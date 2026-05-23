@@ -8,6 +8,7 @@ dependencies = [
     "mscompress>=1.0.16",
     "torch>=2.10,<2.12",
     "numpy",
+    "scipy",
     "wandb",
     "matplotlib",
     "pyyaml",
@@ -16,6 +17,7 @@ dependencies = [
 
 [project.scripts]
 msdelta-train = "msdelta.train:main"
+msdelta-analyze = "msdelta.analyze:main"
 
 [build-system]
 requires = ["hatchling"]

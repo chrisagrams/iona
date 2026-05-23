@@ -16,16 +16,18 @@ model:
     f_max: 1.0e+2
   delta_bias:
     n_freqs: 16
-    hidden: 32
+    per_head_hidden: 8
     f_min: 1.0e-2
     f_max: 1.0e+3
+    scale: 3.0
 
 data:
   root: /mnt/vault-1/k8/concensus_spec_30M/consensus_100M/
   n_val_files: 1
   intensity_threshold_frac: 0.01
   top_n: 150
-  mask_ratio: 0.15
+  denoise:
+    gauss_sigma: 0.1
 
 train:
   batch_size: 8
@@ -36,12 +38,12 @@ train:
   weight_decay: 0.01
   grad_clip: 1.0
   precision: bf16
-  loss_int_weight: 1.0
   val_batches: 5
   device: cuda
+  l1_lambda: 0.1           # nonzero so the smoke test exercises the L1 path
 
 log:
-  wandb_project: msdelta-smoke
+  wandb_project: msdelta-denoise-smoke
   wandb_run_name: toy-100steps
   log_every: 10
   val_every: 50

@@ -608,6 +608,7 @@ dependencies = [
     { name = "numpy" },
     { name = "pyarrow" },
     { name = "pyyaml" },
+    { name = "scipy" },
     { name = "torch" },
     { name = "wandb" },
 ]
@@ -619,6 +620,7 @@ requires-dist = [
     { name = "numpy" },
     { name = "pyarrow", specifier = ">=24.0.0" },
     { name = "pyyaml" },
+    { name = "scipy" },
     { name = "torch", specifier = ">=2.10,<2.12", index = "https://download.pytorch.org/whl/cu128" },
     { name = "wandb" },
 ]

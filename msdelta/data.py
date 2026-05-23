@@ -18,9 +18,14 @@ class PreprocessConfig:
 
 
 @dataclass
-class MPMConfig:
-    mask_ratio: float = 0.15
-    min_masked: int = 1
+class DenoiseConfig:
+    """Gaussian-only m/z noise for the denoising-autoencoder task.
+
+    Nothing in the noise model is chemistry-specific. Any structure the
+    Δm bias module learns is therefore attributable to real chemistry in
+    the spectra, not to an injected signal.
+    """
+    gauss_sigma: float = 0.3          # Da; wide enough that simple "round to nearest peak" is insufficient
 
 
 class ConsensusParquet(IterableDataset):
@@ -130,76 +135,48 @@ def preprocess_spectrum(
     return mz.contiguous(), log_int.contiguous()
 
 
-def mpm_collate(
+def denoise_collate(
     batch: list[tuple[torch.Tensor, torch.Tensor]],
-    mpm: MPMConfig,
+    cfg: DenoiseConfig,
 ) -> dict[str, torch.Tensor]:
-    """Pad, mask, and gather targets for masked peak modeling.
+    """Pad and inject m/z noise for the denoising-autoencoder task.
 
     Returns a dict with:
-      mz, log_int             (B, K_max)  float32; masked positions are zero
-      key_padding_mask        (B, K_max)  bool, True at padding
-      mask_positions          (B, K_max)  bool, True where the model must predict
-      target_mz, target_logint (M,)       float32; concatenated across batch
-      target_index            (M, 2)      int64; (batch_idx, pos_idx) of each target
+      mz_noisy            (B, K_max)  float32   — input to the model
+      mz_clean            (B, K_max)  float32   — prediction target
+      log_int             (B, K_max)  float32   — clean intensity (input feature)
+      key_padding_mask    (B, K_max)  bool      — True at padding
+      true_delta          (B, K_max)  float32   — mz_clean - mz_noisy, for convenience
+                                                  (loss is computed on this via the
+                                                   residual-prediction head)
     """
     B = len(batch)
     Ks = [int(mz.numel()) for mz, _ in batch]
-    K_max = max(Ks) if Ks else 1
-    K_max = max(K_max, 1)
+    K_max = max(max(Ks) if Ks else 1, 1)
 
-    mz = torch.zeros(B, K_max, dtype=torch.float32)
+    mz_clean = torch.zeros(B, K_max, dtype=torch.float32)
+    mz_noisy = torch.zeros(B, K_max, dtype=torch.float32)
     log_int = torch.zeros(B, K_max, dtype=torch.float32)
     key_padding_mask = torch.ones(B, K_max, dtype=torch.bool)
-    mask_positions = torch.zeros(B, K_max, dtype=torch.bool)
-
-    targets_mz: list[torch.Tensor] = []
-    targets_logint: list[torch.Tensor] = []
-    target_index: list[torch.Tensor] = []
 
     for b, ((sp_mz, sp_log_int), K) in enumerate(zip(batch, Ks)):
         if K == 0:
             continue
-        mz[b, :K] = sp_mz
+        mz_clean[b, :K] = sp_mz
         log_int[b, :K] = sp_log_int
         key_padding_mask[b, :K] = False
 
-        n_mask = max(mpm.min_masked, int(round(K * mpm.mask_ratio)))
-        n_mask = min(n_mask, K)
-        idx = torch.randperm(K)[:n_mask]
-        mask_positions[b, idx] = True
+        noise = torch.randn(K) * cfg.gauss_sigma
+        mz_noisy[b, :K] = sp_mz + noise
 
-        targets_mz.append(sp_mz[idx])
-        targets_logint.append(sp_log_int[idx])
-        target_index.append(
-            torch.stack([torch.full((n_mask,), b, dtype=torch.long), idx.to(torch.long)], dim=1)
-        )
-
-        # Keep real m/z at masked positions — the [MASK] embedding swap in
-        # PeakEmbed already prevents direct leakage through the token, and
-        # the encoder zeros the Δm bias on pairs that touch a masked
-        # position so the m/z can't leak via the bias→logits path either.
-        # log_int IS zeroed (it's a prediction target and only flows through
-        # the embedding, which is replaced by [MASK] anyway).
-        log_int[b, idx] = 0.0
-
-    if targets_mz:
-        target_mz = torch.cat(targets_mz)
-        target_logint = torch.cat(targets_logint)
-        target_index_t = torch.cat(target_index)
-    else:
-        target_mz = torch.empty(0, dtype=torch.float32)
-        target_logint = torch.empty(0, dtype=torch.float32)
-        target_index_t = torch.empty(0, 2, dtype=torch.long)
+    true_delta = mz_clean - mz_noisy
 
     return {
-        "mz": mz,
+        "mz_noisy": mz_noisy,
+        "mz_clean": mz_clean,
         "log_int": log_int,
         "key_padding_mask": key_padding_mask,
-        "mask_positions": mask_positions,
-        "target_mz": target_mz,
-        "target_logint": target_logint,
-        "target_index": target_index_t,
+        "true_delta": true_delta,
     }
 
 
