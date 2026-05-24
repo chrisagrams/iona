@@ -21,15 +21,15 @@ import wandb
 
 from .data import (
     ConsensusParquet,
-    DenoiseConfig,
+    MaskConfig,
     PreprocessConfig,
-    denoise_collate,
+    mask_intensity_collate,
     split_paths,
 )
 from .model import (
     DeltaBiasConfig,
-    DenoiseHead,
     FourierConfig,
+    IntensityHead,
     MSEncoder,
     ModelConfig,
 )
@@ -95,15 +95,13 @@ def make_loaders(cfg: dict[str, Any]) -> tuple[DataLoader, DataLoader]:
         flush=True,
     )
 
-    den_cfg = DenoiseConfig(
-        gauss_sigma=dcfg["denoise"]["gauss_sigma"],
-    )
+    mask_cfg = MaskConfig(mask_ratio=dcfg["mask"]["mask_ratio"])
 
     def collate(batch):
         batch = [b for b in batch if b[0].numel() > 0]
         if not batch:
             return None
-        return denoise_collate(batch, den_cfg)
+        return mask_intensity_collate(batch, mask_cfg)
 
     tcfg = cfg["train"]
     train_loader = DataLoader(
@@ -131,7 +129,7 @@ def to_device(batch: dict[str, torch.Tensor], device: torch.device) -> dict[str,
 
 def run_validation(
     encoder: MSEncoder,
-    heads: DenoiseHead,
+    heads: IntensityHead,
     val_loader: DataLoader,
     device: torch.device,
     autocast_ctx,
@@ -139,7 +137,7 @@ def run_validation(
 ) -> dict[str, float]:
     encoder.eval()
     heads.eval()
-    sums = {"nll_mz": 0.0, "rmse_mz": 0.0}
+    sums = {"mse_int": 0.0, "rmse_int": 0.0}
     n = 0
     with torch.no_grad():
         for i, batch in enumerate(val_loader):
@@ -149,12 +147,11 @@ def run_validation(
                 break
             batch = to_device(batch, device)
             with autocast_ctx:
-                tokens = encoder(batch["mz_noisy"], batch["log_int"], batch["key_padding_mask"])
-            loss, parts = heads.loss(
-                tokens, batch["mz_noisy"], batch["mz_clean"], batch["key_padding_mask"],
-            )
-            sums["nll_mz"] += float(parts["nll_mz"])
-            sums["rmse_mz"] += float(parts["rmse_mz"])
+                tokens = encoder(batch["mz"], batch["log_int"],
+                                 batch["key_padding_mask"], batch["mask_positions"])
+            loss, parts = heads.loss(tokens, batch["log_int"], batch["mask_positions"])
+            sums["mse_int"] += float(parts["mse_int"])
+            sums["rmse_int"] += float(parts["rmse_int"])
             n += 1
     encoder.train()
     heads.train()
@@ -206,7 +203,7 @@ def main(argv: list[str] | None = None) -> int:
     # Model
     model_cfg = build_model_config(cfg["model"])
     encoder = MSEncoder(model_cfg).to(device)
-    heads = DenoiseHead(model_cfg.d_model).to(device)
+    heads = IntensityHead(model_cfg.d_model).to(device)
     n_params = sum(p.numel() for p in encoder.parameters()) + sum(p.numel() for p in heads.parameters())
     print(f"[model] {n_params/1e6:.2f}M params", flush=True)
 
@@ -273,10 +270,9 @@ def main(argv: list[str] | None = None) -> int:
         encoder.set_save_attn(save_attn_this_step)
 
         with autocast_ctx:
-            tokens = encoder(batch["mz_noisy"], batch["log_int"], batch["key_padding_mask"])
-        loss, parts = heads.loss(
-            tokens, batch["mz_noisy"], batch["mz_clean"], batch["key_padding_mask"],
-        )
+            tokens = encoder(batch["mz"], batch["log_int"],
+                             batch["key_padding_mask"], batch["mask_positions"])
+        loss, parts = heads.loss(tokens, batch["log_int"], batch["mask_positions"])
         # L1 sparsity penalty on the bias curve (λ=0 → no-op, reproduces denoise baseline).
         l1_lambda = tcfg.get("l1_lambda", 0.0)
         if l1_lambda > 0:
@@ -307,9 +303,8 @@ def main(argv: list[str] | None = None) -> int:
             lr = optimizer.param_groups[0]["lr"]
             wandb_log = {
                 "train/loss": running_loss / max(1, running_n),
-                "train/nll_mz": float(parts["nll_mz"]),
-                "train/rmse_mz": float(parts["rmse_mz"]),
-                "train/mean_log_var": float(parts["mean_log_var"]),
+                "train/mse_int": float(parts["mse_int"]),
+                "train/rmse_int": float(parts["rmse_int"]),
                 "train/bias_l1": float(bias_l1),
                 "train/grad_norm_total": gn_total,
                 "train/grad_norm_delta_bias": gn_bias,
@@ -324,7 +319,7 @@ def main(argv: list[str] | None = None) -> int:
             wandb.log(wandb_log, step=step)
             print(
                 f"step {step:>6} loss {wandb_log['train/loss']:.4f} "
-                f"nll {wandb_log['train/nll_mz']:.4f} rmse {wandb_log['train/rmse_mz']:.4f} "
+                f"mse {wandb_log['train/mse_int']:.4f} rmse {wandb_log['train/rmse_int']:.4f} "
                 f"|g| {gn_total:.3f} |g_bias| {gn_bias:.3f} lr {lr:.2e}",
                 flush=True,
             )

@@ -26,8 +26,8 @@ data:
   n_val_files: 1
   intensity_threshold_frac: 0.01
   top_n: 150
-  denoise:
-    gauss_sigma: 0.1
+  mask:
+    mask_ratio: 0.15
 
 train:
   batch_size: 8

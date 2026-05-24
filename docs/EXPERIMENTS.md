@@ -473,6 +473,79 @@ v7's head 3 (p=0.064) was a lucky fluctuation, not an amplifiable signal.
 → **Pivot to a task where Δm-relational reasoning is irreducibly necessary
 (can't be done peak-by-peak). See v9.**
 
+### Interlude — the probe suite (plan §6.1) flips the narrative
+
+Before pivoting we built `msdelta-probe` (frozen-encoder linear probes) and
+ran it on v7's checkpoint. The result reframes everything:
+
+| tier | probe | result | baseline |
+|---|---|---|---|
+| 1 | precursor m/z | MAE 7.9 Da, R²=0.997 | 520 Da |
+| 1 | peak count | R²=0.994 | — |
+| 1 | log TIC | R²=0.989 | — |
+| 2 | **charge** | **acc 100%** | 59% |
+| 2 | **neutral loss** | **AUC 0.96** | 0.49 |
+| 2 | **isotope M+k** | **F1 0.86** | — |
+
+**The encoder learned the chemistry — extremely well.** Charge is read
+straight from isotope spacing (1/z Da); the encoder gets it 100%. So the
+chemistry is *present* — it just lives in the **content path** (Q/K/V over
+m/z-bearing tokens), not in the Δm bias. The bias-curve analyses weren't
+wrong; the chemistry simply isn't where we were looking.
+
+Root cause, made precise: **tokens carry m/z** (`PeakEmbed` =
+`MLP([Fourier(m/z) ⊕ Fourier(int)])`), so `q_i·k_j` can compute any
+function of `(m/z_i, m/z_j)`. Content attention is a complete substitute
+for a Δm bias — so the bias is never forced to carry chemistry. This is
+the "absolute position baked into tokens" regime; relative-position
+biases (ALiBi/T5) only become load-bearing when absolute position is
+*stripped from the tokens*.
+
+### v9 — m/z-free tokens + masked-intensity prediction *(this branch)*
+
+The T5 mapping for a spectrum: **m/z = position**, **intensity = content**.
+T5 strips position from tokens (relative bias carries it) and predicts
+*content*. Our v5–v7 denoising predicted m/z = *position* — the one thing
+you can't predict once you strip it. The faithful analog predicts
+intensity instead:
+
+- **`PeakEmbed` becomes m/z-free:** token = `MLP(Fourier(log_int))` + a
+  learned `[MASK]`. Tokens no longer know their own m/z.
+- **m/z flows only through `DeltaMZBias`** → the bias is now the *sole*
+  carrier of all m/z structure. Forced load-bearing, ALiBi-style.
+- **Task = masked-intensity prediction:** mask ~15% of peaks' intensity
+  (token → `[MASK]`), predict it. Loss = **MSE on masked positions only**:
+  `L = mean_{(b,i)∈mask} (pred_i − logint_i)²`.
+- No leak: a masked peak is handed its *position* (m/z, via the bias) and
+  asked for *content* (intensity) — never the reverse. Its identity is
+  purely relational, exactly the T5 sentinel.
+
+**Why this forces chemistry into the bias.** To predict a masked peak's
+intensity the cleanest move is to find its M+0 partner at −1.003 Da and
+scale by the isotope ratio — which the model can *only* do by reading a
+¹³C feature off the bias (tokens have no m/z). Minimizing this MSE
+directly rewards a +1.003 bias spike. The incentive is in the objective,
+not hoped for.
+
+**Why MSE not Gaussian-NLL:** intensity is bounded in (0,1]; the NLL
+variance head caused the v5–v7 grad-norm explosions. Point estimate is
+safer for the fork test.
+
+**The gate (don't repeat the v8 mistake):** before a full run, train this
+**with the bias ablated** (content-only). With m/z-free tokens, content
+attention has no m/z at all — if content-only *still* solves masked-
+intensity, the task doesn't need the bias and we rethink. If content-only
+fails and the full model succeeds, the bias is doing the work.
+
+**Risk:** a single scalar/peak is thin signal; intensity may lean on
+absolute m/z (now unavailable) more than relational structure, making the
+task too hard. The ablation gate + probe suite tell us before we commit.
+
+**Scoreboard:** rerun `msdelta-probe` on the v9 checkpoint. The question
+is whether charge/isotope/neutral-loss *still* decode well now that the
+bias is forced to carry m/z — and whether the bias curves finally show
+significant alignment (`msdelta-analyze`).
+
 ---
 
 ## 4. Targets to watch on the v7 run (σ = 0.1)

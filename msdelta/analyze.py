@@ -32,9 +32,8 @@ from torch.utils.data import DataLoader
 
 from .data import (
     ConsensusParquet,
-    DenoiseConfig,
     PreprocessConfig,
-    denoise_collate,
+    pad_collate,
     split_paths,
 )
 from .model import DeltaBiasConfig, FourierConfig, ModelConfig, MSEncoder
@@ -251,11 +250,10 @@ def build_val_loader(cfg: dict[str, Any], batch_size: int, num_workers: int = 0)
     )
     _, val_paths = split_paths(dcfg["root"], dcfg["n_val_files"])
     ds = ConsensusParquet(val_paths, preprocess=pp, seed=123)
-    den = DenoiseConfig(gauss_sigma=dcfg["denoise"]["gauss_sigma"])
 
     def collate(b):
         b = [x for x in b if x[0].numel() > 0]
-        return denoise_collate(b, den) if b else None
+        return pad_collate(b) if b else None
 
     return DataLoader(ds, batch_size=batch_size, num_workers=num_workers, collate_fn=collate)
 
@@ -293,7 +291,7 @@ def functional_probe(
         if batch is None:
             continue
         batch = {k: v.to(device) for k, v in batch.items()}
-        mz = batch["mz_noisy"]
+        mz = batch["mz"]
         enc(mz, batch["log_int"], batch["key_padding_mask"])  # populates last_attn per block
 
         dm = mz.unsqueeze(-1) - mz.unsqueeze(-2)              # (B,K,K)

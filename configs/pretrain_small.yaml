@@ -25,8 +25,8 @@ data:
   n_val_files: 2
   intensity_threshold_frac: 0.01
   top_n: 150
-  denoise:
-    gauss_sigma: 0.1       # Da; Gaussian only. 0.3→0.1 (v7): Δm blur 0.42→0.14 to resolve fine isotope structure
+  mask:
+    mask_ratio: 0.15       # v9: fraction of peaks whose intensity is masked & predicted (m/z never masked)
 
 train:
   batch_size: 256
