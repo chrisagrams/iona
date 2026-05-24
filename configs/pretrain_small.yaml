@@ -43,7 +43,7 @@ train:
                            # v8 fork probe: try {0.01, 0.1, 1.0}; watch bias_l1 fall vs rmse_mz holding
 
 log:
-  wandb_project: msdelta-denoise
+  wandb_project: msdelta-mzfree
   wandb_run_name: null
   log_every: 50
   val_every: 1000

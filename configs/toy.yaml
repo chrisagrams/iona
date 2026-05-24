@@ -43,7 +43,7 @@ train:
   l1_lambda: 0.1           # nonzero so the smoke test exercises the L1 path
 
 log:
-  wandb_project: msdelta-denoise-smoke
+  wandb_project: msdelta-mzfree-smoke
   wandb_run_name: toy-100steps
   log_every: 10
   val_every: 50
