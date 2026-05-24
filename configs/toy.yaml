@@ -49,4 +49,6 @@ log:
   val_every: 50
   bias_curve_every: 50
   ckpt_every: 1000
+  probe_every: 50          # exercise the inline probe path in the smoke test
+  probe_n_spectra: 500
   out_dir: ./runs

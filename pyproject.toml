@@ -13,11 +13,13 @@ dependencies = [
     "matplotlib",
     "pyyaml",
     "pyarrow>=24.0.0",
+    "scikit-learn>=1.8.0",
 ]
 
 [project.scripts]
 msdelta-train = "msdelta.train:main"
 msdelta-analyze = "msdelta.analyze:main"
+msdelta-probe = "msdelta.probe:main"
 
 [build-system]
 requires = ["hatchling"]

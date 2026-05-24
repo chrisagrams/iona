@@ -436,6 +436,43 @@ everything else frozen):
 
 `l1_lambda: 0.0` reproduces v7 exactly.
 
+**Result (3 runs, 20k steps each: λ = 0.01, 0.1, 1.0).** Neither fork
+branch — a *third* outcome we hadn't written down.
+
+| run | mean\|bias\| | RMSE | head outcome | best align p |
+|---|---|---|---|---|
+| v7 (λ=0) | 1.56 | ~0.039 | 8 noisy heads (~40 pk ea) | 0.064 |
+| λ=0.01 | 0.55 | 0.043 | shrunk uniformly, still noisy | n.s. |
+| λ=0.1 | 0.035 | 0.047 | **7/8 heads zeroed; 1 survivor still a thicket** | n.s. |
+| λ=1.0 | 0.00 | 0.048 | all heads dead (content-only) | n.s. |
+
+The L1 worked mechanically (bias magnitude collapsed with λ) but produced
+**head-death, not head-sharpening** — the optimizer zeroed whole heads
+rather than concentrating each onto a few chemistry spikes. No setting
+produced significant chemistry.
+
+**The decisive insight — an ablation hiding in the sweep.** λ=1.0 is a
+clean ablation: bias ≡ 0, pure content attention. Its RMSE (0.048) is only
+~0.005 Da (~11%) worse than the near-full-bias λ=0.01 run (0.043). So:
+
+> **The Δm bias is *used* (probe: attention follows it) but nearly
+> *dispensable* (ablation: removing it costs ~11% RMSE). Content attention
+> reproduces ~90% of what it does.**
+
+That reconciles "load-bearing" (probe) with "head-death under L1": since
+the bias barely helps denoising, the optimizer happily sacrifices 7 heads
+to satisfy the penalty. There is no gradient pressure to encode chemistry
+because **the denoising task can be solved by content attention alone** —
+it never *needs* Δm-relational reasoning.
+
+**Verdict — the real fork was a third branch:** *the bias is optional for
+this task; no regularizer can force chemistry into a parameter the
+objective doesn't require.* Four interventions (per-head MLPs v4, bounded
+bias v6, smaller noise v7, sparsity v8) all leave the bias chemistry-free.
+v7's head 3 (p=0.064) was a lucky fluctuation, not an amplifiable signal.
+→ **Pivot to a task where Δm-relational reasoning is irreducibly necessary
+(can't be done peak-by-peak). See v9.**
+
 ---
 
 ## 4. Targets to watch on the v7 run (σ = 0.1)

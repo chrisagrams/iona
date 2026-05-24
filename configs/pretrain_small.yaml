@@ -49,4 +49,6 @@ log:
   val_every: 1000
   bias_curve_every: 2000
   ckpt_every: 5000
+  probe_every: 5000        # frozen-encoder linear probe suite (0 = off)
+  probe_n_spectra: 3000
   out_dir: ./runs

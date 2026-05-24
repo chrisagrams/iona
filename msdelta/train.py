@@ -33,6 +33,7 @@ from .model import (
     MSEncoder,
     ModelConfig,
 )
+from .probe import run_all_probes
 from .viz import attention_entropy_per_head, render_bias_panels
 
 
@@ -219,6 +220,13 @@ def main(argv: list[str] | None = None) -> int:
     # Loaders
     train_loader, val_loader = make_loaders(cfg)
 
+    # Probe inputs (frozen-encoder linear probes, logged every log.probe_every steps)
+    _, probe_val_paths = split_paths(cfg["data"]["root"], cfg["data"]["n_val_files"])
+    probe_pp = PreprocessConfig(
+        intensity_threshold_frac=cfg["data"]["intensity_threshold_frac"],
+        top_n=cfg["data"]["top_n"],
+    )
+
     # Precision
     if tcfg["precision"] == "bf16":
         autocast_ctx = torch.amp.autocast(device_type=device.type, dtype=torch.bfloat16)
@@ -331,6 +339,19 @@ def main(argv: list[str] | None = None) -> int:
             )
             wandb.log({**val_metrics, "step": step}, step=step)
             print(f"  val: " + "  ".join(f"{k}={v:.4f}" for k, v in val_metrics.items()), flush=True)
+
+        probe_every = lcfg.get("probe_every", 0)
+        if probe_every and step > 0 and step % probe_every == 0:
+            probe_metrics = run_all_probes(
+                encoder, probe_val_paths, device, probe_pp,
+                n_spectra=lcfg.get("probe_n_spectra", 3000),
+            )
+            wandb.log({**probe_metrics, "step": step}, step=step)
+            key = lambda k: probe_metrics.get(k, float("nan"))
+            print(f"  probe: precursor_r2={key('probe/precursor_mz_r2'):.3f} "
+                  f"charge_acc={key('probe/charge_acc'):.3f} "
+                  f"nloss_auc={key('probe/neutral_loss_auc'):.3f} "
+                  f"iso_f1={key('probe/isotope_f1'):.3f}", flush=True)
 
         if step % lcfg["bias_curve_every"] == 0:
             panels = render_bias_panels(encoder.bias_module, step)
