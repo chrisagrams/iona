@@ -133,7 +133,7 @@ def extract_representations(
     rng = np.random.default_rng(seed)
 
     spec, prec, pcount, logtic, charge, maxmz = [], [], [], [], [], []
-    peak_rep, peak_iso = [], []
+    peak_rep, peak_iso, peak_mz = [], [], []
     pair_rep, pair_loss = [], []
     loss_vals = np.array(list(_LOSSES.values()))
 
@@ -157,7 +157,9 @@ def extract_representations(
             spec.append(pooled[b]); prec.append(meta["prec"]); pcount.append(k)
             logtic.append(meta["logtic"]); charge.append(meta["z"]); maxmz.append(float(m.max()))
             mzb = m.numpy()
-            # isotope per-peak samples
+            # per-peak samples: isotope label + the peak's OWN m/z. Tokens are
+            # m/z-free, so recovering peak m/z from the token measures whether the
+            # Δm bias re-injected the fragment m/z pattern into the representation.
             if len(peak_iso) < max_peak_samples and meta["z"]:
                 order = np.argsort(mzb)
                 iso = _isotope_labels(order, mzb, meta["z"])
@@ -165,6 +167,7 @@ def extract_representations(
                 sel = rng.choice(k, size=min(take, k), replace=False)
                 for s in sel:
                     peak_rep.append(tok_cpu[b, s]); peak_iso.append(int(iso[s]))
+                    peak_mz.append(float(mzb[s]))
             # neutral-loss pair samples (balanced per spectrum)
             if len(pair_loss) < max_pair_samples and k >= 4:
                 dm = mzb[:, None] - mzb[None, :]
@@ -203,6 +206,7 @@ def extract_representations(
         "logtic": np.array(logtic), "charge": np.array(charge), "maxmz": np.array(maxmz),
         "peak_rep": np.array(peak_rep) if peak_rep else np.zeros((0, 1)),
         "peak_iso": np.array(peak_iso),
+        "peak_mz": np.array(peak_mz),
         "pair_rep": np.array(pair_rep) if pair_rep else np.zeros((0, 1)),
         "pair_loss": np.array(pair_loss),
     }
@@ -275,6 +279,12 @@ def run_all_probes(
         metrics.update(_classification(d["pair_rep"], d["pair_loss"], "neutral_loss"))
     if len(d["peak_iso"]) >= 50:
         metrics.update(_classification(d["peak_rep"], d["peak_iso"], "isotope"))
+    # Fragment-m/z pattern: recover each peak's OWN m/z from its (m/z-free) token.
+    # High R² ⇒ the Δm bias re-injected fragment m/z into the representation —
+    # the signal retrieval needs. This is the direct "did it learn the fragment
+    # pattern" monitor for the m/z-free architecture.
+    if len(d["peak_mz"]) >= 50:
+        metrics.update(_regression(d["peak_rep"], d["peak_mz"], "fragment_mz"))
     return metrics
 
 
@@ -311,6 +321,7 @@ def main(argv: list[str] | None = None) -> int:
     line("charge", "probe/charge_acc", "probe/charge_acc_baseline", "probe/charge_f1")
     line("neutral loss", "probe/neutral_loss_auc", "probe/neutral_loss_acc", "probe/neutral_loss_acc_baseline")
     line("isotope M+k", "probe/isotope_acc", "probe/isotope_acc_baseline", "probe/isotope_f1")
+    line("fragment m/z", "probe/fragment_mz_r2", "probe/fragment_mz_mae")
     return 0
 
 

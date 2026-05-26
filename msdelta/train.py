@@ -354,6 +354,7 @@ def main(argv: list[str] | None = None) -> int:
             wandb.log({**probe_metrics, "step": step}, step=step)
             key = lambda k: probe_metrics.get(k, float("nan"))
             print(f"  probe: precursor_r2={key('probe/precursor_mz_r2'):.3f} "
+                  f"fragment_mz_r2={key('probe/fragment_mz_r2'):.3f} "
                   f"charge_acc={key('probe/charge_acc'):.3f} "
                   f"nloss_auc={key('probe/neutral_loss_auc'):.3f} "
                   f"iso_f1={key('probe/isotope_f1'):.3f}", flush=True)
