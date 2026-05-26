@@ -546,6 +546,60 @@ is whether charge/isotope/neutral-loss *still* decode well now that the
 bias is forced to carry m/z — and whether the bias curves finally show
 significant alignment (`msdelta-analyze`).
 
+**RESULT (full 50k run, `runs/20260524-140946`) — the pivot worked.**
+First positive result of the project.
+
+*Transfer (probe suite) — chemistry fully decodable, now necessarily via
+the bias:*
+
+| probe | v9 (m/z-free) | note |
+|---|---|---|
+| precursor m/z | R² 0.996 | reconstructed with **no m/z in tokens** |
+| charge | **100%** | charge = isotope spacing → only reachable via the bias |
+| neutral loss | AUC 0.95 | |
+| isotope M+k | F1 0.87 | |
+
+charge=100% + precursor R²=0.996 with m/z-free tokens proves the Δm bias
+is carrying the m/z chemistry — the load-bearing property v4–v8 never had.
+
+*Bias-curve alignment (`msdelta-analyze`) — first significant chemistry head:*
+
+| | enrichment | p | top hits |
+|---|---|---|---|
+| **coarse head 4** | **2.2×** | **0.002** | M·131, V·99, E·129, L/I·113 (<0.1 Da) |
+| fine head 4 | 2.7× | 0.06 | ¹³C @ +1.003 / −1.001, 2×¹³C @ ±2.00 |
+
+Head 4 coarse **survives multiple-comparison correction** (16 tests ×
+0.002 ≈ 0.032 < 0.05) — vs v7's best non-surviving p=0.064. Same head
+carries the near-significant isotope signal, hits precise to ~1 mDa.
+
+![v9 coarse alignment — head 4 residue peaks](figures/v9_align_coarse_50k.png)
+![v9 functional probe — attention follows bias](figures/v9_probe_fine_50k.png)
+
+*Functional probe:* Spearman(bias, attention) 0.56–0.91 (fine) — attention
+concentrates where the bias peaks. Load-bearing confirmed directly.
+
+**Honest calibration.** It's primarily *one* head (head 4) that clearly
+specialized; others are at/near chance in coarse. Fine-isotope alignment
+is near- (not past-) significant, though hit precision (±1.003 to the mDa)
+is more convincing than the p-value. Coarse functional-probe correlations
+are modest (0.13–0.48) — residue-scale bias structure is real but doesn't
+dominate attention. So: "a head learned residues + isotopes," not "all 8
+did" — but a correction-surviving chemical head is a categorical step up
+from eight versions of "vestigial."
+
+**Conclusion.** The original thesis — heads specialize on chemically
+meaningful Δm, surfaced in a learned per-head bias — is **demonstrated**
+for head 4, and the m/z-free architecture is *why*: stripping m/z from
+tokens made the bias the only path for relational chemistry, exactly as
+the T5/ALiBi analogy predicted.
+
+**Next (v10 candidates):** get *more* heads to specialize — (a) the L1
+sparsity penalty, now meaningful because the bias is load-bearing (unlike
+v8 where it caused head-death on a dispensable bias); (b) more heads /
+capacity; (c) longer training. Also worth: condition the bias on charge
+(isotope spacing is z-dependent — 1/z Da).
+
 ---
 
 ## 4. Targets to watch on the v7 run (σ = 0.1)
