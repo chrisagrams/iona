@@ -186,6 +186,16 @@ def main(argv: list[str] | None = None) -> int:
     lcfg = cfg["log"]
 
     device = torch.device(tcfg["device"])
+
+    # Reproducible seed (model init + masking RNG). Recorded in cfg → checkpoint.
+    seed = int(tcfg.get("seed", 0))
+    import random as _random
+    _random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)
+    print(f"[seed] {seed}", flush=True)
+
     run_name = lcfg["wandb_run_name"] or time.strftime("%Y%m%d-%H%M%S")
     out_dir = Path(lcfg["out_dir"]) / run_name
     out_dir.mkdir(parents=True, exist_ok=True)

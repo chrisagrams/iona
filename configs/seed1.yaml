@@ -1,0 +1,59 @@
+# v9 reproducibility seed 1 (gate before scaling). Identical to
+# pretrain_small.yaml except train.seed, total_steps (35k — head 4 is
+# significant in both ranges by 30k; see EXPERIMENTS.md v9 pre-check),
+# and run name. Compare against v9 (seed 0, runs/20260524-140946) + seed 2.
+# Gate: does a chemical head with coarse p<0.01 appear in all 3 seeds?
+model:
+  d_model: 256
+  n_heads: 8
+  n_layers: 6
+  ffn_mult: 4
+  dropout: 0.1
+  max_peaks: 150
+  fourier_mz:
+    n_freqs: 64
+    f_min: 1.0e-2
+    f_max: 1.0e+3
+  fourier_int:
+    n_freqs: 16
+    f_min: 1.0e-2
+    f_max: 1.0e+2
+  delta_bias:
+    n_freqs: 64
+    per_head_hidden: 32
+    f_min: 1.0e-2
+    f_max: 1.0e+3
+    scale: 3.0
+
+data:
+  root: /mnt/vault-1/k8/concensus_spec_30M/consensus_100M/
+  n_val_files: 2
+  intensity_threshold_frac: 0.01
+  top_n: 150
+  mask:
+    mask_ratio: 0.15
+
+train:
+  batch_size: 256
+  num_workers: 8
+  lr: 1.0e-4
+  warmup_steps: 2000
+  total_steps: 35000
+  weight_decay: 0.01
+  grad_clip: 1.0
+  precision: bf16
+  val_batches: 50
+  device: cuda
+  l1_lambda: 0.0
+  seed: 1
+
+log:
+  wandb_project: msdelta-mzfree
+  wandb_run_name: seed1
+  log_every: 50
+  val_every: 1000
+  bias_curve_every: 2000
+  ckpt_every: 5000
+  probe_every: 5000
+  probe_n_spectra: 3000
+  out_dir: ./runs
