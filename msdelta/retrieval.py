@@ -16,7 +16,6 @@ Usage:
 from __future__ import annotations
 
 import argparse
-import collections
 import re
 from pathlib import Path
 
@@ -36,6 +35,7 @@ def _bare_peptide(pc: str) -> str:
 
 
 def _iter(paths, max_rows):
+    """Consensus parquet → (peptide_charge, mz_list, int_list)."""
     n = 0
     for p in paths:
         pf = pq.ParquetFile(p)
@@ -50,34 +50,73 @@ def _iter(paths, max_rows):
                     return
 
 
+def _iter_mgf(path, max_spectra):
+    """Real experimental MGF → ('SEQ_charge', mz_list, int_list).
+
+    Labels and peaks are inline (SEQ, CHARGE, then 'mz intensity' lines), so
+    no PSM join is needed. These are noisy single-scan spectra — the faithful
+    real-world retrieval test.
+    """
+    n = 0
+    seq = charge = None
+    mz: list[float] = []
+    it: list[float] = []
+    with open(path) as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            if line == "BEGIN IONS":
+                seq = charge = None; mz = []; it = []
+            elif line == "END IONS":
+                if seq and mz:
+                    yield f"{seq}_{charge or '?'}", mz, it
+                    n += 1
+                    if n >= max_spectra:
+                        return
+            elif "=" in line:
+                if line.startswith("SEQ="):
+                    seq = line[4:]
+                elif line.startswith("CHARGE="):
+                    charge = line[7:].rstrip("+")
+            else:
+                parts = line.split()
+                if len(parts) == 2:
+                    mz.append(float(parts[0])); it.append(float(parts[1]))
+
+
 # ---------- extraction ----------
 
 @torch.no_grad()
-def extract(enc, paths, device, pp, *, max_peptides=150, per_peptide=25,
-            batch_size=128, bin_width=1.0, mz_max=2000.0, max_rows=120_000):
-    """Collect a balanced set: up to `max_peptides` peptides × `per_peptide`
-    replicates (data is grouped by peptide, so we bucket and cap rather than
-    read sequentially). Returns learned embeddings, binned-cosine baseline
-    vectors, and peptide_charge labels."""
+def extract(enc, spectrum_iter, device, pp, *, max_peptides=150, per_peptide=25,
+            batch_size=128, bin_width=1.0, mz_max=2000.0):
+    """Bucket spectra by label (cap `per_peptide` each, up to `max_peptides`),
+    then encode→pool. `spectrum_iter` yields (label, mz_list, int_list).
+    Returns learned embeddings, binned-cosine baseline vectors, and labels."""
     enc.to(device).eval()
     n_bins = int(mz_max / bin_width)
-    buckets: dict[str, list] = collections.defaultdict(list)
-    binned_b: dict[str, list] = collections.defaultdict(list)
+    buckets: dict[str, list] = {}     # plain dict — do NOT auto-create entries
+    binned_b: dict[str, list] = {}
 
-    for pc, mz_list, int_list in _iter(paths, max_rows):
-        if len(buckets[pc]) >= per_peptide:
-            continue
-        if pc not in buckets and len(buckets) >= max_peptides:
-            continue
+    for pc, mz_list, int_list in spectrum_iter:
+        existing = buckets.get(pc)
+        if existing is not None:
+            if len(existing) >= per_peptide:
+                continue
+        elif len(buckets) >= max_peptides:
+            continue  # hit the peptide cap; skip new peptides (bounds memory)
         mzt = torch.tensor(mz_list, dtype=torch.float32)
         itt = torch.tensor(int_list, dtype=torch.float32)
         mp, lp = preprocess_spectrum(mzt, itt, pp)
         if mp.numel() == 0:
             continue
-        buckets[pc].append((mp, lp))
+        buckets.setdefault(pc, []).append((mp, lp))
         b = np.zeros(n_bins, dtype=np.float32)
         np.add.at(b, np.clip((mp.numpy() / bin_width).astype(int), 0, n_bins - 1), lp.numpy())
-        binned_b[pc].append(b)
+        binned_b.setdefault(pc, []).append(b)
+        # Early exit once every bucket is full — avoids scanning the whole file.
+        if len(buckets) >= max_peptides and all(len(v) >= per_peptide for v in buckets.values()):
+            break
 
     # flatten, keep only peptides with >=2 reps (need positives)
     specs, binned, labels = [], [], []
@@ -180,8 +219,12 @@ def main(argv: list[str] | None = None) -> int:
 
     p = argparse.ArgumentParser(description="Spectrum-retrieval precision/recall eval")
     p.add_argument("--ckpt", required=True, type=Path)
+    p.add_argument("--mgf", type=Path, default=None,
+                   help="real-world MGF (SEQ/CHARGE inline); default = consensus val parquet")
     p.add_argument("--max-peptides", type=int, default=150)
     p.add_argument("--per-peptide", type=int, default=25)
+    p.add_argument("--max-scan", type=int, default=300_000,
+                   help="max spectra to scan from the source (MGF replicates are scattered)")
     p.add_argument("--bin-width", type=float, default=1.0, help="Da, baseline binning")
     p.add_argument("--device", type=str, default="cuda" if torch.cuda.is_available() else "cpu")
     p.add_argument("--check-overlap", action="store_true",
@@ -193,8 +236,13 @@ def main(argv: list[str] | None = None) -> int:
     pp = PreprocessConfig(intensity_threshold_frac=dcfg["intensity_threshold_frac"], top_n=dcfg["top_n"])
     train_paths, val_paths = split_paths(dcfg["root"], dcfg["n_val_files"])
 
-    print(f"loaded {args.ckpt} (step {step}); extracting embeddings...")
-    d = extract(enc, val_paths, torch.device(args.device), pp,
+    if args.mgf:
+        print(f"loaded {args.ckpt} (step {step}); extracting from MGF {args.mgf} ...")
+        spectrum_iter = _iter_mgf(args.mgf, args.max_scan)
+    else:
+        print(f"loaded {args.ckpt} (step {step}); extracting from consensus val parquet ...")
+        spectrum_iter = _iter(val_paths, args.max_scan)
+    d = extract(enc, spectrum_iter, torch.device(args.device), pp,
                 max_peptides=args.max_peptides, per_peptide=args.per_peptide,
                 bin_width=args.bin_width)
     labels = d["labels"]
