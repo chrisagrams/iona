@@ -86,9 +86,9 @@ class RangeSpec:
 
 
 @torch.no_grad()
-def _eval_curves(enc: MSEncoder, lo: float, hi: float, step: float):
+def _eval_curves(enc: MSEncoder, lo: float, hi: float, step: float, charge: int = 2):
     grid = torch.arange(lo, hi + step / 2, step, dtype=torch.float32)
-    curves = enc.bias_module.evaluate(grid).cpu().numpy()  # (N, H)
+    curves = enc.bias_module.evaluate(grid, charge).cpu().numpy()  # (N, H); charge ignored if charge_dim=0
     return grid.numpy(), curves
 
 
@@ -292,7 +292,8 @@ def functional_probe(
             continue
         batch = {k: v.to(device) for k, v in batch.items()}
         mz = batch["mz"]
-        enc(mz, batch["log_int"], batch["key_padding_mask"])  # populates last_attn per block
+        enc(mz, batch["log_int"], batch["key_padding_mask"],
+            charge=batch.get("charge"))  # populates last_attn per block
 
         dm = mz.unsqueeze(-1) - mz.unsqueeze(-2)              # (B,K,K)
         kpm = batch["key_padding_mask"]
@@ -326,7 +327,7 @@ def report_probe(enc: MSEncoder, probe: dict[str, np.ndarray], spec: ProbeSpec,
     mean_attn = probe["mean_attn"]            # (H, n_bins)
     pair_cnt = probe["pair_cnt"]
     dev = next(enc.bias_module.parameters()).device
-    bias = enc.bias_module.evaluate(torch.from_numpy(centers).float().to(dev)).detach().cpu().numpy()
+    bias = enc.bias_module.evaluate(torch.from_numpy(centers).float().to(dev), 2).detach().cpu().numpy()
 
     ok = pair_cnt >= min_pairs  # only correlate where we have enough pairs
     print(f"\n=== PROBE {spec.name} [{spec.lo}, {spec.hi}] Da, {spec.n_bins} bins, "
@@ -356,7 +357,7 @@ def plot_probe(enc: MSEncoder, probe: dict[str, np.ndarray], spec: ProbeSpec,
     centers = probe["centers"]
     mean_attn = probe["mean_attn"]
     dev = next(enc.bias_module.parameters()).device
-    bias = enc.bias_module.evaluate(torch.from_numpy(centers).float().to(dev)).detach().cpu().numpy()
+    bias = enc.bias_module.evaluate(torch.from_numpy(centers).float().to(dev), 2).detach().cpu().numpy()
     H = mean_attn.shape[0]
     ncols = 4
     nrows = (H + ncols - 1) // ncols

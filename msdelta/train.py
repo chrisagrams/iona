@@ -148,7 +148,8 @@ def run_validation(
             batch = to_device(batch, device)
             with autocast_ctx:
                 tokens = encoder(batch["mz"], batch["log_int"],
-                                 batch["key_padding_mask"], batch["mask_positions"])
+                                 batch["key_padding_mask"], batch["mask_positions"],
+                                 charge=batch.get("charge"))
             loss, parts = heads.loss(tokens, batch["log_int"], batch["mask_positions"])
             sums["mse_int"] += float(parts["mse_int"])
             sums["rmse_int"] += float(parts["rmse_int"])
@@ -281,7 +282,8 @@ def main(argv: list[str] | None = None) -> int:
 
         with autocast_ctx:
             tokens = encoder(batch["mz"], batch["log_int"],
-                             batch["key_padding_mask"], batch["mask_positions"])
+                             batch["key_padding_mask"], batch["mask_positions"],
+                             charge=batch.get("charge"))
         loss, parts = heads.loss(tokens, batch["log_int"], batch["mask_positions"])
         # L1 sparsity penalty on the bias curve (λ=0 → no-op, reproduces denoise baseline).
         l1_lambda = tcfg.get("l1_lambda", 0.0)

@@ -34,6 +34,13 @@ class DeltaBiasConfig:
     # neither can steamroll the other — prevents the "bias dominates
     # content" runaway (high-level plan §6.3).
     scale: float = 3.0
+    # v10: condition the bias on precursor charge. A learned charge embedding
+    # adds a per-head term in the bias hidden layer, so each head can give a
+    # charge-specific response (¹³C peak at 0.50 Da for z=2, 0.33 for z=3, …)
+    # instead of smearing all spacings into one curve. Default 0 = OFF (= v9,
+    # and keeps v9 checkpoints loadable); v10 configs set charge_dim: 16.
+    charge_dim: int = 0
+    n_charges: int = 8
 
 
 @dataclass
@@ -93,6 +100,7 @@ class DeltaMZBias(nn.Module):
         self.n_heads = n_heads
         self.per_head_hidden = cfg.per_head_hidden
         self.scale = cfg.scale
+        self.charge_dim = cfg.charge_dim
 
         in_dim = self.ff.out_dim
         H, D_h = n_heads, cfg.per_head_hidden
@@ -110,31 +118,43 @@ class DeltaMZBias(nn.Module):
         bound = 1 / math.sqrt(in_dim)
         nn.init.uniform_(self.b1, -bound, bound)
 
+        # Charge conditioning: per-charge embedding → per-head additive term in
+        # the hidden layer. w1_charge zero-init so the model starts at the v9
+        # (charge-agnostic) bias and *learns* charge-dependence.
+        if self.charge_dim > 0:
+            self.charge_emb = nn.Embedding(cfg.n_charges, cfg.charge_dim)
+            nn.init.normal_(self.charge_emb.weight, std=0.02)
+            self.w1_charge = nn.Parameter(torch.zeros(H, cfg.charge_dim, D_h))
+
     def _bound(self, out: Tensor) -> Tensor:
         # Bound to ±scale logits so the bias can't steamroll the content term.
         return self.scale * torch.tanh(out / self.scale)
 
-    def forward(self, mz: Tensor) -> Tensor:
-        """mz: (B, K) → bias: (B, n_heads, K, K)."""
+    def forward(self, mz: Tensor, charge: Tensor | None = None) -> Tensor:
+        """mz: (B, K); charge: (B,) long → bias: (B, n_heads, K, K)."""
         dm = mz.unsqueeze(-1) - mz.unsqueeze(-2)              # (B, K, K), signed
-        feats = self.ff(dm)                                   # (B, K, K, in_dim)
-        # Per-head first layer: (B, K, K, H, D_h)
-        h = torch.einsum("bijd,hde->bijhe", feats, self.w1) + self.b1
-        h = F.gelu(h)
-        # Per-head output: (B, K, K, H)
+        feats = self.ff(dm)                                   # (B, K, K, ff_dim)
+        h = torch.einsum("bijd,hde->bijhe", feats, self.w1)   # (B, K, K, H, D_h)
+        if self.charge_dim > 0 and charge is not None:
+            ce = self.charge_emb(charge)                      # (B, charge_dim)
+            h_ch = torch.einsum("bc,hce->bhe", ce, self.w1_charge)  # (B, H, D_h)
+            h = h + h_ch[:, None, None]                       # broadcast over (i, j)
+        h = F.gelu(h + self.b1)
         out = torch.einsum("bijhe,he->bijh", h, self.w2) + self.b2
         out = self._bound(out)
         return out.permute(0, 3, 1, 2).contiguous()           # (B, H, K, K)
 
-    def evaluate(self, dm_grid: Tensor) -> Tensor:
-        """For visualization: evaluate per-head bias on a 1-D Δm grid.
+    def evaluate(self, dm_grid: Tensor, charge: int = 0) -> Tensor:
+        """Evaluate per-head bias on a 1-D Δm grid at a given precursor charge.
 
-        dm_grid: (N,) → (N, n_heads). Returns the bounded bias (what the
-        attention actually sees).
+        dm_grid: (N,) → (N, n_heads). Bounded bias (what attention sees).
         """
-        feats = self.ff(dm_grid)                              # (N, in_dim)
-        h = torch.einsum("nd,hde->nhe", feats, self.w1) + self.b1
-        h = F.gelu(h)
+        feats = self.ff(dm_grid)                              # (N, ff_dim)
+        h = torch.einsum("nd,hde->nhe", feats, self.w1)       # (N, H, D_h)
+        if self.charge_dim > 0:
+            ce = self.charge_emb(torch.tensor(charge, device=self.w1.device))  # (charge_dim,)
+            h = h + torch.einsum("c,hce->he", ce, self.w1_charge)              # (H, D_h)
+        h = F.gelu(h + self.b1)
         out = torch.einsum("nhe,he->nh", h, self.w2) + self.b2
         return self._bound(out)                               # (N, H)
 
@@ -148,6 +168,9 @@ class DeltaMZBias(nn.Module):
         λ · l1_penalty() to push the bias toward a few sharp spikes.
         """
         grid = torch.linspace(lo, hi, n, device=self.w1.device, dtype=self.w1.dtype)
+        if self.charge_dim > 0:
+            # average over the common charges so all charge-conditioned curves are penalized
+            return torch.stack([self.evaluate(grid, z).abs().mean() for z in (1, 2, 3)]).mean()
         return self.evaluate(grid).abs().mean()
 
 
@@ -236,9 +259,10 @@ class MSEncoder(nn.Module):
         log_int: Tensor,
         key_padding_mask: Tensor,
         mask_positions: Tensor | None = None,
+        charge: Tensor | None = None,
     ) -> Tensor:
         tokens = self.embed(log_int, mask_positions)   # m/z-free tokens
-        bias = self.bias_module(mz)  # (B, H, K, K) — the only place m/z enters
+        bias = self.bias_module(mz, charge)  # (B, H, K, K) — the only place m/z enters
         # Zero the Δm bias on any pair touching a padded position so the
         # zero-padding sentinel doesn't pollute the bias gradient.
         real = ~key_padding_mask                                       # (B, K)

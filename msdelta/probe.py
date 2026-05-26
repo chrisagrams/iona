@@ -146,10 +146,12 @@ def extract_representations(
         B = len(buf)
         mz = torch.zeros(B, K); li = torch.zeros(B, K)
         mask = torch.zeros(B, K, dtype=torch.bool)
-        for b, (m, l, _) in enumerate(buf):
+        chg = torch.zeros(B, dtype=torch.long)
+        for b, (m, l, meta) in enumerate(buf):
             k = m.numel()
             mz[b, :k] = m; li[b, :k] = l; mask[b, :k] = True
-        tokens = enc(mz.to(device), li.to(device), (~mask).to(device))  # (B,K,D)
+            chg[b] = meta["z"]
+        tokens = enc(mz.to(device), li.to(device), (~mask).to(device), charge=chg.to(device))  # (B,K,D)
         pooled = _pool(tokens, mask.to(device)).cpu().numpy()
         tok_cpu = tokens.cpu().numpy()
         for b, (m, l, meta) in enumerate(buf):
