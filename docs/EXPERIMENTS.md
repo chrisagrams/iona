@@ -567,11 +567,23 @@ is carrying the m/z chemistry — the load-bearing property v4–v8 never had.
 | | enrichment | p | top hits |
 |---|---|---|---|
 | **coarse head 4** | **2.2×** | **0.002** | M·131, V·99, E·129, L/I·113 (<0.1 Da) |
-| fine head 4 | 2.7× | 0.06 | ¹³C @ +1.003 / −1.001, 2×¹³C @ ±2.00 |
+| **fine head 4** | **2.5×** | **0.011** | ¹³C/z3·0.334, ¹³C/z2·0.501, ¹³C·1.003 |
 
-Head 4 coarse **survives multiple-comparison correction** (16 tests ×
-0.002 ≈ 0.032 < 0.05) — vs v7's best non-surviving p=0.064. Same head
-carries the near-significant isotope signal, hits precise to ~1 mDa.
+Head 4 is significant in **both** ranges. Coarse **survives
+multiple-comparison correction** (16 tests × 0.002 ≈ 0.032 < 0.05) — vs
+v7's best non-surviving p=0.064.
+
+**Measurement fix (charge-aware isotopes).** Initially fine-isotope
+alignment looked merely near-significant (p=0.06) — because we scored
+only the z=1 spacings {1.003, 2.005}. But ¹³C spacing in *m/z* is
+`1.003/z`, and the data is mostly z=2/3, so the real isotope peaks sit at
+**0.502 (z=2)** and **0.334 (z=3)** — which the model learned and we were
+scoring as misses. Adding the `1.003/z` references (z=1,2,3) to
+`viz.ISOTOPES` flipped head 4 fine to p=0.011, with hits landing exactly
+at 0.334 / 0.501 / 1.003. The model learned **charge-resolved isotope
+spacing**. (Heads 2/3/5/7 also show precise 0.33/0.50/0.67 hits, p≈0.05–0.10.)
+Lesson, again: score the right targets — most of the isotope signal was
+at Δm we weren't looking at.
 
 ![v9 coarse alignment — head 4 residue peaks](figures/v9_align_coarse_50k.png)
 ![v9 functional probe — attention follows bias](figures/v9_probe_fine_50k.png)
@@ -594,11 +606,23 @@ for head 4, and the m/z-free architecture is *why*: stripping m/z from
 tokens made the bias the only path for relational chemistry, exactly as
 the T5/ALiBi analogy predicted.
 
-**Next (v10 candidates):** get *more* heads to specialize — (a) the L1
-sparsity penalty, now meaningful because the bias is load-bearing (unlike
-v8 where it caused head-death on a dispensable bias); (b) more heads /
-capacity; (c) longer training. Also worth: condition the bias on charge
-(isotope spacing is z-dependent — 1/z Da).
+**Next steps (decided — NOT ready to scale yet; n=1 head, n=1 seed).**
+Before a big expensive run, confirm the effect is robust and get more
+heads to specialize, all at current (small) scale:
+1. **Reproducibility:** 2 more seeds of the v9 config. A correction-
+   surviving chemical head in all 3 → green light to scale. (Gate.)
+2. **Charge-conditioned bias `bias_h(Δm, z)`** — now the *best-motivated*
+   lever: head 4 is cramming isotope spacing at 0.33 *and* 0.50 *and*
+   1.003 into one curve (it learned all three!). Let each charge index
+   its own spacing and the isotope head should sharpen sharply, and more
+   heads may free up for residues.
+3. **L1 sparsity penalty** — meaningful now that the bias is load-bearing
+   (v8's head-death was on a *dispensable* bias).
+
+Scaling (d=512 / 12 layers / 16 heads) comes *after* these confirm a
+robust, multi-head effect — scaling amplifies what's there, and "1 of 8
+on 1 seed" is too fragile to bet a 4–8× run on. "Only 1 head" looks like
+an optimization/incentive problem, not a capacity one.
 
 ---
 
