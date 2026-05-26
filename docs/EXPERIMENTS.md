@@ -729,6 +729,63 @@ isn't pointing it at chemistry.
 
 ---
 
+## 4c. Embedding-model / retrieval evaluation (`msdelta-retrieval`)
+
+"Can we use this as an embedding model and measure precision/recall?"
+`msdelta/retrieval.py` pools the encoder → one vector/spectrum and does
+leave-one-out same-peptide retrieval (mAP, P@1, R@k, pairwise AUC-PR) vs
+a **binned-spectral-cosine baseline**, ground truth = peptide_charge.
+Works on the consensus parquet *and* on real experimental MGF
+(`--mgf`, SEQ/CHARGE/peaks inline — the holdout PXD053296 benchmark).
+
+**Result — v9 is a poor retrieval embedding, and the baseline number was
+misleading.**
+
+| (consensus, ~100 peptides) | mAP | AUC-PR |
+|---|---|---|
+| learned embed (v9) | 0.75 | 0.68 |
+| binned cosine | 0.93 | **0.996** |
+
+The binned-cosine 0.996 looked too good — and it is. Diagnostic:
+same-peptide binned cos = **0.89**, different-peptide = **0.16**
+(near-orthogonal). The task as posed — same-peptide replicate vs *random
+different* peptide in a tiny library — is trivially separable and **not
+comparable to literature** (which discriminates against decoys /
+near-isobaric / analogs at library scale, where negatives sit at high
+cosine). Lesson (again): the metric was measuring an easy thing. A real
+retrieval claim needs hard negatives (decoys via psms.parquet) + scale.
+
+**Two findings that *do* matter (robust regardless of task difficulty):**
+
+1. **The v9 embedding is near-collapsed (anisotropic).** Diagnostic:
+   same-peptide cos 0.997 *and* different-peptide cos 0.987 — everything
+   at ~0.99. But it's mostly *fixable*: `all-but-top-k` (remove the few
+   dominant directions, **zero training**) lifts AUC-PR 0.68 → 0.90,
+   mAP 0.75 → 0.85. Now a `--whiten K` flag. → the discriminative
+   fragment info is *present*, just squashed.
+2. **Fragment m/z is mostly in the representation** (new inline probe
+   `probe/fragment_mz_r2`): recover each peak's *own* m/z from its
+   m/z-free token → **R²=0.889** (MAE 82 Da). High (the Δm bias
+   re-injected it) but below precursor m/z (R²=0.996) — the residual
+   m/z-free handicap, corroborating the whitening gap.
+
+**Strategic read (pretrain → contrastive post-train).** Sound recipe:
+contrastive is the textbook cure for the anisotropy we measured, the
+data has ~225 replicates/peptide (ideal), and the fragment info is
+present (R²=0.89) so there's good material. Caveats:
+- The m/z-free choice (the v9 interpretability win) is a **modest
+  retrieval handicap** — fragment fidelity is 0.89 not ~0.99.
+- **Full contrastive fine-tune specializes**: it would likely flatten
+  the interpretable bias and risk forgetting broad chemistry → no longer
+  the general/interpretable model. **Frozen encoder + contrastive
+  projection head** preserves everything at a lower ceiling. Can't max
+  interpretability + retrieval in one set of weights; pick the primary.
+- `fragment_mz_r2` is the leading indicator to watch — if a future
+  retrieval-focused pretrain keeps m/z in tokens, it should climb toward
+  ~0.97 and the retrieval ceiling rises with it.
+
+---
+
 ## 5. Things we changed along the way that aren't task-related
 
 A few infrastructure / small fixes worth recording so we don't re-litigate:
@@ -797,11 +854,13 @@ msdelta/
 ├── msdelta/
 │   ├── __init__.py
 │   ├── fourier.py            # Fourier feature module
-│   ├── data.py               # ConsensusParquet + DenoiseConfig + denoise_collate
-│   ├── model.py              # MSEncoder, DeltaMZBias (per-head), DenoiseHead
-│   ├── viz.py                # bias-curve plots with chemistry references
-│   ├── train.py              # CLI: msdelta-train --config ...
-│   └── analyze.py            # CLI: msdelta-analyze --mode {align,probe,both}
+│   ├── data.py               # ConsensusParquet + MaskConfig + mask_intensity_collate + pad_collate
+│   ├── model.py              # MSEncoder, DeltaMZBias (per-head, bounded), IntensityHead (v9)
+│   ├── viz.py                # bias-curve plots; ISOTOPES incl. charge-aware 1.003/z
+│   ├── train.py              # CLI: msdelta-train (+ seed, l1_lambda, inline probes)
+│   ├── analyze.py            # CLI: msdelta-analyze --mode {align,probe,both}
+│   ├── probe.py              # CLI: msdelta-probe (Tier-1/2 linear probes + fragment_mz)
+│   └── retrieval.py          # CLI: msdelta-retrieval (embedding eval, --mgf, --whiten)
 ├── docs/
 │   ├── EXPERIMENTS.md        # this file
 │   └── figures/              # PNGs referenced above

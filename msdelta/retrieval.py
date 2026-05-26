@@ -148,6 +148,19 @@ def extract(enc, spectrum_iter, device, pp, *, max_peptides=150, per_peptide=25,
 
 # ---------- metrics ----------
 
+def all_but_top(X: np.ndarray, k: int) -> np.ndarray:
+    """Anisotropy fix (Mu & Viswanath): center, remove the top-k principal
+    directions. Transformer embeddings are dominated by a few common
+    directions that drown the discriminative signal; removing them recovers
+    most of the retrieval gap with zero training."""
+    if k <= 0:
+        return X
+    Xc = X - X.mean(0)
+    _, _, Vt = np.linalg.svd(Xc, full_matrices=False)
+    Vk = Vt[:k]
+    return Xc - (Xc @ Vk.T) @ Vk
+
+
 def _cosine_sim(X):
     Xn = X / (np.linalg.norm(X, axis=1, keepdims=True) + 1e-8)
     return Xn @ Xn.T
@@ -226,6 +239,9 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--max-scan", type=int, default=300_000,
                    help="max spectra to scan from the source (MGF replicates are scattered)")
     p.add_argument("--bin-width", type=float, default=1.0, help="Da, baseline binning")
+    p.add_argument("--whiten", type=int, default=0, metavar="K",
+                   help="all-but-top-K anisotropy fix on the learned embedding "
+                        "(0=off; ~5-20 typically recovers most of the retrieval gap)")
     p.add_argument("--device", type=str, default="cuda" if torch.cuda.is_available() else "cpu")
     p.add_argument("--check-overlap", action="store_true",
                    help="report train/val peptide overlap (generalization sanity)")
@@ -247,17 +263,22 @@ def main(argv: list[str] | None = None) -> int:
                 bin_width=args.bin_width)
     labels = d["labels"]
     n_pep = len(set(labels))
+    emb = d["emb"]
+    emb_label = "learned embed"
+    if args.whiten > 0:
+        emb = all_but_top(emb, args.whiten)
+        emb_label = f"learned (whiten-{args.whiten})"
     print(f"{len(labels)} spectra across {n_pep} peptides "
           f"(~{len(labels)//max(1,n_pep)} reps each)\n")
 
     print("=== strict positives (same peptide_charge) ===")
-    _eval_block("learned embed", d["emb"], labels)
+    _eval_block(emb_label, emb, labels)
     _eval_block("binned cosine", d["binned"], labels)
 
     bare = np.array([_bare_peptide(x) for x in labels])
     if len(set(bare)) < n_pep:  # only meaningful if charges collapse
         print("\n=== loose positives (same peptide, any charge) ===")
-        _eval_block("learned embed", d["emb"], bare)
+        _eval_block(emb_label, emb, bare)
         _eval_block("binned cosine", d["binned"], bare)
 
     if args.check_overlap:
