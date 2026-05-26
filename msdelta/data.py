@@ -18,14 +18,13 @@ class PreprocessConfig:
 
 
 @dataclass
-class DenoiseConfig:
-    """Gaussian-only m/z noise for the denoising-autoencoder task.
-
-    Nothing in the noise model is chemistry-specific. Any structure the
-    Δm bias module learns is therefore attributable to real chemistry in
-    the spectra, not to an injected signal.
+class MaskConfig:
+    """Masked-intensity task (v9). Mask a fraction of peaks' intensity and
+    predict it. m/z is never masked — it flows only through the Δm bias
+    (tokens are m/z-free), so the bias is the sole carrier of m/z structure.
     """
-    gauss_sigma: float = 0.3          # Da; wide enough that simple "round to nearest peak" is insufficient
+    mask_ratio: float = 0.15
+    min_masked: int = 1
 
 
 class ConsensusParquet(IterableDataset):
@@ -135,48 +134,59 @@ def preprocess_spectrum(
     return mz.contiguous(), log_int.contiguous()
 
 
-def denoise_collate(
-    batch: list[tuple[torch.Tensor, torch.Tensor]],
-    cfg: DenoiseConfig,
-) -> dict[str, torch.Tensor]:
-    """Pad and inject m/z noise for the denoising-autoencoder task.
-
-    Returns a dict with:
-      mz_noisy            (B, K_max)  float32   — input to the model
-      mz_clean            (B, K_max)  float32   — prediction target
-      log_int             (B, K_max)  float32   — clean intensity (input feature)
-      key_padding_mask    (B, K_max)  bool      — True at padding
-      true_delta          (B, K_max)  float32   — mz_clean - mz_noisy, for convenience
-                                                  (loss is computed on this via the
-                                                   residual-prediction head)
-    """
+def _pad_batch(batch):
+    """Pad a list of (mz, log_int) to (B, K_max). Returns mz, log_int, key_padding_mask."""
     B = len(batch)
     Ks = [int(mz.numel()) for mz, _ in batch]
     K_max = max(max(Ks) if Ks else 1, 1)
-
-    mz_clean = torch.zeros(B, K_max, dtype=torch.float32)
-    mz_noisy = torch.zeros(B, K_max, dtype=torch.float32)
+    mz = torch.zeros(B, K_max, dtype=torch.float32)
     log_int = torch.zeros(B, K_max, dtype=torch.float32)
     key_padding_mask = torch.ones(B, K_max, dtype=torch.bool)
-
     for b, ((sp_mz, sp_log_int), K) in enumerate(zip(batch, Ks)):
         if K == 0:
             continue
-        mz_clean[b, :K] = sp_mz
+        mz[b, :K] = sp_mz
         log_int[b, :K] = sp_log_int
         key_padding_mask[b, :K] = False
+    return mz, log_int, key_padding_mask, Ks
 
-        noise = torch.randn(K) * cfg.gauss_sigma
-        mz_noisy[b, :K] = sp_mz + noise
 
-    true_delta = mz_clean - mz_noisy
+def pad_collate(batch: list[tuple[torch.Tensor, torch.Tensor]]) -> dict[str, torch.Tensor]:
+    """Clean padded batch, no masking — for inference (probes, attention probe)."""
+    mz, log_int, kpm, _ = _pad_batch(batch)
+    return {"mz": mz, "log_int": log_int, "key_padding_mask": kpm}
 
+
+def mask_intensity_collate(
+    batch: list[tuple[torch.Tensor, torch.Tensor]],
+    cfg: MaskConfig,
+) -> dict[str, torch.Tensor]:
+    """Mask a fraction of peaks' intensity for masked-intensity prediction (v9).
+
+    Returns:
+      mz                (B, K_max)  float32  — real m/z (feeds the Δm bias only)
+      log_int           (B, K_max)  float32  — real log-intensity (also the target)
+      key_padding_mask  (B, K_max)  bool     — True at padding
+      mask_positions    (B, K_max)  bool     — True where intensity is hidden & predicted
+
+    m/z is never masked. log_int is passed clean; PeakEmbed swaps in [MASK] at
+    mask_positions so the input intensity there doesn't leak, and the loss reads
+    the target from log_int at mask_positions.
+    """
+    mz, log_int, key_padding_mask, Ks = _pad_batch(batch)
+    mask_positions = torch.zeros_like(key_padding_mask)
+    for b, K in enumerate(Ks):
+        if K == 0:
+            continue
+        n_mask = max(cfg.min_masked, int(round(K * cfg.mask_ratio)))
+        n_mask = min(n_mask, K)
+        idx = torch.randperm(K)[:n_mask]
+        mask_positions[b, idx] = True
     return {
-        "mz_noisy": mz_noisy,
-        "mz_clean": mz_clean,
+        "mz": mz,
         "log_int": log_int,
         "key_padding_mask": key_padding_mask,
-        "true_delta": true_delta,
+        "mask_positions": mask_positions,
     }
 
 

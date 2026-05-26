@@ -20,6 +20,7 @@ dependencies = [
 msdelta-train = "msdelta.train:main"
 msdelta-analyze = "msdelta.analyze:main"
 msdelta-probe = "msdelta.probe:main"
+msdelta-retrieval = "msdelta.retrieval:main"
 
 [build-system]
 requires = ["hatchling"]

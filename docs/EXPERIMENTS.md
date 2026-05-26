@@ -473,6 +473,198 @@ v7's head 3 (p=0.064) was a lucky fluctuation, not an amplifiable signal.
 → **Pivot to a task where Δm-relational reasoning is irreducibly necessary
 (can't be done peak-by-peak). See v9.**
 
+### Interlude — the probe suite (plan §6.1) flips the narrative
+
+Before pivoting we built `msdelta-probe` (frozen-encoder linear probes) and
+ran it on v7's checkpoint. The result reframes everything:
+
+| tier | probe | result | baseline |
+|---|---|---|---|
+| 1 | precursor m/z | MAE 7.9 Da, R²=0.997 | 520 Da |
+| 1 | peak count | R²=0.994 | — |
+| 1 | log TIC | R²=0.989 | — |
+| 2 | **charge** | **acc 100%** | 59% |
+| 2 | **neutral loss** | **AUC 0.96** | 0.49 |
+| 2 | **isotope M+k** | **F1 0.86** | — |
+
+**The encoder learned the chemistry — extremely well.** Charge is read
+straight from isotope spacing (1/z Da); the encoder gets it 100%. So the
+chemistry is *present* — it just lives in the **content path** (Q/K/V over
+m/z-bearing tokens), not in the Δm bias. The bias-curve analyses weren't
+wrong; the chemistry simply isn't where we were looking.
+
+Root cause, made precise: **tokens carry m/z** (`PeakEmbed` =
+`MLP([Fourier(m/z) ⊕ Fourier(int)])`), so `q_i·k_j` can compute any
+function of `(m/z_i, m/z_j)`. Content attention is a complete substitute
+for a Δm bias — so the bias is never forced to carry chemistry. This is
+the "absolute position baked into tokens" regime; relative-position
+biases (ALiBi/T5) only become load-bearing when absolute position is
+*stripped from the tokens*.
+
+### v9 — m/z-free tokens + masked-intensity prediction *(this branch)*
+
+The T5 mapping for a spectrum: **m/z = position**, **intensity = content**.
+T5 strips position from tokens (relative bias carries it) and predicts
+*content*. Our v5–v7 denoising predicted m/z = *position* — the one thing
+you can't predict once you strip it. The faithful analog predicts
+intensity instead:
+
+- **`PeakEmbed` becomes m/z-free:** token = `MLP(Fourier(log_int))` + a
+  learned `[MASK]`. Tokens no longer know their own m/z.
+- **m/z flows only through `DeltaMZBias`** → the bias is now the *sole*
+  carrier of all m/z structure. Forced load-bearing, ALiBi-style.
+- **Task = masked-intensity prediction:** mask ~15% of peaks' intensity
+  (token → `[MASK]`), predict it. Loss = **MSE on masked positions only**:
+  `L = mean_{(b,i)∈mask} (pred_i − logint_i)²`.
+- No leak: a masked peak is handed its *position* (m/z, via the bias) and
+  asked for *content* (intensity) — never the reverse. Its identity is
+  purely relational, exactly the T5 sentinel.
+
+**Why this forces chemistry into the bias.** To predict a masked peak's
+intensity the cleanest move is to find its M+0 partner at −1.003 Da and
+scale by the isotope ratio — which the model can *only* do by reading a
+¹³C feature off the bias (tokens have no m/z). Minimizing this MSE
+directly rewards a +1.003 bias spike. The incentive is in the objective,
+not hoped for.
+
+**Why MSE not Gaussian-NLL:** intensity is bounded in (0,1]; the NLL
+variance head caused the v5–v7 grad-norm explosions. Point estimate is
+safer for the fork test.
+
+**The gate (don't repeat the v8 mistake):** before a full run, train this
+**with the bias ablated** (content-only). With m/z-free tokens, content
+attention has no m/z at all — if content-only *still* solves masked-
+intensity, the task doesn't need the bias and we rethink. If content-only
+fails and the full model succeeds, the bias is doing the work.
+
+**Risk:** a single scalar/peak is thin signal; intensity may lean on
+absolute m/z (now unavailable) more than relational structure, making the
+task too hard. The ablation gate + probe suite tell us before we commit.
+
+**Scoreboard:** rerun `msdelta-probe` on the v9 checkpoint. The question
+is whether charge/isotope/neutral-loss *still* decode well now that the
+bias is forced to carry m/z — and whether the bias curves finally show
+significant alignment (`msdelta-analyze`).
+
+**RESULT (full 50k run, `runs/20260524-140946`) — the pivot worked.**
+First positive result of the project.
+
+*Transfer (probe suite) — chemistry fully decodable, now necessarily via
+the bias:*
+
+| probe | v9 (m/z-free) | note |
+|---|---|---|
+| precursor m/z | R² 0.996 | reconstructed with **no m/z in tokens** |
+| charge | **100%** | charge = isotope spacing → only reachable via the bias |
+| neutral loss | AUC 0.95 | |
+| isotope M+k | F1 0.87 | |
+
+charge=100% + precursor R²=0.996 with m/z-free tokens proves the Δm bias
+is carrying the m/z chemistry — the load-bearing property v4–v8 never had.
+
+*Bias-curve alignment (`msdelta-analyze`) — first significant chemistry head:*
+
+| | enrichment | p | top hits |
+|---|---|---|---|
+| **coarse head 4** | **2.2×** | **0.002** | M·131, V·99, E·129, L/I·113 (<0.1 Da) |
+| **fine head 4** | **2.5×** | **0.011** | ¹³C/z3·0.334, ¹³C/z2·0.501, ¹³C·1.003 |
+
+Head 4 is significant in **both** ranges. Coarse **survives
+multiple-comparison correction** (16 tests × 0.002 ≈ 0.032 < 0.05) — vs
+v7's best non-surviving p=0.064.
+
+**Measurement fix (charge-aware isotopes).** Initially fine-isotope
+alignment looked merely near-significant (p=0.06) — because we scored
+only the z=1 spacings {1.003, 2.005}. But ¹³C spacing in *m/z* is
+`1.003/z`, and the data is mostly z=2/3, so the real isotope peaks sit at
+**0.502 (z=2)** and **0.334 (z=3)** — which the model learned and we were
+scoring as misses. Adding the `1.003/z` references (z=1,2,3) to
+`viz.ISOTOPES` flipped head 4 fine to p=0.011, with hits landing exactly
+at 0.334 / 0.501 / 1.003. The model learned **charge-resolved isotope
+spacing**. (Heads 2/3/5/7 also show precise 0.33/0.50/0.67 hits, p≈0.05–0.10.)
+Lesson, again: score the right targets — most of the isotope signal was
+at Δm we weren't looking at.
+
+![v9 coarse alignment — head 4 residue peaks](figures/v9_align_coarse_50k.png)
+![v9 functional probe — attention follows bias](figures/v9_probe_fine_50k.png)
+
+*Functional probe:* Spearman(bias, attention) 0.56–0.91 (fine) — attention
+concentrates where the bias peaks. Load-bearing confirmed directly.
+
+**Honest calibration.** It's primarily *one* head (head 4) that clearly
+specialized; others are at/near chance in coarse. Fine-isotope alignment
+is near- (not past-) significant, though hit precision (±1.003 to the mDa)
+is more convincing than the p-value. Coarse functional-probe correlations
+are modest (0.13–0.48) — residue-scale bias structure is real but doesn't
+dominate attention. So: "a head learned residues + isotopes," not "all 8
+did" — but a correction-surviving chemical head is a categorical step up
+from eight versions of "vestigial."
+
+**Conclusion.** The original thesis — heads specialize on chemically
+meaningful Δm, surfaced in a learned per-head bias — is **demonstrated**
+for head 4, and the m/z-free architecture is *why*: stripping m/z from
+tokens made the bias the only path for relational chemistry, exactly as
+the T5/ALiBi analogy predicted.
+
+**Next steps (decided — NOT ready to scale yet; n=1 head, n=1 seed).**
+Before a big expensive run, confirm the effect is robust and get more
+heads to specialize, all at current (small) scale:
+1. **Reproducibility:** 2 more seeds of the v9 config. A correction-
+   surviving chemical head in all 3 → green light to scale. (Gate.)
+2. **Charge-conditioned bias `bias_h(Δm, z)`** — now the *best-motivated*
+   lever: head 4 is cramming isotope spacing at 0.33 *and* 0.50 *and*
+   1.003 into one curve (it learned all three!). Let each charge index
+   its own spacing and the isotope head should sharpen sharply, and more
+   heads may free up for residues.
+3. **L1 sparsity penalty** — meaningful now that the bias is load-bearing
+   (v8's head-death was on a *dispensable* bias).
+
+Scaling (d=512 / 12 layers / 16 heads) comes *after* these confirm a
+robust, multi-head effect — scaling amplifies what's there, and "1 of 8
+on 1 seed" is too fragile to bet a 4–8× run on. "Only 1 head" looks like
+an optimization/incentive problem, not a capacity one.
+
+### v9 seed gate — RESULT (3 seeds, 35k each)
+
+Ran the reproducibility gate (seed configs, `train.seed` knob). Best
+coarse-range head per seed, with charge-aware isotope refs:
+
+| seed | best coarse head | enrich | p | survives ×16 corr? |
+|---|---|---|---|---|
+| 0 (`20260524-140946`) | head 4 | 2.2× | **0.002** | ✅ |
+| 1 | head 7 | 1.6× | 0.045 | ❌ |
+| 2 | head 6 | 1.6× | 0.041 | ❌ |
+
+**Strict gate (coarse p<0.01 every seed) FAILS** — only seed 0 survives
+correction; seed 1/2 top out at p≈0.04, which for 16 tests is ≈ the chance
+expectation (~0.8 false positives/seed). So seed 0 was the lucky-strong
+one; per-seed statistical strength is modest and init-variable.
+
+**But the qualitative chemistry reproduces convincingly.** In the *fine*
+range, every seed independently put bias peaks at the **exact
+charge-resolved ¹³C spacings** (1.003/z = 0.334, 0.501, 0.669, 1.003) on
+*multiple* heads, precise to the mDa:
+- seed 1: heads 1,4,5,7 → 0.501 / 0.334 / 1.003 / 0.667
+- seed 2: heads 2,5,6 → 0.501 / 0.333 / 1.003
+- seed 0: head 4 → 0.334 / 0.501 / 1.003
+
+Chance does not reproduce the *same precise Δm values* across 3 independent
+inits — scattered noise peaks land differently each time. The per-head
+binomial is just low-powered (few strong peaks); it under-credits a signal
+that's clearly there. Coarse significant heads also hit consistent real
+residues/losses (V·99, L/I·113, E·129, G·57, CO·28, H₂O·18).
+
+**Verdict: qualified pass.** The architecture *reproducibly* learns
+chemistry in the bias (charge-resolved isotopes + residues, all 3 seeds) —
+validated. But it's modest, not yet *strong* (1 head at p≈0.04 for 2 of 3
+seeds; only seed 0 is unambiguous). Real and reproducible ≠ headline-robust.
+
+**Implication:** this *reinforces* charge-conditioning + precursor anchor
+as the immediate priority (v10) — the smeared 0.33/0.50/1.003 isotope
+signal is precisely what charge-conditioning should sharpen, and the
+single-marginal-head weakness is what to fix *before* scaling, not by
+scaling. → merge v9 to master (architecture validated), branch v10.
+
 ---
 
 ## 4. Targets to watch on the v7 run (σ = 0.1)
@@ -578,6 +770,63 @@ isn't pointing it at chemistry.
 
 ---
 
+## 4c. Embedding-model / retrieval evaluation (`msdelta-retrieval`)
+
+"Can we use this as an embedding model and measure precision/recall?"
+`msdelta/retrieval.py` pools the encoder → one vector/spectrum and does
+leave-one-out same-peptide retrieval (mAP, P@1, R@k, pairwise AUC-PR) vs
+a **binned-spectral-cosine baseline**, ground truth = peptide_charge.
+Works on the consensus parquet *and* on real experimental MGF
+(`--mgf`, SEQ/CHARGE/peaks inline — the holdout PXD053296 benchmark).
+
+**Result — v9 is a poor retrieval embedding, and the baseline number was
+misleading.**
+
+| (consensus, ~100 peptides) | mAP | AUC-PR |
+|---|---|---|
+| learned embed (v9) | 0.75 | 0.68 |
+| binned cosine | 0.93 | **0.996** |
+
+The binned-cosine 0.996 looked too good — and it is. Diagnostic:
+same-peptide binned cos = **0.89**, different-peptide = **0.16**
+(near-orthogonal). The task as posed — same-peptide replicate vs *random
+different* peptide in a tiny library — is trivially separable and **not
+comparable to literature** (which discriminates against decoys /
+near-isobaric / analogs at library scale, where negatives sit at high
+cosine). Lesson (again): the metric was measuring an easy thing. A real
+retrieval claim needs hard negatives (decoys via psms.parquet) + scale.
+
+**Two findings that *do* matter (robust regardless of task difficulty):**
+
+1. **The v9 embedding is near-collapsed (anisotropic).** Diagnostic:
+   same-peptide cos 0.997 *and* different-peptide cos 0.987 — everything
+   at ~0.99. But it's mostly *fixable*: `all-but-top-k` (remove the few
+   dominant directions, **zero training**) lifts AUC-PR 0.68 → 0.90,
+   mAP 0.75 → 0.85. Now a `--whiten K` flag. → the discriminative
+   fragment info is *present*, just squashed.
+2. **Fragment m/z is mostly in the representation** (new inline probe
+   `probe/fragment_mz_r2`): recover each peak's *own* m/z from its
+   m/z-free token → **R²=0.889** (MAE 82 Da). High (the Δm bias
+   re-injected it) but below precursor m/z (R²=0.996) — the residual
+   m/z-free handicap, corroborating the whitening gap.
+
+**Strategic read (pretrain → contrastive post-train).** Sound recipe:
+contrastive is the textbook cure for the anisotropy we measured, the
+data has ~225 replicates/peptide (ideal), and the fragment info is
+present (R²=0.89) so there's good material. Caveats:
+- The m/z-free choice (the v9 interpretability win) is a **modest
+  retrieval handicap** — fragment fidelity is 0.89 not ~0.99.
+- **Full contrastive fine-tune specializes**: it would likely flatten
+  the interpretable bias and risk forgetting broad chemistry → no longer
+  the general/interpretable model. **Frozen encoder + contrastive
+  projection head** preserves everything at a lower ceiling. Can't max
+  interpretability + retrieval in one set of weights; pick the primary.
+- `fragment_mz_r2` is the leading indicator to watch — if a future
+  retrieval-focused pretrain keeps m/z in tokens, it should climb toward
+  ~0.97 and the retrieval ceiling rises with it.
+
+---
+
 ## 5. Things we changed along the way that aren't task-related
 
 A few infrastructure / small fixes worth recording so we don't re-litigate:
@@ -646,11 +895,13 @@ msdelta/
 ├── msdelta/
 │   ├── __init__.py
 │   ├── fourier.py            # Fourier feature module
-│   ├── data.py               # ConsensusParquet + DenoiseConfig + denoise_collate
-│   ├── model.py              # MSEncoder, DeltaMZBias (per-head), DenoiseHead
-│   ├── viz.py                # bias-curve plots with chemistry references
-│   ├── train.py              # CLI: msdelta-train --config ...
-│   └── analyze.py            # CLI: msdelta-analyze --mode {align,probe,both}
+│   ├── data.py               # ConsensusParquet + MaskConfig + mask_intensity_collate + pad_collate
+│   ├── model.py              # MSEncoder, DeltaMZBias (per-head, bounded), IntensityHead (v9)
+│   ├── viz.py                # bias-curve plots; ISOTOPES incl. charge-aware 1.003/z
+│   ├── train.py              # CLI: msdelta-train (+ seed, l1_lambda, inline probes)
+│   ├── analyze.py            # CLI: msdelta-analyze --mode {align,probe,both}
+│   ├── probe.py              # CLI: msdelta-probe (Tier-1/2 linear probes + fragment_mz)
+│   └── retrieval.py          # CLI: msdelta-retrieval (embedding eval, --mgf, --whiten)
 ├── docs/
 │   ├── EXPERIMENTS.md        # this file
 │   └── figures/              # PNGs referenced above

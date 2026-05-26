@@ -12,9 +12,17 @@ from .model import DeltaMZBias
 
 # Chemically meaningful Δm reference values (Da). Sources: sec 6.2(a) of the
 # high-level plan.
+# Charge-aware: the ¹³C M→M+1 spacing in *m/z* is 1.00335/z, so multiply-
+# charged peaks (the bulk of the data, z=2/3) show isotope structure at
+# 0.5 and 0.33 Da — not 1.003. Score all the distinct M+1/M+2 spacings for
+# z=1,2,3 or we miss the dominant (multiply-charged) isotope signal.
+_C13 = 1.0033548
 ISOTOPES: dict[str, float] = {
-    "¹³C": 1.003,
-    "2×¹³C": 2.005,
+    "¹³C z3": _C13 / 3,        # 0.334  (z=3, M+1)
+    "¹³C z2": _C13 / 2,        # 0.502  (z=2, M+1)
+    "2¹³C z3": 2 * _C13 / 3,   # 0.669  (z=3, M+2)
+    "¹³C": _C13,               # 1.003  (z=1 M+1; also z=2 M+2)
+    "2¹³C": 2 * _C13,          # 2.007  (z=1, M+2)
 }
 
 NEUTRAL_LOSSES: dict[str, float] = {

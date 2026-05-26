@@ -50,23 +50,30 @@ class ModelConfig:
 
 
 class PeakEmbed(nn.Module):
-    """(m/z, log_int) → d_model token. No masking; denoising autoencoder."""
+    """m/z-FREE token embedding (v9): token = MLP(Fourier(log_int)).
+
+    Tokens deliberately do NOT encode m/z — m/z flows only through the Δm
+    bias, making the bias the sole carrier of m/z structure (ALiBi/T5-style
+    relative-only position). A learned [MASK] vector replaces the token at
+    masked positions for masked-intensity prediction.
+    """
 
     def __init__(self, cfg: ModelConfig):
         super().__init__()
-        self.ff_mz = FourierFeatures(cfg.fourier_mz.n_freqs, cfg.fourier_mz.f_min, cfg.fourier_mz.f_max)
         self.ff_int = FourierFeatures(cfg.fourier_int.n_freqs, cfg.fourier_int.f_min, cfg.fourier_int.f_max)
-        in_dim = self.ff_mz.out_dim + self.ff_int.out_dim
         self.mlp = nn.Sequential(
-            nn.Linear(in_dim, cfg.d_model),
+            nn.Linear(self.ff_int.out_dim, cfg.d_model),
             nn.GELU(),
             nn.Linear(cfg.d_model, cfg.d_model),
         )
+        self.mask_token = nn.Parameter(torch.randn(cfg.d_model) * 0.02)
 
-    def forward(self, mz: Tensor, log_int: Tensor) -> Tensor:
-        """mz, log_int: (B, K) → (B, K, d_model)."""
-        feats = torch.cat([self.ff_mz(mz), self.ff_int(log_int)], dim=-1)
-        return self.mlp(feats)
+    def forward(self, log_int: Tensor, mask_positions: Tensor | None = None) -> Tensor:
+        """log_int: (B, K); mask_positions: (B, K) bool or None → (B, K, d_model)."""
+        tokens = self.mlp(self.ff_int(log_int))
+        if mask_positions is not None:
+            tokens = torch.where(mask_positions.unsqueeze(-1), self.mask_token, tokens)
+        return tokens
 
 
 class DeltaMZBias(nn.Module):
@@ -228,9 +235,10 @@ class MSEncoder(nn.Module):
         mz: Tensor,
         log_int: Tensor,
         key_padding_mask: Tensor,
+        mask_positions: Tensor | None = None,
     ) -> Tensor:
-        tokens = self.embed(mz, log_int)
-        bias = self.bias_module(mz)  # (B, H, K, K)
+        tokens = self.embed(log_int, mask_positions)   # m/z-free tokens
+        bias = self.bias_module(mz)  # (B, H, K, K) — the only place m/z enters
         # Zero the Δm bias on any pair touching a padded position so the
         # zero-padding sentinel doesn't pollute the bias gradient.
         real = ~key_padding_mask                                       # (B, K)
@@ -251,60 +259,30 @@ class MSEncoder(nn.Module):
             blk.attn.set_save_attn(save)
 
 
-class DenoiseHead(nn.Module):
-    """m/z denoising head.
+class IntensityHead(nn.Module):
+    """Masked-intensity prediction head (v9).
 
-    Predicts a per-peak (residual, log_var). The cleaned m/z is then
-    ``mz_noisy + residual``; loss is Gaussian NLL on the residual against
-    the true delta (mz_clean - mz_noisy). Residual parameterization keeps
-    the target small (~0.1 Da Gaussian noise, ±1.003 isotope shifts) and
-    makes "do nothing" a meaningful identity init.
+    Per-peak scalar prediction of log-intensity; MSE over masked positions
+    only. Tokens are m/z-free, so the only way the model can localize a
+    masked peak (to predict its intensity) is via the Δm bias — forcing
+    chemistry (esp. the M+0→M+1 isotope ratio) into the bias.
     """
 
-    def __init__(self, d_model: int, init_log_var: float = -2.0):
+    def __init__(self, d_model: int):
         super().__init__()
-        self.head = nn.Linear(d_model, 2)  # (residual, log_var)
-        # Initialize the residual prediction near zero (default identity
-        # behavior) and the log_var bias to ~-2 so initial variance is
-        # exp(-2) ≈ 0.14 — between the Gaussian noise σ=0.1 and the
-        # isotope shift 1.003. Reasonable starting uncertainty.
-        with torch.no_grad():
-            self.head.weight.zero_()
-            self.head.bias.zero_()
-            self.head.bias[1] = init_log_var
+        self.head = nn.Linear(d_model, 1)
 
     def loss(
         self,
         tokens: Tensor,
-        mz_noisy: Tensor,
-        mz_clean: Tensor,
-        key_padding_mask: Tensor,
+        log_int_target: Tensor,
+        mask_positions: Tensor,
     ) -> tuple[Tensor, dict[str, Tensor]]:
-        """Per-peak Gaussian NLL on the cleaning residual, masked to real peaks."""
-        real = ~key_padding_mask                       # (B, K)
-        if not real.any():
+        """MSE on masked positions only."""
+        if not mask_positions.any():
             zero = tokens.new_zeros(())
-            return zero, {"nll_mz": zero, "rmse_mz": zero, "mean_log_var": zero}
-
-        out = self.head(tokens.float())                # (B, K, 2)
-        residual = out[..., 0]                         # predicted (clean - noisy)
-        log_var = out[..., 1].clamp(-10.0, 10.0)
-        true_delta = mz_clean - mz_noisy               # (B, K)
-
-        sq_err = (true_delta - residual) ** 2          # (B, K)
-        # Gaussian NLL (drop the constant 0.5*log(2π))
-        nll = 0.5 * log_var + 0.5 * sq_err / log_var.exp()
-
-        nll = nll[real].mean()
-        rmse = sq_err[real].mean().sqrt()
-        return nll, {
-            "nll_mz": nll.detach(),
-            "rmse_mz": rmse.detach(),
-            "mean_log_var": log_var[real].detach().mean(),
-        }
-
-    @torch.no_grad()
-    def predict(self, tokens: Tensor, mz_noisy: Tensor) -> Tensor:
-        """Return predicted clean m/z = mz_noisy + residual."""
-        out = self.head(tokens.float())
-        return mz_noisy + out[..., 0]
+            return zero, {"mse_int": zero, "rmse_int": zero}
+        pred = self.head(tokens.float()).squeeze(-1)   # (B, K)
+        m = mask_positions
+        mse = F.mse_loss(pred[m], log_int_target[m])
+        return mse, {"mse_int": mse.detach(), "rmse_int": mse.detach().sqrt()}
