@@ -665,6 +665,42 @@ signal is precisely what charge-conditioning should sharpen, and the
 single-marginal-head weakness is what to fix *before* scaling, not by
 scaling. → merge v9 to master (architecture validated), branch v10.
 
+### v10a — charge-conditioned bias `bias_h(Δm, z)` — NO-OP (disabled)
+
+Hypothesis: a learned precursor-charge embedding would let each head put a
+*charge-specific* isotope peak (0.50 Da for z=2, 0.33 for z=3) instead of
+one curve carrying all spacings. Implemented as an additive per-head
+charge term in the bias hidden layer (`h = h_dm + h_ch`, w1_charge
+zero-init). Full 50k run.
+
+**Result: the charge embedding did not relocate peaks. Disabled.**
+
+- `corr(z=2 curve, z=3 curve) = 1.000` for **every** head → curves are
+  *identical in shape* across charge. Every head has isotope peaks at all
+  three spacings (0.33/0.50/1.003) regardless of z.
+- `w1_charge` is nonzero (norm 8.7) and charge varied in data (z=2:1800,
+  3:675, 4:300, 5:225) — *not* a bug. But correlation is affine-invariant,
+  so the charge term learned only a per-charge **offset/scale**, not peak
+  relocation.
+- Probe/alignment ≈ v9: fragment_mz 0.873, charge 100%, iso-F1 0.901;
+  3 significant head×range (vs v9's 2) but best p=0.025 (does *not*
+  survive ×16 correction; v9's head-4 p=0.002 was stronger). "3 vs 2" is
+  seed noise.
+
+**Root cause (implementation):** the *additive* factorization (h_dm + h_ch)
+is Δm-independent in the charge term → even through the GELU it can only
+offset/scale the curve, never move a peak from 1.003 to 0.50. Peak
+relocation needs charge×Δm *interaction* — concat-charge-to-Fourier (memory
+cost) or **Δm×z scaling** (collapse isotopes to neutral mass; caveat:
+fragment charge ≠ precursor charge).
+
+**Reframe:** the premise was a partial misdiagnosis. A charge-agnostic
+all-spacings curve isn't *hurting* — it gives more isotope hits, not fewer,
+and probe metrics are unchanged. The seed-gate marginality is an
+**effect-size / low-power** problem, not charge-smearing. So charge-
+conditioning was the wrong lever; `charge_dim: 0` (off). → move to the
+**precursor anchor** (real measured deficit: fragment_mz 0.87, absolute m/z).
+
 ---
 
 ## 4. Targets to watch on the v7 run (σ = 0.1)

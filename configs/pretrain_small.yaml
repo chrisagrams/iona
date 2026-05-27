@@ -19,7 +19,7 @@ model:
     f_min: 1.0e-2
     f_max: 1.0e+3
     scale: 3.0              # bias bounded to ±scale logits via scale*tanh(raw/scale)
-    charge_dim: 16          # v10: condition bias on precursor charge (0 = off/v9)
+    charge_dim: 0           # v10a charge-conditioning was a no-op (additive term only rescales); disabled
     n_charges: 8
 
 data:
