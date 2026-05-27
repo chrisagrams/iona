@@ -1,6 +1,7 @@
 """Parquet streaming dataset, per-spectrum preprocessing, and MPM collate."""
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable, Iterator
@@ -19,6 +20,17 @@ class PreprocessConfig:
 
 N_CHARGES = 8  # embedding rows; index 0 = unknown/default, 1..N-1 = charge z (clamped)
 
+# Monoisotopic residue masses (Da); for computing precursor m/z from the label.
+_RESIDUE_MASS = {
+    "G": 57.02146, "A": 71.03711, "S": 87.03203, "P": 97.05276, "V": 99.06841,
+    "T": 101.04768, "C": 103.00919, "L": 113.08406, "I": 113.08406, "N": 114.04293,
+    "D": 115.02694, "Q": 128.05858, "K": 128.09496, "E": 129.04259, "M": 131.04049,
+    "H": 137.05891, "F": 147.06841, "R": 156.10111, "Y": 163.06333, "W": 186.07931,
+}
+_WATER = 18.0105646
+_PROTON = 1.0072765
+_MOD_RE = re.compile(r"\[([0-9.]+)\]")
+
 
 def charge_index(peptide_charge: str | None) -> int:
     """Parse charge from 'PEPTIDE_z' → index in [0, N_CHARGES). 0 = unknown."""
@@ -28,6 +40,33 @@ def charge_index(peptide_charge: str | None) -> int:
     if len(parts) == 2 and parts[1].isdigit():
         return min(int(parts[1]), N_CHARGES - 1)
     return 0
+
+
+def precursor_mz(peptide_charge: str | None) -> float:
+    """Compute precursor m/z from 'PEPTIDE_z' (mod-aware: sums [x] bracket
+    masses + residues + water, /z). Returns 0.0 if unparseable.
+
+    Precursor m/z is an *observed* input at deployment (instrument PEPMASS);
+    here we source it from the label for the consensus set, where the observed
+    value isn't stored. Same physical quantity — not leakage.
+    """
+    if not peptide_charge:
+        return 0.0
+    parts = str(peptide_charge).rsplit("_", 1)
+    if len(parts) != 2 or not parts[1].isdigit():
+        return 0.0
+    pep, z = parts[0], int(parts[1])
+    if z < 1:
+        return 0.0
+    mods = sum(float(x) for x in _MOD_RE.findall(pep))
+    seq = _MOD_RE.sub("", pep)
+    mass = _WATER + mods
+    for a in seq:
+        m = _RESIDUE_MASS.get(a)
+        if m is None:
+            return 0.0
+        mass += m
+    return (mass + z * _PROTON) / z
 
 
 @dataclass
@@ -108,7 +147,8 @@ class ConsensusParquet(IterableDataset):
                     mz_p, li_p = preprocess_spectrum(mz_t, int_t, self.preprocess)
                     if mz_p.numel() == 0:
                         continue
-                    yield mz_p, li_p, charge_index(pc_col[int(i)].as_py())
+                    pc = pc_col[int(i)].as_py()
+                    yield mz_p, li_p, charge_index(pc), precursor_mz(pc)
                 # Drop arrow table reference; GC reclaims ~263 MB before next rg.
                 del tbl, mz_col, int_col, pc_col
             epoch += 1
@@ -149,8 +189,8 @@ def preprocess_spectrum(
 
 
 def _pad_batch(batch):
-    """Pad a list of (mz, log_int[, charge]) to (B, K_max).
-    Returns mz, log_int, key_padding_mask, charge (B,) long, Ks."""
+    """Pad a list of (mz, log_int[, charge[, precursor_mz]]) to (B, K_max).
+    Returns mz, log_int, key_padding_mask, charge (B,) long, prec_mz (B,) float, Ks."""
     B = len(batch)
     Ks = [int(item[0].numel()) for item in batch]
     K_max = max(max(Ks) if Ks else 1, 1)
@@ -158,20 +198,23 @@ def _pad_batch(batch):
     log_int = torch.zeros(B, K_max, dtype=torch.float32)
     key_padding_mask = torch.ones(B, K_max, dtype=torch.bool)
     charge = torch.zeros(B, dtype=torch.long)
+    prec_mz = torch.zeros(B, dtype=torch.float32)
     for b, (item, K) in enumerate(zip(batch, Ks)):
         charge[b] = int(item[2]) if len(item) > 2 else 0
+        prec_mz[b] = float(item[3]) if len(item) > 3 else 0.0
         if K == 0:
             continue
         mz[b, :K] = item[0]
         log_int[b, :K] = item[1]
         key_padding_mask[b, :K] = False
-    return mz, log_int, key_padding_mask, charge, Ks
+    return mz, log_int, key_padding_mask, charge, prec_mz, Ks
 
 
 def pad_collate(batch) -> dict[str, torch.Tensor]:
     """Clean padded batch, no masking — for inference (probes, attention probe)."""
-    mz, log_int, kpm, charge, _ = _pad_batch(batch)
-    return {"mz": mz, "log_int": log_int, "key_padding_mask": kpm, "charge": charge}
+    mz, log_int, kpm, charge, prec_mz, _ = _pad_batch(batch)
+    return {"mz": mz, "log_int": log_int, "key_padding_mask": kpm,
+            "charge": charge, "precursor_mz": prec_mz}
 
 
 def mask_intensity_collate(
@@ -190,7 +233,7 @@ def mask_intensity_collate(
     mask_positions so the input intensity there doesn't leak, and the loss reads
     the target from log_int at mask_positions.
     """
-    mz, log_int, key_padding_mask, charge, Ks = _pad_batch(batch)
+    mz, log_int, key_padding_mask, charge, prec_mz, Ks = _pad_batch(batch)
     mask_positions = torch.zeros_like(key_padding_mask)
     for b, K in enumerate(Ks):
         if K == 0:
@@ -205,6 +248,7 @@ def mask_intensity_collate(
         "key_padding_mask": key_padding_mask,
         "mask_positions": mask_positions,
         "charge": charge,
+        "precursor_mz": prec_mz,
     }
 
 

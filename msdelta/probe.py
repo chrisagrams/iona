@@ -35,6 +35,7 @@ from sklearn.metrics import accuracy_score, f1_score, r2_score, roc_auc_score
 from sklearn.preprocessing import StandardScaler
 
 from .data import PreprocessConfig, preprocess_spectrum, split_paths
+from .data import precursor_mz as _anchor_precursor_mz  # mod-aware, for the anchor input
 from .model import MSEncoder
 
 # Monoisotopic residue masses (Da); L and I share a mass.
@@ -147,11 +148,13 @@ def extract_representations(
         mz = torch.zeros(B, K); li = torch.zeros(B, K)
         mask = torch.zeros(B, K, dtype=torch.bool)
         chg = torch.zeros(B, dtype=torch.long)
+        pmz = torch.zeros(B, dtype=torch.float32)
         for b, (m, l, meta) in enumerate(buf):
             k = m.numel()
             mz[b, :k] = m; li[b, :k] = l; mask[b, :k] = True
-            chg[b] = meta["z"]
-        tokens = enc(mz.to(device), li.to(device), (~mask).to(device), charge=chg.to(device))  # (B,K,D)
+            chg[b] = meta["z"]; pmz[b] = meta["prec_in"]
+        tokens = enc(mz.to(device), li.to(device), (~mask).to(device),
+                     charge=chg.to(device), precursor_mz=pmz.to(device))  # (B,K,D)
         pooled = _pool(tokens, mask.to(device)).cpu().numpy()
         tok_cpu = tokens.cpu().numpy()
         for b, (m, l, meta) in enumerate(buf):
@@ -195,7 +198,8 @@ def extract_representations(
         z = parse_charge(pc)
         meta = {"prec": precursor_mz(pc) or np.nan,
                 "logtic": float(torch.log1p(it.sum())),
-                "z": z if (z and 1 <= z <= 5) else 0}
+                "z": z if (z and 1 <= z <= 5) else 0,
+                "prec_in": _anchor_precursor_mz(pc)}  # anchor input (mod-aware, 0 if unparseable)
         buf.append((mz_p, li_p, meta))
         if len(buf) >= batch_size:
             flush()

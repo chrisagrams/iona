@@ -24,7 +24,7 @@ import pyarrow.parquet as pq
 import torch
 from sklearn.metrics import average_precision_score
 
-from .data import PreprocessConfig, charge_index, preprocess_spectrum, split_paths
+from .data import PreprocessConfig, charge_index, precursor_mz, preprocess_spectrum, split_paths
 from .probe import _pool
 
 _BARE = re.compile(r"_\d+$")  # strip the trailing _z charge suffix
@@ -119,7 +119,7 @@ def extract(enc, spectrum_iter, device, pp, *, max_peptides=150, per_peptide=25,
             break
 
     # flatten, keep only peptides with >=2 reps (need positives)
-    specs, binned, labels, charges = [], [], [], []
+    specs, binned, labels, charges, prec_mzs = [], [], [], [], []
     for pc, items in buckets.items():
         if len(items) < 2:
             continue
@@ -127,6 +127,7 @@ def extract(enc, spectrum_iter, device, pp, *, max_peptides=150, per_peptide=25,
         binned.extend(binned_b[pc])
         labels.extend([pc] * len(items))
         charges.extend([charge_index(pc)] * len(items))
+        prec_mzs.extend([precursor_mz(pc)] * len(items))
 
     # encode in batches → pooled embedding
     embs = []
@@ -138,7 +139,8 @@ def extract(enc, spectrum_iter, device, pp, *, max_peptides=150, per_peptide=25,
         for b, (m, l) in enumerate(chunk):
             k = m.numel(); mz[b, :k] = m; li[b, :k] = l; mask[b, :k] = True
         chg = torch.tensor(charges[s:s + batch_size], dtype=torch.long, device=device)
-        tok = enc(mz.to(device), li.to(device), (~mask).to(device), charge=chg)
+        pmz = torch.tensor(prec_mzs[s:s + batch_size], dtype=torch.float32, device=device)
+        tok = enc(mz.to(device), li.to(device), (~mask).to(device), charge=chg, precursor_mz=pmz)
         embs.append(_pool(tok, mask.to(device)).cpu().numpy())
 
     return {

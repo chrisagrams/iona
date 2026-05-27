@@ -51,6 +51,7 @@ def load_encoder(ckpt_path: str | Path) -> tuple[MSEncoder, dict[str, Any], int]
         fourier_mz=FourierConfig(**d["fourier_mz"]),
         fourier_int=FourierConfig(**d["fourier_int"]),
         delta_bias=DeltaBiasConfig(**d["delta_bias"]),
+        use_precursor=d.get("use_precursor", False),
     )
     enc = MSEncoder(mcfg)
     enc.load_state_dict(ckpt["encoder"])
@@ -293,7 +294,7 @@ def functional_probe(
         batch = {k: v.to(device) for k, v in batch.items()}
         mz = batch["mz"]
         enc(mz, batch["log_int"], batch["key_padding_mask"],
-            charge=batch.get("charge"))  # populates last_attn per block
+            charge=batch.get("charge"), precursor_mz=batch.get("precursor_mz"))  # populates last_attn
 
         dm = mz.unsqueeze(-1) - mz.unsqueeze(-2)              # (B,K,K)
         kpm = batch["key_padding_mask"]
@@ -306,7 +307,9 @@ def functional_probe(
 
         pair_cnt.scatter_add_(0, idx_flat, torch.ones_like(idx_flat, dtype=torch.float))
         for blk in enc.blocks:
-            attn = blk.attn.last_attn  # (B,H,K,K)
+            attn = blk.attn.last_attn  # (B,H,Kp,Kp); Kp=K+1 if a precursor token was prepended
+            if attn.size(-1) == K + 1:
+                attn = attn[:, :, 1:, 1:]  # drop the precursor row/col → fragment-fragment (B,H,K,K)
             for h in range(H):
                 attn_sum[h].scatter_add_(0, idx_flat, attn[:, h][in_range].float())
         used += 1

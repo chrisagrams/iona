@@ -5,6 +5,7 @@ model:
   ffn_mult: 4
   dropout: 0.1
   max_peaks: 150
+  use_precursor: true    # v10: prepend precursor anchor token (absolute m/z + charge)
   fourier_mz:
     n_freqs: 64
     f_min: 1.0e-2
