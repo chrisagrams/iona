@@ -701,6 +701,72 @@ and probe metrics are unchanged. The seed-gate marginality is an
 conditioning was the wrong lever; `charge_dim: 0` (off). → move to the
 **precursor anchor** (real measured deficit: fragment_mz 0.87, absolute m/z).
 
+### v10b — precursor anchor token — NO-OP for fragment m/z
+
+Prepend a precursor anchor token (the one token with absolute m/z + charge);
+fragments stay m/z-free; bias spans all pairs incl. precursor. Hypothesis:
+resolve the absolute-frame ambiguity → fragment_mz_r2 0.89 → ~0.97. Full 50k run.
+
+**Result: no improvement.** `fragment_mz_r2 = 0.866` (≈ v9), precursor_mz
+0.994 (already maxed in v9), all probes ≈ v9, alignment comparable (head 6
+coarse p=0.003 survives correction). The anchor **is** used (ablating it
+shifts fragment tokens ~10%) — used-but-unhelpful.
+
+**Why — the bottleneck wasn't the absolute frame.** v9 already recovers
+precursor m/z at R²=0.996, so the frame was never ambiguous. The ~0.89
+fragment-m/z ceiling is the *token representation*: a fragment's own m/z
+offset lives in the Δm bias (attention logits, relative), not as a readable
+feature in its m/z-free token. An anchor gives a reference the fragment
+can't measure its offset from. **The ~0.89 ceiling is intrinsic to m/z-free
+tokens; not fixable by anchoring — only by putting m/z (weakly) back in
+fragment tokens (costs interpretability).**
+
+**Head-to-head fragment_mz_r2 (n=6000, matched):** v9 0.855 < precursor
+0.861 < **charge 0.872**. Charge (a spectrum-level scale cue) helps the
+*representation* slightly more than the anchor — even though it was a no-op
+for the *bias curve shape*. → v10b run = `v10_both.yaml` tests charge +
+precursor together (do the spectrum-level cues stack? expect ≤~0.88; the
+m/z-free ceiling dominates).
+
+### Per-head profile (last completed model = precursor-anchor)
+
+2 specialists + 2 weak + 4 unspecialized, consistent since v9:
+- **head 6 — residues**, 2.0×, **p=0.003** (survives ×16 correction): M·131,
+  V·99, E·129, F·147, L/I·113 to <0.1 Da. Strongest/most robust head.
+- **head 4 — isotopes**, 2.2×, p=0.028 (nominal): ¹³C at 1.003/0.50/0.33;
+  flat in coarse (dedicated isotope head).
+- heads 0,3: weak loss/residue lean (p≈0.12–0.15).
+- heads 1,2,5,7: unspecialized (coarse at/below chance).
+
+Neither v10 bolt-on (charge, precursor) broadened head specialization — still
+~2 chemical heads. The chemistry present is precise (mDa hits) but narrow.
+
+### v11 — capacity scaling (planned, 4× A100-40GB)
+
+**Why scale now:** at 50k×256 we've seen **11.9% of the 107.8M train spectra
+(0.12 epoch; 1 epoch = 421k steps)** — nowhere near data-limited. Yet the
+small model plateaus by ~30k. That's **capacity-limited, not data-limited**,
+and the cheap feature levers (charge, precursor) didn't broaden heads → the
+remaining lever is capacity. Test: does more capacity *broaden* head
+specialization (>2 correction-surviving chemical heads)?
+
+Matrix — one model per A100, **equal data exposure (~12.8M spectra)**, baseline
+arch (m/z-free, charge/precursor OFF) to isolate capacity. Memory from a model
+calibrated to the 19.7 GB measurement (verify on-device before launch):
+
+| tier | d / L / H | params | batch | steps | ~mem |
+|---|---|---|---|---|---|
+| S  | 384 / 8 / 8   | 14M  | 256 | 50k  | 24 GB |
+| M  | 512 / 12 / 16 | 38M  | 160 | 80k  | 29 GB |
+| L  | 768 / 12 / 16 | 86M  | 112 | 114k | 25 GB |
+| XL | 1024 / 16 / 16| 203M | 80  | 160k | 30 GB |
+
+Configs: `configs/scale_{S,M,L,XL}.yaml`. Read: count of correction-surviving
+chemical heads vs capacity. Climbs → capacity is the lever, winner → real-data
+foundation run. Flat at ~2 even for XL → capacity isn't it, rethink before
+spending real-data compute. (Caveat: equal-data may under-show the biggest
+tiers if they're data-hungry.)
+
 ---
 
 ## 4. Targets to watch on the v7 run (σ = 0.1)
