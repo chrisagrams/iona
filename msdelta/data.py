@@ -144,11 +144,11 @@ class ConsensusParquet(IterableDataset):
                         continue
                     mz_t = torch.tensor(mz_list, dtype=torch.float32)
                     int_t = torch.tensor(int_list, dtype=torch.float32)
-                    mz_p, li_p = preprocess_spectrum(mz_t, int_t, self.preprocess)
+                    mz_p, li_p, pp = preprocess_spectrum(mz_t, int_t, self.preprocess)
                     if mz_p.numel() == 0:
                         continue
                     pc = pc_col[int(i)].as_py()
-                    yield mz_p, li_p, charge_index(pc), precursor_mz(pc)
+                    yield mz_p, li_p, pp, charge_index(pc), precursor_mz(pc)
                 # Drop arrow table reference; GC reclaims ~263 MB before next rg.
                 del tbl, mz_col, int_col, pc_col
             epoch += 1
@@ -158,21 +158,29 @@ def preprocess_spectrum(
     mz: torch.Tensor,
     intensity: torch.Tensor,
     cfg: PreprocessConfig,
-) -> tuple[torch.Tensor, torch.Tensor]:
-    """Drop low-intensity peaks, take top-N, log+normalize intensity.
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    """Drop low-intensity peaks, take top-N, produce two intensity views.
 
-    Returns (mz, log_int) as float32, both of length K ≤ cfg.top_n.
+    Returns (mz, log_int, intensity_prob), all float32 of length K ≤ cfg.top_n:
+      - log_int        log1p(intensity) divided by its per-spectrum max — the
+                       input feature embedded by `PeakEmbed` (concentrated in
+                       [~0.5, 1.0] by construction, which is fine for the input).
+      - intensity_prob raw intensity normalised to sum-to-1 across the kept
+                       peaks — the KL target for `IntensityHead.loss`. Treating
+                       the spectrum as a probability distribution over m/z is
+                       what makes isotope/residue intensity ratios (e.g. M+1 ≈
+                       20% M+0 for ¹³C) first-class in the loss.
     """
     mz = mz.to(torch.float32)
     intensity = intensity.to(torch.float32)
 
     if intensity.numel() == 0:
-        return mz, intensity
+        return mz, intensity, intensity
 
     base = float(intensity.max())
     if base <= 0:
         empty = torch.empty(0, dtype=torch.float32)
-        return empty, empty
+        return empty, empty, empty
 
     keep = intensity >= cfg.intensity_threshold_frac * base
     mz = mz[keep]
@@ -185,55 +193,63 @@ def preprocess_spectrum(
 
     log_int = torch.log1p(intensity)
     log_int = log_int / log_int.max().clamp_min(1e-8)
-    return mz.contiguous(), log_int.contiguous()
+
+    intensity_prob = intensity / intensity.sum().clamp_min(1e-12)
+
+    return mz.contiguous(), log_int.contiguous(), intensity_prob.contiguous()
 
 
 def _pad_batch(batch):
-    """Pad a list of (mz, log_int[, charge[, precursor_mz]]) to (B, K_max).
-    Returns mz, log_int, key_padding_mask, charge (B,) long, prec_mz (B,) float, Ks."""
+    """Pad a list of (mz, log_int, intensity_prob[, charge[, precursor_mz]]) to (B, K_max).
+    Returns mz, log_int, intensity_prob, key_padding_mask, charge (B,) long,
+    prec_mz (B,) float, Ks."""
     B = len(batch)
     Ks = [int(item[0].numel()) for item in batch]
     K_max = max(max(Ks) if Ks else 1, 1)
     mz = torch.zeros(B, K_max, dtype=torch.float32)
     log_int = torch.zeros(B, K_max, dtype=torch.float32)
+    intensity_prob = torch.zeros(B, K_max, dtype=torch.float32)
     key_padding_mask = torch.ones(B, K_max, dtype=torch.bool)
     charge = torch.zeros(B, dtype=torch.long)
     prec_mz = torch.zeros(B, dtype=torch.float32)
     for b, (item, K) in enumerate(zip(batch, Ks)):
-        charge[b] = int(item[2]) if len(item) > 2 else 0
-        prec_mz[b] = float(item[3]) if len(item) > 3 else 0.0
+        charge[b] = int(item[3]) if len(item) > 3 else 0
+        prec_mz[b] = float(item[4]) if len(item) > 4 else 0.0
         if K == 0:
             continue
         mz[b, :K] = item[0]
         log_int[b, :K] = item[1]
+        intensity_prob[b, :K] = item[2]
         key_padding_mask[b, :K] = False
-    return mz, log_int, key_padding_mask, charge, prec_mz, Ks
+    return mz, log_int, intensity_prob, key_padding_mask, charge, prec_mz, Ks
 
 
 def pad_collate(batch) -> dict[str, torch.Tensor]:
     """Clean padded batch, no masking — for inference (probes, attention probe)."""
-    mz, log_int, kpm, charge, prec_mz, _ = _pad_batch(batch)
-    return {"mz": mz, "log_int": log_int, "key_padding_mask": kpm,
-            "charge": charge, "precursor_mz": prec_mz}
+    mz, log_int, intensity_prob, kpm, charge, prec_mz, _ = _pad_batch(batch)
+    return {"mz": mz, "log_int": log_int, "intensity_prob": intensity_prob,
+            "key_padding_mask": kpm, "charge": charge, "precursor_mz": prec_mz}
 
 
 def mask_intensity_collate(
     batch: list[tuple[torch.Tensor, torch.Tensor]],
     cfg: MaskConfig,
 ) -> dict[str, torch.Tensor]:
-    """Mask a fraction of peaks' intensity for masked-intensity prediction (v9).
+    """Mask a fraction of peaks' intensity for masked-intensity prediction (v9 / v13).
 
     Returns:
       mz                (B, K_max)  float32  — real m/z (feeds the Δm bias only)
-      log_int           (B, K_max)  float32  — real log-intensity (also the target)
+      log_int           (B, K_max)  float32  — input feature for PeakEmbed (log1p÷max)
+      intensity_prob    (B, K_max)  float32  — KL target (raw intensity / sum)
       key_padding_mask  (B, K_max)  bool     — True at padding
       mask_positions    (B, K_max)  bool     — True where intensity is hidden & predicted
 
-    m/z is never masked. log_int is passed clean; PeakEmbed swaps in [MASK] at
-    mask_positions so the input intensity there doesn't leak, and the loss reads
-    the target from log_int at mask_positions.
+    m/z is never masked. PeakEmbed swaps in [MASK] at mask_positions so the input
+    intensity there doesn't leak; the KL loss reads `intensity_prob` at masked
+    positions, re-normalises across the masked subset, and minimises KL against
+    the model's softmax over masked logits.
     """
-    mz, log_int, key_padding_mask, charge, prec_mz, Ks = _pad_batch(batch)
+    mz, log_int, intensity_prob, key_padding_mask, charge, prec_mz, Ks = _pad_batch(batch)
     mask_positions = torch.zeros_like(key_padding_mask)
     for b, K in enumerate(Ks):
         if K == 0:
@@ -245,6 +261,7 @@ def mask_intensity_collate(
     return {
         "mz": mz,
         "log_int": log_int,
+        "intensity_prob": intensity_prob,
         "key_padding_mask": key_padding_mask,
         "mask_positions": mask_positions,
         "charge": charge,

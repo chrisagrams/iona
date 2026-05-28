@@ -192,7 +192,7 @@ def extract_representations(
     for pc, mz_list, int_list in _iter_spectra(paths, n_spectra):
         mzt = torch.tensor(mz_list, dtype=torch.float32)
         it = torch.tensor(int_list, dtype=torch.float32)
-        mz_p, li_p = preprocess_spectrum(mzt, it, pp)
+        mz_p, li_p, _ = preprocess_spectrum(mzt, it, pp)   # intensity_prob unused by probes
         if mz_p.numel() == 0:
             continue
         z = parse_charge(pc)

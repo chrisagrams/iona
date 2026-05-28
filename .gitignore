@@ -12,3 +12,4 @@ wheels/
 # Run artifacts
 runs/
 wandb/
+pbs/logs/

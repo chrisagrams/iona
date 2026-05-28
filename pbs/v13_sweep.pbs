@@ -1,0 +1,83 @@
+#!/bin/bash
+#PBS -N msdelta_v13
+#PBS -A FRAME-IDP
+#PBS -q capacity
+#PBS -l select=1:system=polaris
+#PBS -l place=scatter
+#PBS -l walltime=06:00:00
+#PBS -l filesystems=home:eagle
+#PBS -j oe
+#PBS -o /home/cgrams/msdelta/pbs/logs/
+#
+# v13 — KL loss × mask-ratio sweep. One Polaris node, 4× A100-40GB, one
+# config per GPU (mask 0.15 / 0.35 / 0.50 / 0.75; v9 architecture
+# d=256/6L/8H; KL loss across all four). The only knob varying across
+# the four runs is `mask.mask_ratio`. See EXPERIMENTS.md §v13.
+#
+# Hypothesis stack:
+#   1. KL replaces MSE on a near-constant target → real gradient pressure
+#      on the bias chemistry (v9-v11 plateaued because predict-the-mean
+#      was ~optimal under the old loss).
+#   2. Mask ratio gates how much chemistry the model is forced to use
+#      to predict the masked subset's intensity distribution: low ratio
+#      lets locality solve it, high ratio forces Δm-relational reasoning.
+#
+# Capacity: ~5M params × batch 256 × 50k steps; v9-era throughput ~8 sps
+# on a single A100 → ~1.8h compute, plus probe (every 5k) + bias-curve
+# renders → ~3h total per tier. 6h walltime gives margin (probably
+# mask75 is slowest — more masked positions per spectrum = slightly more
+# loss compute, though small).
+#
+# Reads (wandb / msdelta-kl-sweep project):
+#   - train/kl                    — does it drop below train/kl_baseline?
+#   - train/kl_baseline           — = log(K_masked) − H(p); the predict-uniform floor
+#   - train/ce, train/h_p         — separate "model bad" from "target nearly uniform"
+#   - probe/fragment_mz_r2        — past v9's 0.87 ceiling on any ratio?
+#   - probe/isotope_f1            — past v9's 0.90?
+# Post-run: msdelta-analyze --mode align on each final.pt. Count of
+# correction-surviving (p<0.01 after ×16) chemical heads vs mask ratio.
+# Climbs with mask → KL+locality-stress is the lever; flat → revisit task.
+#
+# Pre-req: pbs/setup_venv.sh has been run once on the login node.
+
+set -euo pipefail
+
+REPO=/home/cgrams/msdelta
+cd "$REPO"
+
+JOBID=${PBS_JOBID%%.*}
+JOBID=${JOBID:-local}
+LOGDIR=$REPO/pbs/logs/${JOBID}
+mkdir -p "$LOGDIR"
+
+echo "$(date -Is) job=$PBS_JOBID host=$(hostname) gpus=$(nvidia-smi -L | wc -l)"
+nvidia-smi -L | sed "s/^/  /"
+
+CONFIGS=(
+    configs/v13_mask15.yaml
+    configs/v13_mask35.yaml
+    configs/v13_mask50.yaml
+    configs/v13_mask75.yaml
+)
+PIDS=()
+for i in "${!CONFIGS[@]}"; do
+    cfg=${CONFIGS[$i]}
+    gpu=$i
+    bash "$REPO/pbs/_run_tier.sh" "$cfg" "$gpu" &
+    PIDS+=($!)
+    echo "$(date -Is) launched cfg=$cfg gpu=$gpu pid=$!"
+done
+
+set +e
+FAIL=0
+for i in "${!CONFIGS[@]}"; do
+    cfg=${CONFIGS[$i]}
+    wait "${PIDS[$i]}"
+    rc=$?
+    echo "$(date -Is) cfg=$cfg exit=$rc"
+    if [[ $rc -ne 0 ]]; then
+        FAIL=1
+    fi
+done
+
+exit $FAIL
