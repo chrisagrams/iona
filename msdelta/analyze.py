@@ -88,9 +88,12 @@ class RangeSpec:
 
 @torch.no_grad()
 def _eval_curves(enc: MSEncoder, lo: float, hi: float, step: float, charge: int = 2):
-    grid = torch.arange(lo, hi + step / 2, step, dtype=torch.float32)
+    # Build the grid on the bias module's device so this works both for a
+    # CPU-loaded checkpoint (CLI) and the live GPU encoder (inline probe).
+    dev = next(enc.bias_module.parameters()).device
+    grid = torch.arange(lo, hi + step / 2, step, dtype=torch.float32, device=dev)
     curves = enc.bias_module.evaluate(grid, charge).cpu().numpy()  # (N, H); charge ignored if charge_dim=0
-    return grid.numpy(), curves
+    return grid.cpu().numpy(), curves
 
 
 def _chance_rate(abs_grid: np.ndarray, ref_vals: np.ndarray, tol: float) -> float:
