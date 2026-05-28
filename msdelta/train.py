@@ -360,6 +360,15 @@ def main(argv: list[str] | None = None) -> int:
 
         probe_every = lcfg.get("probe_every", 0)
         if probe_every and step > 0 and step % probe_every == 0:
+            # The probe block runs extra forward passes (run_all_probes +
+            # retrieval) on top of training's allocator pool. For the big
+            # tiers that tipped a fragmented 40GB A100 into OOM (XL died at
+            # the step-20000 probe). Return the reserved-but-unallocated
+            # blocks to the allocator first so the probe forwards get
+            # contiguous room. Pair with PYTORCH_CUDA_ALLOC_CONF=
+            # expandable_segments:True on the run for the fragmentation fix.
+            if device.type == "cuda":
+                torch.cuda.empty_cache()
             probe_metrics = run_all_probes(
                 encoder, probe_val_paths, device, probe_pp,
                 n_spectra=lcfg.get("probe_n_spectra", 3000),
