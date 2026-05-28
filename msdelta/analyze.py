@@ -228,6 +228,48 @@ def render_annotated(enc: MSEncoder, spec: RangeSpec, out_path: Path) -> None:
     plt.close(fig)
 
 
+def alignment_metrics(
+    enc: MSEncoder,
+    fine_tol: float = 0.02,
+    coarse_tol: float = 0.1,
+    prominence: float = 0.3,
+) -> dict[str, float]:
+    """Flat wandb dict from the Δm bias-curve chemistry alignment (mode b).
+
+    Pure bias-curve analysis — the encoder never sees a spectrum, so this is
+    fast (peak-find on `bias_h(Δm)`) and safe to call inline every probe step.
+    Tracks, per range and overall: how many head×range tests beat chance
+    (p<0.05), how many survive Bonferroni at p<0.01 (the strict gate), the
+    best p-value, the peak enrichment, and reference coverage. Watching
+    `align/n_sig01_bonf` over training shows whether the bias is *sharpening*
+    onto chemistry as the model learns, rather than only at the final ckpt.
+    """
+    specs = [
+        RangeSpec("fine", -5.0, 5.0, 0.001, ["isotope"],
+                  tol=fine_tol, prominence=prominence, min_sep=0.05),
+        RangeSpec("coarse", 2.0, 200.0, 0.01, ["loss", "residue"],
+                  tol=coarse_tol, prominence=prominence, min_sep=0.3),
+    ]
+    results = [analyze_range(enc, spec) for spec in specs]
+    all_p = [ph["p_value"] for res in results for ph in res["per_head"]]
+    n_tests = max(1, len(all_p))   # 8 heads × 2 ranges = 16
+
+    out: dict[str, float] = {}
+    for res in results:
+        name = res["range"]
+        pvals = [ph["p_value"] for ph in res["per_head"]]
+        enrich = [ph["enrichment"] for ph in res["per_head"]]
+        out[f"align/{name}_n_sig05"] = float(sum(p < 0.05 for p in pvals))
+        out[f"align/{name}_best_p"] = float(min(pvals)) if pvals else 1.0
+        out[f"align/{name}_max_enrich"] = float(max(enrich)) if enrich else 0.0
+        out[f"align/{name}_coverage"] = res["n_refs_covered"] / max(1, res["n_refs"])
+
+    out["align/n_sig05"] = float(sum(p < 0.05 for p in all_p))
+    out["align/n_sig01_bonf"] = float(sum(p * n_tests < 0.01 for p in all_p))
+    out["align/best_p"] = float(min(all_p)) if all_p else 1.0
+    return out
+
+
 # ---------- functional probe (plan §6.2c) ----------
 #
 # The alignment score (b) reads the *learned bias curve* only — the encoder

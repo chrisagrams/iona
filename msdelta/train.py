@@ -34,6 +34,8 @@ from .model import (
     ModelConfig,
 )
 from .probe import run_all_probes
+from .analyze import alignment_metrics
+from .retrieval import retrieval_inline_metrics
 from .viz import attention_entropy_per_head, render_bias_panels
 
 
@@ -362,13 +364,23 @@ def main(argv: list[str] | None = None) -> int:
                 encoder, probe_val_paths, device, probe_pp,
                 n_spectra=lcfg.get("probe_n_spectra", 3000),
             )
-            wandb.log({**probe_metrics, "step": step}, step=step)
+            # Bias-curve chemistry alignment (b) — cheap, no data.
+            align = alignment_metrics(encoder)
+            # Embedding retrieval (model as embedding model) vs binned baseline.
+            retr = retrieval_inline_metrics(encoder, probe_val_paths, device, probe_pp)
+            wandb.log({**probe_metrics, **align, **retr, "step": step}, step=step)
             key = lambda k: probe_metrics.get(k, float("nan"))
             print(f"  probe: precursor_r2={key('probe/precursor_mz_r2'):.3f} "
                   f"fragment_mz_r2={key('probe/fragment_mz_r2'):.3f} "
                   f"charge_acc={key('probe/charge_acc'):.3f} "
                   f"nloss_auc={key('probe/neutral_loss_auc'):.3f} "
                   f"iso_f1={key('probe/isotope_f1'):.3f}", flush=True)
+            print(f"  align: n_sig05={align.get('align/n_sig05', 0):.0f} "
+                  f"n_sig01_bonf={align.get('align/n_sig01_bonf', 0):.0f} "
+                  f"best_p={align.get('align/best_p', 1):.1e} | "
+                  f"retrieval: mAP={retr.get('retrieval/mAP', float('nan')):.3f} "
+                  f"binned={retr.get('retrieval/binned_mAP', float('nan')):.3f} "
+                  f"gap={retr.get('retrieval/gap_vs_binned', float('nan')):+.3f}", flush=True)
 
         if step % lcfg["bias_curve_every"] == 0:
             panels = render_bias_panels(encoder.bias_module, step)

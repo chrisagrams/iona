@@ -1,0 +1,72 @@
+# v14 capacity sweep ON KL LOSS — tier S (d=384). See EXPERIMENTS.md §v14.
+# Re-runs the v11 capacity sweep, but with the two things v11 got wrong:
+#   1. KL distribution loss (v11 used MSE on the concentrated target, which
+#      had no gradient signal — so v11 could not have detected a capacity
+#      effect on chemistry even if one existed).
+#   2. mask_ratio=0.50 — the v13 sweet spot where bias chemistry was
+#      closest to significant (inverted-U peak). Capacity has the best
+#      chance to push it over the line here.
+# Everything else matches v11: equal data exposure (~12.8M spectra),
+# baseline arch (m/z-free, charge/precursor OFF) to isolate capacity.
+#
+# Read the inline align/* and retrieval/* wandb series across training:
+# does align/n_sig01_bonf (heads surviving x16 Bonferroni) climb with
+# capacity? Climbs → it WAS partly capacity under a working loss; flat →
+# genuinely the task incentive, ELECTRA is justified.
+model:
+  d_model: 384
+  n_heads: 8
+  n_layers: 8
+  ffn_mult: 4
+  dropout: 0.1
+  max_peaks: 150
+  use_precursor: false
+  fourier_mz:
+    n_freqs: 64
+    f_min: 1.0e-2
+    f_max: 1.0e+3
+  fourier_int:
+    n_freqs: 16
+    f_min: 1.0e-2
+    f_max: 1.0e+2
+  delta_bias:
+    n_freqs: 64
+    per_head_hidden: 32
+    f_min: 1.0e-2
+    f_max: 1.0e+3
+    scale: 3.0
+    charge_dim: 0
+    n_charges: 8
+
+data:
+  root: /mnt/vault-1/k8/concensus_spec_30M/consensus_100M/
+  n_val_files: 2
+  intensity_threshold_frac: 0.01
+  top_n: 150
+  mask:
+    mask_ratio: 0.50
+
+train:
+  batch_size: 256
+  num_workers: 8
+  lr: 1.0e-4
+  warmup_steps: 2000
+  total_steps: 50000      # 50000 x 256 = 12.8M spectra
+  weight_decay: 0.01
+  grad_clip: 1.0
+  precision: bf16
+  val_batches: 50
+  device: cuda
+  l1_lambda: 0.0
+  seed: 0
+
+log:
+  wandb_project: msdelta-capacity-kl
+  wandb_run_name: v14_cap_S
+  log_every: 50
+  val_every: 2000
+  bias_curve_every: 5000
+  ckpt_every: 10000
+  probe_every: 5000        # align/* + retrieval/* + linear-probe trajectory
+  probe_n_spectra: 3000
+  out_dir: ./runs
