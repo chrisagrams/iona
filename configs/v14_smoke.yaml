@@ -1,0 +1,67 @@
+# v14 SMOKE — tiny model, 1 GPU, debug queue. Sole purpose: force the full
+# inline-probe block (run_all_probes + alignment_metrics +
+# retrieval_inline_metrics) to fire on a GPU *before* spending a 20h
+# capacity slot, after the step-5000 device-mismatch crash in v14.
+#
+# probe_every=20 + total_steps=50 → the probe block fires at steps 20 and
+# 40 (two fires confirms train/eval-mode restore between them). KL loss +
+# mask50 match the real sweep. NOTE: do NOT launch this via SMOKE=1 — that
+# flag DISABLES probes (probe_every→1e7), the opposite of this test. Launch
+# with pbs/v14_smoke.pbs (SMOKE unset) so probe_every=20 is respected.
+model:
+  d_model: 64
+  n_heads: 2
+  n_layers: 2
+  ffn_mult: 2
+  dropout: 0.1
+  max_peaks: 150
+  use_precursor: false
+  fourier_mz:
+    n_freqs: 16
+    f_min: 1.0e-2
+    f_max: 1.0e+3
+  fourier_int:
+    n_freqs: 8
+    f_min: 1.0e-2
+    f_max: 1.0e+2
+  delta_bias:
+    n_freqs: 16
+    per_head_hidden: 8
+    f_min: 1.0e-2
+    f_max: 1.0e+3
+    scale: 3.0
+    charge_dim: 0
+    n_charges: 8
+
+data:
+  root: /mnt/vault-1/k8/concensus_spec_30M/consensus_100M/
+  n_val_files: 2
+  intensity_threshold_frac: 0.01
+  top_n: 150
+  mask:
+    mask_ratio: 0.50
+
+train:
+  batch_size: 64
+  num_workers: 8
+  lr: 1.0e-4
+  warmup_steps: 10
+  total_steps: 50
+  weight_decay: 0.01
+  grad_clip: 1.0
+  precision: bf16
+  val_batches: 5
+  device: cuda
+  l1_lambda: 0.0
+  seed: 0
+
+log:
+  wandb_project: msdelta-capacity-kl-smoke
+  wandb_run_name: v14_smoke
+  log_every: 10
+  val_every: 20
+  bias_curve_every: 1000   # only the step-0 render; not what we're testing
+  ckpt_every: 1000
+  probe_every: 20          # full probe block fires at steps 20 and 40
+  probe_n_spectra: 500
+  out_dir: ./runs
