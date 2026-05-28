@@ -220,6 +220,57 @@ def _eval_block(name, X, labels):
     return m
 
 
+@torch.no_grad()
+def retrieval_inline_metrics(
+    enc,
+    val_paths,
+    device,
+    pp,
+    *,
+    max_peptides: int = 100,
+    per_peptide: int = 20,
+    max_scan: int = 150_000,
+    whiten: int = 0,
+) -> dict[str, float]:
+    """Flat wandb dict from spectrum retrieval — the model as an embedding model.
+
+    Pools the encoder per spectrum and measures leave-one-out same-peptide
+    retrieval vs. the binned-cosine baseline. Smaller caps than the CLI
+    (100×20 vs 150×25) keep it cheap enough to run inline at probe cadence;
+    `extract` early-exits once buckets fill, so it rarely scans all max_scan
+    rows. Logs the learned mAP/P@1/AUC-PR, the baseline mAP, and the gap —
+    so we can watch whether the embedding catches up to binned-cosine as the
+    model trains. Restores the encoder's train/eval mode on exit.
+    """
+    was_training = enc.training
+    try:
+        d = extract(enc, _iter(val_paths, max_scan), device, pp,
+                    max_peptides=max_peptides, per_peptide=per_peptide)
+        labels = d["labels"]
+        if len(labels) < 2 or len(set(labels)) < 2:
+            return {}
+        emb = all_but_top(d["emb"], whiten) if whiten > 0 else d["emb"]
+
+        sim = _cosine_sim(emb)
+        m = retrieval_metrics(sim.copy(), labels)
+        m["AUC-PR"] = pairwise_ap(sim, labels)
+
+        bsim = _cosine_sim(d["binned"])
+        bm = retrieval_metrics(bsim.copy(), labels)
+
+        return {
+            "retrieval/mAP": m["mAP"],
+            "retrieval/P@1": m["P@1"],
+            "retrieval/R@5": m["R@5"],
+            "retrieval/AUC_PR": m["AUC-PR"],
+            "retrieval/binned_mAP": bm["mAP"],
+            "retrieval/gap_vs_binned": m["mAP"] - bm["mAP"],
+        }
+    finally:
+        if was_training:
+            enc.train()
+
+
 def peptide_overlap(train_paths, val_labels, max_rows=60_000) -> float:
     val_set = set(val_labels)
     train_set = set()

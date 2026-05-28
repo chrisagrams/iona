@@ -972,6 +972,44 @@ was fixed. The four `configs/v12_mask{15,35,50,75}.yaml` configs are
 kept on disk as historical artifacts; the equivalent KL-loss sweep is
 v13_mask{15,35,50,75}.yaml (the four runs `pbs/v13_sweep.pbs` launches).
 
+### v14 — capacity sweep ON KL loss *(implemented, on deck)*
+
+**Why this exists.** v13's "it's the task incentive, not capacity"
+conclusion leans on the v11 capacity falsification — but v11 swept
+capacity on the **broken MSE target** (constant-predict floor, no
+gradient), so it could not have detected a capacity effect on chemistry
+even if one existed. v13 fixed the loss (KL) but only ever at d=256.
+**Capacity × working-loss has never been run** — and "diffuse across
+heads, not concentrated into specialists" is itself a plausible
+under-capacity signature. So the v13 verdict was premature; this is the
+missing experiment.
+
+**Design.** The clean re-run of v11: same d=384→1024 ladder, same equal
+data exposure (~12.8M spectra), same baseline arch (charge/precursor
+OFF) — but with KL loss (global since v13) and `mask_ratio=0.50` (the
+v13 sweet spot, where chemistry was closest to significant, so capacity
+has the best chance to push it over). Configs
+`v14_cap_{S,M,L,XL}.yaml`; one per A100 via `pbs/v14_capacity.pbs`
+(20h capacity walltime, XL 160k steps is the binding tier).
+
+**Inline-probe instrumentation (new).** The point of this run is the
+*trajectory*, not just the final ckpt. `train.py`'s probe block now also
+logs, every `probe_every` steps:
+- `align/*` — bias-curve chemistry alignment (`analyze.alignment_metrics`,
+  no data, ~free): `n_sig05`, `n_sig01_bonf` (heads surviving ×16
+  Bonferroni — the strict gate), `best_p`, per-range `max_enrich` /
+  `coverage`.
+- `retrieval/*` — embedding retrieval vs binned-cosine
+  (`retrieval.retrieval_inline_metrics`): `mAP`, `P@1`, `AUC_PR`,
+  `binned_mAP`, `gap_vs_binned`.
+
+So we can watch whether bias chemistry *sharpens with training* and
+*scales with capacity*, instead of inferring it from one endpoint.
+
+**Verdict.** `align/n_sig01_bonf` climbs S→XL → capacity IS the lever
+under a working loss, and v13's conclusion was wrong → scale up + real
+data. Flat across tiers → genuinely the task incentive → ELECTRA (§6).
+
 ---
 
 ## 4. Targets to watch on the v7 run (σ = 0.1)
@@ -1185,11 +1223,19 @@ starvation problem (the model now genuinely learns the masked-peak
 distribution) but the path of least resistance is still a **smooth
 locality bias**, not a sharp Δm comb. Diffuse-but-present chemistry has
 now survived four interventions. The remaining lever is making locality
-genuinely *insufficient to solve the task*, not merely stressed. Current
-priority order:
+genuinely *insufficient to solve the task*, not merely stressed —
+**unless it's capacity**, which has never been tested under a working
+loss (v11 swept capacity on the broken MSE target; v13 fixed the loss
+only at d=256). Current priority order:
 
-1. **ELECTRA-style replaced-peak detection (next).** Now the top
-   candidate after v13. Swap a fraction of peaks between spectra; the
+0. **Capacity sweep on KL loss (v14, run this first).** Gates everything
+   below. Sweeps d=384→1024 with KL + mask50, logging `align/*` per step.
+   If `align/n_sig01_bonf` climbs with capacity, the "task incentive not
+   capacity" framing is wrong and we scale up instead of changing the
+   task. Cheap relative to its leverage on the whole direction. Configs
+   `v14_cap_*`, launcher `pbs/v14_capacity.pbs`.
+1. **ELECTRA-style replaced-peak detection (if v14 is flat).** Swap a
+   fraction of peaks between spectra; the
    model must classify real vs. replaced. A swapped peak breaks the
    isotope/residue ladder — a smooth locality bump *cannot* detect it,
    only chemistry-specific Δm features can — so the bias is forced to
@@ -1253,7 +1299,8 @@ msdelta/
 │   ├── v10_both.yaml         # v10b ablation: charge + precursor stacked
 │   ├── scale_{S,M,L,XL}.yaml # v11 capacity sweep (partial; pivoted to v13)
 │   ├── v12_mask{15,35,50,75}.yaml  # v12 mask-ratio sweep (abandoned — MSE was upstream blocker)
-│   └── v13_mask{15,35,50,75}.yaml  # v13 KL × mask-ratio sweep (on deck)
+│   ├── v13_mask{15,35,50,75}.yaml  # v13 KL × mask-ratio sweep (done: fixes loss, not chemistry)
+│   └── v14_cap_{S,M,L,XL}.yaml      # v14 capacity sweep on KL loss + mask50 (on deck)
 ├── msdelta/
 │   ├── __init__.py
 │   ├── fourier.py            # Fourier feature module
@@ -1270,7 +1317,9 @@ msdelta/
 │   ├── scale_all.pbs         # 1-node 4-GPU capacity-sweep launcher (parked w/ v11)
 │   ├── scale_smoke.pbs       # 10-min debug-queue smoke; SMOKE=1 schedule shrink
 │   ├── mask_sweep.pbs        # v12 launcher (parked; superseded by v13_sweep.pbs)
-│   └── v13_sweep.pbs         # 1-node 4-GPU v13 KL × mask-ratio launcher
+│   ├── v13_sweep.pbs         # 1-node 4-GPU v13 KL × mask-ratio launcher
+│   ├── v13_analyze.pbs       # debug-queue post-sweep analyze + retrieval
+│   └── v14_capacity.pbs      # 1-node 4-GPU v14 capacity-on-KL launcher
 ├── docs/
 │   ├── EXPERIMENTS.md        # this file
 │   └── figures/              # PNGs referenced above
