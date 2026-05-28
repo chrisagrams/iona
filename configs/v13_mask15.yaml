@@ -1,0 +1,70 @@
+# v13 mask-ratio sweep on KL — baseline (mask_ratio = 0.15, v9 default).
+# See EXPERIMENTS.md §v13. v9 architecture (d=256, 6L, 8H, no precursor,
+# no charge-cond); only difference from v9 is the *loss* — KL on the
+# per-spectrum masked-peak intensity distribution instead of MSE on the
+# concentrated [0.66, 1.0] log_int target.
+#
+# This file is the reference run for the sweep — the same loss the
+# bias-chemistry hypothesis was tested under, with 15% mask retained.
+# Three sibling configs (v13_mask{35,50,75}.yaml) vary only `mask_ratio`
+# so the sweep cleanly attributes any difference in chemistry signal to
+# locality-shortcut breakdown.
+#
+# Launch: pbs/v13_sweep.pbs (one config per GPU, parallel).
+model:
+  d_model: 256
+  n_heads: 8
+  n_layers: 6
+  ffn_mult: 4
+  dropout: 0.1
+  max_peaks: 150
+  use_precursor: false
+  fourier_mz:
+    n_freqs: 64
+    f_min: 1.0e-2
+    f_max: 1.0e+3
+  fourier_int:
+    n_freqs: 16
+    f_min: 1.0e-2
+    f_max: 1.0e+2
+  delta_bias:
+    n_freqs: 64
+    per_head_hidden: 32
+    f_min: 1.0e-2
+    f_max: 1.0e+3
+    scale: 3.0
+    charge_dim: 0
+    n_charges: 8
+
+data:
+  root: /mnt/vault-1/k8/concensus_spec_30M/consensus_100M/
+  n_val_files: 2
+  intensity_threshold_frac: 0.01
+  top_n: 150
+  mask:
+    mask_ratio: 0.15
+
+train:
+  batch_size: 256
+  num_workers: 8
+  lr: 1.0e-4
+  warmup_steps: 2000
+  total_steps: 50000
+  weight_decay: 0.01
+  grad_clip: 1.0
+  precision: bf16
+  val_batches: 50
+  device: cuda
+  l1_lambda: 0.0
+  seed: 0
+
+log:
+  wandb_project: msdelta-kl-sweep
+  wandb_run_name: v13_mask15
+  log_every: 50
+  val_every: 1000
+  bias_curve_every: 2000
+  ckpt_every: 10000
+  probe_every: 5000
+  probe_n_spectra: 3000
+  out_dir: ./runs

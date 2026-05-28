@@ -333,12 +333,20 @@ class MSEncoder(nn.Module):
 
 
 class IntensityHead(nn.Module):
-    """Masked-intensity prediction head (v9).
+    """Masked-intensity prediction head (v13 — KL on the masked subset).
 
-    Per-peak scalar prediction of log-intensity; MSE over masked positions
-    only. Tokens are m/z-free, so the only way the model can localize a
-    masked peak (to predict its intensity) is via the Δm bias — forcing
-    chemistry (esp. the M+0→M+1 isotope ratio) into the bias.
+    Per-peak scalar logit; per-spectrum softmax across masked positions
+    gives a predicted distribution over the masked subset, compared via
+    KL against the true intensity distribution (raw intensity normalised
+    to sum to 1 across the masked peaks). Tokens are m/z-free, so the only
+    way the model can localise a masked peak is via the Δm bias — and
+    framing the target as a distribution puts intensity *ratios* (M+0/M+1
+    ≈ 5:1 for ¹³C, residue-ladder ratios, …) directly into the loss.
+
+    Pre-v13 used MSE on the per-spectrum max-normalised log_int; that
+    target was so concentrated (mean ≈ 0.76, var ≈ 0.007) that constant-
+    predict was near-optimal and the bias chemistry never got real
+    gradient pressure (see EXPERIMENTS.md §v13).
     """
 
     def __init__(self, d_model: int):
@@ -348,14 +356,40 @@ class IntensityHead(nn.Module):
     def loss(
         self,
         tokens: Tensor,
-        log_int_target: Tensor,
+        intensity_prob_target: Tensor,
         mask_positions: Tensor,
     ) -> tuple[Tensor, dict[str, Tensor]]:
-        """MSE on masked positions only."""
+        """KL(p || q) on masked positions, batch-mean."""
         if not mask_positions.any():
             zero = tokens.new_zeros(())
-            return zero, {"mse_int": zero, "rmse_int": zero}
-        pred = self.head(tokens.float()).squeeze(-1)   # (B, K)
+            return zero, {"kl": zero, "ce": zero, "h_p": zero}
+
+        logits = self.head(tokens.float()).squeeze(-1)              # (B, K)
         m = mask_positions
-        mse = F.mse_loss(pred[m], log_int_target[m])
-        return mse, {"mse_int": mse.detach(), "rmse_int": mse.detach().sqrt()}
+
+        # Predicted distribution q over masked positions, per row. Setting
+        # non-masked logits to -inf zeros them in the softmax denominator;
+        # we then overwrite the -inf in log_q with 0 so the subsequent
+        # multiply-by-zero target doesn't produce 0·(-inf) = NaN.
+        log_q = F.log_softmax(logits.masked_fill(~m, float("-inf")), dim=-1)
+        log_q = log_q.masked_fill(~m, 0.0)
+
+        # Target distribution p over masked positions, per row. Re-normalise
+        # the per-spectrum (sum-to-1) intensity probabilities to sum-to-1
+        # over the masked subset only.
+        p = intensity_prob_target.masked_fill(~m, 0.0)
+        p = p / p.sum(dim=-1, keepdim=True).clamp_min(1e-12)
+
+        # F.kl_div expects log-prob input + prob target; 'batchmean' = / B.
+        # (The default 'mean' divides by B·K which is wrong for variable K.)
+        kl = F.kl_div(log_q, p, reduction="batchmean")
+
+        with torch.no_grad():
+            # CE = -Σ p log q, H(p) = -Σ p log p, so KL = CE − H(p).
+            # Logging both helps separate "model is bad" from "target is
+            # already nearly uniform" (i.e. distinguishes "no signal in the
+            # data" from "model isn't using the signal").
+            ce  = -(p * log_q).sum(dim=-1).mean()
+            h_p = -(p * p.add(1e-12).log()).sum(dim=-1).mean()
+
+        return kl, {"kl": kl.detach(), "ce": ce, "h_p": h_p}

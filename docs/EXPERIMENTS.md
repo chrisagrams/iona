@@ -741,31 +741,236 @@ m/z-free ceiling dominates).
 Neither v10 bolt-on (charge, precursor) broadened head specialization — still
 ~2 chemical heads. The chemistry present is precise (mDa hits) but narrow.
 
-### v11 — capacity scaling (planned, 4× A100-40GB)
+### v11 — capacity scaling, 4× A100-40GB — PARTIAL RUN, EARLY FALSIFICATION
 
-**Why scale now:** at 50k×256 we've seen **11.9% of the 107.8M train spectra
-(0.12 epoch; 1 epoch = 421k steps)** — nowhere near data-limited. Yet the
-small model plateaus by ~30k. That's **capacity-limited, not data-limited**,
-and the cheap feature levers (charge, precursor) didn't broaden heads → the
-remaining lever is capacity. Test: does more capacity *broaden* head
-specialization (>2 correction-surviving chemical heads)?
+**Why scale now (original premise):** at 50k×256 we've seen **11.9% of the
+107.8M train spectra (0.12 epoch; 1 epoch = 421k steps)** — nowhere near
+data-limited. Yet the small model plateaus by ~30k. That's
+**capacity-limited, not data-limited**, and the cheap feature levers
+(charge, precursor) didn't broaden heads → the remaining lever was assumed
+to be capacity. Test: does more capacity *broaden* head specialization
+(>2 correction-surviving chemical heads)?
 
-Matrix — one model per A100, **equal data exposure (~12.8M spectra)**, baseline
-arch (m/z-free, charge/precursor OFF) to isolate capacity. Memory from a model
-calibrated to the 19.7 GB measurement (verify on-device before launch):
+Matrix — one model per A100, **equal data exposure (~12.8M spectra)**,
+baseline arch (m/z-free, charge/precursor OFF) to isolate capacity. Memory
+from a model calibrated to the 19.7 GB measurement (verified during smoke):
 
 | tier | d / L / H | params | batch | steps | ~mem |
 |---|---|---|---|---|---|
 | S  | 384 / 8 / 8   | 14M  | 256 | 50k  | 24 GB |
-| M  | 512 / 12 / 16 | 38M  | 160 | 80k  | 29 GB |
+| M  | 512 / 12 / 16 | 38M  | 128 | 100k | 29 GB |
 | L  | 768 / 12 / 16 | 86M  | 112 | 114k | 25 GB |
 | XL | 1024 / 16 / 16| 203M | 80  | 160k | 30 GB |
 
-Configs: `configs/scale_{S,M,L,XL}.yaml`. Read: count of correction-surviving
-chemical heads vs capacity. Climbs → capacity is the lever, winner → real-data
-foundation run. Flat at ~2 even for XL → capacity isn't it, rethink before
-spending real-data compute. (Caveat: equal-data may under-show the biggest
-tiers if they're data-hungry.)
+Configs: `configs/scale_{S,M,L,XL}.yaml`; launched via
+`pbs/scale_all.pbs` (FRAME-IDP / capacity / 1 node).
+
+**What actually happened.**
+
+*Smoke (`pbs/scale_smoke.pbs`, 10-min debug-queue, job 7173422)* — caught
+two infra fixes before the real run:
+- **M tier OOM at bs=160:** backward at step 0 needed 6.87 GB on top of
+  33 GB allocated; A100-40GB has only 39.5 GB usable. Dropped to bs=128
+  / total_steps 100k (kept equal exposure: 100k × 128 = 12.8M).
+- **Step-rate timings (median, post-init, from wandb):** S 4.62, M 4.31,
+  L 4.14, XL 3.45 sps → ~13h pure compute for XL set the walltime
+  (18:00:00, with ~5h margin for probe/val/render).
+
+*Full run (job 7173429)* — **killed at ~50 min after `/home` hit quota.**
+The `out_dir: ./runs` default was writing to the home filesystem (10 GB
+quota); each L checkpoint is ~150 MB so M+L together saturated quickly.
+Fixed by adding a `log.out_dir` splice in `pbs/_run_tier.sh` →
+`/eagle/UIC-HPC/cgrams/msdelta-runs`. All four tiers had crossed their
+first probe checkpoint (step 10000) before kill — enough for an early
+read against the v11 falsification condition:
+
+| tier | loss | rmse | frag_r² | prec_r² | charge | iso F1 | NL AUC |
+|---|---|---|---|---|---|---|---|
+| S  | 0.0021 | 0.045 | 0.818 | 0.994 | 1.000 | 0.887 | 0.933 |
+| M  | 0.0021 | 0.047 | 0.800 | 0.995 | 0.999 | 0.864 | 0.934 |
+| L  | 0.0023 | 0.050 | 0.800 | 0.996 | 0.999 | 0.849 | 0.929 |
+| XL | 0.0020 | 0.047 | **0.849** | 0.996 | 1.000 | **0.895** | 0.946 |
+
+**S already matches v9's published probe ceiling** (frag_r² 0.873, iso F1
+0.901, charge 100%, NL AUC 0.95) at step 10k. XL clears v9 by ~3 points
+on frag_r² and ~−1 on iso F1 — for 14× the params. Loss + rmse stack
+across tiers; all four sizes solve the task to floor within 10k steps.
+
+**This is the v11 falsification signal stated upfront in the original
+plan:** *"Flat at ~2 even for XL → capacity isn't it, rethink before
+spending real-data compute."* Caveat: at step 10k, S has burned 20% of
+its step budget while XL has burned 6.25%, so the bigger tiers could
+pull away later. But S matching v9 at step 10k undercuts the premise
+that capacity is what's missing — if more parameters were the lever,
+the gap should be visible already, not deferred to step 100k+.
+
+**Decision: don't resubmit the full sweep.** Pivot to *task-incentive*
+levers (the alternative branch §6 listed). First candidate is mask ratio
+(v12 below); ELECTRA-style replaced-peak detection is the fallback.
+
+### v13 — KL on the masked-peak intensity *distribution* *(implemented, on deck)*
+
+**The deeper diagnosis** that surfaced while planning v12. The MSE target
+was `log_int = log1p(intensity) / log1p(intensity).max()` — concentrated
+in **[0.66, 1.00]** with mean ≈ 0.76 and **variance ≈ 0.007** (measured
+on one batch from the eagle parquet). Predicting the constant 0.76 gives
+MSE ≈ 0.007 — *exactly* the value every run from v9 through v11 has
+converged to within 400 steps. **The model is converging to a trivial
+predictor**, not learning chemistry, because there is almost no gradient
+pressure above the constant baseline. This explains why:
+- v9 → v10a → v10b → v11 all plateau at the same probe ceiling.
+- All four scale tiers in v11 stack on top of each other in loss.
+- Bias-chemistry head count stays at 2/8 across all interventions.
+
+**The fix is the target, not the architecture.** Mass spectra *are*
+discrete probability distributions over m/z (each intensity is an ion
+count); the natural pretraining loss is **KL between the predicted and
+true intensity distribution over masked peaks**, not MSE on a normalised
+scalar. Per-spectrum softmax across masked logits gives `q`; raw
+intensities renormalised over the masked subset give `p`; loss is
+`KL(p || q)` via `F.kl_div(log_q, p, reduction='batchmean')`.
+
+**Why KL is uniquely well-fitted for this task.**
+- Trivial-baseline KL (predict uniform) = `log(K_masked) − H(p)` ≈ 0.5–1
+  nat depending on K_masked; **~100× the v9–v11 gradient pressure**.
+- Intensity *ratios* are first-class in the loss: M+0/M+1 ≈ 5:1 for ¹³C
+  is encoded as a 1:5 probability ratio in `p`, and the loss directly
+  penalises the model for getting that ratio wrong. MSE on rank/z-score
+  obscures the ratio; KL exposes it.
+- Couples masked positions per spectrum (softmax normalises across them),
+  so the model has to predict their *relative* shares, not independent
+  per-position scalars. Stronger structural constraint.
+- Scale-invariant by construction — no per-spectrum σ leaks into the
+  loss (the failure mode of the z-score variant we considered).
+
+**Plumbing changes.**
+- `data.preprocess_spectrum` now returns `(mz, log_int, intensity_prob)`.
+  `log_int` is unchanged (still log1p÷max, the input feature for
+  `PeakEmbed`); `intensity_prob = intensity / intensity.sum()` is the
+  new KL target carried through `_pad_batch`, `pad_collate`, and
+  `mask_intensity_collate` as a new dict key.
+- `model.IntensityHead.loss` swapped from `F.mse_loss(pred[m], log_int[m])`
+  to `F.kl_div(log_q, p, reduction='batchmean')` with the standard
+  `masked_fill(-inf)` trick to vectorise per-spectrum softmax. Also logs
+  CE and `H(p)` so we can separate "model is bad" from "target is nearly
+  uniform" (i.e. no data signal). `nn.functional.kl_div`'s lesser-known
+  defaults (`input` is *log*-probs; `reduction='batchmean'` not `'mean'`)
+  are the only API gotchas.
+- `train.run_validation` + main loop updated wandb keys: `train/mse_int` →
+  `train/{kl, ce, h_p, kl_baseline}`. `kl_baseline = log(K_masked) − H(p)`
+  is logged as the "headroom to beat by predicting uniform."
+
+**Smoke-tested** on CPU (1 layer, d=32, 8 spectra): loss is finite,
+intensity_prob sums to 1 per spectrum, freshly-initialised KL ≈ baseline
+across all mask ratios as expected (random softmax ≈ uniform).
+
+**The sweep — KL × mask-ratio, in one job.** v12's mask-ratio hypothesis
+(locality is the shortcut, raise mask ratio to break it) was *correct in
+direction* — only the upstream loss was misdiagnosed. Now that KL puts
+real gradient pressure on the bias, the mask-ratio dimension actually
+matters again, and the two hypotheses test cleanly together:
+
+| run | mask_ratio | ~visible peaks | role |
+|---|---|---|---|
+| `v13_mask15.yaml` | 0.15 | 127 | v9-position reference, KL-only change |
+| `v13_mask35.yaml` | 0.35 | 98  | locality starting to break |
+| `v13_mask50.yaml` | 0.50 | 75  | locality clearly insufficient — primary candidate |
+| `v13_mask75.yaml` | 0.75 | 37  | MAE-style stretch; brackets the degenerate end |
+
+All four share v9 architecture + KL loss; only `mask.mask_ratio` varies.
+One Polaris node, one config per A100, ~6h capacity-queue walltime
+(`pbs/v13_sweep.pbs`).
+
+**Reads (wandb `msdelta-kl-sweep`):**
+- `train/kl` vs `train/kl_baseline` — does kl drop *below* the
+  predict-uniform headroom for any ratio? (The new analog of "is the
+  model learning anything beyond the marginal?")
+- `train/h_p` — sanity. If h_p is already near `log(K_masked)`, the
+  target is nearly uniform and no model could do much; we'd be debugging
+  the data, not the model.
+- `probe/fragment_mz_r2`, `probe/isotope_f1`, etc. — past v9's
+  0.87 / 0.90 / 0.95 / 100% ceiling on any setting?
+- Post-run `msdelta-analyze --mode align` per `final.pt` — count of
+  correction-surviving (p < 0.01 after ×16) chemical heads.
+
+**Forks.**
+- Any ratio's chemical-head count ≥ 4 (vs v9's 2) **and** kl < baseline
+  → KL+locality-stress is the lever; promote the winning ratio + scale
+  up in v14.
+- KL drops below baseline uniformly but probe/alignment numbers don't
+  move → the model is learning the distribution but not via chemistry
+  (some non-Δm shortcut we haven't identified). Investigate the bias-
+  curves before pivoting.
+- All four plateau at baseline → distribution learning is shallow on
+  this data → pivot to ELECTRA-style replaced-peak detection (§6).
+
+**RESULT** (train job 7173699, analysis job 7174681 via
+`pbs/v13_analyze.pbs`). **Outcome = Fork 2: KL fixed the loss, not the
+chemistry.**
+
+*The loss switch worked.* Every run sheds ~85% of the predict-uniform
+headroom — real gradient signal, unlike the old MSE constant-predict
+floor (0.007 = the target's own variance):
+
+| run | train/kl | kl_baseline | gap (learned) | val/kl |
+|---|---|---|---|---|
+| mask15 | 0.093 | 0.596 | 0.502 | 0.089 |
+| mask35 | 0.104 | 0.701 | 0.597 | 0.100 |
+| mask50 | 0.117 | 0.720 | 0.604 | 0.110 |
+| mask75 | 0.142 | 0.743 | 0.602 | 0.127 |
+
+The model genuinely learns the masked-peak intensity *distribution* now;
+the MSE-on-a-concentrated-target gradient-starvation diagnosis was right.
+
+*But the bias chemistry did not concentrate.* The Δm alignment test
+(`--mode align`) shows a clear inverted-U, peaking at mask50 then
+collapsing at mask75:
+
+| run | raw-sig head×ranges (p<0.05) | best raw p | best ×16-corrected p |
+|---|---|---|---|
+| mask15 | 1 (coarse h5) | 1.4e-2 | 0.22 |
+| mask35 | 2 (fine h5, coarse h7) | 1.1e-2 | 0.18 |
+| **mask50** | **4 (fine h5/6/7, coarse h7)** | **2.3e-3** | **0.037** |
+| mask75 | 0 | — | — |
+
+Under the gate above (`p<0.01 after ×16`) **nothing survives at any mask
+ratio** — mask50's best (coarse head 7) lands at corrected p≈0.037,
+clears 0.05 but misses 0.01. Chemistry is *present* (coverage 5/5 isotope
++ 26/26 residue refs; enrichments up to 2.4×) but stays **diffuse across
+heads**, not concentrated into clean specialists — the same qualitative
+picture as v9–v11.
+
+*Functional probe high everywhere* (best-head Spearman 0.91–0.92, most
+heads "uses bias") — confirms the bias is load-bearing, but that was
+never the question. Attention follows the bias; the bias just isn't a
+sharp chemistry comb.
+
+*Retrieval is a uniform negative* — the learned embedding never beats
+binned-cosine (mAP 0.96) and degrades as mask climbs: mask15 0.824 →
+mask35 0.784 → mask50 0.763 → mask75 0.744. mask75 degenerated as
+predicted (insufficient anchor coverage: 0 aligned heads, fewer
+fine-range peaks, worst retrieval).
+
+**Takeaways.**
+- mask50's inverted-U peak is the one real, repeatable-looking signal —
+  directionally confirms the locality hypothesis but is too weak to call
+  KL "the answer."
+- The bias being load-bearing yet diffuse across *four* loss/arch
+  changes (v9 → v10a → v10b → v13) says the remaining lever is making
+  locality genuinely *insufficient*, not just stressed. Next move:
+  **ELECTRA-style replaced-peak detection** (§6 lever 2) — a swapped
+  peak breaks the isotope/residue ladder, which a smooth bump cannot
+  detect, so the bias is forced to learn specific Δm offsets to solve
+  the task.
+
+**Note on v12.** The original v12 plan (a mask-ratio sweep against the
+*MSE* baseline) was abandoned: the loss is the upstream blocker — no
+mask ratio can move loss off the 0.007 constant-predictor plateau when
+the target itself is concentrated in [0.66, 1.0]. The mask-ratio
+hypothesis was correct in direction, just unrunnable until the target
+was fixed. The four `configs/v12_mask{15,35,50,75}.yaml` configs are
+kept on disk as historical artifacts; the equivalent KL-loss sweep is
+v13_mask{15,35,50,75}.yaml (the four runs `pbs/v13_sweep.pbs` launches).
 
 ---
 
@@ -948,41 +1153,90 @@ A few infrastructure / small fixes worth recording so we don't re-litigate:
 - **Diagonal-zero:** kept it in v5 even though we changed the task. The
   argument is the same: self-attention suppression isn't a Δm-driven
   decision, so the bias path shouldn't carry it.
+- **Polaris PBS deployment (`pbs/`):** `setup_venv.sh` (uv-managed
+  `.venv` on Polaris login node, torch 2.11.0+cu128 wheels self-contain
+  the CUDA libs; no `module load conda` needed), `_run_tier.sh` (per-GPU
+  helper; takes a config path + GPU id, splices `data.root` → eagle and
+  `log.out_dir` → eagle via a temp overlay, sets ALCF HTTPS proxy +
+  wandb run id), `scale_all.pbs` / `scale_smoke.pbs` / `mask_sweep.pbs`
+  (1-node 4-GPU fan-outs; one config per A100; FRAME-IDP / capacity).
+  `SMOKE=1` env flag shrinks any config to 100 steps for the 10-min
+  debug-queue smoke.
+- **Output directory on eagle, not home.** `/home` quota is small and
+  L-tier checkpoints (~150 MB each, every 10k steps) saturated it
+  inside an hour. `log.out_dir` is now spliced to
+  `/eagle/UIC-HPC/cgrams/msdelta-runs/`. The in-repo YAMLs still say
+  `./runs` so the configs stay portable.
+- **ALCF HTTPS proxy required from compute nodes.** Polaris compute
+  nodes can't reach `api.wandb.ai` directly — without `http_proxy =
+  https_proxy = http://proxy.alcf.anl.gov:3128` (and a matching
+  `no_proxy` for `.alcf.anl.gov` / loopback), `wandb.init` silently
+  falls back to offline mode. Set in `_run_tier.sh`. The same gotcha
+  affects any compute-node Python that hits HTTPS.
 
 ---
 
 ## 6. What I'd consider next
 
-**Reframe from the probe finding (§4b mode c):** the bias is load-bearing,
-so the goal is no longer "make the model use the bias" — it does. The goal
-is "make the bias's *shape* be chemistry, not a broad locality bump." That
-means changing the incentive so the broad-locality solution stops being
-optimal.
+**Updated reframe after v13.** The bias is load-bearing (§4b mode c) but
+its chemistry plateaus across every change to date — model-side (v9 →
+v10a → v10b → v11) *and* loss-side (v13 KL). KL fixed the gradient-
+starvation problem (the model now genuinely learns the masked-peak
+distribution) but the path of least resistance is still a **smooth
+locality bias**, not a sharp Δm comb. Diffuse-but-present chemistry has
+now survived four interventions. The remaining lever is making locality
+genuinely *insufficient to solve the task*, not merely stressed. Current
+priority order:
 
-Direct levers on the incentive (most-aligned with the finding first):
+1. **ELECTRA-style replaced-peak detection (next).** Now the top
+   candidate after v13. Swap a fraction of peaks between spectra; the
+   model must classify real vs. replaced. A swapped peak breaks the
+   isotope/residue ladder — a smooth locality bump *cannot* detect it,
+   only chemistry-specific Δm features can — so the bias is forced to
+   learn specific offsets to solve the task. Lift: new collate (cross-
+   spectrum peak swap) + binary-classification head. The cleanest
+   version of "make locality stop being a sufficient solution."
+2. **L1 on the bias curve, redux** (parallel side-bet). v8 ablated L1
+   when the bias was *dispensable* and got head-death. In v9+ the bias
+   is load-bearing (probe Spearman 0.91), so L1 has gradient pressure to
+   *sharpen* the diffuse bias toward the few real chemistry offsets
+   rather than zero it. One-line config (`l1_lambda`); 3-point sweep.
+   Independent of ELECTRA — could run alongside. Especially worth trying
+   on the mask50 checkpoint, where chemistry is closest to significant.
+3. **Peptide-charge contrastive / classification.** Biggest scope; the
+   supervision is structural so the bias would have reason to encode
+   real spacings. Also the likely cure for the retrieval gap (learned
+   embedding < binned-cosine in every v13 run). Defer until ELECTRA
+   resolves whether a pretrain task change can sharpen the bias — if it
+   does, this becomes the downstream finetune, not the pretrain
+   replacement.
 
-1. **Penalize the broad-locality bias shape.** Add a regularizer that
-   discourages a smooth low-frequency bump (e.g. L1 on the bias curve, or
-   penalize bias mass at small |Δm|), forcing the limited bias budget onto
-   sparse, specific Δm offsets. Cheapest test of the hypothesis.
-2. **Make locality unhelpful for the task.** The denoising-by-local-average
-   shortcut works because nearby peaks exist. A task where the *useful*
-   reference is at a specific chemical Δm — not just "nearby" — would force
-   sharp peaks. E.g. ELECTRA-style replaced-peak detection (decide if a
-   peak is real or swapped from another spectrum); a swapped peak breaks
-   the residue/isotope ladder, which a locality bump can't detect.
-3. **Use the `peptide_charge` label** (already in the parquet) for
-   contrastive / classification. Biggest scope; the supervision is
-   structural so the bias would have reason to encode real spacings.
-
-Task-noise tweaks (lower priority now that we know the bias is used):
-- Wider/narrower σ — affects resolution but not the locality-bump
-  incentive itself.
+**Hypotheses parked:**
+- *Capacity is the lever* (v11). Falsified at step 10k — S matches v9 at
+  every probe, XL gains 3 points of frag_r² for 14× params. Bigger
+  models train fine but don't broaden head specialization.
+- *Charge-conditioned bias `bias_h(Δm, z)`* (v10a). Additive
+  factorization was a no-op (only offset/scaled the curve, didn't
+  relocate peaks).
+- *Precursor anchor for fragment-m/z resolution* (v10b). No-op. The
+  ~0.89 fragment-m/z ceiling is intrinsic to m/z-free tokens — only
+  fixable by putting m/z (weakly) back into fragment tokens, which costs
+  interpretability.
+- *KL loss / mask-ratio sweep is the lever* (v13). Partially falsified:
+  KL fixes gradient starvation (model learns the distribution, gap ~0.5
+  nats vs baseline) but does **not** concentrate the bias chemistry —
+  alignment peaks at mask50 (inverted-U) yet doesn't survive ×16
+  correction at p<0.01. Mask ratio is a real but weak knob; the loss
+  target was a genuine bug worth keeping fixed, just not sufficient.
 
 Things we should *not* go back to without a new idea:
 - MPM as originally formulated (positional ambiguity is fundamental).
 - Bigger shared bias MLP (gradient-pool competition, not raw capacity).
 - Chemistry-specific noise (engineers the answers).
+- Pure capacity scaling on this task without changing the incentive
+  (v11 — bigger models don't help when locality already solves it).
+- MSE on the per-spectrum max-normalised log_int (v13 — constant-predict
+  is ~optimal; keep the KL distribution loss).
 
 ---
 
@@ -992,8 +1246,14 @@ Things we should *not* go back to without a new idea:
 msdelta/
 ├── pyproject.toml         # uv-managed; pinned torch cu128
 ├── configs/
-│   ├── pretrain_small.yaml   # production: d=256, 6 layers, 50k steps
-│   └── toy.yaml              # smoke: d=64, 2 layers, 100 steps
+│   ├── pretrain_small.yaml   # v10b: d=256, 6 layers, precursor anchor on, 50k steps
+│   ├── toy.yaml              # smoke: d=64, 2 layers, 100 steps
+│   ├── seed{1,2}.yaml        # v9 reproducibility seeds (the gate)
+│   ├── l1_{0.01,0.1,1.0}.yaml  # v8 L1 sparsity probe (parked — bias was dispensable then)
+│   ├── v10_both.yaml         # v10b ablation: charge + precursor stacked
+│   ├── scale_{S,M,L,XL}.yaml # v11 capacity sweep (partial; pivoted to v13)
+│   ├── v12_mask{15,35,50,75}.yaml  # v12 mask-ratio sweep (abandoned — MSE was upstream blocker)
+│   └── v13_mask{15,35,50,75}.yaml  # v13 KL × mask-ratio sweep (on deck)
 ├── msdelta/
 │   ├── __init__.py
 │   ├── fourier.py            # Fourier feature module
@@ -1004,8 +1264,16 @@ msdelta/
 │   ├── analyze.py            # CLI: msdelta-analyze --mode {align,probe,both}
 │   ├── probe.py              # CLI: msdelta-probe (Tier-1/2 linear probes + fragment_mz)
 │   └── retrieval.py          # CLI: msdelta-retrieval (embedding eval, --mgf, --whiten)
+├── pbs/                      # Polaris (ALCF) deployment; gitignored logs
+│   ├── setup_venv.sh         # one-shot uv sync on the login node
+│   ├── _run_tier.sh          # per-GPU helper; splices data.root + log.out_dir
+│   ├── scale_all.pbs         # 1-node 4-GPU capacity-sweep launcher (parked w/ v11)
+│   ├── scale_smoke.pbs       # 10-min debug-queue smoke; SMOKE=1 schedule shrink
+│   ├── mask_sweep.pbs        # v12 launcher (parked; superseded by v13_sweep.pbs)
+│   └── v13_sweep.pbs         # 1-node 4-GPU v13 KL × mask-ratio launcher
 ├── docs/
 │   ├── EXPERIMENTS.md        # this file
 │   └── figures/              # PNGs referenced above
-└── runs/                     # gitignored: checkpoints + bias-curve PNGs + wandb
+└── runs/                     # gitignored placeholder; real run artifacts now
+                              # live at /eagle/UIC-HPC/cgrams/msdelta-runs/ (home quota)
 ```

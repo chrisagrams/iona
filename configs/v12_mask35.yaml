@@ -1,0 +1,65 @@
+# v12 mask-ratio sweep — mid (mask_ratio = 0.35).
+# 35% masked → ~98/150 visible peaks per spectrum. Locality averaging
+# starts to break down: many masked peaks no longer have a near-neighbor
+# whose intensity is a reliable proxy, so the model is pushed toward
+# chemistry-specific Δm lookups via the bias. Hypothesis target.
+#
+# v9 architecture (d=256, 6L, 8H), use_precursor/charge OFF.
+# Only `mask.mask_ratio` differs from v12_mask15.
+model:
+  d_model: 256
+  n_heads: 8
+  n_layers: 6
+  ffn_mult: 4
+  dropout: 0.1
+  max_peaks: 150
+  use_precursor: false
+  fourier_mz:
+    n_freqs: 64
+    f_min: 1.0e-2
+    f_max: 1.0e+3
+  fourier_int:
+    n_freqs: 16
+    f_min: 1.0e-2
+    f_max: 1.0e+2
+  delta_bias:
+    n_freqs: 64
+    per_head_hidden: 32
+    f_min: 1.0e-2
+    f_max: 1.0e+3
+    scale: 3.0
+    charge_dim: 0
+    n_charges: 8
+
+data:
+  root: /mnt/vault-1/k8/concensus_spec_30M/consensus_100M/
+  n_val_files: 2
+  intensity_threshold_frac: 0.01
+  top_n: 150
+  mask:
+    mask_ratio: 0.35
+
+train:
+  batch_size: 256
+  num_workers: 8
+  lr: 1.0e-4
+  warmup_steps: 2000
+  total_steps: 50000
+  weight_decay: 0.01
+  grad_clip: 1.0
+  precision: bf16
+  val_batches: 50
+  device: cuda
+  l1_lambda: 0.0
+  seed: 0
+
+log:
+  wandb_project: msdelta-mask-sweep
+  wandb_run_name: v12_mask35
+  log_every: 50
+  val_every: 1000
+  bias_curve_every: 2000
+  ckpt_every: 10000
+  probe_every: 5000
+  probe_n_spectra: 3000
+  out_dir: ./runs

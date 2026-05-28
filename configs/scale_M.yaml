@@ -1,7 +1,9 @@
 # Capacity-sweep tier M  (one per A100-40GB; run all 4 in parallel).
-# Equal data exposure: 80000 steps x batch 160 = ~12.8M spectra (~0.12 epoch).
+# Equal data exposure: 100000 steps x batch 128 = ~12.8M spectra (~0.12 epoch).
 # Baseline architecture (m/z-free + per-head bias + masked-intensity); charge/precursor
 # OFF to isolate the effect of capacity on head specialization. ~29 GB est. peak.
+# Batch dropped 160→128 (steps bumped 80k→100k to keep equal exposure) after the
+# 7173409 smoke OOM'd at bs=160 — peak hit 33 GB allocated + 6.9 GB needed on 40 GB.
 # Launch: CUDA_VISIBLE_DEVICES=<gpu> msdelta-train --config configs/scale_M.yaml
 model:
   d_model: 512
@@ -37,11 +39,11 @@ data:
     mask_ratio: 0.15
 
 train:
-  batch_size: 160
+  batch_size: 128
   num_workers: 8
   lr: 1.0e-4
   warmup_steps: 2000
-  total_steps: 80000
+  total_steps: 100000
   weight_decay: 0.01
   grad_clip: 1.0
   precision: bf16

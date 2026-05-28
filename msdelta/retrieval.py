@@ -107,7 +107,7 @@ def extract(enc, spectrum_iter, device, pp, *, max_peptides=150, per_peptide=25,
             continue  # hit the peptide cap; skip new peptides (bounds memory)
         mzt = torch.tensor(mz_list, dtype=torch.float32)
         itt = torch.tensor(int_list, dtype=torch.float32)
-        mp, lp = preprocess_spectrum(mzt, itt, pp)
+        mp, lp, _ = preprocess_spectrum(mzt, itt, pp)   # intensity_prob unused by retrieval
         if mp.numel() == 0:
             continue
         buckets.setdefault(pc, []).append((mp, lp))
