@@ -222,6 +222,18 @@ def main(argv: list[str] | None = None) -> int:
     n_params = sum(p.numel() for p in encoder.parameters()) + sum(p.numel() for p in heads.parameters())
     print(f"[model] {n_params/1e6:.2f}M params", flush=True)
 
+    # Optional torch.compile (train.compile: true). Compile a SEPARATE handle
+    # used only for the training forward; validation/probes/retrieval keep the
+    # eager `encoder` so their varying input shapes don't trigger recompiles,
+    # and checkpoints save `encoder.state_dict()` without an `_orig_mod.` prefix
+    # (the compiled handle shares the same parameters). On the GB10 this is
+    # ~+25% spectra/s (see pbs/bench_spark.py). First step pays a compile warmup.
+    if tcfg.get("compile", False):
+        train_encoder = torch.compile(encoder)
+        print("[compile] torch.compile enabled for training forward", flush=True)
+    else:
+        train_encoder = encoder
+
     # Optimizer & scheduler
     params = list(encoder.parameters()) + list(heads.parameters())
     optimizer = AdamW(params, lr=tcfg["lr"], weight_decay=tcfg["weight_decay"], betas=(0.9, 0.95))
@@ -285,9 +297,9 @@ def main(argv: list[str] | None = None) -> int:
         encoder.set_save_attn(save_attn_this_step)
 
         with autocast_ctx:
-            tokens = encoder(batch["mz"], batch["log_int"],
-                             batch["key_padding_mask"], batch["mask_positions"],
-                             charge=batch.get("charge"), precursor_mz=batch.get("precursor_mz"))
+            tokens = train_encoder(batch["mz"], batch["log_int"],
+                                   batch["key_padding_mask"], batch["mask_positions"],
+                                   charge=batch.get("charge"), precursor_mz=batch.get("precursor_mz"))
         loss, parts = heads.loss(tokens, batch["intensity_prob"], batch["mask_positions"])
         # L1 sparsity penalty on the bias curve (λ=0 → no-op, reproduces denoise baseline).
         l1_lambda = tcfg.get("l1_lambda", 0.0)

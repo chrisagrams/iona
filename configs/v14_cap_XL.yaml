@@ -46,6 +46,7 @@ train:
   weight_decay: 0.01
   grad_clip: 1.0
   precision: bf16
+  compile: true           # torch.compile training forward (~+25% sps on GB10)
   val_batches: 50
   device: cuda
   l1_lambda: 0.0
