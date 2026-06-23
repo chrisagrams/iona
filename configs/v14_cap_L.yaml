@@ -58,4 +58,5 @@ log:
   ckpt_every: 10000
   probe_every: 5000
   probe_n_spectra: 3000
+  replicate_retrieval_dir: data/ms2-peptide-replicate-retrieval  # MS2 replicate-retrieval benchmark probe (omit to skip)
   out_dir: ./runs
