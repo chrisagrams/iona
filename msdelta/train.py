@@ -13,7 +13,10 @@ from typing import Any
 
 import numpy as np
 import torch
+import torch.distributed as dist
 import yaml
+from torch import nn
+from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.optim import AdamW
 from torch.utils.data import DataLoader
 
@@ -61,6 +64,41 @@ def load_config(path: str | Path) -> dict[str, Any]:
         return yaml.safe_load(f)
 
 
+# ---------- distributed ----------
+
+def setup_distributed() -> tuple[int, int, int, bool]:
+    """Init DDP from torchrun env vars. Returns (rank, world_size, local_rank,
+    is_distributed). No-op (0, 1, 0, False) for a plain single-GPU launch."""
+    if os.environ.get("RANK") is None or os.environ.get("WORLD_SIZE") is None:
+        return 0, 1, 0, False
+    rank = int(os.environ["RANK"])
+    world_size = int(os.environ["WORLD_SIZE"])
+    local_rank = int(os.environ.get("LOCAL_RANK", 0))
+    torch.cuda.set_device(local_rank)
+    dist.init_process_group(backend="nccl", init_method="env://")
+    return rank, world_size, local_rank, True
+
+
+class TrainModule(nn.Module):
+    """Bundles encoder + intensity head so a single DDP wrapper synchronises
+    the gradients of both. The forward returns the scalar loss (so the whole
+    graph is built inside DDP.__call__, which is what arms the gradient
+    all-reduce). Validation/probes call the unwrapped encoder/heads directly."""
+
+    def __init__(self, encoder: MSEncoder, heads: IntensityHead):
+        super().__init__()
+        self.encoder = encoder
+        self.heads = heads
+
+    def forward(self, batch: dict[str, torch.Tensor]):
+        tokens = self.encoder(
+            batch["mz"], batch["log_int"],
+            batch["key_padding_mask"], batch["mask_positions"],
+            charge=batch.get("charge"), precursor_mz=batch.get("precursor_mz"),
+        )
+        return self.heads.loss(tokens, batch["intensity_prob"], batch["mask_positions"])
+
+
 # ---------- scheduler ----------
 
 def lr_lambda(step: int, warmup: int, total: int) -> float:
@@ -82,7 +120,7 @@ def grad_norm(parameters) -> float:
     return math.sqrt(total)
 
 
-def make_loaders(cfg: dict[str, Any]) -> tuple[DataLoader, DataLoader]:
+def make_loaders(cfg: dict[str, Any], rank: int = 0, world_size: int = 1) -> tuple[DataLoader, DataLoader]:
     dcfg = cfg["data"]
     pp = PreprocessConfig(
         intensity_threshold_frac=dcfg["intensity_threshold_frac"],
@@ -91,7 +129,10 @@ def make_loaders(cfg: dict[str, Any]) -> tuple[DataLoader, DataLoader]:
     train_paths, val_paths = split_paths(dcfg["root"], dcfg["n_val_files"])
     print(f"[data] {len(train_paths)} train shards, {len(val_paths)} val shards", flush=True)
 
-    train_ds = ConsensusParquet(train_paths, preprocess=pp, seed=cfg["train"].get("seed", 0))
+    # Training data is sharded across ranks (disjoint slices); validation runs
+    # only on rank 0, so its dataset sees the whole val set (world_size=1).
+    train_ds = ConsensusParquet(train_paths, preprocess=pp, seed=cfg["train"].get("seed", 0),
+                                rank=rank, world_size=world_size)
     val_ds = ConsensusParquet(val_paths, preprocess=pp, seed=cfg["train"].get("seed", 0) + 1)
     print(
         f"[data] train row-groups: {len(train_ds._units)}  val row-groups: {len(val_ds._units)}",
@@ -190,59 +231,64 @@ def main(argv: list[str] | None = None) -> int:
     tcfg = cfg["train"]
     lcfg = cfg["log"]
 
-    device = torch.device(tcfg["device"])
+    # Distributed (torchrun) — no-op for a single-GPU launch.
+    rank, world_size, local_rank, is_dist = setup_distributed()
+    is_main = rank == 0
+    if is_dist:
+        device = torch.device(f"cuda:{local_rank}")
+    else:
+        device = torch.device(tcfg["device"])
+
+    def log0(*a, **k):
+        if is_main:
+            print(*a, **k)
 
     # Reproducible seed (model init + masking RNG). Recorded in cfg → checkpoint.
+    # Offset by rank so each DDP process draws different mask positions; model
+    # init still matches because DDP broadcasts rank-0 params at wrap time.
     seed = int(tcfg.get("seed", 0))
     import random as _random
-    _random.seed(seed)
-    np.random.seed(seed)
-    torch.manual_seed(seed)
-    torch.cuda.manual_seed_all(seed)
-    print(f"[seed] {seed}", flush=True)
+    _random.seed(seed + rank)
+    np.random.seed(seed + rank)
+    torch.manual_seed(seed + rank)
+    torch.cuda.manual_seed_all(seed + rank)
+    log0(f"[seed] {seed} (+rank) world_size={world_size}", flush=True)
 
     run_name = lcfg["wandb_run_name"] or time.strftime("%Y%m%d-%H%M%S")
     out_dir = Path(lcfg["out_dir"]) / run_name
-    out_dir.mkdir(parents=True, exist_ok=True)
-    (out_dir / "figs").mkdir(exist_ok=True)
-    print(f"[run] {run_name} → {out_dir}", flush=True)
+    if is_main:
+        out_dir.mkdir(parents=True, exist_ok=True)
+        (out_dir / "figs").mkdir(exist_ok=True)
+    log0(f"[run] {run_name} → {out_dir}", flush=True)
 
-    # wandb
-    wandb.init(
-        project=lcfg["wandb_project"],
-        name=run_name,
-        config=cfg,
-        dir=str(out_dir),
-    )
+    # wandb — rank 0 only.
+    if is_main:
+        wandb.init(
+            project=lcfg["wandb_project"],
+            name=run_name,
+            config=cfg,
+            dir=str(out_dir),
+        )
 
     # Model
     model_cfg = build_model_config(cfg["model"])
     encoder = MSEncoder(model_cfg).to(device)
     heads = IntensityHead(model_cfg.d_model).to(device)
     n_params = sum(p.numel() for p in encoder.parameters()) + sum(p.numel() for p in heads.parameters())
-    print(f"[model] {n_params/1e6:.2f}M params", flush=True)
+    log0(f"[model] {n_params/1e6:.2f}M params", flush=True)
 
-    # Optional torch.compile (train.compile: true). Compile a SEPARATE handle
-    # used only for the training forward; validation/probes/retrieval keep the
-    # eager `encoder` so their varying input shapes don't trigger recompiles,
-    # and checkpoints save `encoder.state_dict()` without an `_orig_mod.` prefix
-    # (the compiled handle shares the same parameters). On the GB10 this is
-    # ~+25% spectra/s (see pbs/bench_spark.py). First step pays a compile warmup.
-    if tcfg.get("compile", False):
-        train_encoder = torch.compile(encoder)
-        print("[compile] torch.compile enabled for training forward", flush=True)
-    else:
-        train_encoder = encoder
-
-    # Optimizer & scheduler
+    # Optimizer & scheduler — built on the raw parameters. The DDP wrapper and
+    # torch.compile (applied below, after any resume) share these same tensors,
+    # so the optimizer, validation/probes, and checkpoints all keep operating on
+    # the eager `encoder`/`heads` (no `_orig_mod.`/`module.` prefixes to strip).
     params = list(encoder.parameters()) + list(heads.parameters())
     optimizer = AdamW(params, lr=tcfg["lr"], weight_decay=tcfg["weight_decay"], betas=(0.9, 0.95))
     scheduler = torch.optim.lr_scheduler.LambdaLR(
         optimizer, lr_lambda=lambda s: lr_lambda(s, tcfg["warmup_steps"], tcfg["total_steps"])
     )
 
-    # Loaders
-    train_loader, val_loader = make_loaders(cfg)
+    # Loaders (training data sharded across ranks; val on rank 0 only)
+    train_loader, val_loader = make_loaders(cfg, rank=rank, world_size=world_size)
 
     # Probe inputs (frozen-encoder linear probes, logged every log.probe_every steps)
     _, probe_val_paths = split_paths(cfg["data"]["root"], cfg["data"]["n_val_files"])
@@ -259,7 +305,7 @@ def main(argv: list[str] | None = None) -> int:
     else:
         autocast_ctx = nullcontext()
 
-    # Resume
+    # Resume — load into the raw modules/optimizer before wrapping.
     start_step = 0
     if args.resume:
         ckpt = torch.load(args.resume, map_location=device)
@@ -269,7 +315,20 @@ def main(argv: list[str] | None = None) -> int:
         if ckpt.get("scheduler") is not None:
             scheduler.load_state_dict(ckpt["scheduler"])
         start_step = int(ckpt["step"]) + 1
-        print(f"[resume] step {start_step} from {args.resume}", flush=True)
+        log0(f"[resume] step {start_step} from {args.resume}", flush=True)
+
+    # Training handle: encoder + heads under one DDP wrapper so a single
+    # backward all-reduces both. torch.compile (train.compile: true) wraps the
+    # whole thing for the training forward only; val/probes/retrieval keep the
+    # eager encoder so their varying input shapes don't trigger recompiles.
+    # On the GB10 compile is ~+25% spectra/s (see pbs/bench_spark.py); first
+    # step pays the compile warmup.
+    train_module: nn.Module = TrainModule(encoder, heads)
+    if is_dist:
+        train_module = DDP(train_module, device_ids=[local_rank], output_device=local_rank)
+    if tcfg.get("compile", False):
+        train_module = torch.compile(train_module)
+        log0("[compile] torch.compile enabled for training forward", flush=True)
 
     encoder.train()
     heads.train()
@@ -297,10 +356,7 @@ def main(argv: list[str] | None = None) -> int:
         encoder.set_save_attn(save_attn_this_step)
 
         with autocast_ctx:
-            tokens = train_encoder(batch["mz"], batch["log_int"],
-                                   batch["key_padding_mask"], batch["mask_positions"],
-                                   charge=batch.get("charge"), precursor_mz=batch.get("precursor_mz"))
-        loss, parts = heads.loss(tokens, batch["intensity_prob"], batch["mask_positions"])
+            loss, parts = train_module(batch)
         # L1 sparsity penalty on the bias curve (λ=0 → no-op, reproduces denoise baseline).
         l1_lambda = tcfg.get("l1_lambda", 0.0)
         if l1_lambda > 0:
@@ -326,8 +382,8 @@ def main(argv: list[str] | None = None) -> int:
         else:
             ent = None
 
-        # Logging
-        if step % lcfg["log_every"] == 0:
+        # Logging (rank 0 only; all ranks still reset their running counters)
+        if is_main and step % lcfg["log_every"] == 0:
             lr = optimizer.param_groups[0]["lr"]
             # KL "predict-uniform" baseline: log(K_masked) − H(p), averaged over
             # rows. Reports the maximum KL the model can shed by just learning
@@ -362,7 +418,7 @@ def main(argv: list[str] | None = None) -> int:
             running_n = 0
             t0 = time.time()
 
-        if step > 0 and step % lcfg["val_every"] == 0:
+        if is_main and step > 0 and step % lcfg["val_every"] == 0:
             val_metrics = run_validation(
                 encoder, heads, val_loader, device, autocast_ctx,
                 max_batches=tcfg["val_batches"],
@@ -371,7 +427,7 @@ def main(argv: list[str] | None = None) -> int:
             print(f"  val: " + "  ".join(f"{k}={v:.4f}" for k, v in val_metrics.items()), flush=True)
 
         probe_every = lcfg.get("probe_every", 0)
-        if probe_every and step > 0 and step % probe_every == 0:
+        if is_main and probe_every and step > 0 and step % probe_every == 0:
             # The probe block runs extra forward passes (run_all_probes +
             # retrieval) on top of training's allocator pool. For the big
             # tiers that tipped a fragmented 40GB A100 into OOM (XL died at
@@ -403,7 +459,7 @@ def main(argv: list[str] | None = None) -> int:
                   f"binned={retr.get('retrieval/binned_mAP', float('nan')):.3f} "
                   f"gap={retr.get('retrieval/gap_vs_binned', float('nan')):+.3f}", flush=True)
 
-        if step % lcfg["bias_curve_every"] == 0:
+        if is_main and step % lcfg["bias_curve_every"] == 0:
             panels = render_bias_panels(encoder.bias_module, step)
             wandb_imgs = {}
             for name, fig in panels.items():
@@ -414,7 +470,7 @@ def main(argv: list[str] | None = None) -> int:
                 plt.close(fig)
             wandb.log({**wandb_imgs, "step": step}, step=step)
 
-        if step > 0 and step % lcfg["ckpt_every"] == 0:
+        if is_main and step > 0 and step % lcfg["ckpt_every"] == 0:
             ckpt_path = out_dir / f"step{step:06d}.pt"
             save_ckpt(ckpt_path, encoder, heads, optimizer, scheduler, step, cfg)
             save_ckpt(out_dir / "last.pt", encoder, heads, optimizer, scheduler, step, cfg)
@@ -422,15 +478,19 @@ def main(argv: list[str] | None = None) -> int:
 
         step += 1
 
-    # Final
-    save_ckpt(out_dir / "final.pt", encoder, heads, optimizer, scheduler, step, cfg)
-    panels = render_bias_panels(encoder.bias_module, step)
-    import matplotlib.pyplot as plt
-    for name, fig in panels.items():
-        fig_path = out_dir / "figs" / f"{name.replace('/', '_')}_final.png"
-        fig.savefig(fig_path, dpi=110)
-        plt.close(fig)
-    wandb.finish()
+    # Final — rank 0 writes the checkpoint/figures and closes wandb.
+    if is_main:
+        save_ckpt(out_dir / "final.pt", encoder, heads, optimizer, scheduler, step, cfg)
+        panels = render_bias_panels(encoder.bias_module, step)
+        import matplotlib.pyplot as plt
+        for name, fig in panels.items():
+            fig_path = out_dir / "figs" / f"{name.replace('/', '_')}_final.png"
+            fig.savefig(fig_path, dpi=110)
+            plt.close(fig)
+        wandb.finish()
+    if is_dist:
+        dist.barrier()
+        dist.destroy_process_group()
     return 0
 
 

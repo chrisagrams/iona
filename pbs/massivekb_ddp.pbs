@@ -1,0 +1,65 @@
+#!/bin/bash
+#PBS -N mkb_ddp
+#PBS -A FRAME-IDP
+#PBS -q preemptable
+#PBS -l select=1:system=polaris
+#PBS -l place=scatter
+#PBS -l walltime=12:00:00
+#PBS -l filesystems=home:eagle
+#PBS -j oe
+#PBS -o /home/cgrams/msdelta/pbs/logs/
+#
+# Train the XL architecture on MassIVE-KB with 4-way DistributedDataParallel
+# (one process per A100-40GB on a single Polaris node) via torchrun. Unlike
+# scale_all.pbs (4 *independent* models, one per GPU), this is ONE model whose
+# gradients are all-reduced across the 4 GPUs each step — global batch 320,
+# ~1 epoch (28.8M spectra) in ~8 h.
+#
+# Pre-reqs: pbs/setup_venv.sh once; pbs/convert_massivekb.sh once (writes the
+# globally-shuffled parquet that configs/massivekb_xl.yaml points at).
+
+set -euo pipefail
+
+REPO=/home/cgrams/msdelta
+VENV=$REPO/.venv
+CFG=$REPO/configs/massivekb_xl.yaml
+
+JOBID=${PBS_JOBID%%.*}
+JOBID=${JOBID:-local}
+RUN_NAME=massivekb_xl_${JOBID}
+LOGDIR=$REPO/pbs/logs/${JOBID}
+mkdir -p "$LOGDIR"
+
+cd "$REPO"
+echo "$(date -Is) job=$PBS_JOBID host=$(hostname) gpus=$(nvidia-smi -L | wc -l) run=$RUN_NAME"
+nvidia-smi -L | sed "s/^/  /"
+
+# 4 ranks share the node's 64 hardware threads; leave headroom for the 6
+# dataloader workers each rank spawns.
+export OMP_NUM_THREADS=2
+export MKL_NUM_THREADS=2
+export OPENBLAS_NUM_THREADS=2
+
+# Fragmentation fix for the inline probe forwards on the big tier (see train.py).
+export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
+
+# ALCF proxy for rank-0 wandb; keep loopback/cluster traffic (NCCL rendezvous
+# on 127.0.0.1 for --standalone) off the proxy.
+export http_proxy=http://proxy.alcf.anl.gov:3128
+export https_proxy=http://proxy.alcf.anl.gov:3128
+export HTTP_PROXY=$http_proxy HTTPS_PROXY=$https_proxy
+export no_proxy=localhost,127.0.0.1,.alcf.anl.gov,.anl.gov
+export NO_PROXY=$no_proxy
+
+export WANDB_DIR=$LOGDIR
+export WANDB_RESUME=allow
+export WANDB_RUN_ID=$RUN_NAME
+
+# torchrun spawns one process per GPU; train.py reads RANK/WORLD_SIZE/LOCAL_RANK
+# from the env and initialises the NCCL process group.
+exec "$VENV/bin/torchrun" \
+    --standalone --nnodes=1 --nproc_per_node=4 \
+    -m msdelta.train \
+    --config "$CFG" \
+    --run-name "$RUN_NAME" \
+    >"$LOGDIR/massivekb_xl.out" 2>"$LOGDIR/massivekb_xl.err"

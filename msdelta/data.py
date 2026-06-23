@@ -29,7 +29,7 @@ _RESIDUE_MASS = {
 }
 _WATER = 18.0105646
 _PROTON = 1.0072765
-_MOD_RE = re.compile(r"\[([0-9.]+)\]")
+_MOD_RE = re.compile(r"\[([+-]?[0-9.]+)\]")  # sign-tolerant: [15.995] and [+15.995]/[-17.027]
 
 
 def charge_index(peptide_charge: str | None) -> int:
@@ -94,6 +94,8 @@ class ConsensusParquet(IterableDataset):
         mz_col: str = "m/z",
         int_col: str = "int",
         seed: int = 0,
+        rank: int = 0,
+        world_size: int = 1,
     ):
         super().__init__()
         self.paths: list[Path] = sorted(Path(p) for p in paths)
@@ -103,6 +105,10 @@ class ConsensusParquet(IterableDataset):
         self.mz_col = mz_col
         self.int_col = int_col
         self.seed = seed
+        # DDP: shard row-group work units across ranks as well as workers, so
+        # each of the world_size processes sees a disjoint slice of the data.
+        self.rank = rank
+        self.world_size = world_size
 
         # Build (path, row_group) work units up front. Uses parquet metadata
         # only — cheap, ~ms per shard.
@@ -118,9 +124,13 @@ class ConsensusParquet(IterableDataset):
         else:
             worker_id, num_workers = info.id, info.num_workers
 
-        # Stable but worker-distinct RNG.
-        rng = np.random.default_rng(self.seed + 1_000_003 * worker_id)
-        my_units = self._units[worker_id::num_workers]
+        # Global shard id across (rank, worker): world_size * num_workers
+        # disjoint streams over the row-group units. Distinct RNG per stream
+        # so each rank/worker draws a different shuffle.
+        global_id = self.rank * num_workers + worker_id
+        global_n = self.world_size * num_workers
+        rng = np.random.default_rng(self.seed + 1_000_003 * global_id)
+        my_units = self._units[global_id::global_n]
         if not my_units:
             return
 
