@@ -25,45 +25,45 @@ feed the encoder directly.
 
 Usage:
     msdelta-replicate-retrieval --ckpt runs/v14_cap_XL_spark/last.pt \
-        --data-dir data/ms2-peptide-replicate-retrieval [--baseline] [--whiten 16]
+        [--repo-id chrisagrams/ms2-peptide-replicate-retrieval] [--baseline] [--whiten 16]
 """
 from __future__ import annotations
 
 import argparse
-import glob
 from collections import Counter
 from pathlib import Path
 
 import numpy as np
-import pyarrow.parquet as pq
 import torch
+from datasets import load_dataset
 
 from .data import N_CHARGES, PreprocessConfig, preprocess_spectrum
 from .probe import _pool
 from .retrieval import all_but_top
 
+# The benchmark lives on the Hugging Face Hub (private dataset repo). Loading it
+# needs auth via a cached `huggingface-cli login` or the HF_TOKEN env var.
+DATASET_REPO = "chrisagrams/ms2-peptide-replicate-retrieval"
+
 
 # ---------- data ----------
 
-def load_spectra(paths: list[Path]):
-    """Load every spectrum from the benchmark parquets.
+def load_spectra(repo_id: str = DATASET_REPO, split: str = "test"):
+    """Load every spectrum from the benchmark Hugging Face dataset.
+
+    Pulls `repo_id` (default the published benchmark) via
+    `datasets.load_dataset`; auth comes from a cached `huggingface-cli login` or
+    the HF_TOKEN env var since the repo is private.
 
     Returns mz_list, int_list (python lists of float lists), y (dense int label
     index, labels sorted for a stable mapping), charges (clamped to the
     encoder's charge table), precursors (observed precursor m/z)."""
-    mz_list, int_list, labels, charges, precursors = [], [], [], [], []
-    for f in paths:
-        d = pq.read_table(
-            f, columns=["peptide", "charge", "mz", "intensity", "precursor"]
-        ).to_pydict()
-        for p, c, mz, inten, prec in zip(
-            d["peptide"], d["charge"], d["mz"], d["intensity"], d["precursor"]
-        ):
-            mz_list.append(mz)
-            int_list.append(inten)
-            labels.append(f"{p}/{c}")
-            charges.append(min(int(c), N_CHARGES - 1))
-            precursors.append(float(prec) if prec is not None else 0.0)
+    ds = load_dataset(repo_id, split=split)
+    mz_list = [list(x) for x in ds["mz"]]
+    int_list = [list(x) for x in ds["intensity"]]
+    labels = [f"{p}/{c}" for p, c in zip(ds["peptide"], ds["charge"])]
+    charges = [min(int(c), N_CHARGES - 1) for c in ds["charge"]]
+    precursors = [float(prec) if prec is not None else 0.0 for prec in ds["precursor"]]
     uniq = {l: i for i, l in enumerate(sorted(set(labels)))}
     y = np.array([uniq[l] for l in labels], dtype=np.int64)
     return mz_list, int_list, y, np.array(charges), np.array(precursors, dtype=np.float32)
@@ -311,28 +311,26 @@ _SPECTRA_CACHE: dict[str, tuple] = {}
 
 @torch.no_grad()
 def replicate_retrieval_inline_metrics(
-    enc, data_dir, device, pp, *, whiten=16, kmeans_seeds=1, batch_size=128,
+    enc, repo_id, device, pp, *, split="test", whiten=16, kmeans_seeds=1,
+    batch_size=128,
 ) -> dict[str, float]:
     """Flat wandb dict for the MS2 peptide-replicate-retrieval benchmark, run
     inline at probe cadence during training.
 
     Encodes the whole benchmark set with the *current* weights and reports the
     three metrics raw and after the all-but-top-`whiten` anisotropy fix. The
-    parsed spectra are cached across calls (keyed by `data_dir`) so only the
-    encode + metrics recompute each probe step. Returns {} if `data_dir` is
-    unset or empty. Restores the encoder's train/eval mode on exit.
+    parsed spectra are cached across calls (keyed by `repo_id`+`split`) so only
+    the encode + metrics recompute each probe step. Returns {} if `repo_id` is
+    unset. Restores the encoder's train/eval mode on exit.
 
     Keys: replicate_retrieval/{Hit@1,MAP,PairF1} and the whitened
     replicate_retrieval/{Hit@1,MAP,PairF1}_w.
     """
-    if not data_dir:
+    if not repo_id:
         return {}
-    key = str(data_dir)
+    key = f"{repo_id}@{split}"
     if key not in _SPECTRA_CACHE:
-        paths = [Path(x) for x in sorted(glob.glob(str(Path(data_dir) / "*.parquet")))]
-        if not paths:
-            return {}
-        _SPECTRA_CACHE[key] = load_spectra(paths)
+        _SPECTRA_CACHE[key] = load_spectra(repo_id, split=split)
     mz_list, int_list, y, charges, precursors = _SPECTRA_CACHE[key]
     was_training = enc.training
     try:
@@ -359,9 +357,9 @@ def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(
         description="MS2 peptide-replicate-retrieval benchmark for the msdelta encoder")
     p.add_argument("--ckpt", required=True, type=Path)
-    p.add_argument("--data-dir", type=Path,
-                   default=Path("data/ms2-peptide-replicate-retrieval"),
-                   help="dir of benchmark *.parquet files")
+    p.add_argument("--repo-id", default=DATASET_REPO,
+                   help="Hugging Face dataset repo for the benchmark")
+    p.add_argument("--split", default="test", help="dataset split to score")
     p.add_argument("--whiten", type=int, default=0, metavar="K",
                    help="all-but-top-K anisotropy fix on the learned embedding (0=off)")
     p.add_argument("--baseline", action="store_true",
@@ -373,11 +371,8 @@ def main(argv: list[str] | None = None) -> int:
                    default="cuda" if torch.cuda.is_available() else "cpu")
     args = p.parse_args(argv)
 
-    paths = [Path(x) for x in sorted(glob.glob(str(args.data_dir / "*.parquet")))]
-    if not paths:
-        raise SystemExit(f"no parquet files under {args.data_dir}")
-    print(f"loading {len(paths)} parquet file(s) from {args.data_dir} ...")
-    mz_list, int_list, y, charges, precursors = load_spectra(paths)
+    print(f"loading benchmark from {args.repo_id} (split={args.split}) ...")
+    mz_list, int_list, y, charges, precursors = load_spectra(args.repo_id, split=args.split)
     print(f"{len(y)} spectra, {int(y.max()) + 1} unique peptide/charge labels\n")
     seeds = tuple(range(args.kmeans_seeds))
 

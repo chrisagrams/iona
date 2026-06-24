@@ -391,9 +391,9 @@ def main(argv: list[str] | None = None) -> int:
             # Embedding retrieval (model as embedding model) vs binned baseline.
             retr = retrieval_inline_metrics(encoder, probe_val_paths, device, probe_pp)
             # External MS2 peptide-replicate-retrieval benchmark (Hit@1/MAP/PairF1),
-            # only if a benchmark data dir is configured (log.replicate_retrieval_dir).
+            # only if a benchmark HF repo is configured (log.replicate_retrieval_repo).
             rr = replicate_retrieval_inline_metrics(
-                encoder, lcfg.get("replicate_retrieval_dir"), device, probe_pp)
+                encoder, lcfg.get("replicate_retrieval_repo"), device, probe_pp)
             wandb.log({**probe_metrics, **align, **retr, **rr, "step": step}, step=step)
             key = lambda k: probe_metrics.get(k, float("nan"))
             print(f"  probe: precursor_r2={key('probe/precursor_mz_r2'):.3f} "
