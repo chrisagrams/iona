@@ -64,4 +64,5 @@ log:
   ckpt_every: 1000
   probe_every: 20          # full probe block fires at steps 20 and 40
   probe_n_spectra: 500
+  replicate_retrieval_repo: chrisagrams/ms2-peptide-replicate-retrieval  # MS2 replicate-retrieval benchmark probe (omit to skip)
   out_dir: ./runs

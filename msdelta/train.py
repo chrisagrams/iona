@@ -39,6 +39,7 @@ from .model import (
 from .probe import run_all_probes
 from .analyze import alignment_metrics
 from .retrieval import retrieval_inline_metrics
+from .replicate_retrieval import replicate_retrieval_inline_metrics
 from .viz import attention_entropy_per_head, render_bias_panels
 
 
@@ -445,7 +446,11 @@ def main(argv: list[str] | None = None) -> int:
             align = alignment_metrics(encoder)
             # Embedding retrieval (model as embedding model) vs binned baseline.
             retr = retrieval_inline_metrics(encoder, probe_val_paths, device, probe_pp)
-            wandb.log({**probe_metrics, **align, **retr, "step": step}, step=step)
+            # External MS2 peptide-replicate-retrieval benchmark (Hit@1/MAP/PairF1),
+            # only if a benchmark HF repo is configured (log.replicate_retrieval_repo).
+            rr = replicate_retrieval_inline_metrics(
+                encoder, lcfg.get("replicate_retrieval_repo"), device, probe_pp)
+            wandb.log({**probe_metrics, **align, **retr, **rr, "step": step}, step=step)
             key = lambda k: probe_metrics.get(k, float("nan"))
             print(f"  probe: precursor_r2={key('probe/precursor_mz_r2'):.3f} "
                   f"fragment_mz_r2={key('probe/fragment_mz_r2'):.3f} "
@@ -458,6 +463,15 @@ def main(argv: list[str] | None = None) -> int:
                   f"retrieval: mAP={retr.get('retrieval/mAP', float('nan')):.3f} "
                   f"binned={retr.get('retrieval/binned_mAP', float('nan')):.3f} "
                   f"gap={retr.get('retrieval/gap_vs_binned', float('nan')):+.3f}", flush=True)
+            if rr:
+                print(f"  replicate-retrieval: "
+                      f"Hit@1={rr.get('replicate_retrieval/Hit@1', float('nan')):.3f} "
+                      f"MAP={rr.get('replicate_retrieval/MAP', float('nan')):.3f} "
+                      f"PairF1={rr.get('replicate_retrieval/PairF1', float('nan')):.3f} | "
+                      f"whiten Hit@1={rr.get('replicate_retrieval/Hit@1_w', float('nan')):.3f} "
+                      f"MAP={rr.get('replicate_retrieval/MAP_w', float('nan')):.3f} "
+                      f"PairF1={rr.get('replicate_retrieval/PairF1_w', float('nan')):.3f}",
+                      flush=True)
 
         if is_main and step % lcfg["bias_curve_every"] == 0:
             panels = render_bias_panels(encoder.bias_module, step)
