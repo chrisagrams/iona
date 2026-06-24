@@ -27,7 +27,7 @@ from .data import (
     MaskConfig,
     PreprocessConfig,
     mask_intensity_collate,
-    split_paths,
+    resolve_dataset_paths,
 )
 from .model import (
     DeltaBiasConfig,
@@ -121,13 +121,18 @@ def grad_norm(parameters) -> float:
     return math.sqrt(total)
 
 
-def make_loaders(cfg: dict[str, Any], rank: int = 0, world_size: int = 1) -> tuple[DataLoader, DataLoader]:
+def make_loaders(
+    cfg: dict[str, Any],
+    train_paths: list[Path],
+    val_paths: list[Path],
+    rank: int = 0,
+    world_size: int = 1,
+) -> tuple[DataLoader, DataLoader]:
     dcfg = cfg["data"]
     pp = PreprocessConfig(
         intensity_threshold_frac=dcfg["intensity_threshold_frac"],
         top_n=dcfg["top_n"],
     )
-    train_paths, val_paths = split_paths(dcfg["root"], dcfg["n_val_files"])
     print(f"[data] {len(train_paths)} train shards, {len(val_paths)} val shards", flush=True)
 
     # Training data is sharded across ranks (disjoint slices); validation runs
@@ -288,11 +293,16 @@ def main(argv: list[str] | None = None) -> int:
         optimizer, lr_lambda=lambda s: lr_lambda(s, tcfg["warmup_steps"], tcfg["total_steps"])
     )
 
+    # Resolve dataset shards once (local parquet root or HF dataset), then reuse
+    # the val shards for the inline probe so we don't re-resolve/re-download.
+    train_paths, val_paths = resolve_dataset_paths(cfg["data"])
+
     # Loaders (training data sharded across ranks; val on rank 0 only)
-    train_loader, val_loader = make_loaders(cfg, rank=rank, world_size=world_size)
+    train_loader, val_loader = make_loaders(
+        cfg, train_paths, val_paths, rank=rank, world_size=world_size)
 
     # Probe inputs (frozen-encoder linear probes, logged every log.probe_every steps)
-    _, probe_val_paths = split_paths(cfg["data"]["root"], cfg["data"]["n_val_files"])
+    probe_val_paths = val_paths
     probe_pp = PreprocessConfig(
         intensity_threshold_frac=cfg["data"]["intensity_threshold_frac"],
         top_n=cfg["data"]["top_n"],

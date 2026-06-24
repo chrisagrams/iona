@@ -1,0 +1,72 @@
+# v14 capacity sweep tier S (d=384), but training from the Hugging Face dataset
+# instead of local parquets. Identical to v14_cap_S.yaml except data.source:
+# set data.hf_repo and the train/val splits are pulled from the hub (cached
+# locally) and fed into the same ConsensusParquet streaming pipeline. The HF
+# shards share the local schema (m/z, int, peptide_charge), so nothing else
+# changes. To go back to local parquets, drop the hf_* keys and set
+# data.root + data.n_val_files.
+model:
+  d_model: 384
+  n_heads: 8
+  n_layers: 8
+  ffn_mult: 4
+  dropout: 0.1
+  max_peaks: 150
+  use_precursor: false
+  fourier_mz:
+    n_freqs: 64
+    f_min: 1.0e-2
+    f_max: 1.0e+3
+  fourier_int:
+    n_freqs: 16
+    f_min: 1.0e-2
+    f_max: 1.0e+2
+  delta_bias:
+    n_freqs: 64
+    per_head_hidden: 32
+    f_min: 1.0e-2
+    f_max: 1.0e+3
+    scale: 3.0
+    charge_dim: 0
+    n_charges: 8
+
+data:
+  # Hugging Face dataset source. Splits live under train/*.parquet and
+  # val/*.parquet in the repo; only those two are downloaded.
+  hf_repo: chrisagrams/massive_kb_v1_shuffled
+  hf_train_split: train
+  hf_val_split: val
+  intensity_threshold_frac: 0.01
+  top_n: 150
+  mask:
+    mask_ratio: 0.50
+
+train:
+  batch_size: 256
+  num_workers: 8
+  lr: 1.0e-4
+  warmup_steps: 4000
+  # One full pass over the train split: 28,508,636 spectra / 256 ≈ 111,362.
+  # (ConsensusParquet streams infinitely, so this just bounds the step count.)
+  # Under DDP the data is sharded across ranks, so one epoch is total_steps/world_size;
+  # scale this up by world_size if you want a full epoch on a multi-GPU launch.
+  total_steps: 111360     # ~1 epoch over the full HF dataset (28.5M spectra @ bs 256)
+  weight_decay: 0.01
+  grad_clip: 1.0
+  precision: bf16
+  val_batches: 50
+  device: cuda
+  l1_lambda: 0.0
+  seed: 0
+
+log:
+  wandb_project: msdelta-capacity-kl
+  wandb_run_name: v14_cap_S_hf
+  log_every: 50
+  val_every: 5000
+  bias_curve_every: 10000
+  ckpt_every: 20000
+  probe_every: 10000       # align/* + retrieval/* + linear-probe trajectory
+  probe_n_spectra: 3000
+  replicate_retrieval_repo: chrisagrams/ms2-peptide-replicate-retrieval  # MS2 replicate-retrieval benchmark probe (omit to skip)
+  out_dir: ./runs

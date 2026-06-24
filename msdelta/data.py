@@ -286,3 +286,56 @@ def split_paths(root: str | Path, n_val: int) -> tuple[list[Path], list[Path]]:
     if len(shards) <= n_val:
         raise ValueError(f"only {len(shards)} shards; need > {n_val} for a split")
     return shards[:-n_val], shards[-n_val:]
+
+
+def hf_split_paths(
+    repo_id: str,
+    train_split: str = "train",
+    val_split: str = "val",
+) -> tuple[list[Path], list[Path]]:
+    """Resolve (train, val) parquet shard paths from a Hugging Face dataset.
+
+    The dataset is expected to lay its shards out under per-split subdirectories
+    (``train/*.parquet``, ``val/*.parquet``) with the same column schema as the
+    local consensus parquets (``m/z``, ``int``, ``peptide_charge``) — so the
+    downloaded shards drop straight into `ConsensusParquet`.
+
+    Only the two requested splits are pulled (``allow_patterns``); the snapshot is
+    served from the HF cache on subsequent calls, so this is cheap to call more
+    than once (e.g. for both the loaders and the inline probe). Auth for private
+    repos comes from a cached `huggingface-cli login` or the HF_TOKEN env var.
+    """
+    from huggingface_hub import snapshot_download
+
+    local_dir = snapshot_download(
+        repo_id,
+        repo_type="dataset",
+        allow_patterns=[f"{train_split}/*.parquet", f"{val_split}/*.parquet"],
+    )
+    root = Path(local_dir)
+    train_paths = sorted((root / train_split).glob("*.parquet"))
+    val_paths = sorted((root / val_split).glob("*.parquet"))
+    if not train_paths:
+        raise ValueError(f"no parquet shards under '{train_split}/' in {repo_id}")
+    if not val_paths:
+        raise ValueError(f"no parquet shards under '{val_split}/' in {repo_id}")
+    return train_paths, val_paths
+
+
+def resolve_dataset_paths(dcfg: dict) -> tuple[list[Path], list[Path]]:
+    """Return (train_paths, val_paths) from either a local parquet root or a
+    Hugging Face dataset, selected by config.
+
+    HF source  — set ``data.hf_repo`` (plus optional ``data.hf_train_split`` /
+                 ``data.hf_val_split``, default ``train`` / ``val``).
+    Local source — set ``data.root`` and ``data.n_val_files`` (last N sorted
+                 shards become validation). This is the original behaviour and
+                 the default when ``hf_repo`` is absent.
+    """
+    if dcfg.get("hf_repo"):
+        return hf_split_paths(
+            dcfg["hf_repo"],
+            train_split=dcfg.get("hf_train_split", "train"),
+            val_split=dcfg.get("hf_val_split", "val"),
+        )
+    return split_paths(dcfg["root"], dcfg["n_val_files"])
