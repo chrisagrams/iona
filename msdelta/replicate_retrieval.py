@@ -25,7 +25,7 @@ feed the encoder directly.
 
 Usage:
     msdelta-replicate-retrieval --ckpt runs/v14_cap_XL_spark/last.pt \
-        [--repo-id chrisagrams/ms2-peptide-replicate-retrieval] [--baseline] [--whiten 16]
+        --repo-id chrisagrams/ms2-peptide-replicate-retrieval [--baseline] [--whiten 16]
 """
 from __future__ import annotations
 
@@ -41,54 +41,62 @@ from .data import N_CHARGES, PreprocessConfig, preprocess_spectrum
 from .probe import _pool
 from .retrieval import all_but_top
 
-# The benchmark lives on the Hugging Face Hub (private dataset repo). Loading it
-# needs auth via a cached `huggingface-cli login` or the HF_TOKEN env var.
-DATASET_REPO = "chrisagrams/ms2-peptide-replicate-retrieval"
-
 
 # ---------- data ----------
 
-def load_spectra(repo_id: str = DATASET_REPO, split: str = "test"):
-    """Load every spectrum from the benchmark Hugging Face dataset.
+def load_benchmark(repo_id: str, split: str = "test"):
+    """Open the benchmark Hugging Face dataset and build its label vector.
 
-    Pulls `repo_id` (default the published benchmark) via
-    `datasets.load_dataset`; auth comes from a cached `huggingface-cli login` or
-    the HF_TOKEN env var since the repo is private.
+    Pulls `repo_id` via `datasets.load_dataset`; auth comes from a cached
+    `huggingface-cli login` or the HF_TOKEN env var if the repo is private.
+    `load_dataset` serves the prepared Arrow tables from the local HF cache, so
+    calling this once per probe step is cheap (set HF_HUB_OFFLINE=1 to skip the
+    hub freshness check).
 
-    Returns mz_list, int_list (python lists of float lists), y (dense int label
-    index, labels sorted for a stable mapping), charges (clamped to the
-    encoder's charge table), precursors (observed precursor m/z)."""
+    Returns (ds, y): the Arrow-backed `Dataset` — mz/intensity, charge and
+    precursor all stay on its memory map and are sliced per batch in
+    `embed_model` / `native_binning` — and y, the dense peptide+charge label index
+    for every spectrum. y is built eagerly because the metrics are global
+    (Hit@1/MAP rank every spectrum against every other, PairF1 k-means clusters
+    the whole set), so the full label vector must exist at scoring time; the only
+    columns it touches, peptide+charge, are scalar and tiny. The metrics are
+    label-permutation invariant, so labels get first-seen indices in one pass —
+    no sort, no intermediate label list."""
     ds = load_dataset(repo_id, split=split)
-    mz_list = [list(x) for x in ds["mz"]]
-    int_list = [list(x) for x in ds["intensity"]]
-    labels = [f"{p}/{c}" for p, c in zip(ds["peptide"], ds["charge"])]
-    charges = [min(int(c), N_CHARGES - 1) for c in ds["charge"]]
-    precursors = [float(prec) if prec is not None else 0.0 for prec in ds["precursor"]]
-    uniq = {l: i for i, l in enumerate(sorted(set(labels)))}
-    y = np.array([uniq[l] for l in labels], dtype=np.int64)
-    return mz_list, int_list, y, np.array(charges), np.array(precursors, dtype=np.float32)
+    seen: dict[str, int] = {}
+    y = np.fromiter(
+        (seen.setdefault(f"{p}/{c}", len(seen))
+         for p, c in zip(ds["peptide"], ds["charge"])),
+        dtype=np.int64, count=len(ds))
+    return ds, y
 
 
 # ---------- embeddings ----------
 
 @torch.no_grad()
-def embed_model(enc, mz_list, int_list, charges, precursors, device, pp,
-                *, batch_size=128):
+def embed_model(enc, ds, device, pp, *, batch_size=128,
+                mz_col="mz", int_col="intensity",
+                charge_col="charge", precursor_col="precursor"):
     """Encode every spectrum and mean⊕max-pool to one L2-normalised vector.
+
+    Spectra are pulled from the Arrow-backed `ds` one `batch_size` slice at a
+    time — peaks, charge and precursor m/z all read from the slice and
+    preprocessed on the fly, so the raw lists and their padded tensors only exist
+    for the batch in flight. Peak host memory is the final n×dim embedding matrix,
+    not the whole dataset plus a tensor copy of it.
 
     Spectra that preprocess to zero peaks get a zero vector (kept so indices
     stay aligned with `y`); they can never be a nearest neighbour of anything
     real and count as misses, matching how an empty spectrum behaves."""
     enc.to(device).eval()
-    pre = [preprocess_spectrum(torch.tensor(mz, dtype=torch.float32),
-                               torch.tensor(it, dtype=torch.float32), pp)[:2]
-           for mz, it in zip(mz_list, int_list)]
-    n = len(pre)
-    dim_probe = None
+    n = len(ds)
     embs = None
     for s in range(0, n, batch_size):
-        idx = list(range(s, min(s + batch_size, n)))
-        chunk = [pre[i] for i in idx]
+        e = min(s + batch_size, n)
+        rows = ds[s:e]  # materialises only this slice
+        chunk = [preprocess_spectrum(torch.tensor(mz, dtype=torch.float32),
+                                     torch.tensor(it, dtype=torch.float32), pp)[:2]
+                 for mz, it in zip(rows[mz_col], rows[int_col])]
         K = max((m.numel() for m, _ in chunk), default=0)
         if K == 0:
             continue
@@ -99,54 +107,64 @@ def embed_model(enc, mz_list, int_list, charges, precursors, device, pp,
             k = m.numel()
             if k:
                 mz[b, :k] = m; li[b, :k] = l; mask[b, :k] = True
-        chg = torch.tensor([charges[i] for i in idx], dtype=torch.long, device=device)
-        pmz = torch.tensor([precursors[i] for i in idx], dtype=torch.float32, device=device)
+        chg = torch.as_tensor(
+            np.minimum(np.asarray(rows[charge_col]), N_CHARGES - 1),
+            dtype=torch.long, device=device)
+        pmz = torch.as_tensor(
+            np.nan_to_num(np.asarray(rows[precursor_col], dtype=np.float32)),
+            dtype=torch.float32, device=device)
         tok = enc(mz.to(device), li.to(device), (~mask).to(device),
                   charge=chg, precursor_mz=pmz)
         pooled = _pool(tok, mask.to(device)).cpu().numpy().astype(np.float32)
         if embs is None:
-            dim_probe = pooled.shape[1]
-            embs = np.zeros((n, dim_probe), dtype=np.float32)
-        for j, i in enumerate(idx):
-            if mask[j].any():
-                embs[i] = pooled[j]
+            embs = np.zeros((n, pooled.shape[1]), dtype=np.float32)
+        nonempty = mask.any(dim=1).cpu().numpy()
+        embs[np.arange(s, e)[nonempty]] = pooled[nonempty]
     if embs is None:
         raise RuntimeError("no spectrum produced any peaks after preprocessing")
     return embs
 
 
-def native_binning(mz_list, int_list, n_bins=65536, mz_min=0.0, mz_max=1000.0):
+def native_binning(ds, n_bins=65536, mz_min=0.0, mz_max=1000.0,
+                   *, batch_size=512, mz_col="mz", int_col="intensity"):
     """Sparse 65536-bin native-binning baseline:
-    log1p intensity ÷ per-spectrum max, m/z → bin, per-bin max, L2-normalise."""
+    log1p intensity ÷ per-spectrum max, m/z → bin, per-bin max, L2-normalise.
+
+    Spectra are streamed from `ds` in slices so the raw peaks are never all
+    resident at once — only the (sparse) output matrix is."""
     from scipy import sparse
     span = mz_max - mz_min
+    n = len(ds)
     rows, cols, vals = [], [], []
-    for r, (mzs, intens) in enumerate(zip(mz_list, int_list)):
-        mzs = np.asarray(mzs, dtype=np.float64)
-        intens = np.asarray(intens, dtype=np.float64)
-        if mzs.size == 0:
-            continue
-        logi = np.log1p(np.maximum(intens, 0.0))
-        mx = logi.max()
-        if mx <= 0:
-            continue
-        v = (logi / mx).astype(np.float32)
-        idx = np.floor((mzs - mz_min) / span * n_bins).astype(np.int64)
-        keep = (idx >= 0) & (idx < n_bins)
-        idx, v = idx[keep], v[keep]
-        if idx.size == 0:
-            continue
-        # per-bin max within this spectrum
-        order = np.argsort(idx)
-        idx, v = idx[order], v[order]
-        ub, inv = np.unique(idx, return_inverse=True)
-        bmax = np.zeros(len(ub), dtype=np.float32)
-        np.maximum.at(bmax, inv, v)
-        nrm = np.sqrt((bmax * bmax).sum()) or 1.0
-        rows.append(np.full(len(ub), r)); cols.append(ub); vals.append(bmax / nrm)
+    for s in range(0, n, batch_size):
+        batch = ds[s:min(s + batch_size, n)]
+        for r_local, (mzs, intens) in enumerate(zip(batch[mz_col], batch[int_col])):
+            r = s + r_local
+            mzs = np.asarray(mzs, dtype=np.float64)
+            intens = np.asarray(intens, dtype=np.float64)
+            if mzs.size == 0:
+                continue
+            logi = np.log1p(np.maximum(intens, 0.0))
+            mx = logi.max()
+            if mx <= 0:
+                continue
+            v = (logi / mx).astype(np.float32)
+            idx = np.floor((mzs - mz_min) / span * n_bins).astype(np.int64)
+            keep = (idx >= 0) & (idx < n_bins)
+            idx, v = idx[keep], v[keep]
+            if idx.size == 0:
+                continue
+            # per-bin max within this spectrum
+            order = np.argsort(idx)
+            idx, v = idx[order], v[order]
+            ub, inv = np.unique(idx, return_inverse=True)
+            bmax = np.zeros(len(ub), dtype=np.float32)
+            np.maximum.at(bmax, inv, v)
+            nrm = np.sqrt((bmax * bmax).sum()) or 1.0
+            rows.append(np.full(len(ub), r)); cols.append(ub); vals.append(bmax / nrm)
     X = sparse.csr_matrix(
         (np.concatenate(vals), (np.concatenate(rows), np.concatenate(cols))),
-        shape=(len(mz_list), n_bins), dtype=np.float32)
+        shape=(n, n_bins), dtype=np.float32)
     return X
 
 
@@ -306,9 +324,6 @@ def evaluate(X, y, *, sparse_in=False, kmeans_seeds=(0,), whiten=0, name="embed"
 
 # ---------- inline training probe ----------
 
-_SPECTRA_CACHE: dict[str, tuple] = {}
-
-
 @torch.no_grad()
 def replicate_retrieval_inline_metrics(
     enc, repo_id, device, pp, *, split="test", whiten=16, kmeans_seeds=1,
@@ -319,23 +334,19 @@ def replicate_retrieval_inline_metrics(
 
     Encodes the whole benchmark set with the *current* weights and reports the
     three metrics raw and after the all-but-top-`whiten` anisotropy fix. The
-    parsed spectra are cached across calls (keyed by `repo_id`+`split`) so only
-    the encode + metrics recompute each probe step. Returns {} if `repo_id` is
-    unset. Restores the encoder's train/eval mode on exit.
+    dataset is opened once and cached by `load_benchmark` (keyed by
+    `repo_id`+`split`), so each probe step only re-encodes + re-scores. Returns
+    {} if `repo_id` is unset. Restores the encoder's train/eval mode on exit.
 
     Keys: replicate_retrieval/{Hit@1,MAP,PairF1} and the whitened
     replicate_retrieval/{Hit@1,MAP,PairF1}_w.
     """
     if not repo_id:
         return {}
-    key = f"{repo_id}@{split}"
-    if key not in _SPECTRA_CACHE:
-        _SPECTRA_CACHE[key] = load_spectra(repo_id, split=split)
-    mz_list, int_list, y, charges, precursors = _SPECTRA_CACHE[key]
+    ds, y = load_benchmark(repo_id, split=split)
     was_training = enc.training
     try:
-        emb = embed_model(enc, mz_list, int_list, charges, precursors, device, pp,
-                          batch_size=batch_size)
+        emb = embed_model(enc, ds, device, pp, batch_size=batch_size)
         seeds = tuple(range(kmeans_seeds))
         raw = evaluate(emb, y, kmeans_seeds=seeds, device=device, verbose=False)
         out = {f"replicate_retrieval/{k}": v for k, v in raw.items()}
@@ -357,7 +368,7 @@ def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(
         description="MS2 peptide-replicate-retrieval benchmark for the msdelta encoder")
     p.add_argument("--ckpt", required=True, type=Path)
-    p.add_argument("--repo-id", default=DATASET_REPO,
+    p.add_argument("--repo-id", required=True,
                    help="Hugging Face dataset repo for the benchmark")
     p.add_argument("--split", default="test", help="dataset split to score")
     p.add_argument("--whiten", type=int, default=0, metavar="K",
@@ -372,7 +383,7 @@ def main(argv: list[str] | None = None) -> int:
     args = p.parse_args(argv)
 
     print(f"loading benchmark from {args.repo_id} (split={args.split}) ...")
-    mz_list, int_list, y, charges, precursors = load_spectra(args.repo_id, split=args.split)
+    ds, y = load_benchmark(args.repo_id, split=args.split)
     print(f"{len(y)} spectra, {int(y.max()) + 1} unique peptide/charge labels\n")
     seeds = tuple(range(args.kmeans_seeds))
 
@@ -382,8 +393,7 @@ def main(argv: list[str] | None = None) -> int:
                           top_n=dcfg["top_n"])
     device = torch.device(args.device)
     print(f"loaded {args.ckpt} (step {step}); encoding ...")
-    emb = embed_model(enc, mz_list, int_list, charges, precursors,
-                      device, pp, batch_size=args.batch_size)
+    emb = embed_model(enc, ds, device, pp, batch_size=args.batch_size)
 
     print("\n=== MS2 peptide-replicate-retrieval benchmark ===")
     evaluate(emb, y, kmeans_seeds=seeds, name="msdelta (learned)", device=device)
@@ -392,7 +402,7 @@ def main(argv: list[str] | None = None) -> int:
                  name=f"msdelta (whiten-{args.whiten})", device=device)
     if args.baseline:
         print("building native-binning baseline (65536 bins) ...")
-        Xb = native_binning(mz_list, int_list)
+        Xb = native_binning(ds)
         evaluate(Xb, y, sparse_in=True, kmeans_seeds=seeds, name="native binning 65536")
     return 0
 
