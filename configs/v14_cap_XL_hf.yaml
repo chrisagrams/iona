@@ -1,0 +1,79 @@
+# v14 capacity tier XL (d=1024, ~203M params) trained on the Hugging Face
+# dataset with 4-way DistributedDataParallel (one process per A100-40GB on a
+# single Polaris node). This is v14_cap_XL.yaml's architecture + KL loss, but
+# the data comes from the hub (like v14_cap_S_hf.yaml) instead of a local
+# parquet root, and the training schedule is sized for the DP-4 launch.
+#
+# Data: hf_repo pulls train/*.parquet + val/*.parquet from the hub into the
+# local HF cache (point HF_HOME at eagle — see pbs/download_hf_dataset.sh) and
+# feeds them into the same ConsensusParquet streaming pipeline. To go back to
+# local parquets, drop the hf_* keys and set data.root + data.n_val_files.
+#
+# Exposure: bs=80 per GPU x 4 GPUs = 320 spectra/step (batch_size and
+# total_steps are BOTH per-rank; DDP shards the train data into 4 disjoint
+# slices and all-reduces gradients). 90000 steps x 320 = 28.8M ≈ one full
+# epoch of the 28.5M-spectra train split. Launch: qsub pbs/v14_xl_hf_ddp.pbs
+model:
+  d_model: 1024
+  n_heads: 16
+  n_layers: 16
+  ffn_mult: 4
+  dropout: 0.1
+  max_peaks: 150
+  use_precursor: false
+  fourier_mz:
+    n_freqs: 64
+    f_min: 1.0e-2
+    f_max: 1.0e+3
+  fourier_int:
+    n_freqs: 16
+    f_min: 1.0e-2
+    f_max: 1.0e+2
+  delta_bias:
+    n_freqs: 64
+    per_head_hidden: 32
+    f_min: 1.0e-2
+    f_max: 1.0e+3
+    scale: 3.0
+    charge_dim: 0
+    n_charges: 8
+
+data:
+  # Hugging Face dataset source. Splits live under train/*.parquet and
+  # val/*.parquet in the repo; only those two are downloaded (cached locally).
+  hf_repo: chrisagrams/massive_kb_v1_shuffled
+  hf_train_split: train
+  hf_val_split: val
+  intensity_threshold_frac: 0.01
+  top_n: 150
+  mask:
+    mask_ratio: 0.50
+
+train:
+  batch_size: 80          # per-GPU; global batch = 80 x 4 GPUs = 320
+  num_workers: 6          # x4 ranks = 24 loader workers (+4 main) < 32 cores
+  lr: 1.0e-4
+  warmup_steps: 2000
+  total_steps: 90000      # 90000 x 320 = 28.8M ≈ 1 epoch of the HF train split
+  weight_decay: 0.01
+  grad_clip: 1.0
+  precision: bf16
+  compile: false          # flip to true once a clean run is confirmed (~+25% sps)
+  val_batches: 50
+  device: cuda
+  l1_lambda: 0.0
+  seed: 0
+
+log:
+  wandb_project: msdelta-capacity-kl
+  wandb_run_name: v14_cap_XL_hf
+  log_every: 50
+  val_every: 2000
+  bias_curve_every: 5000
+  ckpt_every: 10000
+  probe_every: 5000        # align/* + retrieval/* + linear-probe trajectory
+  probe_n_spectra: 3000
+  replicate_retrieval_repo: chrisagrams/ms2-peptide-replicate-retrieval  # MS2 replicate-retrieval benchmark probe (omit to skip)
+  # DDP launcher (pbs/v14_xl_hf_ddp.pbs) uses out_dir as-is (no overlay), so
+  # point it straight at eagle.
+  out_dir: /eagle/UIC-HPC/cgrams/msdelta-runs
