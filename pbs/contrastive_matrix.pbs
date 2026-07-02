@@ -23,12 +23,9 @@
 #
 # Pretrained checkpoints:
 #   massivekb = run v14_cap_XL_hf_7232144  (done)
-#   consensus = run consensus_xl_28M_7235042  (INFLIGHT — final.pt not written yet)
+#   consensus = run consensus_xl_28M_7235042  (finishes before this is scheduled)
 #
-# Because the consensus pretrain is still running, nodes 2 & 3 wait for its
-# final.pt before starting (bounded by CON_WAIT_SECS). RECOMMENDED: submit with a
-# dependency so the whole job only starts once the consensus pretrain finishes —
-# then nothing waits and no node sits idle:
+# Submit gated on the consensus pretrain so both checkpoints exist at start:
 #   qsub -W depend=afterany:7235042 pbs/contrastive_matrix.pbs
 #
 # Layout: this script runs once on the head node (launcher branch), then re-execs
@@ -43,9 +40,6 @@ RUNS=/eagle/UIC-HPC/cgrams/msdelta-runs
 # Pretrained encoders (override with `qsub -v MKB_PT=...,CON_PT=...`).
 MKB_PT=${MKB_PT:-$RUNS/v14_cap_XL_hf_7232144/final.pt}
 CON_PT=${CON_PT:-$RUNS/consensus_xl_28M_7235042/final.pt}
-
-# How long nodes 2 & 3 will wait for the consensus final.pt to appear + settle.
-CON_WAIT_SECS=${CON_WAIT_SECS:-28800}   # 8 h
 
 # ---------------------------------------------------------------------------
 # PER-NODE BRANCH — invoked by mpiexec, once per node. $PALS_RANKID = node index.
@@ -67,25 +61,6 @@ if [[ "${1:-}" == "--node" ]]; then
     mkdir -p "$LOGDIR"
 
     echo "$(date -Is) node=$RANK host=$(hostname) run=$RUN_NAME cfg=$CFG pt=$PT"
-
-    # Wait for the pretrained checkpoint (the consensus one may still be inflight).
-    # Require it to exist AND be size-stable for 60s so we never read a half-written
-    # torch.save.
-    waited=0
-    while [[ ! -f "$PT" ]]; do
-        if (( waited >= CON_WAIT_SECS )); then
-            echo "node=$RANK ERROR: $PT never appeared after ${CON_WAIT_SECS}s" >&2
-            exit 1
-        fi
-        echo "node=$RANK waiting for $PT ... (${waited}s)"; sleep 60; waited=$((waited+60))
-    done
-    prev_size=-1
-    while :; do
-        sz=$(stat -c %s "$PT")
-        [[ "$sz" == "$prev_size" ]] && break
-        prev_size=$sz; sleep 60
-    done
-    echo "$(date -Is) node=$RANK checkpoint ready ($PT, $(stat -c %s "$PT") bytes)"
 
     # Per-node env (mpiexec forwards the launcher env; set the per-combo bits here).
     export OMP_NUM_THREADS=2 MKL_NUM_THREADS=2 OPENBLAS_NUM_THREADS=2
@@ -118,7 +93,7 @@ cd "$REPO"
 NNODES=$(wc -l < "$PBS_NODEFILE")
 echo "$(date -Is) job=$PBS_JOBID nodes=$NNODES matrix launch"
 echo "  MKB_PT=$MKB_PT"
-echo "  CON_PT=$CON_PT (inflight-safe: nodes 2&3 wait up to ${CON_WAIT_SECS}s)"
+echo "  CON_PT=$CON_PT"
 cat "$PBS_NODEFILE" | sed "s/^/  node: /"
 
 if (( NNODES < 4 )); then
@@ -128,7 +103,7 @@ fi
 # Shared env forwarded to every node (--envall). HF cache = inline probe only;
 # proxy = rank-0 wandb; training data + checkpoints are local on eagle.
 export MATRIX_JOBID=$JOBID
-export MKB_PT CON_PT CON_WAIT_SECS
+export MKB_PT CON_PT
 export HF_HOME=/eagle/UIC-HPC/cgrams/hf_cache
 export HF_HUB_OFFLINE=1
 export http_proxy=http://proxy.alcf.anl.gov:3128
