@@ -1,0 +1,78 @@
+# XL (d=1024, ~203M params) retrained on the CONSENSUS corpus after a proper
+# global shuffle + peptide-disjoint val (scripts/shuffle_parquet.py). Same
+# architecture / KL loss as v14_cap_XL and massivekb_xl; the point of this run
+# is the clean data pipeline: the raw consensus shards store ~330 replicates of
+# each peptide consecutively AND spread a peptide across shards, so the old
+# read-time-only shuffle left correlated runs and any random val leaked
+# replicates. The shuffle fixes ordering; the peptide-hash split makes val
+# genuinely held-out.
+#
+# Data: read LOCALLY from the shuffled eagle dir (val_* shards sort last, so
+# n_val_files picks them up). No HF download — see pbs/consensus_xl_ddp.pbs.
+#
+# Exposure: bs=80/GPU x 4 GPUs = 320 spectra/step (both batch_size and
+# total_steps are per-rank; DDP shards train into 4 disjoint slices and
+# all-reduces gradients). The train split is ~109M spectra, so one full epoch is
+# ~109M/320 ≈ 340k steps (~30 h on 4x A100-40GB). total_steps below is set for
+# that; it drives the LR schedule, so keep it at the intended run length and use
+# pbs resume to finish across submissions, or lower it for a shorter run.
+model:
+  d_model: 1024
+  n_heads: 16
+  n_layers: 16
+  ffn_mult: 4
+  dropout: 0.1
+  max_peaks: 150
+  use_precursor: false
+  fourier_mz:
+    n_freqs: 64
+    f_min: 1.0e-2
+    f_max: 1.0e+3
+  fourier_int:
+    n_freqs: 16
+    f_min: 1.0e-2
+    f_max: 1.0e+2
+  delta_bias:
+    n_freqs: 64
+    per_head_hidden: 32
+    f_min: 1.0e-2
+    f_max: 1.0e+3
+    scale: 3.0
+    charge_dim: 0
+    n_charges: 8
+
+data:
+  # Shuffled consensus on eagle; must match pbs/shuffle_consensus.sh ($OUT, N_VAL).
+  root: /eagle/UIC-HPC/cgrams/msbench-datasets/consensus_100M_shuffled/
+  n_val_files: 4          # the 4 consensus_shuf_val_* shards (they sort last)
+  intensity_threshold_frac: 0.01
+  top_n: 150
+  mask:
+    mask_ratio: 0.50
+
+train:
+  batch_size: 80          # per-GPU; global batch = 80 x 4 GPUs = 320
+  num_workers: 6          # x4 ranks = 24 loader workers (+4 main) < 32 cores
+  lr: 1.0e-4
+  warmup_steps: 2000
+  total_steps: 340000     # ~1 epoch of the ~109M-spectra shuffled train split
+  weight_decay: 0.01
+  grad_clip: 1.0
+  precision: bf16
+  compile: false          # flip to true once a clean run is confirmed (~+25% sps)
+  val_batches: 50
+  device: cuda
+  l1_lambda: 0.0
+  seed: 0
+
+log:
+  wandb_project: msdelta-consensus
+  wandb_run_name: consensus_xl
+  log_every: 50
+  val_every: 2000
+  bias_curve_every: 5000
+  ckpt_every: 10000        # frequent enough that preemption/resume loses little
+  probe_every: 5000
+  probe_n_spectra: 3000
+  replicate_retrieval_repo: chrisagrams/ms2-peptide-replicate-retrieval  # MS2 replicate-retrieval benchmark probe (omit to skip)
+  out_dir: /eagle/UIC-HPC/cgrams/msdelta-runs

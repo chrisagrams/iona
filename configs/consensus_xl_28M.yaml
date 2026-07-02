@@ -1,0 +1,72 @@
+# XL on the CONSENSUS corpus, subsampled to MassIVE-KB size (~28.5M train
+# spectra) for an apples-to-apples comparison against massivekb_xl.yaml. The
+# training schedule here is IDENTICAL to massivekb_xl (bs 80 x4 = 320 global,
+# 90000 steps ≈ 1 epoch, same warmup/LR/precision) — the ONLY difference is the
+# dataset, so a wandb diff of the two runs isolates the corpus (consensus vs
+# MassIVE-KB) rather than confounding it with schedule/exposure.
+#
+# Data: the matched shuffled set built with
+#   qsub -v TARGET_TRAIN=28508636,OUT=/eagle/UIC-HPC/cgrams/msbench-datasets/consensus_match_shuffled_28M pbs/shuffle_consensus.sh
+# (global shuffle + peptide-disjoint val, train subsampled to ~28.5M). Read
+# LOCALLY from eagle — see pbs/consensus_xl_ddp.pbs. For the FULL-corpus
+# retrain (~109M, 340k steps) use configs/consensus_xl.yaml instead.
+model:
+  d_model: 1024
+  n_heads: 16
+  n_layers: 16
+  ffn_mult: 4
+  dropout: 0.1
+  max_peaks: 150
+  use_precursor: false
+  fourier_mz:
+    n_freqs: 64
+    f_min: 1.0e-2
+    f_max: 1.0e+3
+  fourier_int:
+    n_freqs: 16
+    f_min: 1.0e-2
+    f_max: 1.0e+2
+  delta_bias:
+    n_freqs: 64
+    per_head_hidden: 32
+    f_min: 1.0e-2
+    f_max: 1.0e+3
+    scale: 3.0
+    charge_dim: 0
+    n_charges: 8
+
+data:
+  # MassIVE-KB-sized shuffled consensus (TARGET_TRAIN=28508636 in shuffle_consensus.sh).
+  root: /eagle/UIC-HPC/cgrams/msbench-datasets/consensus_match_shuffled_28M/
+  n_val_files: 4          # the 4 consensus_shuf_val_* shards (they sort last)
+  intensity_threshold_frac: 0.01
+  top_n: 150
+  mask:
+    mask_ratio: 0.50
+
+train:
+  batch_size: 80          # per-GPU; global batch = 80 x 4 GPUs = 320
+  num_workers: 6          # x4 ranks = 24 loader workers (+4 main) < 32 cores
+  lr: 1.0e-4
+  warmup_steps: 2000
+  total_steps: 90000      # 90000 x 320 = 28.8M ≈ 1 epoch — SAME as massivekb_xl
+  weight_decay: 0.01
+  grad_clip: 1.0
+  precision: bf16
+  compile: false          # keep identical to massivekb_xl for the comparison
+  val_batches: 50
+  device: cuda
+  l1_lambda: 0.0
+  seed: 0
+
+log:
+  wandb_project: msdelta-consensus
+  wandb_run_name: consensus_xl_28M
+  log_every: 50
+  val_every: 2000
+  bias_curve_every: 5000
+  ckpt_every: 10000
+  probe_every: 5000
+  probe_n_spectra: 3000
+  replicate_retrieval_repo: chrisagrams/ms2-peptide-replicate-retrieval  # MS2 replicate-retrieval benchmark probe (omit to skip)
+  out_dir: /eagle/UIC-HPC/cgrams/msdelta-runs
