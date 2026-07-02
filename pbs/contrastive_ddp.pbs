@@ -1,0 +1,71 @@
+#!/bin/bash
+#PBS -N msdelta_contrastive
+#PBS -A FRAME-IDP
+#PBS -q preemptable
+#PBS -l select=1:system=polaris
+#PBS -l place=scatter
+#PBS -l walltime=12:00:00
+#PBS -l filesystems=home:eagle
+#PBS -j oe
+#PBS -o /home/cgrams/msdelta/pbs/logs/
+#
+# Contrastive POST-TRAINING (msdelta.train_contrastive) on one Polaris node with
+# 4-way DDP (one process per A100-40GB via torchrun). Loads a masked-pretrained
+# encoder (train.pretrained_ckpt in the config) and fine-tunes it with the
+# SupCon objective. Reads the shuffled shards LOCALLY from eagle; the HF cache is
+# used only for the inline replicate-retrieval probe.
+#
+# Config selected by env (override with `qsub -v`) — the matched pair:
+#   EXPERIMENTAL (default): configs/massivekb_xl_contrastive.yaml
+#   CONSENSUS:  qsub -v CFG=configs/consensus_xl_28M_contrastive.yaml pbs/contrastive_ddp.pbs
+#
+# Set train.pretrained_ckpt in the config first (both arms must use the SAME
+# pretrained encoder). 320 spectra/step × 30k steps = 9.6M ≈ 0.34 epoch; the
+# two-view + aux-KL forward makes each step ~2-3× a pretraining step.
+
+set -euo pipefail
+
+REPO=/home/cgrams/msdelta
+VENV=$REPO/.venv
+CFG=${CFG:-configs/massivekb_xl_contrastive.yaml}
+case "$CFG" in /*) ;; *) CFG="$REPO/$CFG" ;; esac
+TAG=$(basename "$CFG" .yaml)
+
+JOBID=${PBS_JOBID%%.*}
+JOBID=${JOBID:-local}
+RUN_NAME=${TAG}_${JOBID}
+LOGDIR=$REPO/pbs/logs/${JOBID}
+mkdir -p "$LOGDIR"
+
+cd "$REPO"
+echo "$(date -Is) job=$PBS_JOBID host=$(hostname) gpus=$(nvidia-smi -L | wc -l) run=$RUN_NAME cfg=$CFG"
+nvidia-smi -L | sed "s/^/  /"
+
+export OMP_NUM_THREADS=2
+export MKL_NUM_THREADS=2
+export OPENBLAS_NUM_THREADS=2
+
+# Fragmentation fix for the inline probe forwards (see train.py).
+export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
+
+# HF cache on eagle (probe benchmark only — training data is local).
+export HF_HOME=/eagle/UIC-HPC/cgrams/hf_cache
+export HF_HUB_OFFLINE=1
+
+# ALCF proxy for rank-0 wandb; keep loopback/cluster traffic off the proxy.
+export http_proxy=http://proxy.alcf.anl.gov:3128
+export https_proxy=http://proxy.alcf.anl.gov:3128
+export HTTP_PROXY=$http_proxy HTTPS_PROXY=$https_proxy
+export no_proxy=localhost,127.0.0.1,.alcf.anl.gov,.anl.gov
+export NO_PROXY=$no_proxy
+
+export WANDB_DIR=$LOGDIR
+export WANDB_RESUME=allow
+export WANDB_RUN_ID=$RUN_NAME
+
+exec "$VENV/bin/torchrun" \
+    --standalone --nnodes=1 --nproc_per_node=4 \
+    -m msdelta.train_contrastive \
+    --config "$CFG" \
+    --run-name "$RUN_NAME" \
+    >"$LOGDIR/${TAG}.out" 2>"$LOGDIR/${TAG}.err"

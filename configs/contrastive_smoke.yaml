@@ -1,0 +1,74 @@
+# Smoke test for the contrastive post-training loop end-to-end (tiny dims, few
+# steps, single process/CPU or 1 GPU). Point data.root at a small local parquet
+# shard dir with the standard schema (m/z, int, peptide_charge). No
+# pretrained_ckpt → trains the encoder from random init (fine for a smoke test).
+# Run: WANDB_MODE=disabled python -m msdelta.train_contrastive --config configs/contrastive_smoke.yaml
+model:
+  d_model: 64
+  n_heads: 4
+  n_layers: 2
+  ffn_mult: 2
+  dropout: 0.1
+  max_peaks: 150
+  use_precursor: false
+  fourier_mz:
+    n_freqs: 16
+    f_min: 1.0e-2
+    f_max: 1.0e+3
+  fourier_int:
+    n_freqs: 8
+    f_min: 1.0e-2
+    f_max: 1.0e+2
+  delta_bias:
+    n_freqs: 16
+    per_head_hidden: 8
+    f_min: 1.0e-2
+    f_max: 1.0e+3
+    scale: 3.0
+    charge_dim: 0
+    n_charges: 8
+
+data:
+  root: ./runs/smoke_data          # small local parquet shard dir
+  n_val_files: 1
+  intensity_threshold_frac: 0.01
+  top_n: 150
+  mask:
+    mask_ratio: 0.50               # only used when contrastive.lambda_kl > 0
+
+train:
+  batch_size: 8
+  num_workers: 0
+  lr: 1.0e-4
+  warmup_steps: 5
+  total_steps: 300
+  weight_decay: 0.01
+  grad_clip: 1.0
+  precision: fp32
+  compile: false
+  val_batches: 5
+  device: cpu
+  seed: 0
+
+contrastive:
+  mode: supcon
+  temperature: 0.07
+  proj_dim: 32
+  proj_hidden: 128
+  lambda_kl: 0.1                    # exercise the aux-KL forward path
+  augmentation:
+    peak_dropout_prob: 0.2
+    intensity_jitter_sigma: 0.2
+    subsample_min_frac: 0.6
+    mz_jitter_da: 0.0
+
+log:
+  wandb_project: msdelta-contrastive-smoke
+  wandb_run_name: contrastive_smoke
+  log_every: 20
+  val_every: 100
+  bias_curve_every: 100
+  ckpt_every: 1000
+  probe_every: 0                   # skip inline probes (no HF download) in the smoke test
+  probe_n_spectra: 200
+  out_dir: ./runs

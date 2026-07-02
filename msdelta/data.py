@@ -158,7 +158,10 @@ class ConsensusParquet(IterableDataset):
                     if mz_p.numel() == 0:
                         continue
                     pc = pc_col[int(i)].as_py()
-                    yield mz_p, li_p, pp, charge_index(pc), precursor_mz(pc)
+                    # 6th element = raw peptide_charge label; masked/pad collates
+                    # ignore extra tuple items, contrastive_collate uses it to
+                    # group same-peptide positives.
+                    yield mz_p, li_p, pp, charge_index(pc), precursor_mz(pc), pc
                 # Drop arrow table reference; GC reclaims ~263 MB before next rg.
                 del tbl, mz_col, int_col, pc_col
             epoch += 1
@@ -277,6 +280,88 @@ def mask_intensity_collate(
         "charge": charge,
         "precursor_mz": prec_mz,
     }
+
+
+def contrastive_collate(
+    batch: list[tuple],
+    aug_cfg,
+    mode: str = "supcon",
+    mask_cfg: MaskConfig | None = None,
+) -> dict[str, torch.Tensor]:
+    """Two-augmented-view collate for contrastive post-training.
+
+    Each of the B surviving spectra is turned into two independently augmented
+    views (`contrastive.augment`). Rows are stacked ``[A_0..A_{B-1},
+    B_0..B_{B-1}]`` so view A of spectrum ``i`` is row ``i`` and view B is row
+    ``i+B`` — the two are each other's positive.
+
+    ``label`` (2B,) drives the SupCon positive mask (same label = positive,
+    diagonal excluded). The *mode* is encoded entirely in how labels are built:
+      - ``supcon``  — label = per-`peptide_charge` id, so all same-peptide rows
+                      in the batch (across both views) are positives.
+      - ``infonce`` — label = spectrum index, so only the augmentation twin
+                      (rows i and i+B) is a positive (= NT-Xent / InfoNCE).
+    Unknown/empty labels always get a unique id (never a cross-positive).
+
+    ``mask_positions`` (2B, K_max) is added only when `mask_cfg` is given (i.e.
+    the aux-KL term is on); the trainer uses the view-A slice for the KL forward.
+    """
+    from .contrastive import augment  # local import avoids any import cycle
+
+    B = len(batch)
+    view_a, view_b, pcs = [], [], []
+    for item in batch:
+        mz, li, pp = item[0], item[1], item[2]
+        ch = int(item[3]) if len(item) > 3 else 0
+        pm = float(item[4]) if len(item) > 4 else 0.0
+        pc = item[5] if len(item) > 5 else ""
+        a = augment(mz, li, pp, aug_cfg)
+        b = augment(mz, li, pp, aug_cfg)
+        view_a.append((a[0], a[1], a[2], ch, pm))
+        view_b.append((b[0], b[1], b[2], ch, pm))
+        pcs.append(pc)
+
+    combined = view_a + view_b  # [A_0..A_{B-1}, B_0..B_{B-1}]
+    mz, log_int, intensity_prob, kpm, charge, prec_mz, Ks = _pad_batch(combined)
+
+    # Per-view label ids (see docstring). Tiled across the two views.
+    ids: list[int] = []
+    if mode == "infonce":
+        ids = list(range(B))  # each spectrum unique -> twin-only positive
+    else:  # supcon
+        lut: dict[str, int] = {}
+        next_id = 0
+        for pc in pcs:
+            if pc:
+                if pc not in lut:
+                    lut[pc] = next_id
+                    next_id += 1
+                ids.append(lut[pc])
+            else:  # unknown label -> unique id, positive to no one
+                ids.append(next_id)
+                next_id += 1
+    label = torch.tensor(ids + ids, dtype=torch.long)
+
+    out = {
+        "mz": mz,
+        "log_int": log_int,
+        "intensity_prob": intensity_prob,
+        "key_padding_mask": kpm,
+        "charge": charge,
+        "precursor_mz": prec_mz,
+        "label": label,
+    }
+    if mask_cfg is not None:
+        mask_positions = torch.zeros_like(kpm)
+        for b, K in enumerate(Ks):
+            if K == 0:
+                continue
+            n_mask = max(mask_cfg.min_masked, int(round(K * mask_cfg.mask_ratio)))
+            n_mask = min(n_mask, K)
+            idx = torch.randperm(K)[:n_mask]
+            mask_positions[b, idx] = True
+        out["mask_positions"] = mask_positions
+    return out
 
 
 def split_paths(root: str | Path, n_val: int) -> tuple[list[Path], list[Path]]:

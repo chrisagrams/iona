@@ -20,6 +20,7 @@ dependencies = [
 
 [project.scripts]
 msdelta-train = "msdelta.train:main"
+msdelta-train-contrastive = "msdelta.train_contrastive:main"
 msdelta-analyze = "msdelta.analyze:main"
 msdelta-probe = "msdelta.probe:main"
 msdelta-retrieval = "msdelta.retrieval:main"
