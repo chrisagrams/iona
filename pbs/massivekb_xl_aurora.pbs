@@ -2,7 +2,7 @@
 #PBS -N mkb_xl_aurora
 #PBS -A FRAME-IDP
 #PBS -q debug
-#PBS -l select=1:system=aurora
+#PBS -l select=1
 #PBS -l place=scatter
 #PBS -l walltime=01:00:00
 #PBS -l filesystems=home:flare
