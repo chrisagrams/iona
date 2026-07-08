@@ -322,20 +322,52 @@ def hf_split_paths(
     return train_paths, val_paths
 
 
+def local_subdir_paths(
+    root: str | Path,
+    train_split: str = "train",
+    val_split: str = "val",
+) -> tuple[list[Path], list[Path]]:
+    """Resolve (train, val) shards from a LOCAL directory laid out with
+    per-split subdirectories (``root/train/*.parquet``, ``root/val/*.parquet``).
+
+    This is the on-disk twin of ``hf_split_paths`` — same subdir layout, but
+    reads straight off a filesystem path (e.g. a staged copy on Flare) with no
+    ``snapshot_download`` and no network. Use for a HF-style dataset that's
+    already been downloaded locally.
+    """
+    root = Path(root)
+    train_paths = sorted((root / train_split).glob("*.parquet"))
+    val_paths = sorted((root / val_split).glob("*.parquet"))
+    if not train_paths:
+        raise ValueError(f"no parquet shards under '{train_split}/' in {root}")
+    if not val_paths:
+        raise ValueError(f"no parquet shards under '{val_split}/' in {root}")
+    return train_paths, val_paths
+
+
 def resolve_dataset_paths(dcfg: dict) -> tuple[list[Path], list[Path]]:
     """Return (train_paths, val_paths) from either a local parquet root or a
     Hugging Face dataset, selected by config.
 
     HF source  — set ``data.hf_repo`` (plus optional ``data.hf_train_split`` /
                  ``data.hf_val_split``, default ``train`` / ``val``).
-    Local source — set ``data.root`` and ``data.n_val_files`` (last N sorted
-                 shards become validation). This is the original behaviour and
-                 the default when ``hf_repo`` is absent.
+    Local subdir source — set ``data.root`` and ``data.local_subdirs: true`` to
+                 read ``root/train/*.parquet`` and ``root/val/*.parquet``
+                 directly (a downloaded HF-style dataset on local disk/Flare).
+    Local flat source — set ``data.root`` and ``data.n_val_files`` (last N
+                 sorted shards in ``root/*.parquet`` become validation). This is
+                 the original behaviour and the default.
     """
     if dcfg.get("hf_repo"):
         return hf_split_paths(
             dcfg["hf_repo"],
             train_split=dcfg.get("hf_train_split", "train"),
             val_split=dcfg.get("hf_val_split", "val"),
+        )
+    if dcfg.get("local_subdirs"):
+        return local_subdir_paths(
+            dcfg["root"],
+            train_split=dcfg.get("train_split", "train"),
+            val_split=dcfg.get("val_split", "val"),
         )
     return split_paths(dcfg["root"], dcfg["n_val_files"])

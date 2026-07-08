@@ -1,0 +1,76 @@
+# MassIVE-KB v1 — XL tier (d=1024, ~203M params) — AURORA / Intel XPU port.
+#
+# Purpose: reproduce the Polaris `massivekb_xl` run on Aurora's Intel Data
+# Center GPU Max (PVC) to check we get the same training dynamics on XPU as we
+# did on NVIDIA A100s. Architecture and hyperparameters are IDENTICAL to
+# configs/massivekb_xl.yaml — the only differences are:
+#   * data.root       → the Flare copy of the shuffled MassIVE-KB parquet
+#   * data.local_subdirs: true → read train/ + val/ subdirs directly (the HF
+#                       dataset layout as downloaded), no snapshot_download
+#   * train.device    → xpu
+#   * log.out_dir     → Flare msdelta-runs
+#   * total_steps     → SMOKE-CAPPED (200) for the 1 h debug-queue slot; the
+#                       full run restores 90000 (see comment below).
+#
+# One Aurora node = 6 PVC GPUs × 2 tiles = 12 XPU devices. This smoke uses
+# 12-way DDP (one rank per tile). Global batch = 80 × 12 = 960 spectra/step.
+# Launch: qsub pbs/massivekb_xl_aurora.pbs
+model:
+  d_model: 1024
+  n_heads: 16
+  n_layers: 16
+  ffn_mult: 4
+  dropout: 0.1
+  max_peaks: 150
+  use_precursor: false
+  fourier_mz:
+    n_freqs: 64
+    f_min: 1.0e-2
+    f_max: 1.0e+3
+  fourier_int:
+    n_freqs: 16
+    f_min: 1.0e-2
+    f_max: 1.0e+2
+  delta_bias:
+    n_freqs: 64
+    per_head_hidden: 32
+    f_min: 1.0e-2
+    f_max: 1.0e+3
+    scale: 3.0
+    charge_dim: 0
+    n_charges: 8
+
+data:
+  root: /flare/FRAME-IDP/cgrams/massive_kb_v1_shuffled
+  local_subdirs: true      # read root/train/*.parquet + root/val/*.parquet directly
+  n_val_files: 2           # unused in local_subdirs mode; kept for reference
+  intensity_threshold_frac: 0.01
+  top_n: 150
+  mask:
+    mask_ratio: 0.50
+
+train:
+  batch_size: 80          # per-XPU-tile; global = 80 × 12 tiles = 960
+  num_workers: 4          # ×12 ranks; keep modest, PVC nodes have 208 threads but share
+  lr: 1.0e-4
+  warmup_steps: 2000
+  total_steps: 200        # SMOKE CAP for 1 h debug. Full run: 90000 (matches Polaris)
+  weight_decay: 0.01
+  grad_clip: 1.0
+  precision: bf16
+  compile: false          # keep off for the smoke; parity check first
+  val_batches: 50
+  device: xpu
+  l1_lambda: 0.0
+  seed: 0                  # identical seed to Polaris run for parity comparison
+
+log:
+  wandb_project: msdelta-massivekb
+  wandb_run_name: massivekb_xl_aurora_xpu_smoke
+  log_every: 10           # frequent logging so the short smoke shows a curve
+  val_every: 100
+  bias_curve_every: 5000
+  ckpt_every: 100         # exercise checkpoint-to-Flare within the smoke
+  probe_every: 100
+  probe_n_spectra: 3000
+  out_dir: /flare/FRAME-IDP/cgrams/msdelta-runs

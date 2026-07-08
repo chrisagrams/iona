@@ -22,6 +22,7 @@ from torch.utils.data import DataLoader
 
 import wandb
 
+from . import accel
 from .data import (
     ConsensusParquet,
     MaskConfig,
@@ -67,17 +68,19 @@ def load_config(path: str | Path) -> dict[str, Any]:
 
 # ---------- distributed ----------
 
-def setup_distributed() -> tuple[int, int, int, bool]:
-    """Init DDP from torchrun env vars. Returns (rank, world_size, local_rank,
-    is_distributed). No-op (0, 1, 0, False) for a plain single-GPU launch."""
-    if os.environ.get("RANK") is None or os.environ.get("WORLD_SIZE") is None:
-        return 0, 1, 0, False
-    rank = int(os.environ["RANK"])
-    world_size = int(os.environ["WORLD_SIZE"])
-    local_rank = int(os.environ.get("LOCAL_RANK", 0))
-    torch.cuda.set_device(local_rank)
-    dist.init_process_group(backend="nccl", init_method="env://")
-    return rank, world_size, local_rank, True
+def setup_distributed() -> tuple[int, int, int, bool, str]:
+    """Init DDP from the launcher environment (torchrun on Polaris, mpiexec/PALS
+    on Aurora). Returns (rank, world_size, local_rank, is_distributed, family)
+    where family is the resolved accelerator ('cuda'/'xpu'/'cpu'). For a plain
+    single-process launch returns (0, 1, 0, False, <auto-detected family>)."""
+    env = accel.read_dist_env()
+    if env is None:
+        return 0, 1, 0, False, accel.resolve_accelerator()
+    rank, world_size, local_rank = env
+    family = accel.resolve_accelerator()
+    accel.set_device(family, local_rank)
+    dist.init_process_group(backend=accel.ddp_backend(family), init_method="env://")
+    return rank, world_size, local_rank, True, family
 
 
 class TrainModule(nn.Module):
@@ -237,13 +240,16 @@ def main(argv: list[str] | None = None) -> int:
     tcfg = cfg["train"]
     lcfg = cfg["log"]
 
-    # Distributed (torchrun) — no-op for a single-GPU launch.
-    rank, world_size, local_rank, is_dist = setup_distributed()
+    # Distributed — no-op for a single-process launch. `family` is the resolved
+    # accelerator (cuda on Polaris, xpu on Aurora), honouring train.device if set.
+    rank, world_size, local_rank, is_dist, family = setup_distributed()
     is_main = rank == 0
     if is_dist:
-        device = torch.device(f"cuda:{local_rank}")
+        device = torch.device(accel.device_str(family, local_rank))
     else:
-        device = torch.device(tcfg["device"])
+        # Single-process: honour an explicit train.device, else auto-detect.
+        family = accel.resolve_accelerator(tcfg.get("device"))
+        device = torch.device(accel.device_str(family, 0))
 
     def log0(*a, **k):
         if is_main:
@@ -257,7 +263,7 @@ def main(argv: list[str] | None = None) -> int:
     _random.seed(seed + rank)
     np.random.seed(seed + rank)
     torch.manual_seed(seed + rank)
-    torch.cuda.manual_seed_all(seed + rank)
+    accel.manual_seed_all(family, seed + rank)
     log0(f"[seed] {seed} (+rank) world_size={world_size}", flush=True)
 
     run_name = lcfg["wandb_run_name"] or time.strftime("%Y%m%d-%H%M%S")
@@ -446,8 +452,8 @@ def main(argv: list[str] | None = None) -> int:
             # blocks to the allocator first so the probe forwards get
             # contiguous room. Pair with PYTORCH_CUDA_ALLOC_CONF=
             # expandable_segments:True on the run for the fragmentation fix.
-            if device.type == "cuda":
-                torch.cuda.empty_cache()
+            if device.type in ("cuda", "xpu"):
+                accel.empty_cache(device.type)
             probe_metrics = run_all_probes(
                 encoder, probe_val_paths, device, probe_pp,
                 n_spectra=lcfg.get("probe_n_spectra", 3000),

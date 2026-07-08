@@ -1,0 +1,87 @@
+#!/bin/bash
+#PBS -N mkb_xl_aurora
+#PBS -A FRAME-IDP
+#PBS -q debug
+#PBS -l select=1:system=aurora
+#PBS -l place=scatter
+#PBS -l walltime=01:00:00
+#PBS -l filesystems=home:flare
+#PBS -j oe
+#PBS -o /home/cgrams/msdelta/pbs/logs/
+#
+# AURORA / Intel XPU smoke run of the MassIVE-KB XL model — the port twin of
+# pbs/massivekb_ddp.pbs (Polaris). ONE model, gradients all-reduced across all
+# 12 PVC tiles of a single Aurora node via mpiexec + oneCCL(xccl). Purpose:
+# confirm the architecture trains cleanly on Intel GPUs and compare dynamics to
+# the A100 run. total_steps is smoke-capped to 200 in the config for the 1 h
+# debug slot; raise to 90000 (and -q prod, longer walltime) for the full run.
+#
+# Pre-reqs: pbs/setup_venv_aurora.sh once; data staged at
+# /flare/FRAME-IDP/cgrams/massive_kb_v1_shuffled (train/ + val/ subdirs).
+# Launch: qsub pbs/massivekb_xl_aurora.pbs
+
+set -uo pipefail
+
+REPO=/home/cgrams/msdelta
+VENV=$REPO/.venv-aurora
+CFG=$REPO/configs/massivekb_xl_aurora.yaml
+
+JOBID=${PBS_JOBID%%.*}
+JOBID=${JOBID:-local}
+RUN_NAME=massivekb_xl_aurora_xpu_smoke_${JOBID}
+LOGDIR=$REPO/pbs/logs/${JOBID}
+mkdir -p "$LOGDIR"
+
+cd "$REPO"
+
+# ---- Aurora frameworks module: torch 2.10 with XPU + xccl ----
+module load frameworks/2025.3.1
+# The frameworks module sets CONDA_PREFIX to its env but a spack miniforge
+# shadows `python` on PATH — call the framework python explicitly.
+PY=$CONDA_PREFIX/bin/python
+
+# Layer our extra deps (wandb, pyarrow, etc.) on top of the framework torch.
+export PYTHONPATH=$VENV/lib/python3.12/site-packages:${PYTHONPATH:-}
+
+# ---- ranks / topology: 1 node × 12 PVC tiles ----
+NNODES=$(wc -l < "$PBS_NODEFILE")
+NRANKS_PER_NODE=12
+NTOTRANKS=$(( NNODES * NRANKS_PER_NODE ))
+
+# Tile-as-device (default in frameworks module, set explicitly for clarity):
+# the 12 tiles are exposed as 12 xpu devices.
+export ZE_FLAT_DEVICE_HIERARCHY=FLAT
+
+# ---- DDP rendezvous (single-node): rank-0 host is this node ----
+export MASTER_ADDR=$(hostname).hsn.cm.aurora.alcf.anl.gov
+export MASTER_PORT=2345
+
+# ---- CPU / oneCCL affinity (from ALCF PyTorch guide, 12 ranks/node) ----
+export CPU_BIND="verbose,list:4-7:8-11:12-15:16-19:20-23:24-27:56-59:60-63:64-67:68-71:72-75:76-79"
+export OMP_NUM_THREADS=4
+export MKL_NUM_THREADS=4
+
+# ---- ALCF proxy so rank-0 wandb can reach the internet ----
+export http_proxy=http://proxy.alcf.anl.gov:3128
+export https_proxy=http://proxy.alcf.anl.gov:3128
+export HTTP_PROXY=$http_proxy HTTPS_PROXY=$https_proxy
+export no_proxy=localhost,127.0.0.1,.alcf.anl.gov,.anl.gov
+export NO_PROXY=$no_proxy
+
+export WANDB_DIR=$LOGDIR
+export WANDB_RESUME=allow
+export WANDB_RUN_ID=$RUN_NAME
+
+echo "$(date -Is) job=$PBS_JOBID host=$(hostname) nodes=$NNODES ranks=$NTOTRANKS run=$RUN_NAME"
+$PY -c "import torch; print('torch', torch.__version__, 'xpu?', torch.xpu.is_available(), 'tiles', torch.xpu.device_count())" 2>&1 | sed 's/^/  /'
+
+# mpiexec spawns 12 ranks; train.py reads PMI_RANK/PMI_SIZE/PALS_LOCAL_RANKID
+# via msdelta.accel and initialises the xccl process group.
+mpiexec --np $NTOTRANKS --ppn $NRANKS_PER_NODE \
+    --cpu-bind "$CPU_BIND" \
+    $PY -m msdelta.train \
+    --config "$CFG" \
+    --run-name "$RUN_NAME" \
+    >"$LOGDIR/${RUN_NAME}.out" 2>"$LOGDIR/${RUN_NAME}.err"
+
+echo "$(date -Is) exit=$? — logs in $LOGDIR"

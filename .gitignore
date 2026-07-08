@@ -16,3 +16,6 @@ pbs/logs/
 
 # Benchmark data (published to HF, not tracked in git)
 data/
+
+# Aurora frameworks-layered venv
+.venv-aurora/
