@@ -10,8 +10,8 @@
 #PBS -o /home/cgrams/msdelta/pbs/logs/
 #
 # AURORA / Intel XPU smoke run of the MassIVE-KB XL model — the port twin of
-# pbs/massivekb_ddp.pbs (Polaris). ONE model, gradients all-reduced across all
-# 12 PVC tiles of a single Aurora node via mpiexec + oneCCL(xccl). Purpose:
+# pbs/massivekb_ddp.pbs (Polaris). ONE model, gradients all-reduced across
+# 4 PVC tiles of a single Aurora node via mpiexec + oneCCL(xccl). Purpose:
 # confirm the architecture trains cleanly on Intel GPUs and compare dynamics to
 # the A100 run. total_steps is smoke-capped to 200 in the config for the 1 h
 # debug slot; raise to 90000 (and -q prod, longer walltime) for the full run.
@@ -43,13 +43,13 @@ PY=$CONDA_PREFIX/bin/python
 # Layer our extra deps (wandb, pyarrow, etc.) on top of the framework torch.
 export PYTHONPATH=$VENV/lib/python3.12/site-packages:${PYTHONPATH:-}
 
-# ---- ranks / topology: 1 node × 12 PVC tiles ----
+# ---- ranks / topology: 1 node x 4 PVC tiles (match A100 320 global batch) ----
 NNODES=$(wc -l < "$PBS_NODEFILE")
-NRANKS_PER_NODE=12
+NRANKS_PER_NODE=4
 NTOTRANKS=$(( NNODES * NRANKS_PER_NODE ))
 
 # Tile-as-device (default in frameworks module, set explicitly for clarity):
-# the 12 tiles are exposed as 12 xpu devices.
+# tiles exposed as xpu devices; we use 4 of the 12.
 export ZE_FLAT_DEVICE_HIERARCHY=FLAT
 
 # ---- DDP rendezvous (single-node): rank-0 host is this node ----
@@ -57,7 +57,7 @@ export MASTER_ADDR=$(hostname).hsn.cm.aurora.alcf.anl.gov
 export MASTER_PORT=2345
 
 # ---- CPU / oneCCL affinity (from ALCF PyTorch guide, 12 ranks/node) ----
-export CPU_BIND="verbose,list:4-7:8-11:12-15:16-19:20-23:24-27:56-59:60-63:64-67:68-71:72-75:76-79"
+export CPU_BIND="verbose,list:4-7:8-11:12-15:16-19"
 export OMP_NUM_THREADS=4
 export MKL_NUM_THREADS=4
 
@@ -75,7 +75,7 @@ export WANDB_RUN_ID=$RUN_NAME
 echo "$(date -Is) job=$PBS_JOBID host=$(hostname) nodes=$NNODES ranks=$NTOTRANKS run=$RUN_NAME"
 $PY -c "import torch; print('torch', torch.__version__, 'xpu?', torch.xpu.is_available(), 'tiles', torch.xpu.device_count())" 2>&1 | sed 's/^/  /'
 
-# mpiexec spawns 12 ranks; train.py reads PMI_RANK/PMI_SIZE/PALS_LOCAL_RANKID
+# mpiexec spawns 4 ranks; train.py reads PMI_RANK/PMI_SIZE/PALS_LOCAL_RANKID
 # via msdelta.accel and initialises the xccl process group.
 mpiexec --np $NTOTRANKS --ppn $NRANKS_PER_NODE \
     --cpu-bind "$CPU_BIND" \
