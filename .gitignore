@@ -12,7 +12,8 @@ wheels/
 # Run artifacts
 runs/
 wandb/
-pbs/logs/
+pbs/logs/*
+!pbs/logs/.gitkeep
 
 # Benchmark data (published to HF, not tracked in git)
 data/
