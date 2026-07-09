@@ -35,7 +35,11 @@ mkdir -p "$LOGDIR"
 cd "$REPO"
 
 # ---- Aurora frameworks module: torch 2.10 with XPU + xccl ----
+# Lmod's init references the zsh-only var ZSH_EVAL_CONTEXT, which trips nounset
+# under bash. Disable -u only around the module load, then restore it.
+set +u
 module load frameworks/2025.3.1
+set -u
 # The frameworks module sets CONDA_PREFIX to its env but a spack miniforge
 # shadows `python` on PATH — call the framework python explicitly.
 PY=$CONDA_PREFIX/bin/python
