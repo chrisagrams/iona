@@ -96,6 +96,7 @@ class ConsensusParquet(IterableDataset):
         seed: int = 0,
         rank: int = 0,
         world_size: int = 1,
+        include_peptide: bool = False,
     ):
         super().__init__()
         self.paths: list[Path] = sorted(Path(p) for p in paths)
@@ -105,6 +106,10 @@ class ConsensusParquet(IterableDataset):
         self.mz_col = mz_col
         self.int_col = int_col
         self.seed = seed
+        # When True, each item carries the raw ``peptide_charge`` label as a 6th
+        # element (charge/precursor are otherwise derived from it and the string
+        # dropped). Off by default so the training collate path stays a 5-tuple.
+        self.include_peptide = include_peptide
         # DDP: shard row-group work units across ranks as well as workers, so
         # each of the world_size processes sees a disjoint slice of the data.
         self.rank = rank
@@ -158,7 +163,10 @@ class ConsensusParquet(IterableDataset):
                     if mz_p.numel() == 0:
                         continue
                     pc = pc_col[int(i)].as_py()
-                    yield mz_p, li_p, pp, charge_index(pc), precursor_mz(pc)
+                    if self.include_peptide:
+                        yield mz_p, li_p, pp, charge_index(pc), precursor_mz(pc), pc
+                    else:
+                        yield mz_p, li_p, pp, charge_index(pc), precursor_mz(pc)
                 # Drop arrow table reference; GC reclaims ~263 MB before next rg.
                 del tbl, mz_col, int_col, pc_col
             epoch += 1

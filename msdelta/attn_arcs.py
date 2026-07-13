@@ -40,7 +40,7 @@ from .data import (
     _PROTON,
     _RESIDUE_MASS,
     _WATER,
-    split_paths,
+    resolve_dataset_paths,
 )
 from .model import (
     DeltaBiasConfig,
@@ -201,8 +201,8 @@ def iter_val_spectra(cfg: dict[str, Any], seed: int = 7):
     )
     # This figure needs the raw peptide string (dropped by the collate fns), so
     # iterate the dataset directly rather than through a DataLoader.
-    _, val_paths = split_paths(dcfg["root"], dcfg["n_val_files"])
-    ds = ConsensusParquet(val_paths, preprocess=pp, seed=seed)
+    _, val_paths = resolve_dataset_paths(dcfg)
+    ds = ConsensusParquet(val_paths, preprocess=pp, seed=seed, include_peptide=True)
     for mz, li, pp_prob, ch, pm, pc in ds:
         yield Spectrum(
             mz=mz.numpy(), log_int=li.numpy(), intensity=pp_prob.numpy(),
@@ -390,6 +390,145 @@ def _panel_isotope(ax, spec, assign, attn_h, title):
     ax.set_title(title, fontsize=10, loc="left")
 
 
+def profile_heads(attn: np.ndarray, mz: np.ndarray, tol_res: float = 0.05,
+                  tol_iso: float = 0.01) -> list[dict[str, Any]]:
+    """Per-head chemical profile on one spectrum — the same res/iso masks
+    `pick_heads` scores, plus a neutral-loss mask, returned for every head so
+    the whole population (not just the two argmax heads) can be inspected."""
+    H, K, _ = attn.shape
+    dm = np.abs(mz[:, None] - mz[None, :])
+    res_vals = np.array(list(RESIDUES_AA20.values()))
+    iso_vals = np.array([_C13, _C13 / 2, _C13 / 3])
+    nl_vals = np.array([_WATER, 17.0265491])          # H2O, NH3 losses
+    res_mask = np.abs(dm[..., None] - res_vals).min(-1) < tol_res
+    iso_mask = np.abs(dm[..., None] - iso_vals).min(-1) < tol_iso
+    nl_mask = np.abs(dm[..., None] - nl_vals).min(-1) < tol_res
+    for m in (res_mask, iso_mask, nl_mask):
+        np.fill_diagonal(m, False)
+    out = []
+    for h in range(H):
+        tot = float(attn[h].sum()) or 1.0
+        res = attn[h][res_mask].sum() / tot
+        iso = attn[h][iso_mask].sum() / tot
+        nl = attn[h][nl_mask].sum() / tot
+        if iso >= res and iso >= nl and iso > 0.03:
+            tag, col = "isotope", _COL["iso"]
+        elif res >= nl and res > 0.05:
+            tag, col = "residue ladder", _COL["y"]
+        elif nl > 0.03:
+            tag, col = "neutral loss", "#d6813a"
+        else:
+            tag, col = "diffuse", _COL["noise"]
+        out.append(dict(h=h, res=res, iso=iso, nl=nl, tag=tag, col=col))
+    return out
+
+
+def render_all_heads(enc: MSEncoder, spec: Spectrum, device,
+                     out_path: Path) -> None:
+    """Small-multiples grid: every head's attention-weighted |Δm| profile on the
+    same spectrum, with residue / isotope / neutral-loss reference lines. Shows
+    that specialization is a *population* — several ladder heads, a family of
+    isotope heads split by charge, a modification head, neutral-loss heads."""
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    attn = spectrum_attention(enc, spec, device)
+    res_h, iso_h = pick_heads(attn, spec.mz)
+    prof = profile_heads(attn, spec.mz)
+    H = attn.shape[0]
+    mz = spec.mz
+    iu = np.triu_indices(len(mz), k=1)
+    dm_u = np.abs(mz[:, None] - mz[None, :])[iu]
+    xmax = 200.0
+    bins = np.linspace(0, xmax, 260)
+    res_vals = list(RESIDUES_AA20.values())
+
+    ncol = 4
+    nrow = int(np.ceil(H / ncol))
+    fig, axes = plt.subplots(nrow, ncol, figsize=(4 * ncol, 2.5 * nrow),
+                             squeeze=False)
+    for h in range(H):
+        ax = axes[h // ncol][h % ncol]
+        W = _sym(attn[h])[iu]
+        # residue comb (thin grey) + isotope / neutral-loss reference lines
+        for rv in res_vals:
+            ax.axvline(rv, color="#e3e3e3", lw=0.8, zorder=0)
+        for xv, c in ((_C13, _COL["iso"]), (_WATER, "#d6813a"),
+                      (17.0265491, "#d6813a")):
+            ax.axvline(xv, color=c, lw=0.8, ls=":", alpha=0.7, zorder=0)
+        ax.hist(dm_u, bins=bins, weights=W, color=prof[h]["col"], alpha=0.9)
+        sel = " ★" if h in (res_h, iso_h) else ""
+        ax.set_title(f"H{h}: {prof[h]['tag']}{sel}   "
+                     f"res {prof[h]['res']*100:.0f}%  iso {prof[h]['iso']*100:.0f}%",
+                     fontsize=9, loc="left",
+                     fontweight="bold" if sel else "normal", color=prof[h]["col"])
+        ax.set_xlim(0, xmax)
+        ax.set_yticks([])
+        ax.tick_params(labelsize=7)
+        for s in ("top", "right", "left"):
+            ax.spines[s].set_visible(False)
+        if h // ncol == nrow - 1:
+            ax.set_xlabel("|Δm| (Da)", fontsize=8)
+    for k in range(H, nrow * ncol):
+        axes[k // ncol][k % ncol].set_visible(False)
+
+    from matplotlib.lines import Line2D
+    handles = [Line2D([0], [0], color="#cccccc", lw=3, label="residue masses (comb)"),
+               Line2D([0], [0], color=_COL["iso"], lw=1.5, ls=":", label="¹³C spacing"),
+               Line2D([0], [0], color="#d6813a", lw=1.5, ls=":", label="H₂O / NH₃ loss")]
+    fig.legend(handles=handles, fontsize=8, loc="upper right", frameon=False, ncol=3)
+    fig.suptitle(
+        f"Per-head attention-weighted Δm profile  ·  {spec.peptide}  ·  "
+        f"★ = head shown in main figure", fontsize=12, fontweight="bold", x=0.01, ha="left")
+    fig.tight_layout(rect=[0, 0, 1, 0.96])
+    fig.savefig(out_path, dpi=140)
+    plt.close(fig)
+    ladders = [p["h"] for p in prof if p["tag"] == "residue ladder"]
+    isos = [p["h"] for p in prof if p["tag"] == "isotope"]
+    print(f"wrote {out_path}  (residue heads {ladders}, isotope heads {isos})")
+
+
+def render_head_arcs(enc: MSEncoder, spec: Spectrum, assign, series, ladder,
+                     device, out_path: Path, heads: list[int]) -> None:
+    """Draw the residue-ladder arc panel for each requested head, stacked — the
+    same arcs the main figure draws, but for heads you name (e.g. the several
+    ladder heads) instead of only the single argmax head. Arc width/opacity ∝
+    that head's attention on each consecutive-ion edge."""
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    from matplotlib.lines import Line2D
+
+    attn = spectrum_attention(enc, spec, device)
+    prof = {p["h"]: p for p in profile_heads(attn, spec.mz)}
+    H = attn.shape[0]
+    for h in heads:
+        if not 0 <= h < H:
+            raise SystemExit(f"head {h} out of range (model has {H} heads)")
+
+    nrows = len(heads)
+    fig, axes = plt.subplots(nrows, 1, figsize=(13, 3.4 * nrows), squeeze=False)
+    for r, h in enumerate(heads):
+        _panel_ladder(
+            axes[r][0], spec, assign, attn[h], series, ladder,
+            f"Head {h} ({prof[h]['tag']}) — res {prof[h]['res']*100:.0f}%  "
+            f"iso {prof[h]['iso']*100:.0f}%",
+        )
+    handles = [Line2D([0], [0], color=_COL["b"], lw=2, label="b-ion"),
+               Line2D([0], [0], color=_COL["y"], lw=2, label="y-ion"),
+               Line2D([0], [0], color=_COL["noise"], lw=2, label="unannotated")]
+    axes[0][0].legend(handles=handles, fontsize=8, loc="upper right",
+                      frameon=False, ncol=3)
+    fig.suptitle(
+        f"Residue-ladder attention arcs by head  ·  {spec.peptide}  ·  "
+        f"arc width/opacity ∝ attention weight", fontsize=12, fontweight="bold")
+    fig.tight_layout(rect=[0, 0, 1, 0.97])
+    fig.savefig(out_path, dpi=140)
+    plt.close(fig)
+    print(f"wrote {out_path}  (heads {heads})")
+
+
 def render(enc: MSEncoder, spec: Spectrum, assign, series, ladder,
            device, out_path: Path, control_enc: MSEncoder | None = None) -> None:
     import matplotlib
@@ -464,6 +603,12 @@ def main(argv: list[str] | None = None) -> int:
                    help="figure path (default: <ckpt-dir>/attn_arcs.png)")
     p.add_argument("--control", action="store_true",
                    help="add a random-init null row (trained vs random)")
+    p.add_argument("--all-heads", action="store_true",
+                   help="also write a small-multiples grid profiling every head "
+                        "(<ckpt-dir>/attn_arcs_all_heads.png)")
+    p.add_argument("--heads", type=str, default=None,
+                   help="comma-separated head indices; write their ladder arc "
+                        "panels stacked (<ckpt-dir>/attn_arcs_heads_<...>.png)")
     p.add_argument("--n-scan", type=int, default=800,
                    help="val spectra to scan for a clean ladder")
     p.add_argument("--min-run", type=int, default=4,
@@ -499,6 +644,14 @@ def main(argv: list[str] | None = None) -> int:
     control = build_random_encoder(cfg) if args.control else None
     out = args.out or (args.ckpt.parent / "attn_arcs.png")
     render(enc, spec, assign, series, ladder, device, out, control_enc=control)
+    if args.all_heads:
+        grid_out = out.with_name(out.stem + "_all_heads" + out.suffix)
+        render_all_heads(enc, spec, device, grid_out)
+    if args.heads:
+        heads = [int(x) for x in args.heads.split(",") if x.strip() != ""]
+        tag = "_".join(str(h) for h in heads)
+        heads_out = out.with_name(out.stem + f"_heads_{tag}" + out.suffix)
+        render_head_arcs(enc, spec, assign, series, ladder, device, heads_out, heads)
     return 0
 
 
