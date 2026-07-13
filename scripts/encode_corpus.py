@@ -249,6 +249,7 @@ def encode_one(
     batch_size: int,
     num_workers: int,
     fp16: bool,
+    compute_dtype: str = "fp32",
 ) -> dict:
     enc, cfg, step = load_encoder(ckpt)
     enc.to(device).eval()
@@ -268,6 +269,11 @@ def encode_one(
     n_done = 0
     t0 = time.monotonic()
     last_print = t0
+    # Optional autocast forward. The model was TRAINED under bf16 autocast
+    # (train.precision=bf16) with fp32 master weights, so a bf16 forward at
+    # inference matches the training regime and unlocks the A6000 tensor cores.
+    use_autocast = compute_dtype in ("bf16", "fp16")
+    ac_dtype = torch.bfloat16 if compute_dtype == "bf16" else torch.float16
     for mz, log_int, kpm, charge, prec, grow in loader:
         mz = mz.to(device, non_blocking=True)
         log_int = log_int.to(device, non_blocking=True)
@@ -275,7 +281,8 @@ def encode_one(
         charge = charge.to(device, non_blocking=True)
         prec = prec.to(device, non_blocking=True)
 
-        tok = enc(mz, log_int, kpm, charge=charge, precursor_mz=prec)
+        with torch.autocast(device_type=device.type, dtype=ac_dtype, enabled=use_autocast):
+            tok = enc(mz, log_int, kpm, charge=charge, precursor_mz=prec)
         pooled = _pool(tok, ~kpm).to(torch.float32).cpu().numpy()
 
         idx = grow.numpy()
@@ -379,6 +386,9 @@ def main(argv=None) -> int:
                    help="correctness check (old embed_model vs new path) instead of encoding")
     p.add_argument("--verify-n", type=int, default=2000)
     p.add_argument("--skip-metadata", action="store_true")
+    p.add_argument("--compute-dtype", choices=["fp32", "bf16", "fp16"], default="fp32",
+                   help="autocast dtype for the forward pass (model trained bf16). "
+                        "fp32=exact reference; bf16 matches training + uses tensor cores")
     p.add_argument("--device", type=str, default="cuda" if torch.cuda.is_available() else "cpu")
     args = p.parse_args(argv)
 
@@ -408,7 +418,8 @@ def main(argv=None) -> int:
     for ckpt in args.ckpt:
         print(f"\n=== encoding {ckpt} ===")
         res = encode_one(ckpt, paths, args.out_dir, device, args.limit,
-                         args.batch_size, args.num_workers, args.fp16)
+                         args.batch_size, args.num_workers, args.fp16,
+                         compute_dtype=args.compute_dtype)
         results.append(res)
 
     print("\n=== summary ===")
