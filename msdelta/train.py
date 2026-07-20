@@ -187,7 +187,7 @@ def run_validation(
 ) -> dict[str, float]:
     encoder.eval()
     heads.eval()
-    sums = {"kl": 0.0, "ce": 0.0, "h_p": 0.0}
+    sums = {"kl": 0.0}
     n = 0
     with torch.no_grad():
         for i, batch in enumerate(val_loader):
@@ -202,8 +202,6 @@ def run_validation(
                                  charge=batch.get("charge"), precursor_mz=batch.get("precursor_mz"))
             loss, parts = heads.loss(tokens, batch["intensity_prob"], batch["mask_positions"])
             sums["kl"]  += float(parts["kl"])
-            sums["ce"]  += float(parts["ce"])
-            sums["h_p"] += float(parts["h_p"])
             n += 1
     encoder.train()
     heads.train()
@@ -396,17 +394,9 @@ def main(argv: list[str] | None = None) -> int:
         # Logging (rank 0 only; all ranks still reset their running counters)
         if is_main and step % lcfg["log_every"] == 0:
             lr = optimizer.param_groups[0]["lr"]
-            # KL "predict-uniform" baseline: log(K_masked) − H(p), averaged over
-            # rows. Reports the maximum KL the model can shed by just learning
-            # the marginal — anything above this is the model finding structure.
-            n_masked_avg = float(batch["mask_positions"].sum(dim=-1).float().clamp_min(1).mean())
-            kl_baseline = math.log(n_masked_avg) - float(parts["h_p"])
             wandb_log = {
                 "train/loss": running_loss / max(1, running_n),
                 "train/kl":  float(parts["kl"]),
-                "train/ce":  float(parts["ce"]),
-                "train/h_p": float(parts["h_p"]),
-                "train/kl_baseline": kl_baseline,
                 "train/bias_l1": float(bias_l1),
                 "train/grad_norm_total": gn_total,
                 "train/grad_norm_delta_bias": gn_bias,
@@ -421,7 +411,7 @@ def main(argv: list[str] | None = None) -> int:
             wandb.log(wandb_log, step=step)
             print(
                 f"step {step:>6} loss {wandb_log['train/loss']:.4f} "
-                f"kl {wandb_log['train/kl']:.4f} ce {wandb_log['train/ce']:.4f} h_p {wandb_log['train/h_p']:.4f} "
+                f"kl {wandb_log['train/kl']:.4f} "
                 f"|g| {gn_total:.3f} |g_bias| {gn_bias:.3f} lr {lr:.2e}",
                 flush=True,
             )

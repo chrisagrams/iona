@@ -362,7 +362,7 @@ class IntensityHead(nn.Module):
         """KL(p || q) on masked positions, batch-mean."""
         if not mask_positions.any():
             zero = tokens.new_zeros(())
-            return zero, {"kl": zero, "ce": zero, "h_p": zero}
+            return zero, {"kl": zero}
 
         logits = self.head(tokens.float()).squeeze(-1)              # (B, K)
         m = mask_positions
@@ -384,12 +384,4 @@ class IntensityHead(nn.Module):
         # (The default 'mean' divides by B·K which is wrong for variable K.)
         kl = F.kl_div(log_q, p, reduction="batchmean")
 
-        with torch.no_grad():
-            # CE = -Σ p log q, H(p) = -Σ p log p, so KL = CE − H(p).
-            # Logging both helps separate "model is bad" from "target is
-            # already nearly uniform" (i.e. distinguishes "no signal in the
-            # data" from "model isn't using the signal").
-            ce  = -(p * log_q).sum(dim=-1).mean()
-            h_p = -(p * p.add(1e-12).log()).sum(dim=-1).mean()
-
-        return kl, {"kl": kl.detach(), "ce": ce, "h_p": h_p}
+        return kl, {"kl": kl.detach()}
