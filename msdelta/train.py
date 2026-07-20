@@ -40,7 +40,7 @@ from .probe import run_all_probes
 from .analyze import alignment_metrics
 from .retrieval import retrieval_inline_metrics
 from .replicate_retrieval import replicate_retrieval_inline_metrics
-from .viz import attention_entropy_per_head, render_bias_panels
+from .viz import AttentionRecorder, attention_entropy_per_head, render_bias_panels
 
 
 # ---------- config ----------
@@ -57,6 +57,7 @@ def build_model_config(d: dict[str, Any]) -> ModelConfig:
         fourier_int=FourierConfig(**d["fourier_int"]),
         delta_bias=DeltaBiasConfig(**d["delta_bias"]),
         use_precursor=d.get("use_precursor", False),
+        n_charges=d.get("n_charges", 8),
     )
 
 
@@ -359,20 +360,13 @@ def main(argv: list[str] | None = None) -> int:
             continue
         batch = to_device(batch, device)
 
-        # Save attention once just before bias-curve renders so we can also
+        # Record attention once just before bias-curve renders so we can also
         # log per-head attention entropy at the same cadence.
-        save_attn_this_step = (step % lcfg["bias_curve_every"] == 0)
-        encoder.set_save_attn(save_attn_this_step)
-
-        with autocast_ctx:
-            loss, parts = train_module(batch)
-        # L1 sparsity penalty on the bias curve (λ=0 → no-op, reproduces denoise baseline).
-        l1_lambda = tcfg.get("l1_lambda", 0.0)
-        if l1_lambda > 0:
-            bias_l1 = encoder.bias_module.l1_penalty()
-            loss = loss + l1_lambda * bias_l1
-        else:
-            bias_l1 = torch.zeros((), device=device)
+        record_attn = (step % lcfg["bias_curve_every"] == 0)
+        recorder = AttentionRecorder(encoder.blocks) if record_attn else None
+        with recorder if recorder is not None else nullcontext():
+            with autocast_ctx:
+                loss, parts = train_module(batch)
 
         optimizer.zero_grad(set_to_none=True)
         loss.backward()
@@ -385,11 +379,7 @@ def main(argv: list[str] | None = None) -> int:
         running_loss += float(loss)
         running_n += 1
 
-        if save_attn_this_step:
-            ent = attention_entropy_per_head(encoder.blocks)
-            encoder.set_save_attn(False)
-        else:
-            ent = None
+        ent = attention_entropy_per_head(recorder.attn) if recorder is not None else None
 
         # Logging (rank 0 only; all ranks still reset their running counters)
         if is_main and step % lcfg["log_every"] == 0:
@@ -397,7 +387,6 @@ def main(argv: list[str] | None = None) -> int:
             wandb_log = {
                 "train/loss": running_loss / max(1, running_n),
                 "train/kl":  float(parts["kl"]),
-                "train/bias_l1": float(bias_l1),
                 "train/grad_norm_total": gn_total,
                 "train/grad_norm_delta_bias": gn_bias,
                 "train/lr": lr,

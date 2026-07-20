@@ -1,7 +1,6 @@
 """Peak-token transformer with learned per-head Δm/z attention bias + MPM heads."""
 from __future__ import annotations
 
-import math
 from dataclasses import dataclass, field
 
 import torch
@@ -34,13 +33,6 @@ class DeltaBiasConfig:
     # neither can steamroll the other — prevents the "bias dominates
     # content" runaway (high-level plan §6.3).
     scale: float = 3.0
-    # v10: condition the bias on precursor charge. A learned charge embedding
-    # adds a per-head term in the bias hidden layer, so each head can give a
-    # charge-specific response (¹³C peak at 0.50 Da for z=2, 0.33 for z=3, …)
-    # instead of smearing all spacings into one curve. Default 0 = OFF (= v9,
-    # and keeps v9 checkpoints loadable); v10 configs set charge_dim: 16.
-    charge_dim: int = 0
-    n_charges: int = 8
 
 
 @dataclass
@@ -59,6 +51,9 @@ class ModelConfig:
     # m/z-free tokens leave (fragment_mz_r2 0.89). Default False = v9 (and
     # keeps v9 checkpoints loadable); v10 configs set use_precursor: true.
     use_precursor: bool = False
+    # Charge-embedding vocabulary size (index 0 = unknown, 1..7 = z); used by
+    # the precursor anchor token's charge embedding when use_precursor is set.
+    n_charges: int = 8
 
 
 class PeakEmbed(nn.Module):
@@ -99,7 +94,7 @@ class PrecursorEmbed(nn.Module):
     def __init__(self, cfg: ModelConfig, charge_dim: int = 16):
         super().__init__()
         self.ff_mz = FourierFeatures(cfg.fourier_mz.n_freqs, cfg.fourier_mz.f_min, cfg.fourier_mz.f_max)
-        self.charge_emb = nn.Embedding(cfg.delta_bias.n_charges, charge_dim)
+        self.charge_emb = nn.Embedding(cfg.n_charges, charge_dim)
         nn.init.normal_(self.charge_emb.weight, std=0.02)
         self.mlp = nn.Sequential(
             nn.Linear(self.ff_mz.out_dim + charge_dim, cfg.d_model),
@@ -116,12 +111,21 @@ class PrecursorEmbed(nn.Module):
 class DeltaMZBias(nn.Module):
     """Learned per-head additive attention bias from signed Δm/z.
 
-    Each head has its OWN independent MLP (no parameter sharing across
-    heads). Implemented as stacked per-head Parameter tensors with einsum
-    for efficient batched compute. Decoupling the gradient pools lets
-    heads specialize on different Δm regions instead of all collapsing
-    to whichever single feature dominates the data (e.g., suppression of
-    small-Δm near-duplicate peaks).
+    The bias is H independent 2-layer MLPs of a single scalar (Δm/z, lifted
+    through log-spaced Fourier features), one per attention head, bounded to
+    ±scale by a tanh. Decoupling the heads lets each specialize on a
+    different Δm region instead of all collapsing onto whichever feature
+    dominates the data (e.g. suppression of small-Δm near-duplicate peaks).
+
+    "H independent MLPs sharing one input" needs no special machinery:
+      * Layer 1 (shared Fourier features → per-head hidden) is a plain
+        ``Linear(in_dim, H*D_h)`` whose outputs we simply *view* as
+        ``(H, D_h)`` — every Linear output unit is already an independent
+        function of the whole input, which is exactly per-head independence.
+      * Layer 2 (per-head hidden → per-head scalar) is a per-head weighted
+        sum over the hidden dim: ``(h * w2).sum(-1) + b2``.
+    ``forward`` (the Δm matrix) and ``evaluate`` (a 1-D grid) both route
+    through :meth:`_curve`, so the whole architecture lives in one place.
     """
 
     def __init__(self, n_heads: int, cfg: DeltaBiasConfig):
@@ -130,78 +134,45 @@ class DeltaMZBias(nn.Module):
         self.n_heads = n_heads
         self.per_head_hidden = cfg.per_head_hidden
         self.scale = cfg.scale
-        self.charge_dim = cfg.charge_dim
 
-        in_dim = self.ff.out_dim
         H, D_h = n_heads, cfg.per_head_hidden
 
-        # Per-head first layer: 8 separate Linear(in_dim, per_head_hidden).
-        self.w1 = nn.Parameter(torch.empty(H, in_dim, D_h))
-        self.b1 = nn.Parameter(torch.zeros(H, D_h))
-        # Per-head output projection: 8 separate Linear(per_head_hidden, 1).
-        self.w2 = nn.Parameter(torch.zeros(H, D_h))     # zero-init → bias starts at 0
+        # Layer 1: one Linear whose H*D_h outputs we view as H per-head blocks.
+        # nn.Linear's default Kaiming-uniform init matches the old per-head
+        # init exactly (fan_in is in_dim in both cases).
+        self.fc1 = nn.Linear(self.ff.out_dim, H * D_h)
+        # Layer 2: per-head readout (D_h → scalar), applied as a weighted sum.
+        # Zero-init so every head's bias starts at exactly 0.
+        self.w2 = nn.Parameter(torch.zeros(H, D_h))
         self.b2 = nn.Parameter(torch.zeros(H))
-
-        # Init each head's first layer the same way nn.Linear does (Kaiming).
-        for h in range(H):
-            nn.init.kaiming_uniform_(self.w1[h], a=math.sqrt(5))
-        bound = 1 / math.sqrt(in_dim)
-        nn.init.uniform_(self.b1, -bound, bound)
-
-        # Charge conditioning: per-charge embedding → per-head additive term in
-        # the hidden layer. w1_charge zero-init so the model starts at the v9
-        # (charge-agnostic) bias and *learns* charge-dependence.
-        if self.charge_dim > 0:
-            self.charge_emb = nn.Embedding(cfg.n_charges, cfg.charge_dim)
-            nn.init.normal_(self.charge_emb.weight, std=0.02)
-            self.w1_charge = nn.Parameter(torch.zeros(H, cfg.charge_dim, D_h))
 
     def _bound(self, out: Tensor) -> Tensor:
         # Bound to ±scale logits so the bias can't steamroll the content term.
         return self.scale * torch.tanh(out / self.scale)
 
-    def forward(self, mz: Tensor, charge: Tensor | None = None) -> Tensor:
-        """mz: (B, K); charge: (B,) long → bias: (B, n_heads, K, K)."""
-        dm = mz.unsqueeze(-1) - mz.unsqueeze(-2)              # (B, K, K), signed
-        feats = self.ff(dm)                                   # (B, K, K, ff_dim)
-        h = torch.einsum("bijd,hde->bijhe", feats, self.w1)   # (B, K, K, H, D_h)
-        if self.charge_dim > 0 and charge is not None:
-            ce = self.charge_emb(charge)                      # (B, charge_dim)
-            h_ch = torch.einsum("bc,hce->bhe", ce, self.w1_charge)  # (B, H, D_h)
-            h = h + h_ch[:, None, None]                       # broadcast over (i, j)
-        h = F.gelu(h + self.b1)
-        out = torch.einsum("bijhe,he->bijh", h, self.w2) + self.b2
-        out = self._bound(out)
-        return out.permute(0, 3, 1, 2).contiguous()           # (B, H, K, K)
+    def _curve(self, feats: Tensor) -> Tensor:
+        """feats: (..., ff_dim) → bounded per-head bias (..., H).
 
-    def evaluate(self, dm_grid: Tensor, charge: int = 0) -> Tensor:
-        """Evaluate per-head bias on a 1-D Δm grid at a given precursor charge.
+        The whole bias architecture. `feats` may carry any leading dims (the
+        (B, K, K) Δm matrix in `forward`, a flat (N,) grid in `evaluate`).
+        """
+        h = self.fc1(feats).unflatten(-1, (self.n_heads, self.per_head_hidden))  # (..., H, D_h)
+        h = F.gelu(h)
+        out = (h * self.w2).sum(-1) + self.b2                                    # (..., H)
+        return self._bound(out)
+
+    def forward(self, mz: Tensor) -> Tensor:
+        """mz: (B, K) → bias: (B, n_heads, K, K)."""
+        dm = mz.unsqueeze(-1) - mz.unsqueeze(-2)             # (B, K, K), signed
+        curve = self._curve(self.ff(dm))                     # (B, K, K, H)
+        return curve.permute(0, 3, 1, 2).contiguous()        # (B, H, K, K)
+
+    def evaluate(self, dm_grid: Tensor) -> Tensor:
+        """Evaluate per-head bias on a 1-D Δm grid.
 
         dm_grid: (N,) → (N, n_heads). Bounded bias (what attention sees).
         """
-        feats = self.ff(dm_grid)                              # (N, ff_dim)
-        h = torch.einsum("nd,hde->nhe", feats, self.w1)       # (N, H, D_h)
-        if self.charge_dim > 0:
-            ce = self.charge_emb(torch.tensor(charge, device=self.w1.device))  # (charge_dim,)
-            h = h + torch.einsum("c,hce->he", ce, self.w1_charge)              # (H, D_h)
-        h = F.gelu(h + self.b1)
-        out = torch.einsum("nhe,he->nh", h, self.w2) + self.b2
-        return self._bound(out)                               # (N, H)
-
-    def l1_penalty(self, lo: float = -200.0, hi: float = 200.0, n: int = 4001) -> Tensor:
-        """Mean |bias| over a uniform Δm grid, for an L1 sparsity penalty.
-
-        Data-independent — penalizes the *shape* of the learned bias curve
-        uniformly over Δm, so the broad locality bump (wide → lots of area)
-        and the noise floor (everywhere) are taxed while a narrow chemistry
-        spike costs almost nothing. Added to the training loss as
-        λ · l1_penalty() to push the bias toward a few sharp spikes.
-        """
-        grid = torch.linspace(lo, hi, n, device=self.w1.device, dtype=self.w1.dtype)
-        if self.charge_dim > 0:
-            # average over the common charges so all charge-conditioned curves are penalized
-            return torch.stack([self.evaluate(grid, z).abs().mean() for z in (1, 2, 3)]).mean()
-        return self.evaluate(grid).abs().mean()
+        return self._curve(self.ff(dm_grid))                 # (N, H)
 
 
 class BiasedMHA(nn.Module):
@@ -212,18 +183,10 @@ class BiasedMHA(nn.Module):
         assert d_model % n_heads == 0
         self.n_heads = n_heads
         self.d_head = d_model // n_heads
-        self.scale = 1.0 / math.sqrt(self.d_head)
         self.qkv = nn.Linear(d_model, 3 * d_model, bias=True)
         self.out = nn.Linear(d_model, d_model, bias=True)
         self.attn_dropout = dropout
         self.proj_dropout = nn.Dropout(dropout)
-        self._save_attn = False
-        self.last_attn: Tensor | None = None  # (B, H, K, K), no grad
-
-    def set_save_attn(self, save: bool) -> None:
-        self._save_attn = save
-        if not save:
-            self.last_attn = None
 
     def forward(self, x: Tensor, bias: Tensor, key_padding_mask: Tensor) -> Tensor:
         """x: (B, K, D); bias: (B, H, K, K); key_padding_mask: (B, K) True=pad."""
@@ -234,19 +197,14 @@ class BiasedMHA(nn.Module):
         k = k.transpose(1, 2)
         v = v.transpose(1, 2)
 
-        logits = torch.matmul(q, k.transpose(-1, -2)) * self.scale  # (B, H, K, K)
-        logits = logits + bias
+        # Fold key padding into the additive bias: one float mask for SDPA.
+        attn_mask = bias.masked_fill(key_padding_mask[:, None, None, :], float("-inf"))
 
-        # Mask out keys that are padding. mask: (B, 1, 1, K)
-        mask = key_padding_mask[:, None, None, :]
-        logits = logits.masked_fill(mask, float("-inf"))
-
-        attn = F.softmax(logits, dim=-1)
-        if self._save_attn:
-            self.last_attn = attn.detach()
-        attn = F.dropout(attn, p=self.attn_dropout, training=self.training)
-
-        out = torch.matmul(attn, v)  # (B, H, K, d_head)
+        out = F.scaled_dot_product_attention(
+            q, k, v,
+            attn_mask=attn_mask,
+            dropout_p=self.attn_dropout if self.training else 0.0,
+        )
         out = out.transpose(1, 2).reshape(B, K, -1)
         return self.proj_dropout(self.out(out))
 
@@ -308,7 +266,7 @@ class MSEncoder(nn.Module):
             key_padding_mask = torch.cat(
                 [torch.zeros(B, 1, dtype=torch.bool, device=mz.device), key_padding_mask], dim=1)
 
-        bias = self.bias_module(mz, charge)  # (B, H, K(+1), K(+1)) — the only place m/z enters
+        bias = self.bias_module(mz)  # (B, H, K(+1), K(+1)) — the only place m/z enters
         # Zero the Δm bias on any pair touching a padded position so the
         # zero-padding sentinel doesn't pollute the bias gradient.
         real = ~key_padding_mask                                       # (B, K)
@@ -326,10 +284,6 @@ class MSEncoder(nn.Module):
         if prepended:
             tokens = tokens[:, 1:]   # drop the precursor; return fragment tokens (B, K, D)
         return tokens
-
-    def set_save_attn(self, save: bool) -> None:
-        for blk in self.blocks:
-            blk.attn.set_save_attn(save)
 
 
 class IntensityHead(nn.Module):

@@ -37,7 +37,7 @@ from .data import (
     split_paths,
 )
 from .model import DeltaBiasConfig, FourierConfig, ModelConfig, MSEncoder
-from .viz import ISOTOPES, NEUTRAL_LOSSES, RESIDUES_AA20
+from .viz import ISOTOPES, NEUTRAL_LOSSES, RESIDUES_AA20, AttentionRecorder
 
 
 # ---------- model loading ----------
@@ -52,6 +52,7 @@ def load_encoder(ckpt_path: str | Path) -> tuple[MSEncoder, dict[str, Any], int]
         fourier_int=FourierConfig(**d["fourier_int"]),
         delta_bias=DeltaBiasConfig(**d["delta_bias"]),
         use_precursor=d.get("use_precursor", False),
+        n_charges=d.get("n_charges", 8),
     )
     enc = MSEncoder(mcfg)
     enc.load_state_dict(ckpt["encoder"])
@@ -87,12 +88,12 @@ class RangeSpec:
 
 
 @torch.no_grad()
-def _eval_curves(enc: MSEncoder, lo: float, hi: float, step: float, charge: int = 2):
+def _eval_curves(enc: MSEncoder, lo: float, hi: float, step: float):
     # Build the grid on the bias module's device so this works both for a
     # CPU-loaded checkpoint (CLI) and the live GPU encoder (inline probe).
     dev = next(enc.bias_module.parameters()).device
     grid = torch.arange(lo, hi + step / 2, step, dtype=torch.float32, device=dev)
-    curves = enc.bias_module.evaluate(grid, charge).cpu().numpy()  # (N, H); charge ignored if charge_dim=0
+    curves = enc.bias_module.evaluate(grid).cpu().numpy()  # (N, H)
     return grid.cpu().numpy(), curves
 
 
@@ -322,7 +323,6 @@ def functional_probe(
 ) -> dict[str, np.ndarray]:
     """Histogram attention mass vs Δm, density-normalized, per head."""
     enc.to(device).eval()
-    enc.set_save_attn(True)
     H = enc.cfg.n_heads
     n_layers = enc.cfg.n_layers
     edges = torch.linspace(spec.lo, spec.hi, spec.n_bins + 1, device=device)
@@ -338,8 +338,9 @@ def functional_probe(
             continue
         batch = {k: v.to(device) for k, v in batch.items()}
         mz = batch["mz"]
-        enc(mz, batch["log_int"], batch["key_padding_mask"],
-            charge=batch.get("charge"), precursor_mz=batch.get("precursor_mz"))  # populates last_attn
+        with AttentionRecorder(enc.blocks) as rec:
+            enc(mz, batch["log_int"], batch["key_padding_mask"],
+                charge=batch.get("charge"), precursor_mz=batch.get("precursor_mz"))
 
         dm = mz.unsqueeze(-1) - mz.unsqueeze(-2)              # (B,K,K)
         kpm = batch["key_padding_mask"]
@@ -351,15 +352,13 @@ def functional_probe(
         idx_flat = idx[in_range]
 
         pair_cnt.scatter_add_(0, idx_flat, torch.ones_like(idx_flat, dtype=torch.float))
-        for blk in enc.blocks:
-            attn = blk.attn.last_attn  # (B,H,Kp,Kp); Kp=K+1 if a precursor token was prepended
+        for attn in rec.attn:  # (B,H,Kp,Kp); Kp=K+1 if a precursor token was prepended
             if attn.size(-1) == K + 1:
                 attn = attn[:, :, 1:, 1:]  # drop the precursor row/col → fragment-fragment (B,H,K,K)
             for h in range(H):
                 attn_sum[h].scatter_add_(0, idx_flat, attn[:, h][in_range].float())
         used += 1
 
-    enc.set_save_attn(False)
     attn_sum_np = attn_sum.cpu().numpy()
     pair_cnt_np = pair_cnt.cpu().numpy()
     # mean attention per (pair, layer) at each Δm
@@ -375,7 +374,7 @@ def report_probe(enc: MSEncoder, probe: dict[str, np.ndarray], spec: ProbeSpec,
     mean_attn = probe["mean_attn"]            # (H, n_bins)
     pair_cnt = probe["pair_cnt"]
     dev = next(enc.bias_module.parameters()).device
-    bias = enc.bias_module.evaluate(torch.from_numpy(centers).float().to(dev), 2).detach().cpu().numpy()
+    bias = enc.bias_module.evaluate(torch.from_numpy(centers).float().to(dev)).detach().cpu().numpy()
 
     ok = pair_cnt >= min_pairs  # only correlate where we have enough pairs
     print(f"\n=== PROBE {spec.name} [{spec.lo}, {spec.hi}] Da, {spec.n_bins} bins, "
@@ -405,7 +404,7 @@ def plot_probe(enc: MSEncoder, probe: dict[str, np.ndarray], spec: ProbeSpec,
     centers = probe["centers"]
     mean_attn = probe["mean_attn"]
     dev = next(enc.bias_module.parameters()).device
-    bias = enc.bias_module.evaluate(torch.from_numpy(centers).float().to(dev), 2).detach().cpu().numpy()
+    bias = enc.bias_module.evaluate(torch.from_numpy(centers).float().to(dev)).detach().cpu().numpy()
     H = mean_attn.shape[0]
     ncols = 4
     nrows = (H + ncols - 1) // ncols

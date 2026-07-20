@@ -1,11 +1,15 @@
 """Bias-curve visualization for periodic logging."""
 from __future__ import annotations
 
+import math
+
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
 import torch
+import torch.nn.functional as F
+from torch import Tensor
 
 from .model import DeltaMZBias
 
@@ -114,16 +118,56 @@ def render_bias_panels(bias_module: DeltaMZBias, step: int) -> dict[str, plt.Fig
     return {"bias/fine": fine, "bias/coarse": coarse}
 
 
-def attention_entropy_per_head(blocks) -> np.ndarray | None:
-    """Average attention entropy per head from blocks that saved attn weights.
+class AttentionRecorder:
+    """Record per-layer attention weights for forward passes run inside it.
 
-    Returns array of shape (n_layers, n_heads) or None if no attn saved.
+    SDPA never materializes attention weights, so a forward pre-hook on each
+    ``BiasedMHA`` captures the layer's inputs and recomputes
+    ``softmax(q·kᵀ/√d + bias)`` under no_grad — the pre-dropout weights the
+    layer itself uses. Costs one extra QK matmul + softmax per layer, only
+    while recording.
+
+        with AttentionRecorder(encoder.blocks) as rec:
+            encoder(...)
+        rec.attn  # list of (B, H, K, K), one per layer per forward
+    """
+
+    def __init__(self, blocks):
+        self._modules = [blk.attn for blk in blocks]
+        self._handles: list = []
+        self.attn: list[Tensor] = []
+
+    def __enter__(self) -> "AttentionRecorder":
+        self.attn.clear()
+        for m in self._modules:
+            self._handles.append(m.register_forward_pre_hook(self._hook))
+        return self
+
+    def __exit__(self, *exc) -> None:
+        for h in self._handles:
+            h.remove()
+        self._handles.clear()
+
+    @torch.no_grad()
+    def _hook(self, module, args) -> None:
+        x, bias, key_padding_mask = args
+        B, K, _ = x.shape
+        qkv = module.qkv(x).reshape(B, K, 3, module.n_heads, module.d_head)
+        q, k, _ = qkv.unbind(dim=2)
+        logits = q.transpose(1, 2) @ k.transpose(1, 2).transpose(-1, -2)
+        logits = logits / math.sqrt(module.d_head)
+        logits = logits + bias.masked_fill(key_padding_mask[:, None, None, :], float("-inf"))
+        self.attn.append(F.softmax(logits, dim=-1))
+
+
+def attention_entropy_per_head(attn_layers: list[Tensor]) -> np.ndarray | None:
+    """Average attention entropy per head from recorded attention weights.
+
+    attn_layers: one (B, H, K, K) tensor per layer (AttentionRecorder.attn).
+    Returns array of shape (n_layers, n_heads) or None if nothing recorded.
     """
     rows = []
-    for blk in blocks:
-        attn = blk.attn.last_attn
-        if attn is None:
-            return None
+    for attn in attn_layers:
         # attn: (B, H, K, K). Entropy along last dim, mean over (B, K).
         eps = 1e-12
         ent = -(attn * (attn + eps).log()).sum(dim=-1).mean(dim=(0, 2))
