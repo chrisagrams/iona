@@ -78,6 +78,20 @@ class MSDeltaForPretraining(nn.Module):
         return {"loss": loss, "kl": parts["kl"]}
 
 
+class MSDeltaTrainer(Trainer):
+    """Trainer that exempts the learnable Fourier frequencies from weight decay.
+
+    Stock HF only exempts LayerNorm/bias params from AdamW's decay. The Fourier
+    `freqs` are a frequency *scale*, not a weight — decaying them shrinks every
+    frequency toward 0 (flattening the encoding), so we drop any `.freqs`
+    parameter from the decay group and it lands in the weight_decay=0.0 group.
+    """
+
+    def get_decay_parameter_names(self, model):
+        return [n for n in super().get_decay_parameter_names(model)
+                if not n.endswith(".freqs")]
+
+
 # ---------- training ----------
 
 def main(argv: list[str] | None = None) -> int:
@@ -115,7 +129,7 @@ def main(argv: list[str] | None = None) -> int:
     eval_size = targs.val_batches * targs.batch_size
     eval_ds = val_ds.select(range(min(len(val_ds), eval_size)))
 
-    trainer = Trainer(
+    trainer = MSDeltaTrainer(
         model=model,
         args=training_args,
         train_dataset=train_ds,

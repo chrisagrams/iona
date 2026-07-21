@@ -22,6 +22,7 @@ from torch import nn
 from transformers import TrainerCallback
 
 from .data import collate_preprocessed
+from .fourier import dead_freqs, freq_drift, interp_mae
 from .probe import run_all_probes
 from .alignment import alignment_metrics
 from .retrieval import retrieval_inline_metrics, replicate_retrieval_inline_metrics
@@ -97,6 +98,102 @@ class LinearProbeCallback(_InlineCallback):
               f"charge_acc={key('probe/charge_acc'):.3f} "
               f"nloss_auc={key('probe/neutral_loss_auc'):.3f} "
               f"iso_f1={key('probe/isotope_f1'):.3f}", flush=True)
+
+
+class FourierProbeCallback(_InlineCallback):
+    """Are the learned Fourier frequencies effective?
+
+    Evaluates each learnable featurizer on REAL values drawn from the val set —
+    real log-intensities for `PeakEmbed.ff_int`, real intra-spectrum Δm/z (what
+    `DeltaMZBias.ff` actually sees) for the bias — rather than a synthetic grid.
+    Per featurizer we log reconstruction MAE (can a small MLP recover the scalar
+    from its Fourier code — the effectiveness number), the dead-frequency count,
+    how far the frequencies have drifted from init, their current range, and a
+    histogram of where they sit. A frozen (non-learnable) featurizer is skipped.
+    """
+
+    empty_cache_before = True
+
+    def __init__(self, module, every, dataset, n_spectra):
+        super().__init__(module, every, dataset=dataset)
+        self.n_spectra = n_spectra
+        self._vals: dict[str, torch.Tensor] | None = None   # cached real samples
+        self._init_freqs: dict[str, torch.Tensor] = {}      # snapshot at first run
+
+    # ---- one-time real-value sampling ----
+
+    def _sample_values(self, budget: int = 8192, max_spectra: int = 1000,
+                       pairs_per_spectrum: int = 64) -> dict[str, torch.Tensor]:
+        """Pool real log_int values and real intra-spectrum Δm/z from the val set.
+
+        Both pools are subsampled to `budget` points so the throwaway MLP fit
+        stays cheap. Deterministic (seeded) so the metric is comparable step to
+        step."""
+        g = torch.Generator().manual_seed(0)
+        li_pool, dm_pool = [], []
+        n = min(self.n_spectra, max_spectra)
+        for row in itertools.islice(self.dataset, n):
+            mz = torch.as_tensor(row["mz"], dtype=torch.float32)
+            li = torch.as_tensor(row["log_int"], dtype=torch.float32)
+            if li.numel():
+                li_pool.append(li)
+            if mz.numel() >= 2:
+                # signed Δm/z for a random sample of ordered peak pairs
+                k = mz.numel()
+                idx = torch.randint(0, k, (pairs_per_spectrum, 2), generator=g)
+                idx = idx[idx[:, 0] != idx[:, 1]]
+                dm_pool.append(mz[idx[:, 0]] - mz[idx[:, 1]])
+
+        def _cat(pool):
+            if not pool:
+                return torch.empty(0)
+            v = torch.cat(pool)
+            if v.numel() > budget:
+                sel = torch.randperm(v.numel(), generator=g)[:budget]
+                v = v[sel]
+            return v
+
+        return {"int": _cat(li_pool), "dm": _cat(dm_pool)}
+
+    # ---- per-featurizer metrics ----
+
+    def _featurizer_metrics(self, name: str, ff, vals: torch.Tensor) -> dict:
+        freqs = ff.freqs
+        if not isinstance(freqs, nn.Parameter):
+            return {}                       # frozen featurizer — nothing to watch
+        if name not in self._init_freqs:
+            self._init_freqs[name] = freqs.detach().abs().cpu().clone()
+        if vals.numel() < 8:
+            return {}
+        span = float(vals.max() - vals.min())
+        f = freqs.detach().abs().cpu()
+        m = {
+            f"fourier/{name}_mae": interp_mae(freqs, vals),
+            f"fourier/{name}_dead": dead_freqs(freqs, span),
+            f"fourier/{name}_drift_log10": freq_drift(freqs, self._init_freqs[name]),
+            f"fourier/{name}_f_min": float(f.min()),
+            f"fourier/{name}_f_max": float(f.max()),
+        }
+        if wandb.run is not None:
+            m[f"fourier/{name}_log10_freqs"] = wandb.Histogram(
+                f.clamp_min(1e-12).log10().numpy())
+        return m
+
+    def run(self, step):
+        if self._vals is None:
+            self._vals = self._sample_values()
+        enc = self.encoder
+        payload: dict[str, Any] = {}
+        payload.update(self._featurizer_metrics("int", enc.embed.ff_int, self._vals["int"]))
+        payload.update(self._featurizer_metrics("dm", enc.bias_module.ff, self._vals["dm"]))
+        if not payload:
+            return
+        self._wlog(payload, step)
+        g = lambda k: payload.get(k, float("nan"))
+        print(f"  fourier: int_mae={g('fourier/int_mae'):.4g} "
+              f"int_dead={g('fourier/int_dead'):.0f} "
+              f"dm_mae={g('fourier/dm_mae'):.4g} "
+              f"dm_dead={g('fourier/dm_dead'):.0f}", flush=True)
 
 
 class AlignmentCallback(_InlineCallback):
@@ -219,6 +316,8 @@ def build_callbacks(module, val_dataset, pp, log_args, resolved_config, out_dir)
             module, log_args.bias_curve_every, dataset=val_dataset))
     if log_args.probe_every:
         cbs.append(LinearProbeCallback(
+            module, log_args.probe_every, val_dataset, log_args.probe_n_spectra))
+        cbs.append(FourierProbeCallback(
             module, log_args.probe_every, val_dataset, log_args.probe_n_spectra))
         cbs.append(AlignmentCallback(module, log_args.probe_every))
         cbs.append(RetrievalCallback(

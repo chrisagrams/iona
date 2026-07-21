@@ -43,11 +43,13 @@ class ModelArgs:
     fourier_int_n_freqs: int = 16
     fourier_int_f_min: float = 1e-2
     fourier_int_f_max: float = 1e2
+    fourier_int_learnable: bool = True
     delta_bias_n_freqs: int = 64
     delta_bias_per_head_hidden: int = 32
     delta_bias_f_min: float = 1e-2
     delta_bias_f_max: float = 1e3
     delta_bias_scale: float = 3.0
+    delta_bias_learnable: bool = True
 
     def to_model_config(self) -> ModelConfig:
         return ModelConfig(
@@ -58,13 +60,15 @@ class ModelArgs:
             dropout=self.dropout,
             max_peaks=self.max_peaks,
             fourier_int=FourierConfig(
-                self.fourier_int_n_freqs, self.fourier_int_f_min, self.fourier_int_f_max),
+                self.fourier_int_n_freqs, self.fourier_int_f_min, self.fourier_int_f_max,
+                learnable=self.fourier_int_learnable),
             delta_bias=DeltaBiasConfig(
                 n_freqs=self.delta_bias_n_freqs,
                 per_head_hidden=self.delta_bias_per_head_hidden,
                 f_min=self.delta_bias_f_min,
                 f_max=self.delta_bias_f_max,
                 scale=self.delta_bias_scale,
+                learnable=self.delta_bias_learnable,
             ),
             zero_bias_diagonal=self.zero_bias_diagonal,
         )

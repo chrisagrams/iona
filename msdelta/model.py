@@ -15,6 +15,7 @@ class FourierConfig:
     n_freqs: int
     f_min: float
     f_max: float
+    learnable: bool = True
 
 
 @dataclass
@@ -29,8 +30,9 @@ class DeltaBiasConfig:
     f_max: float = 1e3
     # Bound the per-head bias to ±scale logits via scale*tanh(raw/scale).
     # Keeps the bias comparable to the content term (q·k/√d ~ O(1-2)) so
-    # neither can steamroll the other 
+    # neither can steamroll the other
     scale: float = 3.0
+    learnable: bool = True
 
 
 @dataclass
@@ -59,7 +61,9 @@ class PeakEmbed(nn.Module):
 
     def __init__(self, cfg: ModelConfig):
         super().__init__()
-        self.ff_int = FourierFeatures(cfg.fourier_int.n_freqs, cfg.fourier_int.f_min, cfg.fourier_int.f_max)
+        self.ff_int = FourierFeatures(
+            cfg.fourier_int.n_freqs, cfg.fourier_int.f_min, cfg.fourier_int.f_max,
+            learnable=cfg.fourier_int.learnable)
         self.mlp = nn.Sequential(
             nn.Linear(self.ff_int.out_dim, cfg.d_model),
             nn.GELU(),
@@ -98,7 +102,8 @@ class DeltaMZBias(nn.Module):
 
     def __init__(self, n_heads: int, cfg: DeltaBiasConfig):
         super().__init__()
-        self.ff = FourierFeatures(cfg.n_freqs, cfg.f_min, cfg.f_max, log_spaced=True)
+        self.ff = FourierFeatures(cfg.n_freqs, cfg.f_min, cfg.f_max, log_spaced=True,
+                                  learnable=cfg.learnable)
         self.n_heads = n_heads
         self.per_head_hidden = cfg.per_head_hidden
         self.scale = cfg.scale

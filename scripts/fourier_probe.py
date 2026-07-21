@@ -1,23 +1,28 @@
 """Standalone Fourier-encoding resolution probe — NO model, checkpoint, or data.
 
-Rationalizes the otherwise-arbitrary Fourier ranges used by PeakEmbed (intensity)
-and PrecursorEmbed (precursor m/z). Because ``FourierFeatures`` uses FIXED
-frequencies, the encoding is a deterministic function of the input scalar, so we
-can test a config in isolation: freeze the featurizer, fit a throwaway readout
-MLP on a grid of scalars, and measure reconstruction MAE on scalars *between* the
-grid points (interpolation). Two failure modes both surface this way:
+Rationalizes the otherwise-arbitrary Fourier *initialization* ranges. Holding the
+frequencies fixed at a candidate range makes the encoding a deterministic function
+of the input scalar, so we can test a range in isolation: freeze the featurizer,
+fit a throwaway readout MLP on a grid of scalars, and measure reconstruction MAE
+on held-out scalars (interpolation). Two failure modes both surface this way:
 
   * f_min too low  -> features ~constant over the domain -> can't separate values
   * f_max too high -> oscillation aliases between grid points -> can't interpolate
+
+The metric cores are shared with the inline training probe (``FourierProbeCallback``)
+via ``msdelta.fourier``, so an offline range and the model's live learned
+frequencies are scored the same way. In the model the frequencies are now
+LEARNABLE (``FourierFeatures(learnable=True)``); this script judges the *init*.
 
 Run:  python scripts/fourier_probe.py
 Emits a printed sweep table and a grid figure (f_min x f_max MAE heatmap per
 input, current config marked) to docs/figures/fourier_probe.png.
 
 Run:  python scripts/fourier_probe.py --learnable
-Instead makes the frequencies trainable (initialized at the current wide range)
-and plots where they migrate under the reconstruction objective -> an
-independent read on the data-preferred range. Writes docs/figures/
+Trains the real ``FourierFeatures(learnable=True)`` (initialized at the current
+wide range) and plots where its frequencies migrate under the reconstruction
+objective -> an independent, offline read on the data-preferred range that mirrors
+the linear-space optimization the model performs. Writes docs/figures/
 fourier_learnable.png. Caveat: this optimizes the standalone *reconstruction*
 proxy, and frequency space is non-convex, so the histogram confirms the range
 the heatmap sweep found; it does not replace a real-model training run.
@@ -37,78 +42,49 @@ import torch.nn.functional as F
 from torch import nn
 
 from msdelta.fourier import FourierFeatures
+from msdelta.fourier import dead_freqs as _dead_freqs
+from msdelta.fourier import interp_mae as _interp_mae
 
 torch.manual_seed(0)
 
 
 # --- one reconstruction measurement ---------------------------------------
+#
+# The metric cores live in msdelta.fourier_probe so the offline sweep here and
+# the inline training probe (FourierProbeCallback) score frequencies identically.
+# These thin wrappers keep the sweep's config-and-grid vocabulary while feeding
+# the shared helpers an explicit (freqs, values) pair.
 
 def interp_mae(n_freqs: int, f_min: float, f_max: float, lo: float, hi: float,
                n_grid: int, steps: int = 800, width: int = 96) -> float:
     """Held-out interpolation MAE (native units) for one Fourier config.
 
     Fit a small MLP to map FourierFeatures(x) -> x on an evenly spaced grid over
-    [lo, hi], then evaluate on the unseen midpoints between grid points.
+    [lo, hi], then evaluate on unseen values (the shared helper holds out a
+    random split of the grid points).
     """
-    span = hi - lo
-    x_tr = torch.linspace(lo, hi, n_grid)
-    x_te = (x_tr[:-1] + x_tr[1:]) / 2
-    y_tr = (x_tr - lo) / span            # target normalized to [0,1]
-    y_te = (x_te - lo) / span
-
-    ff = FourierFeatures(n_freqs, f_min, f_max)
-    with torch.no_grad():
-        ftr, fte = ff(x_tr), ff(x_te)
-
-    net = nn.Sequential(
-        nn.Linear(ftr.shape[1], width), nn.GELU(),
-        nn.Linear(width, width), nn.GELU(),
-        nn.Linear(width, 1),
-    )
-    opt = torch.optim.Adam(net.parameters(), lr=3e-3)
-    for _ in range(steps):
-        opt.zero_grad()
-        F.mse_loss(net(ftr).squeeze(-1), y_tr).backward()
-        opt.step()
-    with torch.no_grad():
-        return (net(fte).squeeze(-1) - y_te).abs().mean().item() * span
+    freqs = torch.logspace(math.log10(f_min), math.log10(f_max), n_freqs)
+    x = torch.linspace(lo, hi, n_grid)
+    return _interp_mae(freqs, x, steps=steps, width=width)
 
 
 def dead_freqs(n_freqs: int, f_min: float, f_max: float, span: float) -> int:
     """How many freqs complete < 0.5 cycles over the domain (~constant, wasted)."""
     freqs = torch.logspace(math.log10(f_min), math.log10(f_max), n_freqs)
-    return int(((freqs * span) < 0.5).sum())
+    return _dead_freqs(freqs, span)
 
 
 # --- learnable frequencies (tier 2) ---------------------------------------
-
-class LogLearnableFourier(nn.Module):
-    """Fourier features whose frequencies are trainable in LOG space.
-
-    We optimize log10(freq), not freq directly (as FourierFeatures(learnable=True)
-    would): with Adam an additive step is the same size for every parameter, so a
-    linear-space step that suits a ~1e3 frequency would fling a ~1e-4 frequency
-    negative. In log space each step is multiplicative, which is the scale-
-    invariant behavior needed to move frequencies spanning many decades at once.
-    Init matches FourierFeatures exactly (log-spaced in [f_min, f_max]).
-    """
-
-    def __init__(self, n_freqs: int, f_min: float, f_max: float):
-        super().__init__()
-        self.log_freqs = nn.Parameter(
-            torch.linspace(math.log10(f_min), math.log10(f_max), n_freqs))
-
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        phase = 2.0 * math.pi * x.unsqueeze(-1) * (10.0 ** self.log_freqs)
-        return torch.cat([phase.sin(), phase.cos()], dim=-1)
-
 
 def learn_freqs(task: "Task", steps: int = 3000, freq_lr: float = 1e-2,
                 readout_lr: float = 3e-3, width: int = 96):
     """Train frequencies + readout on the interpolation objective.
 
-    Frequencies start at the current (deliberately wide) range and are free to
-    migrate. Returns (init_freqs, final_freqs, held_out_mae).
+    Exercises the real ``FourierFeatures(learnable=True)`` the model trains —
+    a plain linear ``nn.Parameter`` read through ``abs()`` — so the migration
+    plotted here is the same optimization the model performs. Frequencies start
+    at the current (deliberately wide) range and are free to migrate. Returns
+    (init_freqs, final_freqs, held_out_mae).
     """
     lo, hi, span = task.lo, task.hi, task.span
     x_tr = torch.linspace(lo, hi, task.n_grid)
@@ -116,8 +92,8 @@ def learn_freqs(task: "Task", steps: int = 3000, freq_lr: float = 1e-2,
     y_tr = (x_tr - lo) / span
     y_te = (x_te - lo) / span
 
-    ff = LogLearnableFourier(task.n_freqs, *task.current)
-    init_freqs = (10.0 ** ff.log_freqs.detach()).clone()
+    ff = FourierFeatures(task.n_freqs, *task.current, learnable=True)
+    init_freqs = ff.freqs.detach().abs().clone()
     readout = nn.Sequential(
         nn.Linear(2 * task.n_freqs, width), nn.GELU(),
         nn.Linear(width, width), nn.GELU(),
@@ -132,7 +108,7 @@ def learn_freqs(task: "Task", steps: int = 3000, freq_lr: float = 1e-2,
         F.mse_loss(readout(ff(x_tr)).squeeze(-1), y_tr).backward()
         opt.step()
     with torch.no_grad():
-        final_freqs = (10.0 ** ff.log_freqs).clone()
+        final_freqs = ff.freqs.detach().abs().clone()
         mae = (readout(ff(x_te)).squeeze(-1) - y_te).abs().mean().item() * span
     return init_freqs.numpy(), final_freqs.numpy(), mae
 

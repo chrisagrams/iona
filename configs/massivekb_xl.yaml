@@ -21,11 +21,13 @@ max_peaks: 150
 fourier_int_n_freqs: 16
 fourier_int_f_min: 1.0e-2
 fourier_int_f_max: 1.0e+2
+fourier_int_learnable: true
 delta_bias_n_freqs: 64
 delta_bias_per_head_hidden: 32
 delta_bias_f_min: 1.0e-2
 delta_bias_f_max: 1.0e+3
 delta_bias_scale: 3.0
+delta_bias_learnable: true
 
 root: /eagle/UIC-HPC/cgrams/msbench-datasets/massive_kb_v1_shared/parquet_shuffled/
 n_val_files: 2
@@ -41,15 +43,15 @@ total_steps: 90000      # 90000 × 320 = 28.8M ≈ 1 epoch of MassIVE-KB train
 weight_decay: 0.01
 grad_clip: 1.0
 precision: bf16
-compile: false          # flip to true once a clean run is confirmed (~+25% sps)
+compile: true
 val_batches: 50
 device: cuda
 seed: 0
 deepspeed: true         # ZeRO-2 (torchrun launch, see pbs/massivekb_ddp.pbs)
 zero_stage: 2           # keep ≤2: inline probes call the eager encoder directly
 
-wandb_project: msdelta-massivekb
-wandb_run_name: massivekb_xl
+wandb_project: msfound
+wandb_run_name: massivekb_xl-v15
 log_every: 50
 val_every: 2000
 bias_curve_every: 5000
