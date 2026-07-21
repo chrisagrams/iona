@@ -16,14 +16,14 @@ dependencies = [
     "scikit-learn>=1.8.0",
     "huggingface-hub>=1.20.1",
     "datasets>=4.0.0",
+    "transformers>=4.46.0",
+    "accelerate>=1.0.0",
+    "deepspeed>=0.15.0",
+    "torchmetrics>=1.9.0",
 ]
 
 [project.scripts]
 msdelta-train = "msdelta.train:main"
-msdelta-analyze = "msdelta.analyze:main"
-msdelta-probe = "msdelta.probe:main"
-msdelta-retrieval = "msdelta.retrieval:main"
-msdelta-replicate-retrieval = "msdelta.replicate_retrieval:main"
 
 [build-system]
 requires = ["hatchling"]

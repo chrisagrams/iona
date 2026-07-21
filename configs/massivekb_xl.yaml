@@ -12,61 +12,48 @@
 # Exposure: bs=80 per GPU × 4 GPUs = 320 spectra/step. 90000 steps × 320 =
 # 28.8M ≈ one full epoch (~8 h on 4× A100-40GB). Scale total_steps for more
 # epochs. Launch: qsub pbs/massivekb_ddp.pbs
-model:
-  d_model: 1024
-  n_heads: 16
-  n_layers: 16
-  ffn_mult: 4
-  dropout: 0.1
-  max_peaks: 150
-  use_precursor: false
-  fourier_mz:
-    n_freqs: 64
-    f_min: 1.0e-2
-    f_max: 1.0e+3
-  fourier_int:
-    n_freqs: 16
-    f_min: 1.0e-2
-    f_max: 1.0e+2
-  delta_bias:
-    n_freqs: 64
-    per_head_hidden: 32
-    f_min: 1.0e-2
-    f_max: 1.0e+3
-    scale: 3.0
-    charge_dim: 0
-    n_charges: 8
+d_model: 1024
+n_heads: 16
+n_layers: 16
+ffn_mult: 4
+dropout: 0.1
+max_peaks: 150
+fourier_int_n_freqs: 16
+fourier_int_f_min: 1.0e-2
+fourier_int_f_max: 1.0e+2
+delta_bias_n_freqs: 64
+delta_bias_per_head_hidden: 32
+delta_bias_f_min: 1.0e-2
+delta_bias_f_max: 1.0e+3
+delta_bias_scale: 3.0
 
-data:
-  root: /eagle/UIC-HPC/cgrams/msbench-datasets/massive_kb_v1_shared/parquet_shuffled/
-  n_val_files: 2
-  intensity_threshold_frac: 0.01
-  top_n: 150
-  mask:
-    mask_ratio: 0.50
+root: /eagle/UIC-HPC/cgrams/msbench-datasets/massive_kb_v1_shared/parquet_shuffled/
+n_val_files: 2
+intensity_threshold_frac: 0.01
+top_n: 150
+mask_ratio: 0.50
 
-train:
-  batch_size: 80          # per-GPU; global batch = 80 × 4 GPUs = 320
-  num_workers: 6          # ×4 ranks = 24 loader workers (+4 main) < 32 cores
-  lr: 1.0e-4
-  warmup_steps: 2000
-  total_steps: 90000      # 90000 × 320 = 28.8M ≈ 1 epoch of MassIVE-KB train
-  weight_decay: 0.01
-  grad_clip: 1.0
-  precision: bf16
-  compile: false          # flip to true once a clean run is confirmed (~+25% sps)
-  val_batches: 50
-  device: cuda
-  l1_lambda: 0.0
-  seed: 0
+batch_size: 80          # per-GPU; global batch = 80 × 4 GPUs = 320
+num_workers: 6          # ×4 ranks = 24 loader workers (+4 main) < 32 cores
+lr: 1.0e-4
+warmup_steps: 2000
+total_steps: 90000      # 90000 × 320 = 28.8M ≈ 1 epoch of MassIVE-KB train
+weight_decay: 0.01
+grad_clip: 1.0
+precision: bf16
+compile: false          # flip to true once a clean run is confirmed (~+25% sps)
+val_batches: 50
+device: cuda
+seed: 0
+deepspeed: true         # ZeRO-2 (torchrun launch, see pbs/massivekb_ddp.pbs)
+zero_stage: 2           # keep ≤2: inline probes call the eager encoder directly
 
-log:
-  wandb_project: msdelta-massivekb
-  wandb_run_name: massivekb_xl
-  log_every: 50
-  val_every: 2000
-  bias_curve_every: 5000
-  ckpt_every: 10000
-  probe_every: 5000
-  probe_n_spectra: 3000
-  out_dir: /eagle/UIC-HPC/cgrams/msdelta-runs
+wandb_project: msdelta-massivekb
+wandb_run_name: massivekb_xl
+log_every: 50
+val_every: 2000
+bias_curve_every: 5000
+ckpt_every: 10000
+probe_every: 5000
+probe_n_spectra: 3000
+out_dir: /eagle/UIC-HPC/cgrams/msdelta-runs

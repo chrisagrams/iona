@@ -12,10 +12,8 @@ Two tiers of linear probes on frozen, pooled encoder representations:
     - neutral-loss pair      (binary; does Δm_ij match a known loss?)
     - isotope-peak position  (per-peak M+0/1/2/3; heuristic from Δm = 1.003/z)
 
-Designed to run two ways from ONE implementation:
-  - standalone:  `msdelta-probe --ckpt runs/<run>/final.pt`
-  - inline:      train.py calls `run_all_probes(encoder, ...)` every N steps
-                 and logs the returned flat dict to wandb.
+Run inline: `LinearProbeCallback` calls `run_all_probes(encoder, val_dataset, ...)`
+every N steps over the preprocessed HF val dataset and logs the flat dict to wandb.
 
 Tier-2 labels for neutral-loss / isotope are *derived from Δm rules*, so they
 test "is this info linearly decodable from the representation," not pure
@@ -23,19 +21,16 @@ discovery. Charge / precursor / count / TIC are ground-truth.
 """
 from __future__ import annotations
 
-import argparse
+import itertools
 import re
-from pathlib import Path
 
 import numpy as np
-import pyarrow.parquet as pq
 import torch
 from sklearn.linear_model import LogisticRegression, Ridge
 from sklearn.metrics import accuracy_score, f1_score, r2_score, roc_auc_score
 from sklearn.preprocessing import StandardScaler
 
-from .data import PreprocessConfig, preprocess_spectrum, split_paths
-from .data import precursor_mz as _anchor_precursor_mz  # mod-aware, for the anchor input
+from .embedding import encode_batch, pool_tokens
 from .model import MSEncoder
 
 # Monoisotopic residue masses (Da); L and I share a mass.
@@ -73,31 +68,6 @@ def precursor_mz(pc: str) -> float | None:
 
 # ---------- representation extraction ----------
 
-def _iter_spectra(paths, n_spectra):
-    count = 0
-    for p in paths:
-        pf = pq.ParquetFile(p)
-        for rg in range(pf.num_row_groups):
-            tbl = pf.read_row_group(rg, columns=["peptide_charge", "m/z", "int"])
-            pcs = tbl.column("peptide_charge").to_pylist()
-            mzc, intc = tbl.column("m/z"), tbl.column("int")
-            for i in range(len(tbl)):
-                yield pcs[i], mzc[i].as_py(), intc[i].as_py()
-                count += 1
-                if count >= n_spectra:
-                    return
-
-
-def _pool(tokens: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
-    """mean ⊕ max over real peaks. tokens (B,K,D), mask (B,K) True=real."""
-    m = mask.unsqueeze(-1)
-    summed = (tokens * m).sum(1)
-    mean = summed / m.sum(1).clamp_min(1)
-    mx = tokens.masked_fill(~m, float("-inf")).max(1).values
-    mx = torch.nan_to_num(mx, neginf=0.0)
-    return torch.cat([mean, mx], dim=-1)
-
-
 def _isotope_labels(mz_sorted_idx, mz: np.ndarray, z: int, tol: float = 0.01) -> np.ndarray:
     """Per-peak M+k position: # consecutive isotope steps (1.003/z) present below."""
     step = _C13 / max(z, 1)
@@ -120,15 +90,17 @@ def _isotope_labels(mz_sorted_idx, mz: np.ndarray, z: int, tol: float = 0.01) ->
 @torch.no_grad()
 def extract_representations(
     enc: MSEncoder,
-    paths: list[Path],
+    dataset,
     n_spectra: int,
     batch_size: int,
     device: torch.device,
-    pp: PreprocessConfig,
     max_peak_samples: int = 80_000,
     max_pair_samples: int = 80_000,
     seed: int = 0,
 ) -> dict[str, np.ndarray]:
+    """`dataset` is a preprocessed HF dataset (see `build_preprocessed_dataset`);
+    each row already carries the preprocessed peaks + `log_tic`/`peptide_charge`,
+    so no per-spectrum transform runs here."""
     was_training = enc.training
     enc.to(device).eval()
     rng = np.random.default_rng(seed)
@@ -143,20 +115,10 @@ def extract_representations(
     def flush():
         if not buf:
             return
-        K = max(t[0].numel() for t in buf)
-        B = len(buf)
-        mz = torch.zeros(B, K); li = torch.zeros(B, K)
-        mask = torch.zeros(B, K, dtype=torch.bool)
-        chg = torch.zeros(B, dtype=torch.long)
-        pmz = torch.zeros(B, dtype=torch.float32)
-        for b, (m, l, meta) in enumerate(buf):
-            k = m.numel()
-            mz[b, :k] = m; li[b, :k] = l; mask[b, :k] = True
-            chg[b] = meta["z"]; pmz[b] = meta["prec_in"]
-        tokens = enc(mz.to(device), li.to(device), (~mask).to(device),
-                     charge=chg.to(device), precursor_mz=pmz.to(device))  # (B,K,D)
-        pooled = _pool(tokens, mask.to(device)).cpu().numpy()
-        tok_cpu = tokens.cpu().numpy()
+        tokens, mask = encode_batch(
+            enc, [t[0] for t in buf], [t[1] for t in buf], device)  # (B,K,D)
+        pooled = pool_tokens(tokens, mask).float().cpu().numpy()
+        tok_cpu = tokens.float().cpu().numpy()
         for b, (m, l, meta) in enumerate(buf):
             k = m.numel()
             spec.append(pooled[b]); prec.append(meta["prec"]); pcount.append(k)
@@ -189,17 +151,16 @@ def extract_representations(
                         pair_rep.append(r); pair_loss.append(int(pos[q]))
         buf.clear()
 
-    for pc, mz_list, int_list in _iter_spectra(paths, n_spectra):
-        mzt = torch.tensor(mz_list, dtype=torch.float32)
-        it = torch.tensor(int_list, dtype=torch.float32)
-        mz_p, li_p, _ = preprocess_spectrum(mzt, it, pp)   # intensity_prob unused by probes
+    for row in itertools.islice(dataset, n_spectra):
+        mz_p = torch.tensor(row["mz"], dtype=torch.float32)
+        li_p = torch.tensor(row["log_int"], dtype=torch.float32)
         if mz_p.numel() == 0:
             continue
+        pc = row["peptide_charge"]
         z = parse_charge(pc)
-        meta = {"prec": precursor_mz(pc) or np.nan,
-                "logtic": float(torch.log1p(it.sum())),
-                "z": z if (z and 1 <= z <= 5) else 0,
-                "prec_in": _anchor_precursor_mz(pc)}  # anchor input (mod-aware, 0 if unparseable)
+        meta = {"prec": precursor_mz(pc) or np.nan,       # strict target (probe-local)
+                "logtic": float(row["log_tic"]),
+                "z": z if (z and 1 <= z <= 5) else 0}
         buf.append((mz_p, li_p, meta))
         if len(buf) >= batch_size:
             flush()
@@ -265,14 +226,14 @@ def _classification(X, y, name) -> dict[str, float]:
 
 def run_all_probes(
     enc: MSEncoder,
-    val_paths: list[Path],
+    dataset,
     device: torch.device,
-    pp: PreprocessConfig,
     n_spectra: int = 4000,
     batch_size: int = 128,
 ) -> dict[str, float]:
-    """Flat metrics dict, suitable for wandb.log. Frozen-encoder linear probes."""
-    d = extract_representations(enc, val_paths, n_spectra, batch_size, device, pp)
+    """Flat metrics dict, suitable for wandb.log. Frozen-encoder linear probes
+    over a preprocessed HF dataset (`build_preprocessed_dataset`)."""
+    d = extract_representations(enc, dataset, n_spectra, batch_size, device)
     X = d["spec"]
     metrics: dict[str, float] = {}
     # Tier 1
@@ -294,42 +255,3 @@ def run_all_probes(
     return metrics
 
 
-# ---------- CLI ----------
-
-def main(argv: list[str] | None = None) -> int:
-    from .analyze import load_encoder  # reuse the loader
-
-    p = argparse.ArgumentParser(description="Frozen-encoder linear probe suite")
-    p.add_argument("--ckpt", required=True, type=Path)
-    p.add_argument("--n-spectra", type=int, default=8000)
-    p.add_argument("--batch-size", type=int, default=128)
-    p.add_argument("--device", type=str, default="cuda" if torch.cuda.is_available() else "cpu")
-    args = p.parse_args(argv)
-
-    enc, cfg, step = load_encoder(args.ckpt)
-    dcfg = cfg["data"]
-    pp = PreprocessConfig(intensity_threshold_frac=dcfg["intensity_threshold_frac"], top_n=dcfg["top_n"])
-    _, val_paths = split_paths(dcfg["root"], dcfg["n_val_files"])
-    print(f"loaded {args.ckpt} (step {step}); probing on {args.n_spectra} val spectra...")
-
-    m = run_all_probes(enc, val_paths, torch.device(args.device), pp,
-                       n_spectra=args.n_spectra, batch_size=args.batch_size)
-
-    def line(name, *keys):
-        parts = [f"{k.split('/')[-1]}={m[k]:.3f}" for k in keys if k in m and np.isfinite(m[k])]
-        print(f"  {name:<16} " + "  ".join(parts))
-
-    print("\n=== TIER 1 (sanity) ===")
-    line("precursor m/z", "probe/precursor_mz_mae", "probe/precursor_mz_mae_baseline", "probe/precursor_mz_r2")
-    line("peak count", "probe/peak_count_r2", "probe/peak_count_mae")
-    line("log TIC", "probe/log_tic_r2", "probe/log_tic_mae")
-    print("\n=== TIER 2 (chemistry) ===")
-    line("charge", "probe/charge_acc", "probe/charge_acc_baseline", "probe/charge_f1")
-    line("neutral loss", "probe/neutral_loss_auc", "probe/neutral_loss_acc", "probe/neutral_loss_acc_baseline")
-    line("isotope M+k", "probe/isotope_acc", "probe/isotope_acc_baseline", "probe/isotope_f1")
-    line("fragment m/z", "probe/fragment_mz_r2", "probe/fragment_mz_mae")
-    return 0
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())

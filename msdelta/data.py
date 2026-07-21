@@ -1,15 +1,20 @@
-"""Parquet streaming dataset, per-spectrum preprocessing, and MPM collate."""
+"""Parquet dataset, per-spectrum preprocessing, and MPM collate.
+
+Everything goes through `build_pretraining_datasets` / `build_preprocessed_dataset`,
+which load the parquet as a Hugging Face `datasets.Dataset` and precompute
+`preprocess_spectrum` with `.map()` (cached to Arrow) — so no per-spectrum
+transform runs during training (only the cheap random masking in
+`MaskIntensityCollator`) or in the inline probes (which read the same
+preprocessed rows via `collate_preprocessed`).
+"""
 from __future__ import annotations
 
 import re
 from dataclasses import dataclass
+from functools import partial
 from pathlib import Path
-from typing import Iterable, Iterator
 
-import numpy as np
-import pyarrow.parquet as pq
 import torch
-from torch.utils.data import IterableDataset, get_worker_info
 
 
 @dataclass
@@ -69,101 +74,6 @@ def precursor_mz(peptide_charge: str | None) -> float:
     return (mass + z * _PROTON) / z
 
 
-@dataclass
-class MaskConfig:
-    """Masked-intensity task (v9). Mask a fraction of peaks' intensity and
-    predict it. m/z is never masked — it flows only through the Δm bias
-    (tokens are m/z-free), so the bias is the sole carrier of m/z structure.
-    """
-    mask_ratio: float = 0.15
-    min_masked: int = 1
-
-
-class ConsensusParquet(IterableDataset):
-    """Streaming parquet dataset over consensus spectra row-groups.
-
-    Each shard is a parquet file with columns ``m/z`` (list<float>) and
-    ``int`` (list<float>). Memory is bounded by one row-group per worker
-    (~263 MB raw arrow). Random access within a row-group, random order
-    across row-groups, infinite iteration."""
-
-    def __init__(
-        self,
-        paths: Iterable[str | Path],
-        preprocess: PreprocessConfig | None = None,
-        mz_col: str = "m/z",
-        int_col: str = "int",
-        seed: int = 0,
-        rank: int = 0,
-        world_size: int = 1,
-    ):
-        super().__init__()
-        self.paths: list[Path] = sorted(Path(p) for p in paths)
-        if not self.paths:
-            raise ValueError("ConsensusParquet needs at least one .parquet path")
-        self.preprocess = preprocess or PreprocessConfig()
-        self.mz_col = mz_col
-        self.int_col = int_col
-        self.seed = seed
-        # DDP: shard row-group work units across ranks as well as workers, so
-        # each of the world_size processes sees a disjoint slice of the data.
-        self.rank = rank
-        self.world_size = world_size
-
-        # Build (path, row_group) work units up front. Uses parquet metadata
-        # only — cheap, ~ms per shard.
-        self._units: list[tuple[Path, int]] = []
-        for p in self.paths:
-            n_rg = pq.ParquetFile(p).num_row_groups
-            self._units.extend((p, rg) for rg in range(n_rg))
-
-    def __iter__(self) -> Iterator[tuple[torch.Tensor, torch.Tensor]]:
-        info = get_worker_info()
-        if info is None:
-            worker_id, num_workers = 0, 1
-        else:
-            worker_id, num_workers = info.id, info.num_workers
-
-        # Global shard id across (rank, worker): world_size * num_workers
-        # disjoint streams over the row-group units. Distinct RNG per stream
-        # so each rank/worker draws a different shuffle.
-        global_id = self.rank * num_workers + worker_id
-        global_n = self.world_size * num_workers
-        rng = np.random.default_rng(self.seed + 1_000_003 * global_id)
-        my_units = self._units[global_id::global_n]
-        if not my_units:
-            return
-
-        cols = [self.mz_col, self.int_col, "peptide_charge"]
-        epoch = 0
-        while True:
-            order = rng.permutation(len(my_units))
-            for u in order:
-                path, rg_idx = my_units[u]
-                pf = pq.ParquetFile(path)
-                tbl = pf.read_row_group(rg_idx, columns=cols)
-                mz_col = tbl.column(self.mz_col)
-                int_col = tbl.column(self.int_col)
-                pc_col = tbl.column("peptide_charge")
-                n = len(tbl)
-                row_order = rng.permutation(n)
-                for i in row_order:
-                    mz_list = mz_col[int(i)].as_py()
-                    int_list = int_col[int(i)].as_py()
-                    if not mz_list:
-                        continue
-                    mz_t = torch.tensor(mz_list, dtype=torch.float32)
-                    int_t = torch.tensor(int_list, dtype=torch.float32)
-                    mz_p, li_p, pp = preprocess_spectrum(mz_t, int_t, self.preprocess)
-                    if mz_p.numel() == 0:
-                        continue
-                    pc = pc_col[int(i)].as_py()
-                    yield mz_p, li_p, pp, charge_index(pc), precursor_mz(pc)
-                # Drop arrow table reference; GC reclaims ~263 MB before next rg.
-                del tbl, mz_col, int_col, pc_col
-            epoch += 1
-
-
 def preprocess_spectrum(
     mz: torch.Tensor,
     intensity: torch.Tensor,
@@ -209,76 +119,6 @@ def preprocess_spectrum(
     return mz.contiguous(), log_int.contiguous(), intensity_prob.contiguous()
 
 
-def _pad_batch(batch):
-    """Pad a list of (mz, log_int, intensity_prob[, charge[, precursor_mz]]) to (B, K_max).
-    Returns mz, log_int, intensity_prob, key_padding_mask, charge (B,) long,
-    prec_mz (B,) float, Ks."""
-    B = len(batch)
-    Ks = [int(item[0].numel()) for item in batch]
-    K_max = max(max(Ks) if Ks else 1, 1)
-    mz = torch.zeros(B, K_max, dtype=torch.float32)
-    log_int = torch.zeros(B, K_max, dtype=torch.float32)
-    intensity_prob = torch.zeros(B, K_max, dtype=torch.float32)
-    key_padding_mask = torch.ones(B, K_max, dtype=torch.bool)
-    charge = torch.zeros(B, dtype=torch.long)
-    prec_mz = torch.zeros(B, dtype=torch.float32)
-    for b, (item, K) in enumerate(zip(batch, Ks)):
-        charge[b] = int(item[3]) if len(item) > 3 else 0
-        prec_mz[b] = float(item[4]) if len(item) > 4 else 0.0
-        if K == 0:
-            continue
-        mz[b, :K] = item[0]
-        log_int[b, :K] = item[1]
-        intensity_prob[b, :K] = item[2]
-        key_padding_mask[b, :K] = False
-    return mz, log_int, intensity_prob, key_padding_mask, charge, prec_mz, Ks
-
-
-def pad_collate(batch) -> dict[str, torch.Tensor]:
-    """Clean padded batch, no masking — for inference (probes, attention probe)."""
-    mz, log_int, intensity_prob, kpm, charge, prec_mz, _ = _pad_batch(batch)
-    return {"mz": mz, "log_int": log_int, "intensity_prob": intensity_prob,
-            "key_padding_mask": kpm, "charge": charge, "precursor_mz": prec_mz}
-
-
-def mask_intensity_collate(
-    batch: list[tuple[torch.Tensor, torch.Tensor]],
-    cfg: MaskConfig,
-) -> dict[str, torch.Tensor]:
-    """Mask a fraction of peaks' intensity for masked-intensity prediction (v9 / v13).
-
-    Returns:
-      mz                (B, K_max)  float32  — real m/z (feeds the Δm bias only)
-      log_int           (B, K_max)  float32  — input feature for PeakEmbed (log1p÷max)
-      intensity_prob    (B, K_max)  float32  — KL target (raw intensity / sum)
-      key_padding_mask  (B, K_max)  bool     — True at padding
-      mask_positions    (B, K_max)  bool     — True where intensity is hidden & predicted
-
-    m/z is never masked. PeakEmbed swaps in [MASK] at mask_positions so the input
-    intensity there doesn't leak; the KL loss reads `intensity_prob` at masked
-    positions, re-normalises across the masked subset, and minimises KL against
-    the model's softmax over masked logits.
-    """
-    mz, log_int, intensity_prob, key_padding_mask, charge, prec_mz, Ks = _pad_batch(batch)
-    mask_positions = torch.zeros_like(key_padding_mask)
-    for b, K in enumerate(Ks):
-        if K == 0:
-            continue
-        n_mask = max(cfg.min_masked, int(round(K * cfg.mask_ratio)))
-        n_mask = min(n_mask, K)
-        idx = torch.randperm(K)[:n_mask]
-        mask_positions[b, idx] = True
-    return {
-        "mz": mz,
-        "log_int": log_int,
-        "intensity_prob": intensity_prob,
-        "key_padding_mask": key_padding_mask,
-        "mask_positions": mask_positions,
-        "charge": charge,
-        "precursor_mz": prec_mz,
-    }
-
-
 def split_paths(root: str | Path, n_val: int) -> tuple[list[Path], list[Path]]:
     """Deterministic file-level split: last n_val shards (sorted) become val."""
     root = Path(root)
@@ -298,7 +138,7 @@ def hf_split_paths(
     The dataset is expected to lay its shards out under per-split subdirectories
     (``train/*.parquet``, ``val/*.parquet``) with the same column schema as the
     local consensus parquets (``m/z``, ``int``, ``peptide_charge``) — so the
-    downloaded shards drop straight into `ConsensusParquet`.
+    downloaded shards drop straight into `build_preprocessed_dataset`.
 
     Only the two requested splits are pulled (``allow_patterns``); the snapshot is
     served from the HF cache on subsequent calls, so this is cheap to call more
@@ -339,3 +179,119 @@ def resolve_dataset_paths(dcfg: dict) -> tuple[list[Path], list[Path]]:
             val_split=dcfg.get("hf_val_split", "val"),
         )
     return split_paths(dcfg["root"], dcfg["n_val_files"])
+
+
+# ---------- Hugging Face dataset path (precomputed preprocessing) ----------
+
+def _preprocess_example(example: dict, pp: PreprocessConfig) -> dict:
+    """Row transform for `datasets.Dataset.map`: raw {m/z, int, peptide_charge}
+    → the preprocessed peak lists + the scalars every consumer needs. This is
+    the work that used to run per-spectrum inside the training loop (and inside
+    each probe); `.map` runs it once and caches the result to Arrow.
+
+    The row is a superset so the same preprocessed dataset feeds both training
+    and the inline probes/retrieval: `log_tic` (log of the raw pre-threshold
+    TIC, discarded by preprocessing) is a probe target, and `peptide_charge` is
+    kept so the probes can recompute their own labels (strict precursor m/z,
+    charge) from it.
+    """
+    mz = torch.tensor(example["m/z"], dtype=torch.float32)
+    inten = torch.tensor(example["int"], dtype=torch.float32)
+    mz_p, log_int, intensity_prob = preprocess_spectrum(mz, inten, pp)
+    pc = example.get("peptide_charge")
+    return {
+        "mz": mz_p.tolist(),
+        "log_int": log_int.tolist(),
+        "intensity_prob": intensity_prob.tolist(),
+        "charge": charge_index(pc),
+        "precursor_mz": precursor_mz(pc),          # anchor input (mod-aware)
+        "log_tic": float(torch.log1p(inten.sum())) if inten.numel() else 0.0,
+        "peptide_charge": pc if pc is not None else "",
+    }
+
+
+@dataclass
+class MaskIntensityCollator:
+    """HF `data_collator`: pad a batch of preprocessed rows and draw fresh
+    masked-intensity positions (v9/v13). Masking is per-batch so it varies each
+    epoch — the only per-step data work now that preprocessing is precomputed.
+    Mirrors `mask_intensity_collate` but consumes `datasets` dict rows.
+    """
+    mask_ratio: float = 0.15
+    min_masked: int = 1
+
+    def __call__(self, features: list[dict]) -> dict[str, torch.Tensor]:
+        B = len(features)
+        Ks = [len(f["mz"]) for f in features]
+        K_max = max(max(Ks) if Ks else 1, 1)
+        mz = torch.zeros(B, K_max, dtype=torch.float32)
+        log_int = torch.zeros(B, K_max, dtype=torch.float32)
+        intensity_prob = torch.zeros(B, K_max, dtype=torch.float32)
+        key_padding_mask = torch.ones(B, K_max, dtype=torch.bool)
+        mask_positions = torch.zeros(B, K_max, dtype=torch.bool)
+        for b, (f, K) in enumerate(zip(features, Ks)):
+            if K == 0:
+                continue
+            mz[b, :K] = torch.as_tensor(f["mz"], dtype=torch.float32)
+            log_int[b, :K] = torch.as_tensor(f["log_int"], dtype=torch.float32)
+            intensity_prob[b, :K] = torch.as_tensor(f["intensity_prob"], dtype=torch.float32)
+            key_padding_mask[b, :K] = False
+            n_mask = min(K, max(self.min_masked, int(round(K * self.mask_ratio))))
+            idx = torch.randperm(K)[:n_mask]
+            mask_positions[b, idx] = True
+        return {
+            "mz": mz,
+            "log_int": log_int,
+            "intensity_prob": intensity_prob,
+            "key_padding_mask": key_padding_mask,
+            "mask_positions": mask_positions,
+        }
+
+
+def collate_preprocessed(features: list[dict]) -> dict[str, torch.Tensor]:
+    """Pad preprocessed rows into an encoder batch, no masking — for the probe /
+    attention diagnostics that run the encoder without the masked task."""
+    B = len(features)
+    Ks = [len(f["mz"]) for f in features]
+    K_max = max(max(Ks) if Ks else 1, 1)
+    mz = torch.zeros(B, K_max, dtype=torch.float32)
+    log_int = torch.zeros(B, K_max, dtype=torch.float32)
+    intensity_prob = torch.zeros(B, K_max, dtype=torch.float32)
+    key_padding_mask = torch.ones(B, K_max, dtype=torch.bool)
+    for b, (f, K) in enumerate(zip(features, Ks)):
+        if K == 0:
+            continue
+        mz[b, :K] = torch.as_tensor(f["mz"], dtype=torch.float32)
+        log_int[b, :K] = torch.as_tensor(f["log_int"], dtype=torch.float32)
+        intensity_prob[b, :K] = torch.as_tensor(f["intensity_prob"], dtype=torch.float32)
+        key_padding_mask[b, :K] = False
+    return {"mz": mz, "log_int": log_int, "intensity_prob": intensity_prob,
+            "key_padding_mask": key_padding_mask}
+
+
+def build_preprocessed_dataset(paths: list[Path], pp: PreprocessConfig,
+                               num_proc: int | None = None):
+    """Load parquet shards as a HF `datasets.Dataset` and precompute
+    `preprocess_spectrum` with `.map` (cached to Arrow); drop empty spectra."""
+    from datasets import load_dataset
+
+    ds = load_dataset("parquet", data_files=[str(p) for p in paths], split="train")
+    ds = ds.map(partial(_preprocess_example, pp=pp), remove_columns=ds.column_names,
+                num_proc=num_proc, desc="preprocess spectra")
+    return ds.filter(lambda ex: len(ex["mz"]) > 0, num_proc=num_proc,
+                     desc="drop empty spectra")
+
+
+def build_pretraining_datasets(
+    train_paths: list[Path],
+    val_paths: list[Path],
+    pp: PreprocessConfig,
+    num_proc: int | None = None,
+):
+    """Preprocessed (train, val) HF datasets — map-style, so `Trainer` handles
+    sampling/sharding/finite eval natively. The same preprocessed rows feed the
+    inline probes (via `build_preprocessed_dataset` on the val shards), so no
+    per-spectrum transform runs anywhere in training or evaluation."""
+    train = build_preprocessed_dataset(train_paths, pp, num_proc=num_proc)
+    val = build_preprocessed_dataset(val_paths, pp, num_proc=num_proc)
+    return train, val

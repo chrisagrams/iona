@@ -23,15 +23,13 @@ class DeltaBiasConfig:
     # Per-head hidden width. Each head gets its OWN MLP (no parameter
     # sharing across heads), so total bias capacity is n_heads * per_head_hidden.
     # Smaller than the old shared `hidden` because activation memory is
-    # (B, K, K, n_heads * per_head_hidden) — set this to keep that under
-    # ~6 GB at bf16 (per_head_hidden=32 with B=256, K=150, H=8).
+    # (B, K, K, n_heads * per_head_hidden)
     per_head_hidden: int = 32
     f_min: float = 1e-2
     f_max: float = 1e3
     # Bound the per-head bias to ±scale logits via scale*tanh(raw/scale).
     # Keeps the bias comparable to the content term (q·k/√d ~ O(1-2)) so
-    # neither can steamroll the other — prevents the "bias dominates
-    # content" runaway (high-level plan §6.3).
+    # neither can steamroll the other 
     scale: float = 3.0
 
 
@@ -43,17 +41,11 @@ class ModelConfig:
     ffn_mult: int = 4
     dropout: float = 0.1
     max_peaks: int = 150
-    fourier_mz: FourierConfig = field(default_factory=lambda: FourierConfig(64, 1e-2, 1e3))
     fourier_int: FourierConfig = field(default_factory=lambda: FourierConfig(16, 1e-2, 1e2))
     delta_bias: DeltaBiasConfig = field(default_factory=DeltaBiasConfig)
-    # v10: prepend a precursor anchor token carrying absolute m/z (+charge) —
-    # the ONE token with m/z, resolving the absolute-frame ambiguity that
-    # m/z-free tokens leave (fragment_mz_r2 0.89). Default False = v9 (and
-    # keeps v9 checkpoints loadable); v10 configs set use_precursor: true.
-    use_precursor: bool = False
-    # Charge-embedding vocabulary size (index 0 = unknown, 1..7 = z); used by
-    # the precursor anchor token's charge embedding when use_precursor is set.
-    n_charges: int = 8
+    # Zero the (i, i) entry of the Δm bias so the bias module can't modulate
+    # self-attention (Δm=0 → a per-head constant self-logit offset).
+    zero_bias_diagonal: bool = True
 
 
 class PeakEmbed(nn.Module):
@@ -77,35 +69,11 @@ class PeakEmbed(nn.Module):
 
     def forward(self, log_int: Tensor, mask_positions: Tensor | None = None) -> Tensor:
         """log_int: (B, K); mask_positions: (B, K) bool or None → (B, K, d_model)."""
-        tokens = self.mlp(self.ff_int(log_int))
+        feats = self.ff_int(log_int)  # fp32 Fourier features
+        tokens = self.mlp(feats.to(self.mlp[0].weight.dtype))
         if mask_positions is not None:
             tokens = torch.where(mask_positions.unsqueeze(-1), self.mask_token, tokens)
         return tokens
-
-
-class PrecursorEmbed(nn.Module):
-    """Precursor anchor token (v10): MLP(Fourier(precursor_mz) ⊕ charge_emb).
-
-    The ONE token carrying absolute m/z. Prepended to the m/z-free fragment
-    tokens, it pins the absolute frame; the Δm bias then propagates absolute
-    fragment m/z from it. Charge enters here too (the bias is charge-agnostic).
-    """
-
-    def __init__(self, cfg: ModelConfig, charge_dim: int = 16):
-        super().__init__()
-        self.ff_mz = FourierFeatures(cfg.fourier_mz.n_freqs, cfg.fourier_mz.f_min, cfg.fourier_mz.f_max)
-        self.charge_emb = nn.Embedding(cfg.n_charges, charge_dim)
-        nn.init.normal_(self.charge_emb.weight, std=0.02)
-        self.mlp = nn.Sequential(
-            nn.Linear(self.ff_mz.out_dim + charge_dim, cfg.d_model),
-            nn.GELU(),
-            nn.Linear(cfg.d_model, cfg.d_model),
-        )
-
-    def forward(self, precursor_mz: Tensor, charge: Tensor) -> Tensor:
-        """precursor_mz: (B,), charge: (B,) long → (B, d_model)."""
-        feats = torch.cat([self.ff_mz(precursor_mz), self.charge_emb(charge)], dim=-1)
-        return self.mlp(feats)
 
 
 class DeltaMZBias(nn.Module):
@@ -138,8 +106,6 @@ class DeltaMZBias(nn.Module):
         H, D_h = n_heads, cfg.per_head_hidden
 
         # Layer 1: one Linear whose H*D_h outputs we view as H per-head blocks.
-        # nn.Linear's default Kaiming-uniform init matches the old per-head
-        # init exactly (fan_in is in_dim in both cases).
         self.fc1 = nn.Linear(self.ff.out_dim, H * D_h)
         # Layer 2: per-head readout (D_h → scalar), applied as a weighted sum.
         # Zero-init so every head's bias starts at exactly 0.
@@ -156,7 +122,7 @@ class DeltaMZBias(nn.Module):
         The whole bias architecture. `feats` may carry any leading dims (the
         (B, K, K) Δm matrix in `forward`, a flat (N,) grid in `evaluate`).
         """
-        h = self.fc1(feats).unflatten(-1, (self.n_heads, self.per_head_hidden))  # (..., H, D_h)
+        h = self.fc1(feats.to(self.fc1.weight.dtype)).unflatten(-1, (self.n_heads, self.per_head_hidden))  # (..., H, D_h)
         h = F.gelu(h)
         out = (h * self.w2).sum(-1) + self.b2                                    # (..., H)
         return self._bound(out)
@@ -172,7 +138,7 @@ class DeltaMZBias(nn.Module):
 
         dm_grid: (N,) → (N, n_heads). Bounded bias (what attention sees).
         """
-        return self._curve(self.ff(dm_grid))                 # (N, H)
+        return self._curve(self.ff(dm_grid)).float()         # (N, H)
 
 
 class BiasedMHA(nn.Module):
@@ -237,9 +203,7 @@ class MSEncoder(nn.Module):
         super().__init__()
         self.cfg = cfg
         self.embed = PeakEmbed(cfg)
-        self.use_precursor = cfg.use_precursor
-        if self.use_precursor:
-            self.precursor_embed = PrecursorEmbed(cfg)
+        self.zero_bias_diagonal = cfg.zero_bias_diagonal
         self.bias_module = DeltaMZBias(cfg.n_heads, cfg.delta_bias)
         self.blocks = nn.ModuleList([EncoderBlock(cfg) for _ in range(cfg.n_layers)])
         self.norm = nn.LayerNorm(cfg.d_model)
@@ -250,39 +214,23 @@ class MSEncoder(nn.Module):
         log_int: Tensor,
         key_padding_mask: Tensor,
         mask_positions: Tensor | None = None,
-        charge: Tensor | None = None,
-        precursor_mz: Tensor | None = None,
     ) -> Tensor:
         tokens = self.embed(log_int, mask_positions)   # m/z-free tokens (B, K, D)
 
-        # v10: prepend a precursor anchor token (the only token with absolute m/z).
-        prepended = self.use_precursor and precursor_mz is not None
-        if prepended:
-            B = mz.size(0)
-            z = charge if charge is not None else torch.zeros(B, dtype=torch.long, device=mz.device)
-            prec_tok = self.precursor_embed(precursor_mz, z)              # (B, D)
-            tokens = torch.cat([prec_tok.unsqueeze(1), tokens], dim=1)    # (B, K+1, D)
-            mz = torch.cat([precursor_mz.unsqueeze(1), mz], dim=1)        # (B, K+1)
-            key_padding_mask = torch.cat(
-                [torch.zeros(B, 1, dtype=torch.bool, device=mz.device), key_padding_mask], dim=1)
-
-        bias = self.bias_module(mz)  # (B, H, K(+1), K(+1)) — the only place m/z enters
-        # Zero the Δm bias on any pair touching a padded position so the
-        # zero-padding sentinel doesn't pollute the bias gradient.
-        real = ~key_padding_mask                                       # (B, K)
-        bias_valid = real[:, None, :, None] & real[:, None, None, :]   # (B, 1, K, K)
-        bias = bias * bias_valid
-        # Also zero the diagonal so self-attention is never modulated by
-        # the bias — forces self-suppression onto the content (Q/K) path
-        # and frees the bias module to specialize on chemistry.
-        K = mz.size(1)
-        diag = torch.eye(K, dtype=torch.bool, device=mz.device).view(1, 1, K, K)
-        bias = bias.masked_fill(diag, 0.0)
+        bias = self.bias_module(mz)  # (B, H, K, K) — the only place m/z enters
+        # Zero the diagonal so self-attention is never modulated by the
+        # bias — forces self-suppression onto the content (Q/K) path and
+        # frees the bias module to specialize on chemistry. Key-padding is
+        # handled in BiasedMHA (folded into the SDPA attn_mask as -inf), so
+        # the bias needs no separate padding mask here. Toggled off by the
+        # diagonal-zero ablation (cfg.zero_bias_diagonal).
+        if self.zero_bias_diagonal:
+            K = mz.size(1)
+            diag = torch.eye(K, dtype=torch.bool, device=mz.device).view(1, 1, K, K)
+            bias = bias.masked_fill(diag, 0.0)
         for blk in self.blocks:
             tokens = blk(tokens, bias, key_padding_mask)
         tokens = self.norm(tokens)
-        if prepended:
-            tokens = tokens[:, 1:]   # drop the precursor; return fragment tokens (B, K, D)
         return tokens
 
 
@@ -318,7 +266,9 @@ class IntensityHead(nn.Module):
             zero = tokens.new_zeros(())
             return zero, {"kl": zero}
 
-        logits = self.head(tokens.float()).squeeze(-1)              # (B, K)
+        # Matmul in the token/weight dtype (bf16 under DeepSpeed), then upcast
+        # the per-peak logits to fp32 for the numerically-sensitive KL below.
+        logits = self.head(tokens).squeeze(-1).float()             # (B, K)
         m = mask_positions
 
         # Predicted distribution q over masked positions, per row. Setting
