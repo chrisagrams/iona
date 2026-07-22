@@ -9,15 +9,15 @@
 # and would reproduce the old loss spikes. n_val_files=2 takes the two
 # `val_*` shards (they sort after `train_*`) as validation.
 #
-# Exposure: bs=64 per GPU × 4 GPUs × 2 accum = 512 spectra/step (same global as
+# Exposure: bs=64 per GPU × 4 GPUs × 4 accum = 1024 spectra/step (same global as
 # the single-GB10 massivekb_spark run, so the two are directly comparable).
-# 90000 steps × 512 = 46M ≈ 1.6 epochs. Launch: qsub pbs/massivekb_ddp.pbs
+# 28125 steps × 1024 = 28.8M ≈ 1 epoch. Launch: qsub pbs/massivekb_ddp.pbs
 #
 # Batch sizing: the gradient-noise-scale probe (scripts/grad_noise_scale.py)
 # measures B_simple ≈ 900 on this model at the plateau. The old global 320 was
 # ~3x below it — noise-limited, which is why v14 only crept off the plateau and
-# a single-GPU global-80 run stalled on it entirely. Global 512 lands in the
-# efficient band; raise accum for more (up to ~global 900) if steps are cheap.
+# a single-GPU global-80 run stalled on it entirely. Global 1024 sits right at
+# B_simple — the compute-efficient sweet spot.
 d_model: 1024
 n_heads: 16
 n_layers: 16
@@ -41,12 +41,12 @@ intensity_threshold_frac: 0.01
 top_n: 150
 mask_ratio: 0.50
 
-batch_size: 64          # per-GPU; global batch = 64 × 4 GPUs × 2 accum = 512
-grad_accum_steps: 2     # → global 512, same as massivekb_spark (B_simple≈900 band)
+batch_size: 64          # per-GPU; global batch = 64 × 4 GPUs × 4 accum = 1024
+grad_accum_steps: 4     # → global 1024, same as massivekb_spark (at B_simple≈900)
 num_workers: 6          # ×4 ranks = 24 loader workers (+4 main) < 32 cores
-lr: 1.3e-4              # √-scaled from v14's 1e-4 @ global 320:  1e-4 × √(512/320) ≈ 1.26e-4
+lr: 1.8e-4              # √-scaled from v14's 1e-4 @ global 320:  1e-4 × √(1024/320) ≈ 1.79e-4
 warmup_steps: 2000
-total_steps: 90000      # 90000 × 512 = 46M ≈ 1.6 epochs of MassIVE-KB train
+total_steps: 28125      # 28125 × 1024 = 28.8M ≈ 1 epoch of MassIVE-KB train
 weight_decay: 0.01
 grad_clip: 1.0
 precision: bf16
@@ -58,7 +58,7 @@ deepspeed: true         # ZeRO-2 (torchrun launch, see pbs/massivekb_ddp.pbs)
 zero_stage: 2           # keep ≤2: inline probes call the eager encoder directly
 
 wandb_project: msfound
-wandb_run_name: massivekb_xl-polaris-bs64-gacc8   # pbs/massivekb_ddp.pbs appends the job id
+wandb_run_name: massivekb_xl-polaris-gbs1024   # pbs/massivekb_ddp.pbs appends the job id
 log_every: 50
 val_every: 2000
 bias_curve_every: 5000

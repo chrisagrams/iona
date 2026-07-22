@@ -12,8 +12,8 @@
 # Train the XL architecture on MassIVE-KB with 4-way DistributedDataParallel
 # (one process per A100-40GB on a single Polaris node) via torchrun. Unlike
 # scale_all.pbs (4 *independent* models, one per GPU), this is ONE model whose
-# gradients are all-reduced across the 4 GPUs each step — global batch 512
-# (64/GPU × 4 × 2 accum), same as the massivekb_spark run.
+# gradients are all-reduced across the 4 GPUs each step — global batch 1024
+# (64/GPU × 4 × 4 accum), same as the massivekb_spark run.
 #
 # Pre-reqs: pbs/setup_venv.sh once; pbs/convert_massivekb.sh once (writes the
 # globally-shuffled parquet that configs/massivekb_xl.yaml points at).
@@ -26,7 +26,7 @@ CFG=$REPO/configs/massivekb_xl.yaml
 
 JOBID=${PBS_JOBID%%.*}
 JOBID=${JOBID:-local}
-RUN_NAME=massivekb_xl-polaris-bs64-gacc8-${JOBID}
+RUN_NAME=massivekb_xl-polaris-gbs1024-${JOBID}
 LOGDIR=$REPO/pbs/logs/${JOBID}
 mkdir -p "$LOGDIR"
 

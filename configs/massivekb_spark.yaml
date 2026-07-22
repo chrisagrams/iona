@@ -32,14 +32,14 @@ top_n: 150
 mask_ratio: 0.50
 
 batch_size: 64
-grad_accum_steps: 8     # effective batch 512 — gradient-noise-scale B_simple≈900 on the
-                        # XL model (scripts/grad_noise_scale.py); eff 80 was ~11x below it,
-                        # which drowned the low-signal masked-intensity gradient and stalled
-                        # training at the predict-uniform plateau.
+grad_accum_steps: 16    # global batch 64 × 16 = 1024 — at the gradient-noise-scale
+                        # B_simple≈900 (scripts/grad_noise_scale.py). eff 80 was ~11x below
+                        # it, which drowned the low-signal masked-intensity gradient and
+                        # stalled training at the predict-uniform plateau.
 num_workers: 8
-lr: 1.3e-4              # √-scaledß
+lr: 1.8e-4              # √-scaled from v14's 1e-4 @ global 320:  1e-4 × √(1024/320) ≈ 1.79e-4
 warmup_steps: 2000
-total_steps: 90000
+total_steps: 28125      # 28125 × 1024 = 28.8M ≈ 1 epoch of MassIVE-KB train
 weight_decay: 0.01
 grad_clip: 1.0
 precision: bf16
@@ -51,7 +51,7 @@ deepspeed: false        # single GPU — no torchrun/DDP
 zero_stage: 2
 
 wandb_project: msfound
-wandb_run_name: massivekb_xl-spark-bs64-gacc8
+wandb_run_name: massivekb_xl-spark-gbs1024
 log_every: 50
 val_every: 2000
 bias_curve_every: 5000
