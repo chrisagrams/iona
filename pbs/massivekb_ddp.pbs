@@ -51,6 +51,14 @@ export HTTP_PROXY=$http_proxy HTTPS_PROXY=$https_proxy
 export no_proxy=localhost,127.0.0.1,.alcf.anl.gov,.anl.gov
 export NO_PROXY=$no_proxy
 
+# HF dataset cache on eagle (pre-populated by the login-node snapshot_download).
+# resolve_dataset_paths() reads configs/massivekb_xl.yaml's hf_repo and serves
+# the train/ + val/ shards from $HF_HOME/hub. Pointing HF_HOME at eagle keeps
+# the 49 GB off the home quota; HF_HUB_OFFLINE=1 skips the per-rank Hub
+# revalidation and reads straight from disk — no network dependency for data.
+export HF_HOME=/eagle/UIC-HPC/cgrams/hf
+export HF_HUB_OFFLINE=1
+
 export WANDB_DIR=$LOGDIR
 export WANDB_RESUME=allow
 export WANDB_RUN_ID=$RUN_NAME

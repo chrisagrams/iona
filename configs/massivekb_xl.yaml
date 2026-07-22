@@ -4,10 +4,11 @@
 # architecture trains cleanly on the Casanovo/GLEAMS MassIVE-KB corpus
 # (~28.5M train spectra) with a full global shuffle.
 #
-# Data MUST be the globally-shuffled parquet produced by scripts/convert_mgf.py
-# (see pbs/convert_massivekb.sh); the raw MGF is ordered by source raw file
-# and would reproduce the old loss spikes. n_val_files=2 takes the two
-# `val_*` shards (they sort after `train_*`) as validation.
+# Data is the globally-shuffled MassIVE-KB on the Hugging Face Hub
+# (chrisagrams/massive_kb_v1_shuffled) — the same corpus scripts/convert_mgf.py
+# would produce locally, but the shuffle is baked in so the raw-MGF loss spikes
+# can't recur. hf_split_paths() snapshot-downloads the train/ and val/ shards
+# into HF_HOME (set to /eagle/UIC-HPC/cgrams/hf in pbs/massivekb_ddp.pbs).
 #
 # Exposure: bs=64 per GPU × 4 GPUs × 4 accum = 1024 spectra/step (same global as
 # the single-GB10 massivekb_spark run, so the two are directly comparable).
@@ -35,8 +36,7 @@ delta_bias_f_max: 1.0e+3
 delta_bias_scale: 3.0
 delta_bias_learnable: true
 
-root: /eagle/UIC-HPC/cgrams/msbench-datasets/massive_kb_v1_shared/parquet_shuffled/
-n_val_files: 2
+hf_repo: chrisagrams/massive_kb_v1_shuffled   # takes precedence over root; train/ + val/ splits
 intensity_threshold_frac: 0.01
 top_n: 150
 mask_ratio: 0.50
