@@ -9,9 +9,15 @@
 # and would reproduce the old loss spikes. n_val_files=2 takes the two
 # `val_*` shards (they sort after `train_*`) as validation.
 #
-# Exposure: bs=80 per GPU × 4 GPUs = 320 spectra/step. 90000 steps × 320 =
-# 28.8M ≈ one full epoch (~8 h on 4× A100-40GB). Scale total_steps for more
-# epochs. Launch: qsub pbs/massivekb_ddp.pbs
+# Exposure: bs=80 per GPU × 4 GPUs × 2 accum = 640 spectra/step. 90000 steps ×
+# 640 = 57.6M ≈ two epochs. Launch: qsub pbs/massivekb_ddp.pbs
+#
+# Batch sizing: the gradient-noise-scale probe (scripts/grad_noise_scale.py)
+# measures B_simple ≈ 900 on this model at the plateau. The old global 320 was
+# ~3x below it — noise-limited, which is why v14 only crept off the plateau and
+# a single-GPU global-80 run stalled on it entirely. Global 640 (accum 2, same
+# proven 80/GPU memory) lands in the efficient band; push accum→3 (global 960)
+# to sit right at the optimum if the extra per-step compute is worth it.
 d_model: 1024
 n_heads: 16
 n_layers: 16
@@ -35,11 +41,12 @@ intensity_threshold_frac: 0.01
 top_n: 150
 mask_ratio: 0.50
 
-batch_size: 80          # per-GPU; global batch = 80 × 4 GPUs = 320
+batch_size: 80          # per-GPU; global batch = 80 × 4 GPUs × 2 accum = 640
+grad_accum_steps: 2     # → global 640, in the B_simple≈900 efficient band (see header)
 num_workers: 6          # ×4 ranks = 24 loader workers (+4 main) < 32 cores
-lr: 1.0e-4
+lr: 1.4e-4              # √-scaled from v14's 1e-4 @ global 320:  1e-4 × √(640/320) ≈ 1.41e-4
 warmup_steps: 2000
-total_steps: 90000      # 90000 × 320 = 28.8M ≈ 1 epoch of MassIVE-KB train
+total_steps: 90000      # 90000 × 640 = 57.6M ≈ 2 epochs of MassIVE-KB train
 weight_decay: 0.01
 grad_clip: 1.0
 precision: bf16
@@ -51,7 +58,7 @@ deepspeed: true         # ZeRO-2 (torchrun launch, see pbs/massivekb_ddp.pbs)
 zero_stage: 2           # keep ≤2: inline probes call the eager encoder directly
 
 wandb_project: msfound
-wandb_run_name: massivekb_xl-v15
+wandb_run_name: massivekb_xl-polaris
 log_every: 50
 val_every: 2000
 bias_curve_every: 5000
