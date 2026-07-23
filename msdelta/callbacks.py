@@ -166,7 +166,10 @@ class FourierProbeCallback(_InlineCallback):
         if vals.numel() < 8:
             return {}
         span = float(vals.max() - vals.min())
-        f = freqs.detach().abs().cpu()
+        # .float(): freqs is a learnable nn.Parameter, so under bf16 training it
+        # comes back as bfloat16 — which Tensor.numpy() (the histogram below)
+        # rejects. Cast to fp32 at the source, matching interp_mae's idiom.
+        f = freqs.detach().abs().float().cpu()
         m = {
             f"fourier/{name}_mae": interp_mae(freqs, vals),
             f"fourier/{name}_dead": dead_freqs(freqs, span),
