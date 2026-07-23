@@ -163,10 +163,16 @@ def retrieval_metrics_tm(X, y, device, *, ks=(5,), pairwise=False, chunk=1024):
     Xt = torch.as_tensor(X, dtype=torch.float32, device=device)
     yt = torch.as_tensor(y, dtype=torch.long, device=device)
     n = Xt.shape[0]
-    p1 = RetrievalHitRate(top_k=1, empty_target_action="neg")
-    mAP = RetrievalMAP(empty_target_action="neg")
-    rec = {k: RetrievalRecall(top_k=k, empty_target_action="neg") for k in ks}
-    aucpr = BinaryAveragePrecision() if pairwise else None
+    # sync_on_compute=False: this runs only on rank 0 (the inline callbacks are
+    # world-process-zero gated) over its own sampled spectra, and the metric
+    # state lives on CPU. Left at the default, .compute() would all_gather that
+    # CPU state across the NCCL group — which has no CPU backend and no other
+    # rank waiting — raising "No backend type associated with device type cpu".
+    p1 = RetrievalHitRate(top_k=1, empty_target_action="neg", sync_on_compute=False)
+    mAP = RetrievalMAP(empty_target_action="neg", sync_on_compute=False)
+    rec = {k: RetrievalRecall(top_k=k, empty_target_action="neg", sync_on_compute=False)
+           for k in ks}
+    aucpr = BinaryAveragePrecision(sync_on_compute=False) if pairwise else None
     XT = Xt.t().contiguous()
     cols_all = torch.arange(n, device=device)
     for s in range(0, n, chunk):
