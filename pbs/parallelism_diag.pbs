@@ -1,0 +1,109 @@
+#!/bin/bash
+#PBS -N mkbxl_pardiag
+#PBS -A FRAME-IDP
+#PBS -q preemptable
+#PBS -l select=3:system=polaris
+#PBS -l place=scatter
+#PBS -l walltime=03:00:00
+#PBS -l filesystems=home:eagle
+#PBS -j oe
+#PBS -o /home/cgrams/msdelta/pbs/logs/
+#
+# Parallelism diagnostic — why does the 4-GPU/DeepSpeed XL run need ~5x more
+# OPTIMIZER STEPS than the 1-GPU run to reach the same loss, despite twice the
+# global batch?
+#
+# The observation: massivekb_xl-spark (1 GPU, no DeepSpeed, gbs 512, lr 1.3e-4)
+# reaches train loss 0.25 at step 2700 and eval 0.079 at 8.2M samples. The
+# polaris run (4 GPU, ZeRO-2, gbs 1024, lr 1.8e-4) needs step 14600 for the same
+# train loss and ended at eval 0.221 after 28.8M samples. A bigger batch gives a
+# lower-variance gradient, so per-step progress should be BETTER or equal, never
+# 5x worse. Batch size cannot explain that; something in the parallel path might.
+#
+# The problem with every experiment so far is that those two runs differ on five
+# axes at once (batch, lr, DeepSpeed, rank count, hardware), so nothing is
+# attributable. This job fixes global batch at 512 and lr at 1.3e-4 — Spark's
+# known-good settings — and varies ONLY the parallelism, one node per cell:
+#
+#   A  1 GPU, no DeepSpeed, bs64 x gacc8   replicates Spark on A100 hardware
+#   B  4 GPU, plain DDP,    bs64 x gacc2   A vs B  -> is multi-GPU itself the issue?
+#   C  4 GPU, ZeRO-2,       bs64 x gacc2   B vs C  -> is DeepSpeed the issue?
+#
+# Reads (project msfound, runs named mkbxl-par-<cell>-<jobid>):
+#   train/loss   — primary. Spark hits 0.30 @2200 and 0.25 @2700; log_every=50
+#                  matches Spark so the curves overlay directly.
+#   eval/loss    — secondary (val_every=250).
+#   grad_norm    — caveat: DeepSpeed computes this on partitioned gradients via
+#                  its own global-norm path, torch via clip_grad_norm_, so A/B vs
+#                  C are not strictly the same metric. Compare A vs B freely.
+#
+# Outcomes:
+#   A tracks Spark, C falls behind B  -> DeepSpeed. Next test the unpinned bf16
+#       gradient precision: build_deepspeed_config sets bf16 enabled but pins
+#       neither data_types.grad_accum_dtype nor fp32_reduce_scatter, so grad
+#       accumulation/reduce-scatter may run in bf16 where the no-DeepSpeed path
+#       keeps fp32 .grad. Re-run C with those pinned to fp32.
+#   A tracks Spark, B already falls behind -> multi-GPU/DDP path, not DeepSpeed.
+#   A already falls behind Spark -> parallelism is innocent; the gap is the
+#       batch/lr/hardware axis and belongs in a tuning sweep after all.
+#
+# Sizing: 3000 steps covers Spark's breakthrough (0.52@1600 -> 0.25@2700). Cells
+# B/C run ~0.31 s/step (~16 min); cell A is 8 sequential micro-batches on one GPU
+# at ~1.26 s/step (~63 min) and sets the walltime. 3h leaves room for compile
+# warmup and the first-epoch data read — the previous lr sweep died on a 1h
+# debug-scaling cap, so this uses preemptable with real margin.
+#
+# Pre-req: pbs/setup_venv.sh once; HF cache pre-populated on eagle.
+# Launch:  qsub pbs/parallelism_diag.pbs
+
+set -euo pipefail
+
+REPO=/home/cgrams/msdelta
+cd "$REPO"
+
+JOBID=${PBS_JOBID%%.*}
+JOBID=${JOBID:-local}
+LOGDIR=$REPO/pbs/logs/${JOBID}
+mkdir -p "$LOGDIR"
+
+# tag:nproc:deepspeed:grad_accum   — nproc * 64 * gacc == 512 for every cell.
+CELLS=(
+    "A-1gpu-nods:1:False:8"
+    "B-4gpu-nods:4:False:2"
+    "C-4gpu-zero2:4:True:2"
+)
+
+mapfile -t NODES < <(sort -u "$PBS_NODEFILE")
+echo "$(date -Is) job=$PBS_JOBID nodes=${#NODES[@]} cells=${#CELLS[@]}"
+printf '  node: %s\n' "${NODES[@]}"
+
+if (( ${#NODES[@]} < ${#CELLS[@]} )); then
+    echo "ERROR: need ${#CELLS[@]} nodes, got ${#NODES[@]}" >&2
+    exit 2
+fi
+
+# Launch each cell on its own node via mpiexec (Cray PALS), NOT ssh: node-to-node
+# ssh is not permitted inside a Polaris job (hostbased auth fails -> exit 255).
+# `--np 1 --ppn 1 --hosts $node` places exactly one shell on the target node; that
+# shell's torchrun (--standalone, node-local NCCL rendezvous) spawns the per-GPU
+# ranks itself. PALS exports PMI_*/PALS_* env, which does not collide with the
+# RANK/WORLD_SIZE torchrun sets for its children.
+PIDS=()
+for i in "${!CELLS[@]}"; do
+    IFS=: read -r tag nproc ds gacc <<<"${CELLS[$i]}"
+    node=${NODES[$i]}
+    echo "$(date -Is) -> node=$node cell=$tag nproc=$nproc deepspeed=$ds gacc=$gacc"
+    mpiexec --np 1 --ppn 1 --hosts "$node" -- \
+        bash "$REPO/pbs/_run_parallelism_cell.sh" "$tag" "$nproc" "$ds" "$gacc" "$JOBID" &
+    PIDS+=($!)
+done
+
+set +e
+FAIL=0
+for i in "${!CELLS[@]}"; do
+    IFS=: read -r tag _ _ _ <<<"${CELLS[$i]}"
+    wait "${PIDS[$i]}"; rc=$?
+    echo "$(date -Is) cell=$tag exit=$rc"
+    (( rc != 0 )) && FAIL=1
+done
+exit $FAIL
