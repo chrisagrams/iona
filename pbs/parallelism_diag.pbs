@@ -1,7 +1,7 @@
 #!/bin/bash
 #PBS -N mkbxl_pardiag
 #PBS -A FRAME-IDP
-#PBS -q preemptable
+#PBS -q capacity
 #PBS -l select=3:system=polaris
 #PBS -l place=scatter
 #PBS -l walltime=03:00:00
@@ -51,7 +51,7 @@
 # B/C run ~0.31 s/step (~16 min); cell A is 8 sequential micro-batches on one GPU
 # at ~1.26 s/step (~63 min) and sets the walltime. 3h leaves room for compile
 # warmup and the first-epoch data read — the previous lr sweep died on a 1h
-# debug-scaling cap, so this uses preemptable with real margin.
+# debug-scaling cap, so this uses capacity with real margin.
 #
 # Pre-req: pbs/setup_venv.sh once; HF cache pre-populated on eagle.
 # Launch:  qsub pbs/parallelism_diag.pbs
