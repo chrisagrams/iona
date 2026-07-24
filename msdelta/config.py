@@ -106,6 +106,10 @@ class TrainArgs:
     lr: float = 1e-4
     warmup_steps: int = 2000
     total_steps: int = 50000
+    lr_scheduler_type: str = "cosine"  # cosine | constant_with_warmup | linear | …
+    # An LR-range-test screen wants a flat post-warmup LR so configs are ranked
+    # on training dynamics, not on where the cosine tail happens to land; set
+    # `constant_with_warmup` for that (see pbs/lr_sweep.pbs).
     weight_decay: float = 0.01
     grad_clip: float = 1.0
     grad_accum_steps: int = 1
@@ -214,7 +218,7 @@ def build_training_arguments(
         adam_beta2=0.95,
         max_grad_norm=targs.grad_clip,
         warmup_steps=targs.warmup_steps,
-        lr_scheduler_type="cosine",
+        lr_scheduler_type=targs.lr_scheduler_type,
         bf16=(targs.precision == "bf16"),
         fp16=(targs.precision == "fp16"),
         torch_compile=targs.compile,
