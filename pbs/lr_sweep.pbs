@@ -60,15 +60,23 @@ if (( ${#NODES[@]} < ${#LRS[@]} )); then
     exit 2
 fi
 
-# ssh into each node and launch its cell in the background. The cell script lives
-# on the shared home filesystem, so it's visible on every node. --standalone
-# torchrun keeps each cell's NCCL rendezvous node-local (no cross-node comm).
+# Launch each cell on its node in the background via mpiexec (Cray PALS) rather
+# than raw ssh: node-to-node ssh is not permitted inside a Polaris job (key/
+# hostbased auth fails -> "Permission denied", exit 255). PALS mpiexec is the
+# sanctioned launcher on this machine, and multiple concurrent single-node
+# mpiexec invocations against disjoint --hosts coexist fine in one allocation.
+# `--np 1 --ppn 1 --hosts $node` places exactly one shell on the target node;
+# that shell's torchrun (--standalone, node-local NCCL rendezvous) then spawns
+# the 4 per-GPU ranks itself. The cell script lives on shared home, visible on
+# every node. PALS sets PMI_*/PALS_* env (not RANK/WORLD_SIZE), so it does not
+# collide with the RANK/WORLD_SIZE that torchrun exports to its children.
 PIDS=()
 for i in "${!LRS[@]}"; do
     lr=${LRS[$i]}
     node=${NODES[$i]}
     echo "$(date -Is) -> node=$node lr=$lr clip=$CLIP"
-    ssh "$node" "bash $REPO/pbs/_run_sweep_cell.sh $lr $CLIP $JOBID" &
+    mpiexec --np 1 --ppn 1 --hosts "$node" -- \
+        bash "$REPO/pbs/_run_sweep_cell.sh" "$lr" "$CLIP" "$JOBID" &
     PIDS+=($!)
 done
 
