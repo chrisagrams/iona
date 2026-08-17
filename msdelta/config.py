@@ -120,6 +120,7 @@ class TrainArgs:
     save_total_limit: int = 3
     deepspeed: bool = False            # opt-in; needs a torchrun launch (see build_deepspeed_config)
     zero_stage: int = 2               # keep ≤2: inline probes call the eager encoder directly
+    deepspeed_fp32_gradients: bool = False  # accumulate + reduce gradients in fp32 under DeepSpeed
     device: str = "cuda"              # accepted for back-compat; Trainer manages placement
 
 
@@ -171,7 +172,9 @@ def parse_config(argv: list[str] | None):
 
 # ---------- translation to HF arguments ----------
 
-def build_deepspeed_config(enabled: bool, zero_stage: int) -> dict | None:
+def build_deepspeed_config(
+    enabled: bool, zero_stage: int, fp32_gradients: bool = False,
+) -> dict | None:
     """A sensible ZeRO config for `TrainingArguments(deepspeed=...)`, or None
     when disabled. Optimizer and scheduler are left as ``auto`` so HF builds
     them from `TrainingArguments` (AdamW + cosine-with-warmup).
@@ -182,7 +185,7 @@ def build_deepspeed_config(enabled: bool, zero_stage: int) -> dict | None:
     launch under torchrun (see configs/massivekb_xl.yaml)."""
     if not enabled:
         return None
-    return {
+    config = {
         "zero_optimization": {
             # ZeRO-2 partitions optimizer state + grads but keeps a full copy
             # of every parameter on each rank — required for the inline probes,
@@ -198,6 +201,14 @@ def build_deepspeed_config(enabled: bool, zero_stage: int) -> dict | None:
         "train_micro_batch_size_per_gpu": "auto",
         "train_batch_size": "auto",
     }
+    if fp32_gradients:
+        # DeepSpeed-native bf16 otherwise accumulates gradients in the model
+        # dtype and may use a reduced-precision communication dtype. Pin both
+        # lossy summations to fp32 so this path matches PyTorch bf16 AMP more
+        # closely; parameters and optimizer state remain managed by ZeRO.
+        config["data_types"] = {"grad_accum_dtype": "fp32"}
+        config["communication_data_type"] = "fp32"
+    return config
 
 
 def build_training_arguments(
@@ -234,5 +245,7 @@ def build_training_arguments(
         remove_unused_columns=False,
         seed=targs.seed,
         report_to=report_to,
-        deepspeed=build_deepspeed_config(targs.deepspeed, targs.zero_stage),
+        deepspeed=build_deepspeed_config(
+            targs.deepspeed, targs.zero_stage, targs.deepspeed_fp32_gradients,
+        ),
     )
