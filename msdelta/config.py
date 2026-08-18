@@ -121,6 +121,7 @@ class TrainArgs:
     deepspeed: bool = False            # opt-in; needs a torchrun launch (see build_deepspeed_config)
     zero_stage: int = 2               # keep ≤2: inline probes call the eager encoder directly
     deepspeed_fp32_gradients: bool = False  # accumulate + reduce gradients in fp32 under DeepSpeed
+    deepspeed_torch_autocast: bool = False  # keep fp32 params; use PyTorch bf16 autocast inside DeepSpeed
     device: str = "cuda"              # accepted for back-compat; Trainer manages placement
 
 
@@ -174,6 +175,7 @@ def parse_config(argv: list[str] | None):
 
 def build_deepspeed_config(
     enabled: bool, zero_stage: int, fp32_gradients: bool = False,
+    torch_autocast: bool = False,
 ) -> dict | None:
     """A sensible ZeRO config for `TrainingArguments(deepspeed=...)`, or None
     when disabled. Optimizer and scheduler are left as ``auto`` so HF builds
@@ -194,13 +196,24 @@ def build_deepspeed_config(
             "overlap_comm": True,
             "contiguous_gradients": True,
         },
-        "bf16": {"enabled": "auto"},
-        "fp16": {"enabled": "auto"},
         "gradient_clipping": "auto",
         "gradient_accumulation_steps": "auto",
         "train_micro_batch_size_per_gpu": "auto",
         "train_batch_size": "auto",
     }
+    if torch_autocast:
+        # DeepSpeed's native bf16 mode casts the live model to bf16. PyTorch
+        # autocast instead keeps fp32 parameters and chooses the compute dtype
+        # per operation, matching the healthy non-DeepSpeed Trainer path while
+        # retaining ZeRO sharding. Native bf16/fp16 keys must not coexist with
+        # DeepSpeed's torch_autocast mode.
+        config["torch_autocast"] = {
+            "enabled": True,
+            "dtype": "bfloat16",
+        }
+    else:
+        config["bf16"] = {"enabled": "auto"}
+        config["fp16"] = {"enabled": "auto"}
     if fp32_gradients:
         # DeepSpeed-native bf16 otherwise accumulates gradients in the model
         # dtype and may use a reduced-precision communication dtype. Pin both
@@ -246,6 +259,9 @@ def build_training_arguments(
         seed=targs.seed,
         report_to=report_to,
         deepspeed=build_deepspeed_config(
-            targs.deepspeed, targs.zero_stage, targs.deepspeed_fp32_gradients,
+            targs.deepspeed,
+            targs.zero_stage,
+            targs.deepspeed_fp32_gradients,
+            targs.deepspeed_torch_autocast,
         ),
     )
