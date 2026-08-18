@@ -121,7 +121,10 @@ class TrainArgs:
     deepspeed: bool = False            # opt-in; needs a torchrun launch (see build_deepspeed_config)
     zero_stage: int = 2               # keep ≤2: inline probes call the eager encoder directly
     deepspeed_fp32_gradients: bool = False  # accumulate + reduce gradients in fp32 under DeepSpeed
-    deepspeed_torch_autocast: bool = False  # keep fp32 params; use PyTorch bf16 autocast inside DeepSpeed
+    # Default to PyTorch autocast under DeepSpeed. Native DeepSpeed bf16 casts
+    # the live model to bf16 and produced a reproducibly degraded trajectory for
+    # this model under both ZeRO-0 and ZeRO-2.
+    deepspeed_torch_autocast: bool = True
     device: str = "cuda"              # accepted for back-compat; Trainer manages placement
 
 
@@ -175,7 +178,7 @@ def parse_config(argv: list[str] | None):
 
 def build_deepspeed_config(
     enabled: bool, zero_stage: int, fp32_gradients: bool = False,
-    torch_autocast: bool = False,
+    torch_autocast: bool = True,
 ) -> dict | None:
     """A sensible ZeRO config for `TrainingArguments(deepspeed=...)`, or None
     when disabled. Optimizer and scheduler are left as ``auto`` so HF builds
@@ -184,7 +187,12 @@ def build_deepspeed_config(
     Off by default: DeepSpeed needs a torchrun/deepspeed launcher to stand up
     the process group, so it would break the single-GPU ``msdelta-train``
     launches. Opt in with ``deepspeed: true`` on the multi-GPU configs that
-    launch under torchrun (see configs/massivekb_xl.yaml)."""
+    launch under torchrun (see configs/massivekb_xl.yaml).
+
+    PyTorch bf16 autocast is the default because it keeps live parameters in
+    fp32 and matches the healthy non-DeepSpeed training trajectory. Set
+    ``deepspeed_torch_autocast: false`` only to reproduce the legacy native-bf16
+    behavior."""
     if not enabled:
         return None
     config = {

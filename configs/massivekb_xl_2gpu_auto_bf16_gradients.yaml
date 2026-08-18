@@ -49,6 +49,7 @@ seed: 0
 deepspeed: true
 zero_stage: 2
 deepspeed_fp32_gradients: false
+deepspeed_torch_autocast: false  # retain legacy native-bf16 behavior for this control
 
 wandb_project: msfound
 wandb_run_name: massivekb_xl-2gpu-gbs512-auto-bf16grads
