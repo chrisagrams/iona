@@ -24,6 +24,7 @@ dependencies = [
 
 [project.scripts]
 msdelta-train = "msdelta.train:main"
+msdelta-denoise = "msdelta.denoise:main"
 
 [build-system]
 requires = ["hatchling"]
