@@ -24,7 +24,7 @@ n_heads: 16
 n_layers: 16
 ffn_mult: 4
 dropout: 0.1
-max_peaks: 150
+max_peaks: 1024
 fourier_int_n_freqs: 16
 fourier_int_f_min: 1.0e-2
 fourier_int_f_max: 1.0e+2
@@ -40,6 +40,7 @@ hf_repo: chrisagrams/massive_kb_v1_shuffled   # takes precedence over root; trai
 intensity_threshold_frac: 0.01
 top_n: 150
 mask_ratio: 0.50
+preprocess_num_workers: 24  # rank 0 only; other ranks wait and load its cache
 
 batch_size: 64          # per-GPU; global batch = 64 × 4 GPUs × 4 accum = 1024
 grad_accum_steps: 4     # → global 1024, same as massivekb_spark (at B_simple≈900)
@@ -59,7 +60,7 @@ zero_stage: 2           # keep ≤2: inline probes call the eager encoder direct
 deepspeed_torch_autocast: true  # fp32 params + bf16 compute; native DS bf16 trains poorly here
 
 wandb_project: msfound
-wandb_run_name: massivekb_xl-polaris-gbs1024   # pbs/massivekb_ddp.pbs appends the job id
+wandb_run_name: v15-seq1024-bs512   # pbs/massivekb_ddp.pbs appends the job id
 log_every: 50
 val_every: 2000
 bias_curve_every: 5000
@@ -67,4 +68,4 @@ ckpt_every: 10000
 probe_every: 5000
 probe_n_spectra: 3000
 replicate_retrieval_repo: chrisagrams/ms2-peptide-replicate-retrieval  # MS2 replicate-retrieval benchmark probe (omit to skip)
-out_dir: /eagle/UIC-HPC/cgrams/msdelta-runs
+out_dir: ./runs

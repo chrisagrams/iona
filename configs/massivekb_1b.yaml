@@ -1,0 +1,76 @@
+# MassIVE-KB v1 — 1B tier (d=2048, n_layers=20, ~1.01B params), 4× A100-40GB.
+# Same architecture and corpus as configs/massivekb_xl.yaml (~203M); this is the
+# 5× capacity step on that ladder, so every non-capacity knob is held fixed to
+# keep the two runs directly comparable.
+#
+# Sizing. Params ≈ 12·d²·L, so 1B is reachable as either d=2048/L=20 (1.01B) or
+# d=1792/L=26 (1.01B). d=2048 wins on two counts: n_heads stays at 16, which
+# keeps the Δm-bias tensor — (B, 16, K, K), materialized once and shared across
+# all layers — exactly the size it is on XL; and d_head becomes 128 (vs XL's
+# 64), the width SDPA's fused kernels are fastest at. The cost is a wider/
+# shallower aspect ratio (d/L = 102 vs XL's 64); if depth turns out to matter
+# more than width here, d=1792 / n_heads=14 / n_layers=26 is the same param
+# count at d/L = 69 and the same d_head=128.
+d_model: 2048           # 2× XL
+n_heads: 16             # unchanged from XL → Δm-bias activation cost is unchanged; d_head = 128
+n_layers: 20            # 12 · 2048² · 20 ≈ 1.01B
+ffn_mult: 4
+dropout: 0.1
+max_peaks: 1024
+zero_bias_diagonal: true
+fourier_int_n_freqs: 16
+fourier_int_f_min: 1.0e-2
+fourier_int_f_max: 1.0e+2
+fourier_int_learnable: true
+delta_bias_n_freqs: 64
+delta_bias_per_head_hidden: 32
+delta_bias_f_min: 1.0e-2
+delta_bias_f_max: 1.0e+3
+delta_bias_scale: 3.0
+delta_bias_learnable: true
+
+hf_repo: chrisagrams/massive_kb_v1_shuffled   # takes precedence over root; train/ + val/ splits
+hf_train_split: train
+hf_val_split: val
+intensity_threshold_frac: 0.01
+top_n: 150
+mask_ratio: 0.50
+preprocess_num_workers: 24  # rank 0 only; other ranks wait and load its cache
+
+# Exposure: global batch is held at XL's 1024 spectra/step (the gradient-noise-
+# scale probe put B_simple ≈ 900 on the 203M model; critical batch size grows
+# with capacity, so 1024 is if anything conservative here — re-run
+# scripts/grad_noise_scale.py on this model before raising it). The per-GPU
+# micro-batch drops 64 → 32 to pay for the 5× weights, with accumulation
+# doubled to compensate: 32 × 4 GPUs × 8 accum = 1024.
+batch_size: 32          # per-GPU micro-batch
+grad_accum_steps: 8     # → global 1024, same as massivekb_xl
+num_workers: 6          # ×4 ranks = 24 loader workers (+4 main) < 32 cores
+lr: 1.2e-4              # 1.8e-4 × √(1024/2048): the usual 1/√d_model taper off the XL LR
+lr_scheduler_type: cosine
+warmup_steps: 3000      # longer than XL's 2000 — wide models are least stable early
+total_steps: 56250      # 56250 × 1024 = 57.6M ≈ 2 epochs of MassIVE-KB train
+                        # (1 epoch ≈ 4.3B peak tokens at top_n=150, so a compute-optimal
+                        #  1B budget would want ~4–5 epochs; 2 is the affordable first cut)
+weight_decay: 0.01
+grad_clip: 1.0
+precision: bf16
+compile: true
+val_batches: 50
+device: cuda
+seed: 0
+save_total_limit: 3
+deepspeed: true         # ZeRO-2 (torchrun launch, see pbs/massivekb_ddp.pbs)
+zero_stage: 2           # keep ≤2: inline probes call the eager encoder directly
+deepspeed_torch_autocast: true  # fp32 params + bf16 compute; native DS bf16 trains poorly here
+
+wandb_project: msfound
+wandb_run_name: v15-1b-seq150   # pbs/massivekb_ddp.pbs appends the job id
+log_every: 50
+val_every: 2000
+bias_curve_every: 5000
+ckpt_every: 10000
+probe_every: 5000
+probe_n_spectra: 3000
+replicate_retrieval_repo: chrisagrams/ms2-peptide-replicate-retrieval  # MS2 replicate-retrieval benchmark probe (omit to skip)
+out_dir: ./runs
