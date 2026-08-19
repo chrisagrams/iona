@@ -28,6 +28,8 @@ from __future__ import annotations
 
 import os
 import sys
+import json
+import time
 from dataclasses import asdict
 from pathlib import Path
 
@@ -91,6 +93,89 @@ class MSDeltaTrainer(Trainer):
         return [n for n in super().get_decay_parameter_names(model)
                 if not n.endswith(".freqs")]
 
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._train_counts = {"spectra": 0, "peaks": 0, "masked": 0}
+        self._eval_counts = {"spectra": 0, "masked": 0}
+        self._metrics_started = time.monotonic()
+
+    def compute_loss(self, model, inputs, return_outputs=False, num_items_in_batch=None):
+        counts = self._train_counts if model.training else self._eval_counts
+        counts["spectra"] += int(inputs["mz"].shape[0])
+        counts["masked"] += int(inputs["mask_positions"].sum().item())
+        if model.training:
+            counts["peaks"] += int((~inputs["key_padding_mask"]).sum().item())
+        return super().compute_loss(
+            model, inputs, return_outputs=return_outputs,
+            num_items_in_batch=num_items_in_batch,
+        )
+
+    def log(self, logs, start_time=None):
+        elapsed = max(time.monotonic() - self._metrics_started, 1e-9)
+        local = torch.tensor(
+            [self._train_counts["spectra"], self._train_counts["peaks"],
+             self._train_counts["masked"]],
+            dtype=torch.long, device=self.args.device,
+        )
+        spectra, peaks, masked = self.accelerator.reduce(local, reduction="sum").tolist()
+        logs = {
+            **logs,
+            "training_spectra_seen": spectra,
+            "training_peak_tokens_seen": peaks,
+            "masked_peaks_seen": masked,
+            "cumulative_estimated_flops": self.state.total_flos,
+            "wall_clock_time": elapsed,
+            "spectra_per_second": spectra / elapsed,
+            "peak_tokens_per_second": peaks / elapsed,
+        }
+        if "loss" in logs:
+            logs["training_loss"] = logs["loss"]
+        if "eval_loss" in logs:
+            logs["validation_loss"] = logs["eval_loss"]
+        if hasattr(self, "parameter_count"):
+            logs["parameter_count"] = self.parameter_count
+        return super().log(logs, start_time=start_time)
+
+    def evaluate(self, *args, **kwargs):
+        self._eval_counts = {"spectra": 0, "masked": 0}
+        metrics = super().evaluate(*args, **kwargs)
+        prefix = kwargs.get("metric_key_prefix", "eval")
+        loss_key = f"{prefix}_loss"
+        local = torch.tensor(
+            [self._eval_counts["spectra"], self._eval_counts["masked"]],
+            dtype=torch.long, device=self.args.device,
+        )
+        eval_spectra, eval_masked = self.accelerator.reduce(local, reduction="sum").tolist()
+        if loss_key in metrics and eval_masked:
+            # Existing KL is batch-mean (per spectrum). Convert its accumulated
+            # numerator to the required held-out per-masked-peak comparison.
+            per_masked = (
+                metrics[loss_key] * eval_spectra / eval_masked
+            )
+            metrics[f"{prefix}_loss_per_masked_peak"] = per_masked
+            self.log({
+                f"{prefix}_loss_per_masked_peak": per_masked,
+                "validation_loss_per_masked_peak": per_masked,
+            })
+        return metrics
+
+
+def parameter_counts(model: MSDeltaForPretraining, architecture_id: str) -> dict[str, int | str]:
+    """Exact trainable-parameter accounting for an ablation run."""
+    count = lambda module: sum(p.numel() for p in module.parameters() if p.requires_grad)
+    embed = model.encoder.embed
+    return {
+        "architecture": architecture_id,
+        "total_parameters": count(model),
+        "encoder_parameters": count(model.encoder),
+        "absolute_mz_parameters": (
+            count(embed.ff_mz) + count(embed.mz_mlp) if embed.use_absolute_mz else 0
+        ),
+        "delta_bias_parameters": (
+            count(model.encoder.bias_module) if model.encoder.bias_module is not None else 0
+        ),
+    }
+
 
 # ---------- training ----------
 
@@ -113,9 +198,11 @@ def main(argv: list[str] | None = None) -> int:
 
     # Model — placement + precision are the Trainer/DeepSpeed engine's job.
     model = MSDeltaForPretraining(margs.to_model_config())
+    counts = parameter_counts(model, margs.architecture_id)
     if training_args.local_process_index == 0:
-        n_params = sum(p.numel() for p in model.parameters())
-        print(f"[model] {n_params/1e6:.2f}M params", flush=True)
+        print(f"[model] {counts}", flush=True)
+        with open(out_dir / "parameter_counts.json", "w") as f:
+            json.dump(counts, f, indent=2)
 
     # Only global rank 0 performs the expensive map/filter. Other ranks wait,
     # then execute the same calls and immediately load rank 0's completed Arrow
@@ -142,11 +229,15 @@ def main(argv: list[str] | None = None) -> int:
         eval_dataset=eval_ds,
         data_collator=MaskIntensityCollator(mask_ratio=dargs.mask_ratio),
     )
+    trainer.parameter_count = counts["total_parameters"]
     # The model always returns a loss but exposes no label columns for HF to
     # detect, so the eval loop would otherwise skip loss and report no eval_loss
     # (our val KL). Force it on.
     trainer.can_return_loss = True
-    resolved = {**asdict(margs), **asdict(dargs), **asdict(targs), **asdict(largs)}
+    resolved = {
+        **asdict(margs), **asdict(dargs), **asdict(targs), **asdict(largs),
+        **counts, "parameter_count": counts["total_parameters"],
+    }
     for cb in build_callbacks(model, val_ds, dargs.preprocess(), largs, resolved, out_dir):
         trainer.add_callback(cb)
 
@@ -155,10 +246,11 @@ def main(argv: list[str] | None = None) -> int:
     # Final artifacts — main process writes the model + a last bias-curve render.
     if trainer.is_world_process_zero():
         trainer.save_model(str(out_dir / "final"))
-        panels = render_bias_panels(model.encoder.bias_module, trainer.state.global_step)
-        for name, fig in panels.items():
-            fig.savefig(out_dir / "figs" / f"{name.replace('/', '_')}_final.png", dpi=110)
-            plt.close(fig)
+        if model.encoder.bias_module is not None:
+            panels = render_bias_panels(model.encoder.bias_module, trainer.state.global_step)
+            for name, fig in panels.items():
+                fig.savefig(out_dir / "figs" / f"{name.replace('/', '_')}_final.png", dpi=110)
+                plt.close(fig)
     return 0
 
 

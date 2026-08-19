@@ -156,7 +156,9 @@ class AttentionRecorder:
         q, k, _ = qkv.unbind(dim=2)
         logits = q.transpose(1, 2) @ k.transpose(1, 2).transpose(-1, -2)
         logits = logits / math.sqrt(module.d_head)
-        logits = logits + bias.masked_fill(key_padding_mask[:, None, None, :], float("-inf"))
+        attn_mask = bias if bias is not None else x.new_zeros((B, 1, 1, K))
+        logits = logits + attn_mask.masked_fill(
+            key_padding_mask[:, None, None, :], float("-inf"))
         self.attn.append(F.softmax(logits, dim=-1))
 
 

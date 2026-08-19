@@ -44,19 +44,20 @@ class ModelConfig:
     dropout: float = 0.1
     max_peaks: int = 150
     fourier_int: FourierConfig = field(default_factory=lambda: FourierConfig(16, 1e-2, 1e2))
+    fourier_mz: FourierConfig = field(default_factory=lambda: FourierConfig(64, 1e-3, 1e0))
     delta_bias: DeltaBiasConfig = field(default_factory=DeltaBiasConfig)
+    use_absolute_mz: bool = False
+    use_delta_mz_bias: bool = True
     # Zero the (i, i) entry of the Δm bias so the bias module can't modulate
     # self-attention (Δm=0 → a per-head constant self-logit offset).
     zero_bias_diagonal: bool = True
 
 
 class PeakEmbed(nn.Module):
-    """m/z-FREE token embedding (v9): token = MLP(Fourier(log_int)).
+    """Intensity embedding with an optional absolute-m/z pathway.
 
-    Tokens deliberately do NOT encode m/z — m/z flows only through the Δm
-    bias, making the bias the sole carrier of m/z structure (ALiBi/T5-style
-    relative-only position). A learned [MASK] vector replaces the token at
-    masked positions for masked-intensity prediction.
+    Masking replaces only the intensity token, so absolute-m/z variants retain
+    a masked peak's coordinate.
     """
 
     def __init__(self, cfg: ModelConfig):
@@ -69,14 +70,28 @@ class PeakEmbed(nn.Module):
             nn.GELU(),
             nn.Linear(cfg.d_model, cfg.d_model),
         )
+        self.use_absolute_mz = cfg.use_absolute_mz
+        if self.use_absolute_mz:
+            self.ff_mz = FourierFeatures(
+                cfg.fourier_mz.n_freqs, cfg.fourier_mz.f_min, cfg.fourier_mz.f_max,
+                learnable=cfg.fourier_mz.learnable)
+            self.mz_mlp = nn.Sequential(
+                nn.Linear(self.ff_mz.out_dim, cfg.d_model),
+                nn.GELU(),
+                nn.Linear(cfg.d_model, cfg.d_model),
+            )
         self.mask_token = nn.Parameter(torch.randn(cfg.d_model) * 0.02)
 
-    def forward(self, log_int: Tensor, mask_positions: Tensor | None = None) -> Tensor:
-        """log_int: (B, K); mask_positions: (B, K) bool or None → (B, K, d_model)."""
+    def forward(self, mz: Tensor, log_int: Tensor,
+                mask_positions: Tensor | None = None) -> Tensor:
+        """mz/log_int: (B, K); mask_positions: (B, K) bool or None."""
         feats = self.ff_int(log_int)  # fp32 Fourier features
         tokens = self.mlp(feats.to(self.mlp[0].weight.dtype))
         if mask_positions is not None:
             tokens = torch.where(mask_positions.unsqueeze(-1), self.mask_token, tokens)
+        if self.use_absolute_mz:
+            mz_feats = self.ff_mz(mz)
+            tokens = tokens + self.mz_mlp(mz_feats.to(self.mz_mlp[0].weight.dtype))
         return tokens
 
 
@@ -159,7 +174,7 @@ class BiasedMHA(nn.Module):
         self.attn_dropout = dropout
         self.proj_dropout = nn.Dropout(dropout)
 
-    def forward(self, x: Tensor, bias: Tensor, key_padding_mask: Tensor) -> Tensor:
+    def forward(self, x: Tensor, bias: Tensor | None, key_padding_mask: Tensor) -> Tensor:
         """x: (B, K, D); bias: (B, H, K, K); key_padding_mask: (B, K) True=pad."""
         B, K, _ = x.shape
         qkv = self.qkv(x).reshape(B, K, 3, self.n_heads, self.d_head)
@@ -168,8 +183,10 @@ class BiasedMHA(nn.Module):
         k = k.transpose(1, 2)
         v = v.transpose(1, 2)
 
-        # Fold key padding into the additive bias: one float mask for SDPA.
-        attn_mask = bias.masked_fill(key_padding_mask[:, None, None, :], float("-inf"))
+        # Padding remains mandatory when the optional Δm/z pathway is disabled.
+        attn_mask = bias if bias is not None else x.new_zeros((B, 1, 1, K))
+        attn_mask = attn_mask.masked_fill(
+            key_padding_mask[:, None, None, :], float("-inf"))
 
         out = F.scaled_dot_product_attention(
             q, k, v,
@@ -195,7 +212,7 @@ class EncoderBlock(nn.Module):
             nn.Dropout(cfg.dropout),
         )
 
-    def forward(self, x: Tensor, bias: Tensor, key_padding_mask: Tensor) -> Tensor:
+    def forward(self, x: Tensor, bias: Tensor | None, key_padding_mask: Tensor) -> Tensor:
         x = x + self.attn(self.norm1(x), bias, key_padding_mask)
         x = x + self.ffn(self.norm2(x))
         return x
@@ -209,7 +226,9 @@ class MSEncoder(nn.Module):
         self.cfg = cfg
         self.embed = PeakEmbed(cfg)
         self.zero_bias_diagonal = cfg.zero_bias_diagonal
-        self.bias_module = DeltaMZBias(cfg.n_heads, cfg.delta_bias)
+        self.bias_module = (
+            DeltaMZBias(cfg.n_heads, cfg.delta_bias) if cfg.use_delta_mz_bias else None
+        )
         self.blocks = nn.ModuleList([EncoderBlock(cfg) for _ in range(cfg.n_layers)])
         self.norm = nn.LayerNorm(cfg.d_model)
 
@@ -220,16 +239,16 @@ class MSEncoder(nn.Module):
         key_padding_mask: Tensor,
         mask_positions: Tensor | None = None,
     ) -> Tensor:
-        tokens = self.embed(log_int, mask_positions)   # m/z-free tokens (B, K, D)
+        tokens = self.embed(mz, log_int, mask_positions)
 
-        bias = self.bias_module(mz)  # (B, H, K, K) — the only place m/z enters
+        bias = self.bias_module(mz) if self.bias_module is not None else None
         # Zero the diagonal so self-attention is never modulated by the
         # bias — forces self-suppression onto the content (Q/K) path and
         # frees the bias module to specialize on chemistry. Key-padding is
         # handled in BiasedMHA (folded into the SDPA attn_mask as -inf), so
         # the bias needs no separate padding mask here. Toggled off by the
         # diagonal-zero ablation (cfg.zero_bias_diagonal).
-        if self.zero_bias_diagonal:
+        if bias is not None and self.zero_bias_diagonal:
             K = mz.size(1)
             diag = torch.eye(K, dtype=torch.bool, device=mz.device).view(1, 1, K, K)
             bias = bias.masked_fill(diag, 0.0)

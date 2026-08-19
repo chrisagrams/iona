@@ -130,13 +130,14 @@ class FourierProbeCallback(_InlineCallback):
         stays cheap. Deterministic (seeded) so the metric is comparable step to
         step."""
         g = torch.Generator().manual_seed(0)
-        li_pool, dm_pool = [], []
+        li_pool, mz_pool, dm_pool = [], [], []
         n = min(self.n_spectra, max_spectra)
         for row in itertools.islice(self.dataset, n):
             mz = torch.as_tensor(row["mz"], dtype=torch.float32)
             li = torch.as_tensor(row["log_int"], dtype=torch.float32)
             if li.numel():
                 li_pool.append(li)
+                mz_pool.append(mz)
             if mz.numel() >= 2:
                 # signed Δm/z for a random sample of ordered peak pairs
                 k = mz.numel()
@@ -153,7 +154,7 @@ class FourierProbeCallback(_InlineCallback):
                 v = v[sel]
             return v
 
-        return {"int": _cat(li_pool), "dm": _cat(dm_pool)}
+        return {"int": _cat(li_pool), "mz": _cat(mz_pool), "dm": _cat(dm_pool)}
 
     # ---- per-featurizer metrics ----
 
@@ -188,7 +189,10 @@ class FourierProbeCallback(_InlineCallback):
         enc = self.encoder
         payload: dict[str, Any] = {}
         payload.update(self._featurizer_metrics("int", enc.embed.ff_int, self._vals["int"]))
-        payload.update(self._featurizer_metrics("dm", enc.bias_module.ff, self._vals["dm"]))
+        if enc.embed.use_absolute_mz:
+            payload.update(self._featurizer_metrics("mz", enc.embed.ff_mz, self._vals["mz"]))
+        if enc.bias_module is not None:
+            payload.update(self._featurizer_metrics("dm", enc.bias_module.ff, self._vals["dm"]))
         if not payload:
             return
         self._wlog(payload, step)
@@ -313,7 +317,8 @@ def build_callbacks(module, val_dataset, pp, log_args, resolved_config, out_dir)
     is the preprocessed HF val dataset the probes/retrieval read; `pp` is only
     for the external replicate-retrieval benchmark (its own dataset)."""
     cbs: list[TrainerCallback] = [WandbConfigCallback(resolved_config)]
-    if log_args.bias_curve_every:
+    has_delta_bias = module.encoder.bias_module is not None
+    if log_args.bias_curve_every and has_delta_bias:
         cbs.append(BiasPanelCallback(module, log_args.bias_curve_every, out_dir=out_dir))
         cbs.append(AttentionEntropyCallback(
             module, log_args.bias_curve_every, dataset=val_dataset))
@@ -322,7 +327,8 @@ def build_callbacks(module, val_dataset, pp, log_args, resolved_config, out_dir)
             module, log_args.probe_every, val_dataset, log_args.probe_n_spectra))
         cbs.append(FourierProbeCallback(
             module, log_args.probe_every, val_dataset, log_args.probe_n_spectra))
-        cbs.append(AlignmentCallback(module, log_args.probe_every))
+        if has_delta_bias:
+            cbs.append(AlignmentCallback(module, log_args.probe_every))
         cbs.append(RetrievalCallback(
             module, log_args.probe_every, dataset=val_dataset))
         if log_args.replicate_retrieval_repo:

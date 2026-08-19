@@ -33,6 +33,7 @@ from .model import DeltaBiasConfig, FourierConfig, ModelConfig
 
 @dataclass
 class ModelArgs:
+    architecture_id: str = "C"
     d_model: int = 256
     n_heads: int = 8
     n_layers: int = 6
@@ -44,12 +45,18 @@ class ModelArgs:
     fourier_int_f_min: float = 1e-2
     fourier_int_f_max: float = 1e2
     fourier_int_learnable: bool = True
+    fourier_mz_n_freqs: int = 64
+    fourier_mz_f_min: float = 1e-3
+    fourier_mz_f_max: float = 1e0
+    fourier_mz_learnable: bool = True
     delta_bias_n_freqs: int = 64
     delta_bias_per_head_hidden: int = 32
     delta_bias_f_min: float = 1e-2
     delta_bias_f_max: float = 1e3
     delta_bias_scale: float = 3.0
     delta_bias_learnable: bool = True
+    use_absolute_mz: bool = False
+    use_delta_mz_bias: bool = True
 
     def to_model_config(self) -> ModelConfig:
         return ModelConfig(
@@ -62,6 +69,9 @@ class ModelArgs:
             fourier_int=FourierConfig(
                 self.fourier_int_n_freqs, self.fourier_int_f_min, self.fourier_int_f_max,
                 learnable=self.fourier_int_learnable),
+            fourier_mz=FourierConfig(
+                self.fourier_mz_n_freqs, self.fourier_mz_f_min, self.fourier_mz_f_max,
+                learnable=self.fourier_mz_learnable),
             delta_bias=DeltaBiasConfig(
                 n_freqs=self.delta_bias_n_freqs,
                 per_head_hidden=self.delta_bias_per_head_hidden,
@@ -71,6 +81,8 @@ class ModelArgs:
                 learnable=self.delta_bias_learnable,
             ),
             zero_bias_diagonal=self.zero_bias_diagonal,
+            use_absolute_mz=self.use_absolute_mz,
+            use_delta_mz_bias=self.use_delta_mz_bias,
         )
 
 
