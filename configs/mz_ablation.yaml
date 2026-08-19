@@ -52,7 +52,7 @@ deepspeed: true
 zero_stage: 2
 deepspeed_torch_autocast: true
 
-wandb_project: msfound-mz-ablation
+wandb_project: msfound
 wandb_run_name: mz-ablation-C1
 log_every: 50
 val_every: 2000
