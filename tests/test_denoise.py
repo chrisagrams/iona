@@ -1,7 +1,12 @@
 import torch
 
 from msdelta.data import PreprocessConfig
-from msdelta.denoise import DenoiseCollator, MSDeltaForDenoising, preprocess_labeled_spectrum
+from msdelta.denoise import (
+    DenoiseCollator,
+    MSDeltaForDenoising,
+    parse_args,
+    preprocess_labeled_spectrum,
+)
 from msdelta.model import MSEncoder, ModelConfig
 
 
@@ -29,3 +34,12 @@ def test_only_classifier_receives_gradients():
     assert output["logits"].shape == batch["labels"].shape
     assert all(parameter.grad is None for parameter in model.encoder.parameters())
     assert any(parameter.grad is not None for parameter in model.classifier.parameters())
+
+
+def test_run_name_argument():
+    args = parse_args([
+        "--encoder-config", "encoder.yaml",
+        "--encoder-checkpoint", "checkpoint",
+        "--run-name", "v15-denoise-test",
+    ])
+    assert args.run_name == "v15-denoise-test"

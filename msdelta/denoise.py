@@ -178,6 +178,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--encoder-checkpoint", required=True, type=Path)
     parser.add_argument("--dataset", default="chrisagrams/ms-denoise-12k")
     parser.add_argument("--output-dir", default="runs/denoise", type=Path)
+    parser.add_argument("--run-name", default=None,
+                        help="W&B run name (independent of the output directory)")
     parser.add_argument("--top-n", default=None, type=int)
     parser.add_argument("--intensity-threshold-frac", default=0.0, type=float)
     parser.add_argument("--hidden-dim", default=128, type=int)
@@ -218,6 +220,7 @@ def main(argv: list[str] | None = None) -> int:
         os.environ.setdefault("WANDB_PROJECT", args.wandb_project)
     training_args = TrainingArguments(
         output_dir=str(args.output_dir),
+        run_name=args.run_name,
         num_train_epochs=args.epochs,
         per_device_train_batch_size=args.batch_size,
         per_device_eval_batch_size=args.batch_size,
