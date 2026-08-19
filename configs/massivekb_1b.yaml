@@ -1,4 +1,4 @@
-# MassIVE-KB v1 — 1B tier (d=2048, n_layers=20, ~1.01B params), 4× A100-40GB.
+# MassIVE-KB v1 — 1B tier (d=2048, n_layers=20, ~1.01B params), 2× A100-40GB.
 # Same architecture and corpus as configs/massivekb_xl.yaml (~203M); this is the
 # 5× capacity step on that ladder, so every non-capacity knob is held fixed to
 # keep the two runs directly comparable.
@@ -37,21 +37,26 @@ top_n: 150
 mask_ratio: 0.50
 preprocess_num_workers: 24  # rank 0 only; other ranks wait and load its cache
 
-# Exposure: global batch is held at XL's 1024 spectra/step (the gradient-noise-
-# scale probe put B_simple ≈ 900 on the 203M model; critical batch size grows
-# with capacity, so 1024 is if anything conservative here — re-run
-# scripts/grad_noise_scale.py on this model before raising it). The per-GPU
-# micro-batch drops 64 → 32 to pay for the 5× weights, with accumulation
-# doubled to compensate: 32 × 4 GPUs × 8 accum = 1024.
-batch_size: 32          # per-GPU micro-batch
-grad_accum_steps: 8     # → global 1024, same as massivekb_xl
-num_workers: 6          # ×4 ranks = 24 loader workers (+4 main) < 32 cores
-lr: 1.2e-4              # 1.8e-4 × √(1024/2048): the usual 1/√d_model taper off the XL LR
+# Exposure: global batch 512 (XL ran at 1024; 1024 did not work here). Note
+# that the gradient-noise-scale probe put B_simple ≈ 900 on the 203M model, and
+# critical batch size grows with capacity — so 512 sits well below the
+# noise-efficient point and gradients will be correspondingly noisier per step.
+# Compensated by the LR taper below; re-run scripts/grad_noise_scale.py on this
+# model if the loss curve looks noise-limited.
+#
+# Micro-batch: 64 per GPU is the largest that fits 40 GB alongside ZeRO-2 state
+# sharded over only 2 ranks (≈12 GB states + ≈16 GB activations + NCCL/allocator
+# overhead ≈ 31 GB). 64 × 2 GPUs × 4 accum = 512.
+batch_size: 64          # per-GPU micro-batch
+grad_accum_steps: 4     # → global 512
+num_workers: 8          # ×2 ranks = 16 loader workers (+2 main)
+lr: 8.5e-5              # 1.2e-4 × √(512/1024); the 1.2e-4 was itself 1.8e-4 × √(1024/2048),
+                        # i.e. the 1/√d_model taper off XL stacked with the batch taper
 lr_scheduler_type: cosine
 warmup_steps: 3000      # longer than XL's 2000 — wide models are least stable early
-total_steps: 56250      # 56250 × 1024 = 57.6M ≈ 2 epochs of MassIVE-KB train
+total_steps: 56250      # 56250 × 512 = 28.8M ≈ 1 epoch of MassIVE-KB train
                         # (1 epoch ≈ 4.3B peak tokens at top_n=150, so a compute-optimal
-                        #  1B budget would want ~4–5 epochs; 2 is the affordable first cut)
+                        #  1B budget would want ~4–5 epochs; double this for a 2nd epoch)
 weight_decay: 0.01
 grad_clip: 1.0
 precision: bf16
@@ -60,12 +65,12 @@ val_batches: 50
 device: cuda
 seed: 0
 save_total_limit: 3
-deepspeed: true         # ZeRO-2 (torchrun launch, see pbs/massivekb_ddp.pbs)
+deepspeed: true         # ZeRO-2; needs a torchrun launch (--nproc_per_node=2)
 zero_stage: 2           # keep ≤2: inline probes call the eager encoder directly
 deepspeed_torch_autocast: true  # fp32 params + bf16 compute; native DS bf16 trains poorly here
 
 wandb_project: msfound
-wandb_run_name: v15-1b-seq150   # pbs/massivekb_ddp.pbs appends the job id
+wandb_run_name: v15-1b-gbs512
 log_every: 50
 val_every: 2000
 bias_curve_every: 5000
