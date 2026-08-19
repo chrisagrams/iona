@@ -84,6 +84,9 @@ class DataArgs:
     intensity_threshold_frac: float = 0.01
     top_n: int = 150
     mask_ratio: float = 0.15
+    # CPU processes used once by rank 0 for Dataset.map/filter. This is
+    # intentionally separate from per-rank DataLoader workers.
+    preprocess_num_workers: int = 24
 
     def to_source_dict(self) -> dict[str, Any]:
         return {

@@ -117,15 +117,21 @@ def main(argv: list[str] | None = None) -> int:
         n_params = sum(p.numel() for p in model.parameters())
         print(f"[model] {n_params/1e6:.2f}M params", flush=True)
 
-    # Datasets: resolve shard paths once (local parquet root or HF dataset), then
-    # build the map-style HF datasets with preprocessing precomputed/cached. The
-    # full preprocessed val dataset feeds both eval (a capped slice) and the
-    # inline probes (which read the same preprocessed rows).
-    train_paths, val_paths = resolve_dataset_paths(dargs.to_source_dict())
-    train_ds, val_ds = build_pretraining_datasets(
-        train_paths, val_paths, dargs.preprocess(),
-        num_proc=targs.num_workers or None,
-    )
+    # Only global rank 0 performs the expensive map/filter. Other ranks wait,
+    # then execute the same calls and immediately load rank 0's completed Arrow
+    # cache. This requires the ranks to share the HF/datasets cache, as they do
+    # on a single multi-GPU node (and on multi-node jobs with shared storage).
+    with training_args.main_process_first(local=False, desc="dataset preprocessing"):
+        if training_args.process_index == 0:
+            print(
+                f"[data] preprocessing with {dargs.preprocess_num_workers} CPU workers",
+                flush=True,
+            )
+        train_paths, val_paths = resolve_dataset_paths(dargs.to_source_dict())
+        train_ds, val_ds = build_pretraining_datasets(
+            train_paths, val_paths, dargs.preprocess(),
+            num_proc=dargs.preprocess_num_workers or None,
+        )
     eval_size = targs.val_batches * targs.batch_size
     eval_ds = val_ds.select(range(min(len(val_ds), eval_size)))
 
