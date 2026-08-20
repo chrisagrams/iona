@@ -22,18 +22,15 @@ fourier_int_n_freqs: 16
 fourier_int_f_min: 1.0e-2
 fourier_int_f_max: 1.0e+2
 fourier_int_learnable: true
-delta_bias_n_freqs: 64
-delta_bias_per_head_hidden: 32
-delta_bias_f_min: 1.0e-2
-delta_bias_f_max: 1.0e+3
-delta_bias_scale: 3.0
-delta_bias_learnable: true
+delta_bias_n_buckets: 65536
+delta_bias_resolution: 0.001
+delta_bias_max_distance: 2000.0
 
 hf_repo: chrisagrams/massive_kb_v1_shuffled   # takes precedence over root; train/ + val/ splits
 hf_train_split: train
 hf_val_split: val
 intensity_threshold_frac: 0.01
-top_n: 150
+top_n: 1024
 mask_ratio: 0.50
 preprocess_num_workers: 24  # rank 0 only; other ranks wait and load its cache
 
@@ -55,8 +52,7 @@ lr: 8.5e-5              # 1.2e-4 × √(512/1024); the 1.2e-4 was itself 1.8e-4 
 lr_scheduler_type: cosine
 warmup_steps: 3000      # longer than XL's 2000 — wide models are least stable early
 total_steps: 56250      # 56250 × 512 = 28.8M ≈ 1 epoch of MassIVE-KB train
-                        # (1 epoch ≈ 4.3B peak tokens at top_n=150, so a compute-optimal
-                        #  1B budget would want ~4–5 epochs; double this for a 2nd epoch)
+                        # (up to ≈29.5B retained peak tokens at top_n=1024)
 weight_decay: 0.01
 grad_clip: 1.0
 precision: bf16

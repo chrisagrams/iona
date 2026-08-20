@@ -107,7 +107,7 @@ def plot_bias_curves(
 def render_bias_panels(bias_module: DeltaMZBias, step: int) -> dict[str, plt.Figure]:
     """Render both the fine (isotope-scale) and coarse (residue-scale) panels.
 
-    Note: the MLP value at Δm=0 is shown but NOT used in attention (the
+    Note: the bucket value at Δm=0 is shown but NOT used in attention (the
     diagonal is masked out in MSEncoder.forward), so it gets no gradient
     and its plotted value is unconstrained — treat with suspicion.
     """

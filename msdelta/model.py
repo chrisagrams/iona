@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 import torch
 import torch.nn.functional as F
 from torch import Tensor, nn
+from transformers.models.t5.modeling_t5 import T5Attention
 
 from .fourier import FourierFeatures
 
@@ -20,19 +21,9 @@ class FourierConfig:
 
 @dataclass
 class DeltaBiasConfig:
-    n_freqs: int = 64
-    # Per-head hidden width. Each head gets its OWN MLP (no parameter
-    # sharing across heads), so total bias capacity is n_heads * per_head_hidden.
-    # Smaller than the old shared `hidden` because activation memory is
-    # (B, K, K, n_heads * per_head_hidden)
-    per_head_hidden: int = 32
-    f_min: float = 1e-2
-    f_max: float = 1e3
-    # Bound the per-head bias to ±scale logits via scale*tanh(raw/scale).
-    # Keeps the bias comparable to the content term (q·k/√d ~ O(1-2)) so
-    # neither can steamroll the other
-    scale: float = 3.0
-    learnable: bool = True
+    n_buckets: int = 65536
+    resolution: float = 0.001
+    max_distance: float = 2000.0
 
 
 @dataclass
@@ -81,69 +72,55 @@ class PeakEmbed(nn.Module):
 
 
 class DeltaMZBias(nn.Module):
-    """Learned per-head additive attention bias from signed Δm/z.
+    """T5-style bucketed per-head attention bias for continuous signed Δm/z.
 
-    The bias is H independent 2-layer MLPs of a single scalar (Δm/z, lifted
-    through log-spaced Fourier features), one per attention head, bounded to
-    ±scale by a tanh. Decoupling the heads lets each specialize on a
-    different Δm region instead of all collapsing onto whichever feature
-    dominates the data (e.g. suppression of small-Δm near-duplicate peaks).
-
-    "H independent MLPs sharing one input" needs no special machinery:
-      * Layer 1 (shared Fourier features → per-head hidden) is a plain
-        ``Linear(in_dim, H*D_h)`` whose outputs we simply *view* as
-        ``(H, D_h)`` — every Linear output unit is already an independent
-        function of the whole input, which is exactly per-head independence.
-      * Layer 2 (per-head hidden → per-head scalar) is a per-head weighted
-        sum over the hidden dim: ``(h * w2).sum(-1) + b2``.
-    ``forward`` (the Δm matrix) and ``evaluate`` (a 1-D grid) both route
-    through :meth:`_curve`, so the whole architecture lives in one place.
+    Mass differences are quantized into integer positions at ``resolution``
+    Da, passed through T5's bidirectional linear-then-log bucketizer, and looked
+    up in a learned ``(n_buckets, n_heads)`` table. This keeps the existing
+    additive attention interface without materializing pairwise Fourier/MLP
+    hidden activations.
     """
 
     def __init__(self, n_heads: int, cfg: DeltaBiasConfig):
         super().__init__()
-        self.ff = FourierFeatures(cfg.n_freqs, cfg.f_min, cfg.f_max, log_spaced=True,
-                                  learnable=cfg.learnable)
+        if cfg.n_buckets < 4 or cfg.n_buckets % 2:
+            raise ValueError("delta_bias_n_buckets must be even and at least 4")
+        if cfg.resolution <= 0:
+            raise ValueError("delta_bias_resolution must be positive")
+        if cfg.max_distance <= 0:
+            raise ValueError("delta_bias_max_distance must be positive")
         self.n_heads = n_heads
-        self.per_head_hidden = cfg.per_head_hidden
-        self.scale = cfg.scale
+        self.n_buckets = cfg.n_buckets
+        self.resolution = cfg.resolution
+        self.max_position = round(cfg.max_distance / cfg.resolution)
+        if self.max_position <= self.n_buckets // 4:
+            raise ValueError(
+                "delta_bias_max_distance / delta_bias_resolution must exceed "
+                "delta_bias_n_buckets / 4")
+        self.relative_attention_bias = nn.Embedding(cfg.n_buckets, n_heads)
+        nn.init.zeros_(self.relative_attention_bias.weight)
 
-        H, D_h = n_heads, cfg.per_head_hidden
-
-        # Layer 1: one Linear whose H*D_h outputs we view as H per-head blocks.
-        self.fc1 = nn.Linear(self.ff.out_dim, H * D_h)
-        # Layer 2: per-head readout (D_h → scalar), applied as a weighted sum.
-        # Zero-init so every head's bias starts at exactly 0.
-        self.w2 = nn.Parameter(torch.zeros(H, D_h))
-        self.b2 = nn.Parameter(torch.zeros(H))
-
-    def _bound(self, out: Tensor) -> Tensor:
-        # Bound to ±scale logits so the bias can't steamroll the content term.
-        return self.scale * torch.tanh(out / self.scale)
-
-    def _curve(self, feats: Tensor) -> Tensor:
-        """feats: (..., ff_dim) → bounded per-head bias (..., H).
-
-        The whole bias architecture. `feats` may carry any leading dims (the
-        (B, K, K) Δm matrix in `forward`, a flat (N,) grid in `evaluate`).
-        """
-        h = self.fc1(feats.to(self.fc1.weight.dtype)).unflatten(-1, (self.n_heads, self.per_head_hidden))  # (..., H, D_h)
-        h = F.gelu(h)
-        out = (h * self.w2).sum(-1) + self.b2                                    # (..., H)
-        return self._bound(out)
+    def _bucket(self, dm: Tensor) -> Tensor:
+        relative_position = torch.round(dm / self.resolution).long()
+        return T5Attention._relative_position_bucket(
+            relative_position,
+            bidirectional=True,
+            num_buckets=self.n_buckets,
+            max_distance=self.max_position,
+        )
 
     def forward(self, mz: Tensor) -> Tensor:
         """mz: (B, K) → bias: (B, n_heads, K, K)."""
         dm = mz.unsqueeze(-1) - mz.unsqueeze(-2)             # (B, K, K), signed
-        curve = self._curve(self.ff(dm))                     # (B, K, K, H)
-        return curve.permute(0, 3, 1, 2).contiguous()        # (B, H, K, K)
+        bias = self.relative_attention_bias(self._bucket(dm)) # (B, K, K, H)
+        return bias.permute(0, 3, 1, 2).contiguous()          # (B, H, K, K)
 
     def evaluate(self, dm_grid: Tensor) -> Tensor:
         """Evaluate per-head bias on a 1-D Δm grid.
 
-        dm_grid: (N,) → (N, n_heads). Bounded bias (what attention sees).
+        dm_grid: (N,) → (N, n_heads). Bucket embedding (what attention sees).
         """
-        return self._curve(self.ff(dm_grid)).float()         # (N, H)
+        return self.relative_attention_bias(self._bucket(dm_grid)).float()
 
 
 class BiasedMHA(nn.Module):
