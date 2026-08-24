@@ -24,7 +24,7 @@ n_heads: 16
 n_layers: 16
 ffn_mult: 4
 dropout: 0.1
-max_peaks: 1024
+max_peaks: 150
 fourier_int_n_freqs: 16
 fourier_int_f_min: 1.0e-2
 fourier_int_f_max: 1.0e+2
@@ -59,7 +59,7 @@ zero_stage: 2           # keep ≤2: inline probes call the eager encoder direct
 deepspeed_torch_autocast: true  # fp32 params + bf16 compute; native DS bf16 trains poorly here
 
 wandb_project: msfound
-wandb_run_name: v17-swinv2-cpb-seq1024-bs512   # pbs/massivekb_ddp.pbs appends the job id
+wandb_run_name: v17-swinv2-cpb-seq150-bs512   # pbs/massivekb_ddp.pbs appends the job id
 log_every: 50
 val_every: 2000
 bias_curve_every: 5000
