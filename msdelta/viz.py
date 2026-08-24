@@ -150,13 +150,25 @@ class AttentionRecorder:
 
     @torch.no_grad()
     def _hook(self, module, args) -> None:
-        x, bias, key_padding_mask = args
+        x, query_mz, key_mz, bias_intercept, bias_slope, key_padding_mask = args
         B, K, _ = x.shape
         qkv = module.qkv(x).reshape(B, K, 3, module.n_heads, module.d_head)
         q, k, _ = qkv.unbind(dim=2)
         logits = q.transpose(1, 2) @ k.transpose(1, 2).transpose(-1, -2)
         logits = logits / math.sqrt(module.d_head)
-        logits = logits + bias.masked_fill(key_padding_mask[:, None, None, :], float("-inf"))
+        dm = query_mz.unsqueeze(-1) - key_mz.unsqueeze(-2)
+        dm = dm.clamp(-module.bias_max_distance, module.bias_max_distance)
+        position = (dm + module.bias_max_distance) / module.bias_resolution
+        left = position.floor().long().clamp(0, bias_intercept.shape[0] - 1)
+        fraction = (position - left.to(position.dtype)).to(bias_intercept.dtype)
+        bias = bias_intercept[left] + fraction.unsqueeze(-1) * bias_slope[left]
+        bias = bias.permute(0, 3, 1, 2)
+        if module.zero_bias_diagonal:
+            diagonal = torch.eye(K, dtype=torch.bool, device=x.device)
+            bias = bias.masked_fill(diagonal.view(1, 1, K, K), 0.0)
+        logits = logits + bias.masked_fill(
+            key_padding_mask[:, None, None, :], float("-inf")
+        )
         self.attn.append(F.softmax(logits, dim=-1))
 
 

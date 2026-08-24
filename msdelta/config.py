@@ -28,7 +28,7 @@ from .model import DeltaBiasConfig, FourierConfig, ModelConfig
 # `--flag`, which is what makes a value overridable on the command line and
 # therefore sweepable by a wandb agent. The nested model sub-blocks (fourier_int
 # / delta_bias) are flattened with a prefix — `fourier_int_n_freqs`,
-# `delta_bias_scale`, … — for the same reason; `to_model_config()` re-assembles
+# `delta_bias_hidden`, … — for the same reason; `to_model_config()` re-assembles
 # the nested `ModelConfig`.
 
 @dataclass
@@ -44,12 +44,11 @@ class ModelArgs:
     fourier_int_f_min: float = 1e-2
     fourier_int_f_max: float = 1e2
     fourier_int_learnable: bool = True
-    delta_bias_n_freqs: int = 64
-    delta_bias_per_head_hidden: int = 32
-    delta_bias_f_min: float = 1e-2
-    delta_bias_f_max: float = 1e3
+    delta_bias_hidden: int = 128
+    delta_bias_resolution: float = 0.01
+    delta_bias_max_distance: float = 2000.0
+    delta_bias_coordinate_scale: float = 1.0
     delta_bias_scale: float = 3.0
-    delta_bias_learnable: bool = True
 
     def to_model_config(self) -> ModelConfig:
         return ModelConfig(
@@ -63,12 +62,11 @@ class ModelArgs:
                 self.fourier_int_n_freqs, self.fourier_int_f_min, self.fourier_int_f_max,
                 learnable=self.fourier_int_learnable),
             delta_bias=DeltaBiasConfig(
-                n_freqs=self.delta_bias_n_freqs,
-                per_head_hidden=self.delta_bias_per_head_hidden,
-                f_min=self.delta_bias_f_min,
-                f_max=self.delta_bias_f_max,
+                hidden=self.delta_bias_hidden,
+                resolution=self.delta_bias_resolution,
+                max_distance=self.delta_bias_max_distance,
+                coordinate_scale=self.delta_bias_coordinate_scale,
                 scale=self.delta_bias_scale,
-                learnable=self.delta_bias_learnable,
             ),
             zero_bias_diagonal=self.zero_bias_diagonal,
         )

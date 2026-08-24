@@ -2,10 +2,12 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+import math
 
 import torch
 import torch.nn.functional as F
 from torch import Tensor, nn
+from torch.nn.attention.flex_attention import flex_attention
 
 from .fourier import FourierFeatures
 
@@ -20,19 +22,14 @@ class FourierConfig:
 
 @dataclass
 class DeltaBiasConfig:
-    n_freqs: int = 64
-    # Per-head hidden width. Each head gets its OWN MLP (no parameter
-    # sharing across heads), so total bias capacity is n_heads * per_head_hidden.
-    # Smaller than the old shared `hidden` because activation memory is
-    # (B, K, K, n_heads * per_head_hidden)
-    per_head_hidden: int = 32
-    f_min: float = 1e-2
-    f_max: float = 1e3
+    hidden: int = 128
+    resolution: float = 0.01
+    max_distance: float = 2000.0
+    coordinate_scale: float = 1.0
     # Bound the per-head bias to ±scale logits via scale*tanh(raw/scale).
     # Keeps the bias comparable to the content term (q·k/√d ~ O(1-2)) so
     # neither can steamroll the other
     scale: float = 3.0
-    learnable: bool = True
 
 
 @dataclass
@@ -81,61 +78,75 @@ class PeakEmbed(nn.Module):
 
 
 class DeltaMZBias(nn.Module):
-    """Learned per-head additive attention bias from signed Δm/z.
+    """Swin-V2-style continuous relative-position bias for signed Δm/z.
 
-    The bias is H independent 2-layer MLPs of a single scalar (Δm/z, lifted
-    through log-spaced Fourier features), one per attention head, bounded to
-    ±scale by a tanh. Decoupling the heads lets each specialize on a
-    different Δm region instead of all collapsing onto whichever feature
-    dominates the data (e.g. suppression of small-Δm near-duplicate peaks).
-
-    "H independent MLPs sharing one input" needs no special machinery:
-      * Layer 1 (shared Fourier features → per-head hidden) is a plain
-        ``Linear(in_dim, H*D_h)`` whose outputs we simply *view* as
-        ``(H, D_h)`` — every Linear output unit is already an independent
-        function of the whole input, which is exactly per-head independence.
-      * Layer 2 (per-head hidden → per-head scalar) is a per-head weighted
-        sum over the hidden dim: ``(h * w2).sum(-1) + b2``.
-    ``forward`` (the Δm matrix) and ``evaluate`` (a 1-D grid) both route
-    through :meth:`_curve`, so the whole architecture lives in one place.
+    A small MLP maps a normalized signed-log mass coordinate to one additive
+    bias per attention head. To avoid v15's ``(B, K, K, hidden)`` activation,
+    the MLP is evaluated only on a fixed uniform grid of Δm/z knots. Pairwise
+    differences linearly interpolate neighboring knot values, so the runtime
+    pair tensor carries only the head dimension.
     """
 
     def __init__(self, n_heads: int, cfg: DeltaBiasConfig):
         super().__init__()
-        self.ff = FourierFeatures(cfg.n_freqs, cfg.f_min, cfg.f_max, log_spaced=True,
-                                  learnable=cfg.learnable)
+        n_intervals = round(2 * cfg.max_distance / cfg.resolution)
         self.n_heads = n_heads
-        self.per_head_hidden = cfg.per_head_hidden
+        self.resolution = cfg.resolution
+        self.max_distance = cfg.max_distance
+        self.coordinate_scale = cfg.coordinate_scale
         self.scale = cfg.scale
 
-        H, D_h = n_heads, cfg.per_head_hidden
+        self.mlp = nn.Sequential(
+            nn.Linear(1, cfg.hidden),
+            nn.ReLU(),
+            nn.Linear(cfg.hidden, n_heads, bias=False),
+        )
+        # Start from ordinary content attention, matching v15's zero-bias init.
+        nn.init.zeros_(self.mlp[-1].weight)
 
-        # Layer 1: one Linear whose H*D_h outputs we view as H per-head blocks.
-        self.fc1 = nn.Linear(self.ff.out_dim, H * D_h)
-        # Layer 2: per-head readout (D_h → scalar), applied as a weighted sum.
-        # Zero-init so every head's bias starts at exactly 0.
-        self.w2 = nn.Parameter(torch.zeros(H, D_h))
-        self.b2 = nn.Parameter(torch.zeros(H))
+        knot_dm = torch.linspace(
+            -cfg.max_distance,
+            cfg.max_distance,
+            n_intervals + 1,
+            dtype=torch.float32,
+        )
+        self.register_buffer("knot_dm", knot_dm, persistent=False)
 
-    def _bound(self, out: Tensor) -> Tensor:
-        # Bound to ±scale logits so the bias can't steamroll the content term.
-        return self.scale * torch.tanh(out / self.scale)
+    def _coordinate(self, dm: Tensor) -> Tensor:
+        """Map physical Δm/z to a normalized signed-log coordinate in [-1, 1]."""
+        dm = dm.float().clamp(-self.max_distance, self.max_distance)
+        x = torch.sign(dm) * torch.log1p(dm.abs() / self.coordinate_scale)
+        normalizer = math.log1p(self.max_distance / self.coordinate_scale)
+        return x / normalizer
 
-    def _curve(self, feats: Tensor) -> Tensor:
-        """feats: (..., ff_dim) → bounded per-head bias (..., H).
+    def _curve(self, dm: Tensor) -> Tensor:
+        """Evaluate the bounded continuous MLP: (...,) → (..., n_heads)."""
+        x = self._coordinate(dm).unsqueeze(-1)
+        raw = self.mlp(x.to(self.mlp[0].weight.dtype))
+        return self.scale * torch.tanh(raw / self.scale)
 
-        The whole bias architecture. `feats` may carry any leading dims (the
-        (B, K, K) Δm matrix in `forward`, a flat (N,) grid in `evaluate`).
-        """
-        h = self.fc1(feats.to(self.fc1.weight.dtype)).unflatten(-1, (self.n_heads, self.per_head_hidden))  # (..., H, D_h)
-        h = F.gelu(h)
-        out = (h * self.w2).sum(-1) + self.b2                                    # (..., H)
-        return self._bound(out)
+    def _make_bias_table(self) -> Tensor:
+        """Generate the current bounded bias curve at all fixed Δm/z knots."""
+        return self._curve(self.knot_dm)
+
+    def interpolation_coefficients(self) -> tuple[Tensor, Tensor]:
+        """Return per-interval intercept and slope tables for FlexAttention."""
+        table = self._make_bias_table()
+        return table[:-1], table[1:] - table[:-1]
+
+    def _interpolate(self, dm: Tensor, table: Tensor) -> Tensor:
+        """Linearly interpolate ``table`` at arbitrary continuous Δm/z values."""
+        dm = dm.float().clamp(-self.max_distance, self.max_distance)
+        position = (dm + self.max_distance) / self.resolution
+        left = position.floor().long().clamp(0, table.shape[0] - 2)
+        fraction = (position - left.to(position.dtype)).clamp(0.0, 1.0)
+        weight = fraction.unsqueeze(-1).to(table.dtype)
+        return torch.lerp(table[left], table[left + 1], weight)
 
     def forward(self, mz: Tensor) -> Tensor:
         """mz: (B, K) → bias: (B, n_heads, K, K)."""
         dm = mz.unsqueeze(-1) - mz.unsqueeze(-2)             # (B, K, K), signed
-        curve = self._curve(self.ff(dm))                     # (B, K, K, H)
+        curve = self._interpolate(dm, self._make_bias_table()) # (B, K, K, H)
         return curve.permute(0, 3, 1, 2).contiguous()        # (B, H, K, K)
 
     def evaluate(self, dm_grid: Tensor) -> Tensor:
@@ -143,24 +154,34 @@ class DeltaMZBias(nn.Module):
 
         dm_grid: (N,) → (N, n_heads). Bounded bias (what attention sees).
         """
-        return self._curve(self.ff(dm_grid)).float()         # (N, H)
+        return self._interpolate(dm_grid, self._make_bias_table()).float()
 
 
 class BiasedMHA(nn.Module):
-    """Multi-head attention with an additive (B, H, K, K) per-head bias."""
+    """FlexAttention with on-kernel interpolated continuous Δm/z bias."""
 
-    def __init__(self, d_model: int, n_heads: int, dropout: float):
+    def __init__(self, cfg: ModelConfig):
         super().__init__()
-        assert d_model % n_heads == 0
-        self.n_heads = n_heads
-        self.d_head = d_model // n_heads
-        self.qkv = nn.Linear(d_model, 3 * d_model, bias=True)
-        self.out = nn.Linear(d_model, d_model, bias=True)
-        self.attn_dropout = dropout
-        self.proj_dropout = nn.Dropout(dropout)
+        assert cfg.d_model % cfg.n_heads == 0
+        self.n_heads = cfg.n_heads
+        self.d_head = cfg.d_model // cfg.n_heads
+        self.bias_resolution = cfg.delta_bias.resolution
+        self.bias_max_distance = cfg.delta_bias.max_distance
+        self.zero_bias_diagonal = cfg.zero_bias_diagonal
+        self.qkv = nn.Linear(cfg.d_model, 3 * cfg.d_model, bias=True)
+        self.out = nn.Linear(cfg.d_model, cfg.d_model, bias=True)
+        self.proj_dropout = nn.Dropout(cfg.dropout)
 
-    def forward(self, x: Tensor, bias: Tensor, key_padding_mask: Tensor) -> Tensor:
-        """x: (B, K, D); bias: (B, H, K, K); key_padding_mask: (B, K) True=pad."""
+    def forward(
+        self,
+        x: Tensor,
+        query_mz: Tensor,
+        key_mz: Tensor,
+        bias_intercept: Tensor,
+        bias_slope: Tensor,
+        key_padding_mask: Tensor,
+    ) -> Tensor:
+        """Apply attention without materializing pairwise scores or biases."""
         B, K, _ = x.shape
         qkv = self.qkv(x).reshape(B, K, 3, self.n_heads, self.d_head)
         q, k, v = qkv.unbind(dim=2)  # each (B, K, H, d_head)
@@ -168,14 +189,33 @@ class BiasedMHA(nn.Module):
         k = k.transpose(1, 2)
         v = v.transpose(1, 2)
 
-        # Fold key padding into the additive bias: one float mask for SDPA.
-        attn_mask = bias.masked_fill(key_padding_mask[:, None, None, :], float("-inf"))
+        resolution = self.bias_resolution
+        max_distance = self.bias_max_distance
+        n_intervals = bias_intercept.shape[0]
+        zero_diagonal = self.zero_bias_diagonal
 
-        out = F.scaled_dot_product_attention(
-            q, k, v,
-            attn_mask=attn_mask,
-            dropout_p=self.attn_dropout if self.training else 0.0,
-        )
+        def score_mod(score, batch, head, q_idx, kv_idx):
+            dm = query_mz[batch, q_idx] - key_mz[batch, kv_idx]
+            dm = dm.clamp(-max_distance, max_distance)
+            position = (dm + max_distance) / resolution
+            left = position.floor().to(torch.int64).clamp(0, n_intervals - 1)
+            fraction = (position - left.to(position.dtype)).to(bias_intercept.dtype)
+            bias = (
+                bias_intercept[left, head]
+                + fraction * bias_slope[left, head]
+            )
+            if zero_diagonal:
+                bias = torch.where(q_idx == kv_idx, 0.0, bias)
+            score = score + bias.to(score.dtype)
+            return torch.where(
+                key_padding_mask[batch, kv_idx],
+                -float("inf"),
+                score,
+            )
+
+        # FlexAttention currently has no attention-probability dropout. The
+        # projection and FFN dropout configured on the model remain active.
+        out = flex_attention(q, k, v, score_mod=score_mod)
         out = out.transpose(1, 2).reshape(B, K, -1)
         return self.proj_dropout(self.out(out))
 
@@ -184,7 +224,7 @@ class EncoderBlock(nn.Module):
     def __init__(self, cfg: ModelConfig):
         super().__init__()
         self.norm1 = nn.LayerNorm(cfg.d_model)
-        self.attn = BiasedMHA(cfg.d_model, cfg.n_heads, cfg.dropout)
+        self.attn = BiasedMHA(cfg)
         self.norm2 = nn.LayerNorm(cfg.d_model)
         ffn_dim = cfg.d_model * cfg.ffn_mult
         self.ffn = nn.Sequential(
@@ -195,8 +235,19 @@ class EncoderBlock(nn.Module):
             nn.Dropout(cfg.dropout),
         )
 
-    def forward(self, x: Tensor, bias: Tensor, key_padding_mask: Tensor) -> Tensor:
-        x = x + self.attn(self.norm1(x), bias, key_padding_mask)
+    def forward(
+        self,
+        x: Tensor,
+        query_mz: Tensor,
+        key_mz: Tensor,
+        bias_intercept: Tensor,
+        bias_slope: Tensor,
+        key_padding_mask: Tensor,
+    ) -> Tensor:
+        x = x + self.attn(
+            self.norm1(x), query_mz, key_mz,
+            bias_intercept, bias_slope, key_padding_mask,
+        )
         x = x + self.ffn(self.norm2(x))
         return x
 
@@ -221,20 +272,16 @@ class MSEncoder(nn.Module):
         mask_positions: Tensor | None = None,
     ) -> Tensor:
         tokens = self.embed(log_int, mask_positions)   # m/z-free tokens (B, K, D)
-
-        bias = self.bias_module(mz)  # (B, H, K, K) — the only place m/z enters
-        # Zero the diagonal so self-attention is never modulated by the
-        # bias — forces self-suppression onto the content (Q/K) path and
-        # frees the bias module to specialize on chemistry. Key-padding is
-        # handled in BiasedMHA (folded into the SDPA attn_mask as -inf), so
-        # the bias needs no separate padding mask here. Toggled off by the
-        # diagonal-zero ablation (cfg.zero_bias_diagonal).
-        if self.zero_bias_diagonal:
-            K = mz.size(1)
-            diag = torch.eye(K, dtype=torch.bool, device=mz.device).view(1, 1, K, K)
-            bias = bias.masked_fill(diag, 0.0)
+        bias_intercept, bias_slope = self.bias_module.interpolation_coefficients()
+        # FlexAttention currently permits one read per captured tensor in a
+        # score modifier. Separate query/key copies keep each m/z capture to a
+        # single indexed read; the clone is only O(B*K).
+        key_mz = mz.clone()
         for blk in self.blocks:
-            tokens = blk(tokens, bias, key_padding_mask)
+            tokens = blk(
+                tokens, mz, key_mz,
+                bias_intercept, bias_slope, key_padding_mask,
+            )
         tokens = self.norm(tokens)
         return tokens
 

@@ -9,11 +9,11 @@
 #PBS -j oe
 #PBS -o /home/cgrams/msdelta/pbs/logs/
 #
-# Train the XL architecture on MassIVE-KB with 4-way DistributedDataParallel
-# (one process per A100-40GB on a single Polaris node) via torchrun. Unlike
+# Train the XL architecture on MassIVE-KB with 2-way DistributedDataParallel
+# (two A100-40GB GPUs on a single Polaris node) via torchrun. Unlike
 # scale_all.pbs (4 *independent* models, one per GPU), this is ONE model whose
-# gradients are all-reduced across the 4 GPUs each step — global batch 1024
-# (64/GPU × 4 × 4 accum), same as the massivekb_spark run.
+# gradients are all-reduced across 2 GPUs each step — global batch 512
+# (64/GPU × 2 × 4 accum), matching W&B run qvcw35rr.
 #
 # Pre-reqs: pbs/setup_venv.sh once; pbs/convert_massivekb.sh once (writes the
 # globally-shuffled parquet that configs/massivekb_xl.yaml points at).
@@ -26,7 +26,7 @@ CFG=$REPO/configs/massivekb_xl.yaml
 
 JOBID=${PBS_JOBID%%.*}
 JOBID=${JOBID:-local}
-RUN_NAME=massivekb_xl-polaris-gbs1024-${JOBID}
+RUN_NAME=massivekb_xl-polaris-gbs512-${JOBID}
 LOGDIR=$REPO/pbs/logs/${JOBID}
 mkdir -p "$LOGDIR"
 
@@ -34,7 +34,7 @@ cd "$REPO"
 echo "$(date -Is) job=$PBS_JOBID host=$(hostname) gpus=$(nvidia-smi -L | wc -l) run=$RUN_NAME"
 nvidia-smi -L | sed "s/^/  /"
 
-# 4 ranks share the node's 64 hardware threads; leave headroom for the 6
+# 2 ranks share the node's 64 hardware threads; leave headroom for the 6
 # dataloader workers each rank spawns.
 export OMP_NUM_THREADS=2
 export MKL_NUM_THREADS=2
@@ -63,10 +63,10 @@ export WANDB_DIR=$LOGDIR
 export WANDB_RESUME=allow
 export WANDB_RUN_ID=$RUN_NAME
 
-# torchrun spawns one process per GPU; train.py reads RANK/WORLD_SIZE/LOCAL_RANK
+# torchrun spawns one process per selected GPU; train.py reads RANK/WORLD_SIZE/LOCAL_RANK
 # from the env and initialises the NCCL process group.
 exec "$VENV/bin/torchrun" \
-    --standalone --nnodes=1 --nproc_per_node=4 \
+    --standalone --nnodes=1 --nproc_per_node=2 \
     -m msdelta.train \
     --config "$CFG" \
     --run-name "$RUN_NAME" \

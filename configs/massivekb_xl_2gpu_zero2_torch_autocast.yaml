@@ -16,12 +16,11 @@ fourier_int_n_freqs: 16
 fourier_int_f_min: 1.0e-2
 fourier_int_f_max: 1.0e+2
 fourier_int_learnable: true
-delta_bias_n_freqs: 64
-delta_bias_per_head_hidden: 32
-delta_bias_f_min: 1.0e-2
-delta_bias_f_max: 1.0e+3
+delta_bias_hidden: 128
+delta_bias_resolution: 0.01
+delta_bias_max_distance: 2000.0
+delta_bias_coordinate_scale: 1.0
 delta_bias_scale: 3.0
-delta_bias_learnable: true
 
 hf_repo: chrisagrams/massive_kb_v1_shuffled
 hf_train_split: train

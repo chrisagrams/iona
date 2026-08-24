@@ -122,27 +122,16 @@ class FourierProbeCallback(_InlineCallback):
 
     # ---- one-time real-value sampling ----
 
-    def _sample_values(self, budget: int = 8192, max_spectra: int = 1000,
-                       pairs_per_spectrum: int = 64) -> dict[str, torch.Tensor]:
-        """Pool real log_int values and real intra-spectrum Δm/z from the val set.
-
-        Both pools are subsampled to `budget` points so the throwaway MLP fit
-        stays cheap. Deterministic (seeded) so the metric is comparable step to
-        step."""
+    def _sample_values(self, budget: int = 8192,
+                       max_spectra: int = 1000) -> dict[str, torch.Tensor]:
+        """Pool real log-intensity values from the validation set."""
         g = torch.Generator().manual_seed(0)
-        li_pool, dm_pool = [], []
+        li_pool = []
         n = min(self.n_spectra, max_spectra)
         for row in itertools.islice(self.dataset, n):
-            mz = torch.as_tensor(row["mz"], dtype=torch.float32)
             li = torch.as_tensor(row["log_int"], dtype=torch.float32)
             if li.numel():
                 li_pool.append(li)
-            if mz.numel() >= 2:
-                # signed Δm/z for a random sample of ordered peak pairs
-                k = mz.numel()
-                idx = torch.randint(0, k, (pairs_per_spectrum, 2), generator=g)
-                idx = idx[idx[:, 0] != idx[:, 1]]
-                dm_pool.append(mz[idx[:, 0]] - mz[idx[:, 1]])
 
         def _cat(pool):
             if not pool:
@@ -153,7 +142,7 @@ class FourierProbeCallback(_InlineCallback):
                 v = v[sel]
             return v
 
-        return {"int": _cat(li_pool), "dm": _cat(dm_pool)}
+        return {"int": _cat(li_pool)}
 
     # ---- per-featurizer metrics ----
 
@@ -188,15 +177,12 @@ class FourierProbeCallback(_InlineCallback):
         enc = self.encoder
         payload: dict[str, Any] = {}
         payload.update(self._featurizer_metrics("int", enc.embed.ff_int, self._vals["int"]))
-        payload.update(self._featurizer_metrics("dm", enc.bias_module.ff, self._vals["dm"]))
         if not payload:
             return
         self._wlog(payload, step)
         g = lambda k: payload.get(k, float("nan"))
         print(f"  fourier: int_mae={g('fourier/int_mae'):.4g} "
-              f"int_dead={g('fourier/int_dead'):.0f} "
-              f"dm_mae={g('fourier/dm_mae'):.4g} "
-              f"dm_dead={g('fourier/dm_dead'):.0f}", flush=True)
+              f"int_dead={g('fourier/int_dead'):.0f}", flush=True)
 
 
 class AlignmentCallback(_InlineCallback):

@@ -1,4 +1,4 @@
-# MassIVE-KB v1 — XL tier (d=1024, ~203M params), 4× A100-40GB data-parallel.
+# MassIVE-KB v1 — XL tier (d=1024, ~203M params), 2× A100-40GB data-parallel.
 # Same architecture as v14_cap_XL (m/z-free tokens + per-head Δm bias +
 # masked-intensity KL loss); the point of this run is to see whether the
 # architecture trains cleanly on the Casanovo/GLEAMS MassIVE-KB corpus
@@ -10,9 +10,9 @@
 # can't recur. hf_split_paths() snapshot-downloads the train/ and val/ shards
 # into HF_HOME (set to /eagle/UIC-HPC/cgrams/hf in pbs/massivekb_ddp.pbs).
 #
-# Exposure: bs=64 per GPU × 4 GPUs × 4 accum = 1024 spectra/step (same global as
-# the single-GB10 massivekb_spark run, so the two are directly comparable).
-# 28125 steps × 1024 = 28.8M ≈ 1 epoch. Launch: qsub pbs/massivekb_ddp.pbs
+# Exposure: bs=64 per GPU × 2 GPUs × 4 accum = 512 spectra/step, matching W&B
+# run qvcw35rr. 28125 steps × 512 = 14.4M ≈ 0.5 epoch of MassIVE-KB train.
+# Launch: qsub pbs/massivekb_ddp.pbs
 #
 # Batch sizing: the gradient-noise-scale probe (scripts/grad_noise_scale.py)
 # measures B_simple ≈ 900 on this model at the plateau. The old global 320 was
@@ -29,12 +29,11 @@ fourier_int_n_freqs: 16
 fourier_int_f_min: 1.0e-2
 fourier_int_f_max: 1.0e+2
 fourier_int_learnable: true
-delta_bias_n_freqs: 64
-delta_bias_per_head_hidden: 32
-delta_bias_f_min: 1.0e-2
-delta_bias_f_max: 1.0e+3
+delta_bias_hidden: 128
+delta_bias_resolution: 0.01
+delta_bias_max_distance: 2000.0
+delta_bias_coordinate_scale: 1.0
 delta_bias_scale: 3.0
-delta_bias_learnable: true
 
 hf_repo: chrisagrams/massive_kb_v1_shuffled   # takes precedence over root; train/ + val/ splits
 intensity_threshold_frac: 0.01
@@ -42,12 +41,12 @@ top_n: 150
 mask_ratio: 0.50
 preprocess_num_workers: 24  # rank 0 only; other ranks wait and load its cache
 
-batch_size: 64          # per-GPU; global batch = 64 × 4 GPUs × 4 accum = 1024
-grad_accum_steps: 4     # → global 1024, same as massivekb_spark (at B_simple≈900)
-num_workers: 6          # ×4 ranks = 24 loader workers (+4 main) < 32 cores
-lr: 1.8e-4              # √-scaled from v14's 1e-4 @ global 320:  1e-4 × √(1024/320) ≈ 1.79e-4
+batch_size: 64          # per-GPU; global batch = 64 × 2 GPUs × 4 accum = 512
+grad_accum_steps: 4     # → global 512, matching W&B run qvcw35rr
+num_workers: 6          # ×2 ranks = 12 loader workers
+lr: 1.8e-4              # match W&B run qvcw35rr
 warmup_steps: 2000
-total_steps: 28125      # 28125 × 1024 = 28.8M ≈ 1 epoch of MassIVE-KB train
+total_steps: 28125      # 28125 × 512 = 14.4M ≈ 0.5 epoch of MassIVE-KB train
 weight_decay: 0.01
 grad_clip: 1.0
 precision: bf16
@@ -60,7 +59,7 @@ zero_stage: 2           # keep ≤2: inline probes call the eager encoder direct
 deepspeed_torch_autocast: true  # fp32 params + bf16 compute; native DS bf16 trains poorly here
 
 wandb_project: msfound
-wandb_run_name: v15-seq1024-bs512   # pbs/massivekb_ddp.pbs appends the job id
+wandb_run_name: v17-swinv2-cpb-seq1024-bs512   # pbs/massivekb_ddp.pbs appends the job id
 log_every: 50
 val_every: 2000
 bias_curve_every: 5000
