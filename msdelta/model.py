@@ -7,7 +7,7 @@ import math
 import torch
 import torch.nn.functional as F
 from torch import Tensor, nn
-from torch.nn.attention.flex_attention import flex_attention
+from torch.nn.attention.flex_attention import BlockMask, create_block_mask, flex_attention
 
 from .fourier import FourierFeatures
 
@@ -180,6 +180,7 @@ class BiasedMHA(nn.Module):
         bias_intercept: Tensor,
         bias_slope: Tensor,
         key_padding_mask: Tensor,
+        block_mask: BlockMask | None = None,
     ) -> Tensor:
         """Apply attention without materializing pairwise scores or biases."""
         B, K, _ = x.shape
@@ -215,7 +216,7 @@ class BiasedMHA(nn.Module):
 
         # FlexAttention currently has no attention-probability dropout. The
         # projection and FFN dropout configured on the model remain active.
-        out = flex_attention(q, k, v, score_mod=score_mod)
+        out = flex_attention(q, k, v, score_mod=score_mod, block_mask=block_mask)
         out = out.transpose(1, 2).reshape(B, K, -1)
         return self.proj_dropout(self.out(out))
 
@@ -243,10 +244,11 @@ class EncoderBlock(nn.Module):
         bias_intercept: Tensor,
         bias_slope: Tensor,
         key_padding_mask: Tensor,
+        block_mask: BlockMask | None = None,
     ) -> Tensor:
         x = x + self.attn(
             self.norm1(x), query_mz, key_mz,
-            bias_intercept, bias_slope, key_padding_mask,
+            bias_intercept, bias_slope, key_padding_mask, block_mask,
         )
         x = x + self.ffn(self.norm2(x))
         return x
@@ -263,6 +265,28 @@ class MSEncoder(nn.Module):
         self.bias_module = DeltaMZBias(cfg.n_heads, cfg.delta_bias)
         self.blocks = nn.ModuleList([EncoderBlock(cfg) for _ in range(cfg.n_layers)])
         self.norm = nn.LayerNorm(cfg.d_model)
+        self.block_mask: BlockMask | None = None
+
+    def initialize_block_mask(self, device: torch.device) -> None:
+        """Create dense FlexAttention metadata outside the compiled forward.
+
+        Letting ``flex_attention`` create its implicit dense mask while Dynamo
+        traces the eval graph leaves two Inductor buffers with FlexibleLayout.
+        Supplying the equivalent pre-built mask avoids that lowering bug without
+        changing which token pairs may attend to one another.
+        """
+        def allow_all(batch, head, q_idx, kv_idx):
+            return q_idx.new_ones((), dtype=torch.bool)
+
+        self.block_mask = create_block_mask(
+            allow_all,
+            B=None,
+            H=None,
+            Q_LEN=self.cfg.max_peaks,
+            KV_LEN=self.cfg.max_peaks,
+            device=device,
+            _compile=True,
+        )
 
     def forward(
         self,
@@ -280,7 +304,7 @@ class MSEncoder(nn.Module):
         for blk in self.blocks:
             tokens = blk(
                 tokens, mz, key_mz,
-                bias_intercept, bias_slope, key_padding_mask,
+                bias_intercept, bias_slope, key_padding_mask, self.block_mask,
             )
         tokens = self.norm(tokens)
         return tokens
