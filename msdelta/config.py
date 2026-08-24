@@ -209,6 +209,10 @@ def build_deepspeed_config(
         "gradient_accumulation_steps": "auto",
         "train_micro_batch_size_per_gpu": "auto",
         "train_batch_size": "auto",
+        # The synchronized throughput timer calls torch.cuda.synchronize(None)
+        # from a model forward hook. TorchDynamo 2.12/2.13 cannot trace that
+        # valid CUDA call, and the timer is not needed for training metrics.
+        "timers": {"throughput": {"enabled": False}},
     }
     if torch_autocast:
         # DeepSpeed's native bf16 mode casts the live model to bf16. PyTorch
