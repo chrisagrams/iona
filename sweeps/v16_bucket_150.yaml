@@ -1,0 +1,35 @@
+# Register once:
+#   wandb sweep sweeps/v16_bucket_150.yaml
+# Run one agent per isolated working directory (the base config uses one local
+# output directory for all trials):
+#   wandb agent CS_Pharm/msfound/<sweep-id>
+#
+# Stage 1 intentionally stops at 6k steps: this covers three evals and the
+# first full probe/retrieval suite while costing about 21% of a full grid.
+# Promote the best 2-3 settings to 28,125-step runs with explicit --run_name.
+program: msdelta/train.py
+entity: CS_Pharm
+project: msfound
+method: grid
+metric:
+  name: eval/loss
+  goal: minimize
+parameters:
+  delta_bias_n_buckets:
+    values: [2048, 4096, 8192]
+  delta_bias_resolution:
+    values: [0.005, 0.01, 0.02]
+  total_steps:
+    value: 6000
+  warmup_steps:
+    value: 2000
+command:
+  - ${env}
+  - torchrun
+  - --standalone
+  - --nproc_per_node=2
+  - -m
+  - msdelta.train
+  - --config
+  - configs/v16_bucket_150.yaml
+  - ${args}

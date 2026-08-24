@@ -1,0 +1,61 @@
+# V16 bucket-bias ablation matched to W&B run 34r6dee6.
+#
+# This deliberately retains 150 peaks and global batch 512 so that changing
+# delta_bias_n_buckets / delta_bias_resolution isolates the bucket-bias
+# parameterization. The defaults below are the center of the accompanying
+# 3x3 W&B grid in sweeps/v16_bucket_150.yaml.
+#
+# Two-GPU launch:
+#   torchrun --standalone --nproc_per_node=2 -m msdelta.train \
+#     --config configs/v16_bucket_150.yaml
+d_model: 1024
+n_heads: 16
+n_layers: 16
+ffn_mult: 4
+dropout: 0.1
+max_peaks: 150
+fourier_int_n_freqs: 16
+fourier_int_f_min: 1.0e-2
+fourier_int_f_max: 1.0e+2
+fourier_int_learnable: true
+
+delta_bias_n_buckets: 4096
+delta_bias_resolution: 0.01
+delta_bias_max_distance: 2000.0
+
+hf_repo: chrisagrams/massive_kb_v1_shuffled
+hf_train_split: train
+hf_val_split: val
+intensity_threshold_frac: 0.01
+top_n: 150
+mask_ratio: 0.50
+preprocess_num_workers: 24
+
+# 32 spectra/GPU x 2 GPUs x 8 accumulation = global batch 512.
+batch_size: 32
+grad_accum_steps: 8
+num_workers: 6
+lr: 1.8e-4
+warmup_steps: 2000
+total_steps: 28125
+weight_decay: 0.01
+grad_clip: 1.0
+precision: bf16
+compile: true
+val_batches: 50
+device: cuda
+seed: 0
+deepspeed: true
+zero_stage: 2
+deepspeed_torch_autocast: true
+
+wandb_project: msfound
+wandb_run_name: v16-bucket150-b4096-r0.01
+log_every: 50
+val_every: 2000
+bias_curve_every: 5000
+ckpt_every: 10000
+probe_every: 5000
+probe_n_spectra: 3000
+replicate_retrieval_repo: chrisagrams/ms2-peptide-replicate-retrieval
+out_dir: ./runs
