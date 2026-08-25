@@ -18,7 +18,8 @@ delta_bias_coordinate_scale: 1.0
 delta_bias_scale: 3.0
 # Eval-only cumulative score_mod compiler bisection. Stage 4 passed in run
 # gutuxobw and stage 5 isolated the failure to dynamically indexing the sliced
-# intercept view in fo4aw8tm. Keep stage 5 while testing the fixed-table capture.
+# intercept view in fo4aw8tm. A full computed table still failed in u5gl57h5,
+# so stage 5 now tests materializing that table across an eval-only graph break.
 score_mod_debug_stage: 5
 
 hf_repo: chrisagrams/massive_kb_v1_shuffled

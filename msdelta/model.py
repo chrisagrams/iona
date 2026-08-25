@@ -163,6 +163,21 @@ class DeltaMZBias(nn.Module):
         return self._interpolate(dm_grid, self._make_bias_table()).float()
 
 
+@torch.compiler.disable
+def _eval_interpolation_coefficients(
+    bias_module: DeltaMZBias,
+) -> tuple[Tensor, Tensor]:
+    """Materialize bias tables before entering compiled eval attention.
+
+    Inductor's eval FlexAttention template cannot dynamically index a table
+    whose producer is still part of the same compiled graph: its loader reaches
+    back into an unresolved-layout MLP buffer. A narrow graph boundary makes
+    both tables concrete inputs to the resumed compiled graph. Training keeps
+    the end-to-end compiled path and its gradients unchanged.
+    """
+    return bias_module.interpolation_coefficients()
+
+
 class BiasedMHA(nn.Module):
     """FlexAttention with on-kernel interpolated continuous Δm/z bias."""
 
@@ -338,7 +353,12 @@ class MSEncoder(nn.Module):
         mask_positions: Tensor | None = None,
     ) -> Tensor:
         tokens = self.embed(log_int, mask_positions)   # m/z-free tokens (B, K, D)
-        bias_intercept, bias_slope = self.bias_module.interpolation_coefficients()
+        if self.training:
+            bias_intercept, bias_slope = self.bias_module.interpolation_coefficients()
+        else:
+            bias_intercept, bias_slope = _eval_interpolation_coefficients(
+                self.bias_module
+            )
         # FlexAttention currently permits one read per captured tensor in a
         # score modifier. Separate query/key copies keep each m/z capture to a
         # single indexed read; the clone is only O(B*K).
