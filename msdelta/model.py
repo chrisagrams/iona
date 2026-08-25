@@ -7,7 +7,7 @@ import math
 import torch
 import torch.nn.functional as F
 from torch import Tensor, nn
-from torch.nn.attention.flex_attention import BlockMask, create_block_mask, flex_attention
+from torch.nn.attention.flex_attention import flex_attention
 
 from .fourier import FourierFeatures
 
@@ -45,9 +45,6 @@ class ModelConfig:
     # Zero the (i, i) entry of the Δm bias so the bias module can't modulate
     # self-attention (Δm=0 → a per-head constant self-logit offset).
     zero_bias_diagonal: bool = True
-    # Cumulative score_mod compiler-bisection stage. 7 is the production path;
-    # lower stages are used only in eval mode by the dedicated debug config.
-    score_mod_debug_stage: int = 7
 
 
 class PeakEmbed(nn.Module):
@@ -189,9 +186,6 @@ class BiasedMHA(nn.Module):
         self.bias_resolution = cfg.delta_bias.resolution
         self.bias_max_distance = cfg.delta_bias.max_distance
         self.zero_bias_diagonal = cfg.zero_bias_diagonal
-        if not 0 <= cfg.score_mod_debug_stage <= 7:
-            raise ValueError("score_mod_debug_stage must be between 0 and 7")
-        self.score_mod_debug_stage = cfg.score_mod_debug_stage
         self.qkv = nn.Linear(cfg.d_model, 3 * cfg.d_model, bias=True)
         self.out = nn.Linear(cfg.d_model, cfg.d_model, bias=True)
         self.proj_dropout = nn.Dropout(cfg.dropout)
@@ -204,7 +198,6 @@ class BiasedMHA(nn.Module):
         bias_intercept: Tensor,
         bias_slope: Tensor,
         key_padding_mask: Tensor,
-        block_mask: BlockMask | None = None,
     ) -> Tensor:
         """Apply attention without materializing pairwise scores or biases."""
         B, K, _ = x.shape
@@ -220,60 +213,29 @@ class BiasedMHA(nn.Module):
         # determines the valid left-endpoint interval indices.
         n_intervals = bias_slope.shape[0]
         zero_diagonal = self.zero_bias_diagonal
-        # Keep training mathematically unchanged while allowing the compiled
-        # eval specialization to bisect the score-modifier lowering failure.
-        debug_stage = 7 if self.training else self.score_mod_debug_stage
 
         def score_mod(score, batch, head, q_idx, kv_idx):
-            if debug_stage == 0:
-                return score
-
-            def apply_padding(value):
-                return torch.where(
-                    key_padding_mask[batch, kv_idx],
-                    -float("inf"),
-                    value,
-                )
-
-            if debug_stage == 1:
-                return apply_padding(score)
-
             dm = query_mz[batch, q_idx] - key_mz[batch, kv_idx]
-            if debug_stage == 2:
-                return apply_padding(
-                    score + (dm / max_distance).to(score.dtype)
-                )
-
             dm = dm.clamp(-max_distance, max_distance)
             position = (dm + max_distance) / resolution
-            if debug_stage == 3:
-                return apply_padding(
-                    score + (position / n_intervals).to(score.dtype)
-                )
-
             left = position.floor().to(torch.int64).clamp(0, n_intervals - 1)
-            if debug_stage == 4:
-                return apply_padding(
-                    score + left.to(score.dtype) / n_intervals
-                )
-
-            if debug_stage == 5:
-                bias = bias_intercept[left, head]
-                return apply_padding(score + bias.to(score.dtype))
-
             fraction = (position - left.to(position.dtype)).to(bias_intercept.dtype)
             bias = (
                 bias_intercept[left, head]
                 + fraction * bias_slope[left, head]
             )
-            if debug_stage == 7 and zero_diagonal:
+            if zero_diagonal:
                 bias = torch.where(q_idx == kv_idx, 0.0, bias)
             score = score + bias.to(score.dtype)
-            return apply_padding(score)
+            return torch.where(
+                key_padding_mask[batch, kv_idx],
+                -float("inf"),
+                score,
+            )
 
         # FlexAttention currently has no attention-probability dropout. The
         # projection and FFN dropout configured on the model remain active.
-        out = flex_attention(q, k, v, score_mod=score_mod, block_mask=block_mask)
+        out = flex_attention(q, k, v, score_mod=score_mod)
         out = out.transpose(1, 2).reshape(B, K, -1)
         return self.proj_dropout(self.out(out))
 
@@ -301,11 +263,10 @@ class EncoderBlock(nn.Module):
         bias_intercept: Tensor,
         bias_slope: Tensor,
         key_padding_mask: Tensor,
-        block_mask: BlockMask | None = None,
     ) -> Tensor:
         x = x + self.attn(
             self.norm1(x), query_mz, key_mz,
-            bias_intercept, bias_slope, key_padding_mask, block_mask,
+            bias_intercept, bias_slope, key_padding_mask,
         )
         x = x + self.ffn(self.norm2(x))
         return x
@@ -322,28 +283,6 @@ class MSEncoder(nn.Module):
         self.bias_module = DeltaMZBias(cfg.n_heads, cfg.delta_bias)
         self.blocks = nn.ModuleList([EncoderBlock(cfg) for _ in range(cfg.n_layers)])
         self.norm = nn.LayerNorm(cfg.d_model)
-        self.block_mask: BlockMask | None = None
-
-    def initialize_block_mask(self, device: torch.device) -> None:
-        """Create dense FlexAttention metadata outside the compiled forward.
-
-        Letting ``flex_attention`` create its implicit dense mask while Dynamo
-        traces the eval graph leaves two Inductor buffers with FlexibleLayout.
-        Supplying the equivalent pre-built mask avoids that lowering bug without
-        changing which token pairs may attend to one another.
-        """
-        def allow_all(batch, head, q_idx, kv_idx):
-            return q_idx.new_ones((), dtype=torch.bool)
-
-        self.block_mask = create_block_mask(
-            allow_all,
-            B=None,
-            H=None,
-            Q_LEN=self.cfg.max_peaks,
-            KV_LEN=self.cfg.max_peaks,
-            device=device,
-            _compile=True,
-        )
 
     def forward(
         self,
@@ -363,19 +302,10 @@ class MSEncoder(nn.Module):
         # score modifier. Separate query/key copies keep each m/z capture to a
         # single indexed read; the clone is only O(B*K).
         key_mz = mz.clone()
-        block_mask = self.block_mask
-        sequence_length = mz.shape[1]
-        if (
-            block_mask is not None
-            and block_mask.shape[-2:] != (sequence_length, sequence_length)
-        ):
-            # This mask permits every pair, so cropping its upper-left corner
-            # is valid for shorter variable-length probe/retrieval batches.
-            block_mask = block_mask._adjust(sequence_length, sequence_length)
         for blk in self.blocks:
             tokens = blk(
                 tokens, mz, key_mz,
-                bias_intercept, bias_slope, key_padding_mask, block_mask,
+                bias_intercept, bias_slope, key_padding_mask,
             )
         tokens = self.norm(tokens)
         return tokens

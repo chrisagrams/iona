@@ -113,11 +113,6 @@ def main(argv: list[str] | None = None) -> int:
 
     # Model — placement + precision are the Trainer/DeepSpeed engine's job.
     model = MSDeltaForPretraining(margs.to_model_config())
-    if targs.compile:
-        # Build FlexAttention's dense block metadata before Dynamo traces the
-        # model. Constructing the implicit mask inside the compiled eval graph
-        # triggers an Inductor FlexibleLayout lowering failure.
-        model.encoder.initialize_block_mask(training_args.device)
     if training_args.local_process_index == 0:
         n_params = sum(p.numel() for p in model.parameters())
         print(f"[model] {n_params/1e6:.2f}M params", flush=True)

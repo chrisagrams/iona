@@ -150,10 +150,7 @@ class AttentionRecorder:
 
     @torch.no_grad()
     def _hook(self, module, args) -> None:
-        (
-            x, query_mz, key_mz, bias_intercept, bias_slope,
-            key_padding_mask, _block_mask,
-        ) = args
+        x, query_mz, key_mz, bias_intercept, bias_slope, key_padding_mask = args
         B, K, _ = x.shape
         qkv = module.qkv(x).reshape(B, K, 3, module.n_heads, module.d_head)
         q, k, _ = qkv.unbind(dim=2)

@@ -16,12 +16,6 @@ delta_bias_resolution: 0.01
 delta_bias_max_distance: 2000.0
 delta_bias_coordinate_scale: 1.0
 delta_bias_scale: 3.0
-# Eval-only cumulative score_mod compiler bisection. Stage 4 passed in run
-# gutuxobw and stage 5 isolated the failure to dynamically indexing the sliced
-# intercept view in fo4aw8tm. Materializing the tables across an eval-only graph
-# break passed stages 5 and 6; stage 7 restores the complete modifier, including
-# zeroing the diagonal.
-score_mod_debug_stage: 7
 
 hf_repo: chrisagrams/massive_kb_v1_shuffled
 intensity_threshold_frac: 0.01
