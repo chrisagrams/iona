@@ -162,7 +162,7 @@ class AttentionRecorder:
         dm = query_mz.unsqueeze(-1) - key_mz.unsqueeze(-2)
         dm = dm.clamp(-module.bias_max_distance, module.bias_max_distance)
         position = (dm + module.bias_max_distance) / module.bias_resolution
-        left = position.floor().long().clamp(0, bias_intercept.shape[0] - 1)
+        left = position.floor().long().clamp(0, bias_slope.shape[0] - 1)
         fraction = (position - left.to(position.dtype)).to(bias_intercept.dtype)
         bias = bias_intercept[left] + fraction.unsqueeze(-1) * bias_slope[left]
         bias = bias.permute(0, 3, 1, 2)

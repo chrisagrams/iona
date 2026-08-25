@@ -135,7 +135,10 @@ class DeltaMZBias(nn.Module):
     def interpolation_coefficients(self) -> tuple[Tensor, Tensor]:
         """Return per-interval intercept and slope tables for FlexAttention."""
         table = self._make_bias_table()
-        return table[:-1], table[1:] - table[:-1]
+        # Capture the fixed-layout table itself in score_mod. Capturing
+        # ``table[:-1]`` creates a SliceView that Inductor cannot dynamically
+        # index while rendering the eval FlexAttention template.
+        return table, table[1:] - table[:-1]
 
     def _interpolate(self, dm: Tensor, table: Tensor) -> Tensor:
         """Linearly interpolate ``table`` at arbitrary continuous Δm/z values."""
@@ -198,7 +201,9 @@ class BiasedMHA(nn.Module):
 
         resolution = self.bias_resolution
         max_distance = self.bias_max_distance
-        n_intervals = bias_intercept.shape[0]
+        # bias_intercept is the full knot table (one entry longer); bias_slope
+        # determines the valid left-endpoint interval indices.
+        n_intervals = bias_slope.shape[0]
         zero_diagonal = self.zero_bias_diagonal
         # Keep training mathematically unchanged while allowing the compiled
         # eval specialization to bisect the score-modifier lowering failure.
