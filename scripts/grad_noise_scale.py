@@ -24,8 +24,8 @@ before the ratio (the ratio-of-noisy-estimates is biased otherwise).
 Reusable across configs — everything (model, preprocessing, mask ratio, data
 source) is read from the training YAML:
 
-    python scripts/grad_noise_scale.py --config configs/massivekb_spark.yaml
-    python scripts/grad_noise_scale.py --config configs/scale_XL.yaml \
+    python scripts/grad_noise_scale.py --config configs/massivekb_xl_debug.yaml
+    python scripts/grad_noise_scale.py --config configs/massivekb_xl.yaml \
         --micro-batch 16 --n-micro 32 --iters 8 --precision bf16 --ckpt runs/foo/final
 
 Tunables: raise --n-micro (bigger probe batch = less extrapolation) and --iters

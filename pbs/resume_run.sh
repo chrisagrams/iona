@@ -11,7 +11,7 @@
 # freed GPU. Use tmux/nohup so it survives an ssh drop.
 #
 # Usage:  bash pbs/resume_run.sh <config> <gpu> <run_dir>
-#   e.g.  bash pbs/resume_run.sh configs/v14_cap_XL.yaml 3 \
+#   e.g.  bash pbs/resume_run.sh configs/massivekb_xl.yaml 3 \
 #               /eagle/UIC-HPC/cgrams/msdelta-runs/v14_cap_XL_7174804
 
 set -euo pipefail

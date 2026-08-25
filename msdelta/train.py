@@ -16,8 +16,8 @@ how a `wandb agent` injects a sweep (it appends `--lr=... --mask_ratio=...` via
 the sweep's `${args}`).
 
 Single GPU / dev (HF Trainer, no launcher needed):
-    msdelta-train --config configs/v14_cap_S.yaml
-    msdelta-train --config configs/v14_cap_S.yaml --lr 2e-4          # CLI override
+    msdelta-train --config configs/massivekb_xl_debug.yaml
+    msdelta-train --config configs/massivekb_xl_debug.yaml --lr 2e-4  # CLI override
 Multi-GPU with DeepSpeed (set `deepspeed: true` in the config; torchrun stands
 up the process group — the `deepspeed` launcher can't run a package's `-m`
 entrypoint given the relative imports):
