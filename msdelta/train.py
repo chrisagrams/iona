@@ -91,17 +91,6 @@ class MSDeltaTrainer(Trainer):
         return [n for n in super().get_decay_parameter_names(model)
                 if not n.endswith(".freqs")]
 
-    def evaluation_loop(self, *args, **kwargs):
-        """Run validation in PyTorch's inference-only execution mode.
-
-        Keep the whole loop in scope so loss gathering and accumulation do not
-        operate on inference tensors after leaving inference mode.  Besides
-        avoiding unnecessary autograd bookkeeping, this gives torch.compile an
-        inference specialization distinct from its failing no-grad graph.
-        """
-        with torch.inference_mode():
-            return super().evaluation_loop(*args, **kwargs)
-
 
 # ---------- training ----------
 

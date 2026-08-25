@@ -45,6 +45,9 @@ class ModelConfig:
     # Zero the (i, i) entry of the Δm bias so the bias module can't modulate
     # self-attention (Δm=0 → a per-head constant self-logit offset).
     zero_bias_diagonal: bool = True
+    # Cumulative score_mod compiler-bisection stage. 7 is the production path;
+    # lower stages are used only in eval mode by the dedicated debug config.
+    score_mod_debug_stage: int = 7
 
 
 class PeakEmbed(nn.Module):
@@ -168,6 +171,9 @@ class BiasedMHA(nn.Module):
         self.bias_resolution = cfg.delta_bias.resolution
         self.bias_max_distance = cfg.delta_bias.max_distance
         self.zero_bias_diagonal = cfg.zero_bias_diagonal
+        if not 0 <= cfg.score_mod_debug_stage <= 7:
+            raise ValueError("score_mod_debug_stage must be between 0 and 7")
+        self.score_mod_debug_stage = cfg.score_mod_debug_stage
         self.qkv = nn.Linear(cfg.d_model, 3 * cfg.d_model, bias=True)
         self.out = nn.Linear(cfg.d_model, cfg.d_model, bias=True)
         self.proj_dropout = nn.Dropout(cfg.dropout)
@@ -194,25 +200,56 @@ class BiasedMHA(nn.Module):
         max_distance = self.bias_max_distance
         n_intervals = bias_intercept.shape[0]
         zero_diagonal = self.zero_bias_diagonal
+        # Keep training mathematically unchanged while allowing the compiled
+        # eval specialization to bisect the score-modifier lowering failure.
+        debug_stage = 7 if self.training else self.score_mod_debug_stage
 
         def score_mod(score, batch, head, q_idx, kv_idx):
+            if debug_stage == 0:
+                return score
+
+            def apply_padding(value):
+                return torch.where(
+                    key_padding_mask[batch, kv_idx],
+                    -float("inf"),
+                    value,
+                )
+
+            if debug_stage == 1:
+                return apply_padding(score)
+
             dm = query_mz[batch, q_idx] - key_mz[batch, kv_idx]
+            if debug_stage == 2:
+                return apply_padding(
+                    score + (dm / max_distance).to(score.dtype)
+                )
+
             dm = dm.clamp(-max_distance, max_distance)
             position = (dm + max_distance) / resolution
+            if debug_stage == 3:
+                return apply_padding(
+                    score + (position / n_intervals).to(score.dtype)
+                )
+
             left = position.floor().to(torch.int64).clamp(0, n_intervals - 1)
+            if debug_stage == 4:
+                return apply_padding(
+                    score + left.to(score.dtype) / n_intervals
+                )
+
+            if debug_stage == 5:
+                bias = bias_intercept[left, head]
+                return apply_padding(score + bias.to(score.dtype))
+
             fraction = (position - left.to(position.dtype)).to(bias_intercept.dtype)
             bias = (
                 bias_intercept[left, head]
                 + fraction * bias_slope[left, head]
             )
-            if zero_diagonal:
+            if debug_stage == 7 and zero_diagonal:
                 bias = torch.where(q_idx == kv_idx, 0.0, bias)
             score = score + bias.to(score.dtype)
-            return torch.where(
-                key_padding_mask[batch, kv_idx],
-                -float("inf"),
-                score,
-            )
+            return apply_padding(score)
 
         # FlexAttention currently has no attention-probability dropout. The
         # projection and FFN dropout configured on the model remain active.

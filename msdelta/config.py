@@ -40,6 +40,7 @@ class ModelArgs:
     dropout: float = 0.1
     max_peaks: int = 150
     zero_bias_diagonal: bool = True
+    score_mod_debug_stage: int = 7
     fourier_int_n_freqs: int = 16
     fourier_int_f_min: float = 1e-2
     fourier_int_f_max: float = 1e2
@@ -58,6 +59,7 @@ class ModelArgs:
             ffn_mult=self.ffn_mult,
             dropout=self.dropout,
             max_peaks=self.max_peaks,
+            score_mod_debug_stage=self.score_mod_debug_stage,
             fourier_int=FourierConfig(
                 self.fourier_int_n_freqs, self.fourier_int_f_min, self.fourier_int_f_max,
                 learnable=self.fourier_int_learnable),
