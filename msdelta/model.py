@@ -363,10 +363,19 @@ class MSEncoder(nn.Module):
         # score modifier. Separate query/key copies keep each m/z capture to a
         # single indexed read; the clone is only O(B*K).
         key_mz = mz.clone()
+        block_mask = self.block_mask
+        sequence_length = mz.shape[1]
+        if (
+            block_mask is not None
+            and block_mask.shape[-2:] != (sequence_length, sequence_length)
+        ):
+            # This mask permits every pair, so cropping its upper-left corner
+            # is valid for shorter variable-length probe/retrieval batches.
+            block_mask = block_mask._adjust(sequence_length, sequence_length)
         for blk in self.blocks:
             tokens = blk(
                 tokens, mz, key_mz,
-                bias_intercept, bias_slope, key_padding_mask, self.block_mask,
+                bias_intercept, bias_slope, key_padding_mask, block_mask,
             )
         tokens = self.norm(tokens)
         return tokens
