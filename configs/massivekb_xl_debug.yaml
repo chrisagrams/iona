@@ -16,10 +16,10 @@ delta_bias_resolution: 0.01
 delta_bias_max_distance: 2000.0
 delta_bias_coordinate_scale: 1.0
 delta_bias_scale: 3.0
-# Eval-only cumulative score_mod compiler bisection: stage 4 includes padding,
-# m/z reads, arithmetic, floor, int64 conversion, and clamping, but no learned
-# bias-table lookup. Training always uses the complete stage-7 modifier.
-score_mod_debug_stage: 4
+# Eval-only cumulative score_mod compiler bisection. Stage 4 passed in run
+# gutuxobw; stage 5 adds the first learned bias-table lookup but not the slope
+# lookup or interpolation. Training always uses the complete stage-7 modifier.
+score_mod_debug_stage: 5
 
 hf_repo: chrisagrams/massive_kb_v1_shuffled
 intensity_threshold_frac: 0.01
