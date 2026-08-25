@@ -4,7 +4,7 @@
 # with the current pretraining head. d_head=64 matches the proven XL attention
 # geometry while reducing both width and depth.
 #
-# Exposure: 128 spectra/GPU × 2 GPUs × 2 accumulation = global batch 512.
+# Exposure: 64 spectra/GPU × 2 GPUs × 4 accumulation = global batch 512.
 # Using the established ~28.8M train-spectrum estimate, 56,250 optimizer steps
 # is one epoch, so 112,500 steps trains for two full epochs.
 #
@@ -35,8 +35,8 @@ top_n: 1024
 mask_ratio: 0.50
 preprocess_num_workers: 24
 
-batch_size: 128          # per-GPU micro-batch
-grad_accum_steps: 2      # global batch = 128 × 2 GPUs × 2 accum = 512
+batch_size: 64           # per-GPU micro-batch
+grad_accum_steps: 4      # global batch = 64 × 2 GPUs × 4 accum = 512
 num_workers: 6           # ×2 ranks = 12 loader workers
 lr: 1.8e-4
 lr_scheduler_type: cosine
