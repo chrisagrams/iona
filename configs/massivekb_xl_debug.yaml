@@ -6,7 +6,7 @@ n_heads: 16
 n_layers: 16
 ffn_mult: 4
 dropout: 0.1
-max_peaks: 150
+max_peaks: 1024
 fourier_int_n_freqs: 16
 fourier_int_f_min: 1.0e-2
 fourier_int_f_max: 1.0e+2
@@ -19,7 +19,7 @@ delta_bias_scale: 3.0
 
 hf_repo: chrisagrams/massive_kb_v1_shuffled
 intensity_threshold_frac: 0.01
-top_n: 150
+top_n: 1024
 mask_ratio: 0.50
 preprocess_num_workers: 24
 
