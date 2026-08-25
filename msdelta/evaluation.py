@@ -307,10 +307,13 @@ class DistributedDiagnosticRunner:
                     "replicate_retrieval", external["embeddings"], labels,
                     self.last_transform,
                 ))
-            metrics["eval/diagnostics_runtime"] = time.monotonic() - started
+            metrics["diagnostics_runtime"] = time.monotonic() - started
 
         self.accelerator.wait_for_everyone()
-        return metrics
+        # Hugging Face's stock W&B callback rewrites ``eval_*`` to ``eval/*``.
+        # Keeping that convention here gives us eval/probe/*,
+        # eval/retrieval/*, etc. without a custom logging integration.
+        return {f"eval_{key}": value for key, value in metrics.items()}
 
     def save_transform(self, path) -> None:
         if self.accelerator.is_main_process and self.last_transform is not None:
