@@ -993,14 +993,13 @@ has the best chance to push it over). Configs
 (20h capacity walltime, XL 160k steps is the binding tier).
 
 **Inline-probe instrumentation (new).** The point of this run is the
-*trajectory*, not just the final ckpt. `train.py`'s probe block now also
-logs, every `probe_every` steps:
+*trajectory*, not just the final ckpt. Trainer evaluation also logs, every
+`val_every` steps:
 - `align/*` — bias-curve chemistry alignment (`analyze.alignment_metrics`,
   no data, ~free): `n_sig05`, `n_sig01_bonf` (heads surviving ×16
   Bonferroni — the strict gate), `best_p`, per-range `max_enrich` /
   `coverage`.
-- `retrieval/*` — embedding retrieval vs binned-cosine
-  (`retrieval.retrieval_inline_metrics`): `mAP`, `P@1`, `AUC_PR`,
+- `retrieval/*` — embedding retrieval vs binned-cosine: `mAP`, `P@1`, `AUC_PR`,
   `binned_mAP`, `gap_vs_binned`.
 
 So we can watch whether bias chemistry *sharpens with training* and

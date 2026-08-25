@@ -19,7 +19,7 @@ import yaml
 from transformers import HfArgumentParser, TrainingArguments
 
 from .data import PreprocessConfig
-from .model import DeltaBiasConfig, FourierConfig, ModelConfig
+from .model import MSDeltaConfig
 
 
 # ---------- schema ----------
@@ -50,24 +50,23 @@ class ModelArgs:
     delta_bias_coordinate_scale: float = 1.0
     delta_bias_scale: float = 3.0
 
-    def to_model_config(self) -> ModelConfig:
-        return ModelConfig(
+    def to_model_config(self) -> MSDeltaConfig:
+        return MSDeltaConfig(
             d_model=self.d_model,
             n_heads=self.n_heads,
             n_layers=self.n_layers,
             ffn_mult=self.ffn_mult,
             dropout=self.dropout,
             max_peaks=self.max_peaks,
-            fourier_int=FourierConfig(
-                self.fourier_int_n_freqs, self.fourier_int_f_min, self.fourier_int_f_max,
-                learnable=self.fourier_int_learnable),
-            delta_bias=DeltaBiasConfig(
-                hidden=self.delta_bias_hidden,
-                resolution=self.delta_bias_resolution,
-                max_distance=self.delta_bias_max_distance,
-                coordinate_scale=self.delta_bias_coordinate_scale,
-                scale=self.delta_bias_scale,
-            ),
+            fourier_int_n_freqs=self.fourier_int_n_freqs,
+            fourier_int_f_min=self.fourier_int_f_min,
+            fourier_int_f_max=self.fourier_int_f_max,
+            fourier_int_learnable=self.fourier_int_learnable,
+            delta_bias_hidden=self.delta_bias_hidden,
+            delta_bias_resolution=self.delta_bias_resolution,
+            delta_bias_max_distance=self.delta_bias_max_distance,
+            delta_bias_coordinate_scale=self.delta_bias_coordinate_scale,
+            delta_bias_scale=self.delta_bias_scale,
             zero_bias_diagonal=self.zero_bias_diagonal,
         )
 
@@ -115,12 +114,12 @@ class TrainArgs:
     grad_clip: float = 1.0
     grad_accum_steps: int = 1
     precision: str = "bf16"            # bf16 | fp16 | fp32
-    compile: bool = False              # torch.compile the training forward
+    compile: bool = False              # torch.compile train and eval forwards
     val_batches: int = 50
     seed: int = 0
     save_total_limit: int = 3
     deepspeed: bool = False            # opt-in; needs a torchrun launch (see build_deepspeed_config)
-    zero_stage: int = 2               # keep ≤2: inline probes call the eager encoder directly
+    zero_stage: int = 2               # keep ≤2: rank-zero parameter probes inspect live modules
     deepspeed_fp32_gradients: bool = False  # accumulate + reduce gradients in fp32 under DeepSpeed
     # Default to PyTorch autocast under DeepSpeed. Native DeepSpeed bf16 casts
     # the live model to bf16 and produced a reproducibly degraded trajectory for
@@ -137,7 +136,6 @@ class LogArgs:
     val_every: int = 2000
     bias_curve_every: int = 5000
     ckpt_every: int = 10000
-    probe_every: int = 0
     probe_n_spectra: int = 3000
     replicate_retrieval_repo: str | None = None
     out_dir: str = "./runs"
@@ -199,8 +197,8 @@ def build_deepspeed_config(
     config = {
         "zero_optimization": {
             # ZeRO-2 partitions optimizer state + grads but keeps a full copy
-            # of every parameter on each rank — required for the inline probes,
-            # which call the eager encoder directly (see ScienceCallback).
+            # of every parameter on each rank. Forward-heavy diagnostics use
+            # the prepared DeepSpeed model on all ranks.
             "stage": zero_stage,
             "overlap_comm": True,
             "contiguous_gradients": True,

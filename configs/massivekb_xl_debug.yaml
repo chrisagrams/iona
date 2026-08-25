@@ -46,7 +46,6 @@ log_every: 50
 val_every: 2
 bias_curve_every: 3
 ckpt_every: 5
-probe_every: 4
 probe_n_spectra: 30
 replicate_retrieval_repo: chrisagrams/ms2-peptide-replicate-retrieval
 out_dir: ./runs

@@ -12,8 +12,8 @@ Two tiers of linear probes on frozen, pooled encoder representations:
     - neutral-loss pair      (binary; does Δm_ij match a known loss?)
     - isotope-peak position  (per-peak M+0/1/2/3; heuristic from Δm = 1.003/z)
 
-Run inline: `LinearProbeCallback` calls `run_all_probes(encoder, val_dataset, ...)`
-every N steps over the preprocessed HF val dataset and logs the flat dict to wandb.
+During training, distributed representation extraction is orchestrated by
+``MSDeltaTrainer.evaluate`` and this module fits the rank-zero sklearn probes.
 
 Tier-2 labels for neutral-loss / isotope are *derived from Δm rules*, so they
 test "is this info linearly decodable from the representation," not pure
@@ -29,8 +29,9 @@ import torch
 from sklearn.linear_model import LogisticRegression, Ridge
 from sklearn.metrics import accuracy_score, f1_score, r2_score, roc_auc_score
 from sklearn.preprocessing import StandardScaler
+from sentence_transformers.sentence_transformer.modules import Pooling
 
-from .embedding import encode_batch, pool_tokens
+from .embedding import encode_batch
 from .model import MSEncoder
 
 # Monoisotopic residue masses (Da); L and I share a mass.
@@ -103,6 +104,10 @@ def extract_representations(
     so no per-spectrum transform runs here."""
     was_training = enc.training
     enc.to(device).eval()
+    pooler = Pooling(
+        embedding_dimension=enc.cfg.d_model,
+        pooling_mode=tuple(enc.cfg.pooling_modes),
+    ).to(device)
     rng = np.random.default_rng(seed)
 
     spec, prec, pcount, logtic, charge, maxmz = [], [], [], [], [], []
@@ -117,7 +122,10 @@ def extract_representations(
             return
         tokens, mask = encode_batch(
             enc, [t[0] for t in buf], [t[1] for t in buf], device)  # (B,K,D)
-        pooled = pool_tokens(tokens, mask).float().cpu().numpy()
+        pooled = pooler({
+            "token_embeddings": tokens,
+            "attention_mask": mask.long(),
+        })["sentence_embedding"].float().cpu().numpy()
         tok_cpu = tokens.float().cpu().numpy()
         for b, (m, l, meta) in enumerate(buf):
             k = m.numel()
@@ -234,6 +242,13 @@ def run_all_probes(
     """Flat metrics dict, suitable for wandb.log. Frozen-encoder linear probes
     over a preprocessed HF dataset (`build_preprocessed_dataset`)."""
     d = extract_representations(enc, dataset, n_spectra, batch_size, device)
+    return probe_metrics_from_representations(d)
+
+
+def probe_metrics_from_representations(
+    d: dict[str, np.ndarray],
+) -> dict[str, float]:
+    """Fit the probe suite from already gathered distributed representations."""
     X = d["spec"]
     metrics: dict[str, float] = {}
     # Tier 1
@@ -253,5 +268,3 @@ def run_all_probes(
     if len(d["peak_mz"]) >= 50:
         metrics.update(_regression(d["peak_rep"], d["peak_mz"], "fragment_mz"))
     return metrics
-
-

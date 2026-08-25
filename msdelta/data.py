@@ -4,8 +4,8 @@ Everything goes through `build_pretraining_datasets` / `build_preprocessed_datas
 which load the parquet as a Hugging Face `datasets.Dataset` and precompute
 `preprocess_spectrum` with `.map()` (cached to Arrow) — so no per-spectrum
 transform runs during training (only the cheap random masking in
-`MaskIntensityCollator`) or in the inline probes (which read the same
-preprocessed rows via `collate_preprocessed`).
+`MaskIntensityCollator`) or distributed diagnostics (which read the same
+preprocessed rows via `EmbeddingEvalCollator`).
 """
 from __future__ import annotations
 
@@ -269,6 +269,46 @@ def collate_preprocessed(features: list[dict]) -> dict[str, torch.Tensor]:
             "key_padding_mask": key_padding_mask}
 
 
+@dataclass
+class EmbeddingEvalCollator:
+    """Fixed-shape, unmasked batches for compiled distributed diagnostics."""
+
+    max_peaks: int
+
+    def __call__(self, features: list[dict]):
+        B = len(features)
+        mz = torch.zeros(B, self.max_peaks, dtype=torch.float32)
+        log_int = torch.zeros(B, self.max_peaks, dtype=torch.float32)
+        key_padding_mask = torch.ones(B, self.max_peaks, dtype=torch.bool)
+        peak_count = torch.zeros(B, dtype=torch.long)
+        log_tic = torch.zeros(B, dtype=torch.float32)
+        row_id = torch.zeros(B, dtype=torch.long)
+        peptide_charge: list[str] = []
+
+        for b, feature in enumerate(features):
+            K = min(len(feature["mz"]), self.max_peaks)
+            if K:
+                mz[b, :K] = torch.as_tensor(feature["mz"][:K], dtype=torch.float32)
+                log_int[b, :K] = torch.as_tensor(
+                    feature["log_int"][:K], dtype=torch.float32
+                )
+                key_padding_mask[b, :K] = False
+            peak_count[b] = K
+            log_tic[b] = float(feature.get("log_tic", 0.0))
+            row_id[b] = int(feature["_eval_id"])
+            peptide_charge.append(str(feature.get("peptide_charge", "")))
+
+        return {
+            "mz": mz,
+            "log_int": log_int,
+            "key_padding_mask": key_padding_mask,
+            "peak_count": peak_count,
+            "log_tic": log_tic,
+            "row_id": row_id,
+            "peptide_charge": peptide_charge,
+        }
+
+
 def build_preprocessed_dataset(paths: list[Path], pp: PreprocessConfig,
                                num_proc: int | None = None):
     """Load parquet shards as a HF `datasets.Dataset` and precompute
@@ -290,8 +330,8 @@ def build_pretraining_datasets(
 ):
     """Preprocessed (train, val) HF datasets — map-style, so `Trainer` handles
     sampling/sharding/finite eval natively. The same preprocessed rows feed the
-    inline probes (via `build_preprocessed_dataset` on the val shards), so no
-    per-spectrum transform runs anywhere in training or evaluation."""
+    distributed diagnostics, so no per-spectrum transform runs anywhere in
+    training or evaluation."""
     train = build_preprocessed_dataset(train_paths, pp, num_proc=num_proc)
     val = build_preprocessed_dataset(val_paths, pp, num_proc=num_proc)
     return train, val

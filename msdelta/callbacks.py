@@ -1,10 +1,8 @@
 """Trainer callbacks for the inline diagnostics — one callback per probe.
 
-Each concrete callback runs a single diagnostic on the main process at its
-configured cadence, reaching the eager `.encoder` shared with the training
-engine for its own forwards. That sharing assumes DeepSpeed ZeRO stage ≤ 2:
-under ZeRO-3 the params live in the engine and a bare `encoder(...)` would see
-empty shells.
+These callbacks now cover only rank-zero parameter/plot diagnostics. Forward-
+heavy representation probes are owned by ``MSDeltaTrainer.evaluate`` so they
+use the prepared compiled model and every data-parallel rank.
 
 `build_callbacks` assembles the right set from the `LogArgs` cadences (a probe
 is only registered when its cadence is set), so nothing runs as a no-op.
@@ -22,9 +20,7 @@ from torch import nn
 from transformers import TrainerCallback
 
 from .fourier import dead_freqs, freq_drift, interp_mae
-from .probe import run_all_probes
 from .alignment import alignment_metrics
-from .retrieval import retrieval_inline_metrics, replicate_retrieval_inline_metrics
 from .viz import render_bias_panels
 
 
@@ -77,27 +73,6 @@ class _InlineCallback(TrainerCallback):
 
 
 # ---------- one callback per probe ----------
-
-class LinearProbeCallback(_InlineCallback):
-    """Frozen-encoder linear probes (precursor m/z, charge, neutral loss, …)."""
-
-    empty_cache_before = True
-
-    def __init__(self, module, every, dataset, n_spectra):
-        super().__init__(module, every, dataset=dataset)
-        self.n_spectra = n_spectra
-
-    def run(self, step):
-        m = run_all_probes(self.encoder, self.dataset, self.device,
-                           n_spectra=self.n_spectra)
-        self._wlog(m, step)
-        key = lambda k: m.get(k, float("nan"))
-        print(f"  probe: precursor_r2={key('probe/precursor_mz_r2'):.3f} "
-              f"fragment_mz_r2={key('probe/fragment_mz_r2'):.3f} "
-              f"charge_acc={key('probe/charge_acc'):.3f} "
-              f"nloss_auc={key('probe/neutral_loss_auc'):.3f} "
-              f"iso_f1={key('probe/isotope_f1'):.3f}", flush=True)
-
 
 class FourierProbeCallback(_InlineCallback):
     """Are the learned Fourier frequencies effective?
@@ -195,41 +170,6 @@ class AlignmentCallback(_InlineCallback):
               f"best_p={a.get('align/best_p', 1):.1e}", flush=True)
 
 
-class RetrievalCallback(_InlineCallback):
-    """Spectrum retrieval — the model as an embedding model, vs a binned baseline."""
-
-    empty_cache_before = True
-
-    def run(self, step):
-        r = retrieval_inline_metrics(self.encoder, self.dataset, self.device)
-        self._wlog(r, step)
-        print(f"  retrieval: mAP={r.get('retrieval/mAP', float('nan')):.3f} "
-              f"binned={r.get('retrieval/binned_mAP', float('nan')):.3f} "
-              f"gap={r.get('retrieval/gap_vs_binned', float('nan')):+.3f}", flush=True)
-
-
-class ReplicateRetrievalCallback(_InlineCallback):
-    """External MS2 peptide-replicate-retrieval benchmark (Hit@1 / MAP / R@5)."""
-
-    empty_cache_before = True
-
-    def __init__(self, module, every, pp, repo_id):
-        super().__init__(module, every)
-        self.pp = pp                # external benchmark preprocessed on the fly
-        self.repo_id = repo_id
-
-    def run(self, step):
-        rr = replicate_retrieval_inline_metrics(
-            self.encoder, self.repo_id, self.device, self.pp)
-        if not rr:
-            return
-        self._wlog(rr, step)
-        print(f"  replicate-retrieval: "
-              f"Hit@1={rr.get('replicate_retrieval/Hit@1', float('nan')):.3f} "
-              f"MAP={rr.get('replicate_retrieval/MAP', float('nan')):.3f} "
-              f"R@5={rr.get('replicate_retrieval/R@5', float('nan')):.3f}", flush=True)
-
-
 class BiasPanelCallback(_InlineCallback):
     """Δm bias-curve panels (fine + coarse) rendered to figs/ and logged as images."""
 
@@ -259,23 +199,15 @@ class WandbConfigCallback(TrainerCallback):
 
 # ---------- assembly ----------
 
-def build_callbacks(module, val_dataset, pp, log_args, resolved_config, out_dir):
+def build_callbacks(module, val_dataset, log_args, resolved_config, out_dir):
     """Assemble the callbacks the config asks for. A probe is registered only
     when its cadence is set, so no callback ever fires as a no-op. `val_dataset`
-    is the preprocessed HF val dataset the probes/retrieval read; `pp` is only
-    for the external replicate-retrieval benchmark (its own dataset)."""
+    is the preprocessed HF validation dataset used for Fourier diagnostics."""
     cbs: list[TrainerCallback] = [WandbConfigCallback(resolved_config)]
     if log_args.bias_curve_every:
         cbs.append(BiasPanelCallback(module, log_args.bias_curve_every, out_dir=out_dir))
-    if log_args.probe_every:
-        cbs.append(LinearProbeCallback(
-            module, log_args.probe_every, val_dataset, log_args.probe_n_spectra))
+    if log_args.val_every:
         cbs.append(FourierProbeCallback(
-            module, log_args.probe_every, val_dataset, log_args.probe_n_spectra))
-        cbs.append(AlignmentCallback(module, log_args.probe_every))
-        cbs.append(RetrievalCallback(
-            module, log_args.probe_every, dataset=val_dataset))
-        if log_args.replicate_retrieval_repo:
-            cbs.append(ReplicateRetrievalCallback(
-                module, log_args.probe_every, pp, log_args.replicate_retrieval_repo))
+            module, log_args.val_every, val_dataset, log_args.probe_n_spectra))
+        cbs.append(AlignmentCallback(module, log_args.val_every))
     return cbs

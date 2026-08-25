@@ -5,10 +5,9 @@ owns the things that used to be hand-rolled here — distributed launch, AdamW, 
 cosine schedule, bf16 autocast, gradient clipping, checkpoint save/resume, and
 wandb logging. Data is a Hugging Face `datasets.Dataset` with preprocessing
 precomputed by `.map` (see `build_pretraining_datasets`), so the Trainer's native
-sampling/sharding/eval apply and no per-spectrum transform runs in the loop. What
-stays project-specific is the inline science — frozen-encoder probes, Δm
-bias-curve alignment, retrieval, and the bias-curve/attention-entropy panels,
-each its own callback in `callbacks.py`.
+sampling/sharding/eval apply and no per-spectrum transform runs in the loop.
+Representation probes and retrieval use the same prepared, compiled model on
+every rank. Rank-zero callbacks only inspect parameters and render plots.
 
 The config schema and parsing live in `config.py` (`ModelArgs`/`DataArgs`/
 `TrainArgs`/`LogArgs`, parsed by `HfArgumentParser`): a YAML file supplies the
@@ -32,8 +31,7 @@ from dataclasses import asdict
 from pathlib import Path
 
 import matplotlib.pyplot as plt
-import torch
-from torch import nn
+import wandb
 
 from transformers import Trainer
 
@@ -44,38 +42,13 @@ from .data import (
     build_pretraining_datasets,
     resolve_dataset_paths,
 )
-from .model import IntensityHead, MSEncoder, ModelConfig
+from .evaluation import DiagnosticCorpora, DistributedDiagnosticRunner
+from .model import MSDeltaForPretraining
+from .retrieval import (
+    build_external_retrieval_dataset,
+    build_internal_retrieval_dataset,
+)
 from .viz import render_bias_panels
-
-
-# ---------- model ----------
-
-class MSDeltaForPretraining(nn.Module):
-    """Encoder + intensity head as one `Trainer`-compatible module.
-
-    `forward` consumes the collated batch keys as keyword args and returns
-    ``{"loss", "kl"}`` so `Trainer.compute_loss` reads ``outputs["loss"]``
-    directly (loss == the masked-intensity KL). The submodules stay plain
-    `MSEncoder`/`IntensityHead`, so the probe/panel code reaches ``.encoder``
-    and runs its own forwards unchanged.
-    """
-
-    def __init__(self, model_cfg: ModelConfig):
-        super().__init__()
-        self.encoder = MSEncoder(model_cfg)
-        self.heads = IntensityHead(model_cfg.d_model)
-
-    def forward(
-        self,
-        mz: torch.Tensor,
-        log_int: torch.Tensor,
-        key_padding_mask: torch.Tensor,
-        mask_positions: torch.Tensor,
-        intensity_prob: torch.Tensor,
-    ) -> dict[str, torch.Tensor]:
-        tokens = self.encoder(mz, log_int, key_padding_mask, mask_positions)
-        loss, parts = self.heads.loss(tokens, intensity_prob, mask_positions)
-        return {"loss": loss, "kl": parts["kl"]}
 
 
 class MSDeltaTrainer(Trainer):
@@ -90,6 +63,18 @@ class MSDeltaTrainer(Trainer):
     def get_decay_parameter_names(self, model):
         return [n for n in super().get_decay_parameter_names(model)
                 if not n.endswith(".freqs")]
+
+    diagnostic_runner: DistributedDiagnosticRunner | None = None
+
+    def evaluate(self, *args, **kwargs):
+        metrics = super().evaluate(*args, **kwargs)
+        if self.diagnostic_runner is None:
+            return metrics
+        diagnostic_metrics = self.diagnostic_runner.run()
+        if self.is_world_process_zero() and diagnostic_metrics:
+            self.log(diagnostic_metrics)
+            metrics.update(diagnostic_metrics)
+        return metrics
 
 
 # ---------- training ----------
@@ -146,15 +131,59 @@ def main(argv: list[str] | None = None) -> int:
     # detect, so the eval loop would otherwise skip loss and report no eval_loss
     # (our val KL). Force it on.
     trainer.can_return_loss = True
+    calibration_size = min(len(train_ds), targs.val_batches * targs.batch_size)
+    probe_size = min(len(val_ds), largs.probe_n_spectra)
+    calibration_ds = train_ds.select(range(calibration_size)).add_column(
+        "_eval_id", list(range(calibration_size))
+    )
+    probe_ds = val_ds.select(range(probe_size)).add_column(
+        "_eval_id", list(range(probe_size))
+    )
+    internal_retrieval_ds, internal_binned = build_internal_retrieval_dataset(val_ds)
+    external_retrieval_ds = None
+    if largs.replicate_retrieval_repo:
+        with training_args.main_process_first(
+            local=False, desc="retrieval benchmark preprocessing"
+        ):
+            external_retrieval_ds = build_external_retrieval_dataset(
+                largs.replicate_retrieval_repo, dargs.preprocess()
+            )
+    trainer.diagnostic_runner = DistributedDiagnosticRunner(
+        trainer,
+        DiagnosticCorpora(
+            calibration=calibration_ds,
+            probes=probe_ds,
+            internal_retrieval=internal_retrieval_ds,
+            internal_binned=internal_binned,
+            external_retrieval=external_retrieval_ds,
+        ),
+        max_peaks=margs.max_peaks,
+        batch_size=targs.batch_size,
+        num_workers=targs.num_workers,
+    )
     resolved = {**asdict(margs), **asdict(dargs), **asdict(targs), **asdict(largs)}
-    for cb in build_callbacks(model, val_ds, dargs.preprocess(), largs, resolved, out_dir):
+    for cb in build_callbacks(model, val_ds, largs, resolved, out_dir):
         trainer.add_callback(cb)
 
     trainer.train(resume_from_checkpoint=str(cli.resume) if cli.resume else None)
 
+    # Refit the deployment transform against the final encoder weights even if
+    # the last training step was not an evaluation boundary.
+    final_diagnostics = trainer.diagnostic_runner.run()
+    if trainer.is_world_process_zero() and final_diagnostics:
+        trainer.log(final_diagnostics)
+
     # Final artifacts — main process writes the model + a last bias-curve render.
     if trainer.is_world_process_zero():
         trainer.save_model(str(out_dir / "final"))
+        transform_path = out_dir / "final" / "retrieval_transform.joblib"
+        trainer.diagnostic_runner.save_transform(transform_path)
+        if wandb.run is not None:
+            artifact = wandb.Artifact(
+                f"{run_name}-retrieval-transform", type="retrieval-transform"
+            )
+            artifact.add_file(str(transform_path))
+            wandb.log_artifact(artifact)
         panels = render_bias_panels(model.encoder.bias_module, trainer.state.global_step)
         for name, fig in panels.items():
             fig.savefig(out_dir / "figs" / f"{name.replace('/', '_')}_final.png", dpi=110)

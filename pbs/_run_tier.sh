@@ -54,7 +54,6 @@ if os.environ.get("SMOKE") == "1":
     cfg["log"]["val_every"] = 50
     cfg["log"]["bias_curve_every"] = 100
     cfg["log"]["ckpt_every"] = 100
-    cfg["log"]["probe_every"] = 10_000_000   # skip — slow + not needed for smoke
     cfg["log"]["wandb_project"] = cfg["log"].get("wandb_project", "msdelta") + "-smoke"
 with open(dst, "w") as fh:
     yaml.safe_dump(cfg, fh, sort_keys=False)

@@ -1,13 +1,16 @@
 """Peak-token transformer with learned per-head Δm/z attention bias + MPM heads."""
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 import math
 
 import torch
 import torch.nn.functional as F
 from torch import Tensor, nn
 from torch.nn.attention.flex_attention import flex_attention
+from sentence_transformers.sentence_transformer.modules import Pooling
+from transformers import PretrainedConfig, PreTrainedModel
+from transformers.utils import ModelOutput
 
 from .fourier import FourierFeatures
 
@@ -32,19 +35,84 @@ class DeltaBiasConfig:
     scale: float = 3.0
 
 
+class MSDeltaConfig(PretrainedConfig):
+    """Self-describing Hugging Face configuration for every MSDelta task head."""
+
+    model_type = "msdelta"
+
+    def __init__(
+        self,
+        d_model: int = 256,
+        n_heads: int = 8,
+        n_layers: int = 6,
+        ffn_mult: int = 4,
+        dropout: float = 0.1,
+        max_peaks: int = 150,
+        zero_bias_diagonal: bool = True,
+        fourier_int_n_freqs: int = 16,
+        fourier_int_f_min: float = 1e-2,
+        fourier_int_f_max: float = 1e2,
+        fourier_int_learnable: bool = True,
+        delta_bias_hidden: int = 128,
+        delta_bias_resolution: float = 0.01,
+        delta_bias_max_distance: float = 2000.0,
+        delta_bias_coordinate_scale: float = 1.0,
+        delta_bias_scale: float = 3.0,
+        pooling_modes: tuple[str, ...] | list[str] = ("mean", "max"),
+        **kwargs,
+    ):
+        super().__init__(**kwargs)
+        self.d_model = d_model
+        self.n_heads = n_heads
+        self.n_layers = n_layers
+        self.ffn_mult = ffn_mult
+        self.dropout = dropout
+        self.max_peaks = max_peaks
+        self.zero_bias_diagonal = zero_bias_diagonal
+        self.fourier_int_n_freqs = fourier_int_n_freqs
+        self.fourier_int_f_min = fourier_int_f_min
+        self.fourier_int_f_max = fourier_int_f_max
+        self.fourier_int_learnable = fourier_int_learnable
+        self.delta_bias_hidden = delta_bias_hidden
+        self.delta_bias_resolution = delta_bias_resolution
+        self.delta_bias_max_distance = delta_bias_max_distance
+        self.delta_bias_coordinate_scale = delta_bias_coordinate_scale
+        self.delta_bias_scale = delta_bias_scale
+        self.pooling_modes = list(pooling_modes)
+
+    @property
+    def fourier_int(self) -> FourierConfig:
+        return FourierConfig(
+            self.fourier_int_n_freqs,
+            self.fourier_int_f_min,
+            self.fourier_int_f_max,
+            self.fourier_int_learnable,
+        )
+
+    @property
+    def delta_bias(self) -> DeltaBiasConfig:
+        return DeltaBiasConfig(
+            hidden=self.delta_bias_hidden,
+            resolution=self.delta_bias_resolution,
+            max_distance=self.delta_bias_max_distance,
+            coordinate_scale=self.delta_bias_coordinate_scale,
+            scale=self.delta_bias_scale,
+        )
+
+
+ModelConfig = MSDeltaConfig
+
+
 @dataclass
-class ModelConfig:
-    d_model: int = 256
-    n_heads: int = 8
-    n_layers: int = 6
-    ffn_mult: int = 4
-    dropout: float = 0.1
-    max_peaks: int = 150
-    fourier_int: FourierConfig = field(default_factory=lambda: FourierConfig(16, 1e-2, 1e2))
-    delta_bias: DeltaBiasConfig = field(default_factory=DeltaBiasConfig)
-    # Zero the (i, i) entry of the Δm bias so the bias module can't modulate
-    # self-attention (Δm=0 → a per-head constant self-logit offset).
-    zero_bias_diagonal: bool = True
+class MSDeltaPretrainingOutput(ModelOutput):
+    loss: Tensor | None = None
+    kl: Tensor | None = None
+
+
+@dataclass
+class MSDeltaEmbeddingOutput(ModelOutput):
+    embeddings: Tensor | None = None
+    token_embeddings: Tensor | None = None
 
 
 class PeakEmbed(nn.Module):
@@ -366,3 +434,112 @@ class IntensityHead(nn.Module):
         kl = F.kl_div(log_q, p, reduction="batchmean")
 
         return kl, {"kl": kl.detach()}
+
+
+class MSDeltaPreTrainedModel(PreTrainedModel):
+    config_class = MSDeltaConfig
+    base_model_prefix = "encoder"
+
+    def _init_weights(self, module: nn.Module) -> None:
+        # Submodules already use the project's established PyTorch
+        # initializers, including the intentionally zeroed bias MLP output.
+        return
+
+
+class _EmbeddingMixin:
+    encoder: MSEncoder
+    pooler: Pooling
+
+    def _embedding_forward(
+        self,
+        mz: Tensor,
+        log_int: Tensor,
+        key_padding_mask: Tensor,
+        *,
+        return_token_embeddings: bool = False,
+    ) -> MSDeltaEmbeddingOutput:
+        tokens = self.encoder(mz, log_int, key_padding_mask, None)
+        pooled = self.pooler({
+            "token_embeddings": tokens,
+            # Sentence Transformers uses 1=real while the encoder uses
+            # True=padding.
+            "attention_mask": (~key_padding_mask).long(),
+        })["sentence_embedding"]
+        # Sentence Transformers' max pool emits -inf for a completely padded
+        # row; empty spectra have a defined zero embedding in this project.
+        pooled = torch.nan_to_num(pooled, neginf=0.0, posinf=0.0)
+        return MSDeltaEmbeddingOutput(
+            embeddings=pooled,
+            token_embeddings=tokens if return_token_embeddings else None,
+        )
+
+
+class MSDeltaForEmbedding(_EmbeddingMixin, MSDeltaPreTrainedModel):
+    """Encoder plus canonical mean/max spectrum pooling for downstream use."""
+
+    _keys_to_ignore_on_load_unexpected = [r"heads\..*"]
+
+    def __init__(self, config: MSDeltaConfig):
+        super().__init__(config)
+        self.encoder = MSEncoder(config)
+        self.pooler = Pooling(
+            embedding_dimension=config.d_model,
+            pooling_mode=tuple(config.pooling_modes),
+        )
+        self.post_init()
+
+    def forward(
+        self,
+        mz: Tensor,
+        log_int: Tensor,
+        key_padding_mask: Tensor,
+        return_token_embeddings: bool = False,
+    ) -> MSDeltaEmbeddingOutput:
+        return self._embedding_forward(
+            mz,
+            log_int,
+            key_padding_mask,
+            return_token_embeddings=return_token_embeddings,
+        )
+
+
+class MSDeltaForPretraining(_EmbeddingMixin, MSDeltaPreTrainedModel):
+    """Masked-intensity pretraining model with a distributed embedding route."""
+
+    def __init__(self, config: MSDeltaConfig):
+        super().__init__(config)
+        self.encoder = MSEncoder(config)
+        self.pooler = Pooling(
+            embedding_dimension=config.d_model,
+            pooling_mode=tuple(config.pooling_modes),
+        )
+        self.heads = IntensityHead(config.d_model)
+        self.post_init()
+
+    def forward(
+        self,
+        mz: Tensor,
+        log_int: Tensor,
+        key_padding_mask: Tensor,
+        mask_positions: Tensor | None = None,
+        intensity_prob: Tensor | None = None,
+        eval_mode: str = "pretraining",
+    ) -> MSDeltaPretrainingOutput | MSDeltaEmbeddingOutput:
+        if eval_mode == "embedding":
+            return self._embedding_forward(mz, log_int, key_padding_mask)
+        if eval_mode == "representations":
+            return self._embedding_forward(
+                mz,
+                log_int,
+                key_padding_mask,
+                return_token_embeddings=True,
+            )
+        if eval_mode != "pretraining":
+            raise ValueError(f"unknown eval_mode: {eval_mode}")
+        if mask_positions is None or intensity_prob is None:
+            raise ValueError(
+                "mask_positions and intensity_prob are required for pretraining"
+            )
+        tokens = self.encoder(mz, log_int, key_padding_mask, mask_positions)
+        loss, parts = self.heads.loss(tokens, intensity_prob, mask_positions)
+        return MSDeltaPretrainingOutput(loss=loss, kl=parts["kl"])

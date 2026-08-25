@@ -4,16 +4,16 @@ Pools the frozen encoder to one vector per spectrum and measures how well
 same-peptide replicate spectra retrieve each other (leave-one-out cosine).
 Ground truth = peptide+charge. One eval, two datasets:
 
-- **internal** (`retrieval_inline_metrics`): the preprocessed HF val dataset
+- **internal**: the preprocessed HF val dataset
   (`peptide_charge` label, already-preprocessed `mz`/`log_int`). Caps to a few
   thousand spectra and also scores a 1-Da binned-cosine baseline, so we can watch
   the learned embedding close the gap on binned-cosine as training proceeds.
   wandb prefix `retrieval/`.
-- **external** (`replicate_retrieval_inline_metrics`): the
+- **external**: the
   `chrisagrams/ms2-peptide-replicate-retrieval` benchmark (raw `mz`/`intensity`
   + `charge`/`precursor` columns, preprocessed on the fly). Encodes every
-  spectrum and reports the metrics raw and after the all-but-top-K anisotropy
-  fix. wandb prefix `replicate_retrieval/`.
+  spectrum and reports raw plus PCA-whitened metrics. wandb prefix
+  `replicate_retrieval/`.
 
 Metrics come from **torchmetrics** (`RetrievalHitRate`/`RetrievalMAP`/
 `RetrievalRecall` + `BinaryAveragePrecision`), so there is one exact,
@@ -21,8 +21,7 @@ well-tested definition for both datasets. All are strict leave-one-out: the
 query itself is excluded (never a positive, ranked last), every spectrum counts
 toward the denominator, and singletons score 0 (`empty_target_action="neg"`).
 
-Run inline: `RetrievalCallback` / `ReplicateRetrievalCallback` call the two
-`*_inline_metrics` fns at probe cadence and log to wandb.
+Distributed extraction is orchestrated by ``MSDeltaTrainer.evaluate``.
 """
 from __future__ import annotations
 
@@ -30,28 +29,14 @@ import itertools
 
 import numpy as np
 import torch
-from datasets import load_dataset
+from datasets import Dataset, load_dataset
 from torchmetrics.classification import BinaryAveragePrecision
 from torchmetrics.retrieval import RetrievalHitRate, RetrievalMAP, RetrievalRecall
 
 from .data import preprocess_spectrum
-from .embedding import embed_spectra
 
 
 # ---------- data adapters ----------
-
-def load_benchmark(repo_id: str, split: str = "test"):
-    """Open the external benchmark HF dataset and build its label vector.
-
-    `load_dataset` serves the prepared Arrow tables from the local HF cache, so
-    calling this once per probe step is cheap (set HF_HUB_OFFLINE=1 to skip the
-    hub freshness check). Returns (ds, y): the Arrow-backed `Dataset` and the
-    dense peptide+charge label index for every spectrum (first-seen order; the
-    metrics are label-permutation invariant)."""
-    ds = load_dataset(repo_id, split=split)
-    y = _label_index([f"{p}/{c}" for p, c in zip(ds["peptide"], ds["charge"])])
-    return ds, y
-
 
 def _prepped_from_dataset(dataset, max_rows):
     """(peptide_charge, mz_p, log_int) rows from a preprocessed HF dataset —
@@ -106,45 +91,53 @@ def _collect_capped(prepped, max_peptides, per_peptide, *, bin_width=1.0, mz_max
     return specs, labels, np.array(binned, dtype=np.float32)
 
 
-def _collect_benchmark(ds, pp, *, batch_size=512):
-    """Preprocess every benchmark spectrum on the fly (raw mz/intensity), reading
-    the Arrow map in slices so the raw lists never all resident at once. Returns
-    `specs` aligned 1:1 with `ds` rows — empty spectra keep an empty tensor so
-    indices stay aligned with `load_benchmark`'s `y` (they encode to a zero
-    vector and can never be a real neighbour, i.e. a miss)."""
-    specs = []
-    n = len(ds)
-    for s in range(0, n, batch_size):
-        rows = ds[s:min(s + batch_size, n)]
-        for mz, it in zip(rows["mz"], rows["intensity"]):
-            mp, lp = preprocess_spectrum(
-                torch.tensor(mz, dtype=torch.float32),
-                torch.tensor(it, dtype=torch.float32), pp)[:2]
-            specs.append((mp, lp))
-    return specs
+def build_internal_retrieval_dataset(
+    dataset,
+    *,
+    max_peptides: int = 100,
+    per_peptide: int = 20,
+    max_scan: int = 150_000,
+) -> tuple[Dataset, np.ndarray]:
+    """Create the deterministic internal retrieval corpus and baseline."""
+    specs, labels, binned = _collect_capped(
+        _prepped_from_dataset(dataset, max_scan), max_peptides, per_peptide
+    )
+    rows = {
+        "mz": [mz.tolist() for mz, _ in specs],
+        "log_int": [li.tolist() for _, li in specs],
+        "peptide_charge": labels,
+        "log_tic": [0.0] * len(specs),
+        "_eval_id": list(range(len(specs))),
+    }
+    return Dataset.from_dict(rows), binned
+
+
+def build_external_retrieval_dataset(repo_id: str, pp, split: str = "test"):
+    """Preprocess the external benchmark once into the common eval schema."""
+    raw = load_dataset(repo_id, split=split)
+
+    def convert(example, index):
+        intensity = torch.tensor(example["intensity"], dtype=torch.float32)
+        mz, log_int, _ = preprocess_spectrum(
+            torch.tensor(example["mz"], dtype=torch.float32), intensity, pp
+        )
+        return {
+            "mz": mz.tolist(),
+            "log_int": log_int.tolist(),
+            "peptide_charge": f"{example['peptide']}_{example['charge']}",
+            "log_tic": float(torch.log1p(intensity.sum())) if intensity.numel() else 0.0,
+            "_eval_id": index,
+        }
+
+    return raw.map(
+        convert,
+        with_indices=True,
+        remove_columns=raw.column_names,
+        desc="preprocess retrieval benchmark",
+    )
 
 
 # ---------- metrics ----------
-
-def all_but_top(X: np.ndarray, k: int) -> np.ndarray:
-    """Anisotropy fix (Mu & Viswanath): center, remove the top-k principal
-    directions. Transformer embeddings are dominated by a few common
-    directions that drown the discriminative signal; removing them recovers
-    most of the retrieval gap with zero training."""
-    if k <= 0:
-        return X
-    Xc = X - X.mean(0)
-    _, _, Vt = np.linalg.svd(Xc, full_matrices=False)
-    Vk = Vt[:k]
-    return Xc - (Xc @ Vk.T) @ Vk
-
-
-def _l2norm(X: np.ndarray) -> np.ndarray:
-    X = np.asarray(X, dtype=np.float32)
-    n = np.linalg.norm(X, axis=1, keepdims=True)
-    n[n == 0] = 1.0
-    return X / n
-
 
 @torch.no_grad()
 def retrieval_metrics_tm(X, y, device, *, ks=(5,), pairwise=False, chunk=1024):
@@ -163,8 +156,8 @@ def retrieval_metrics_tm(X, y, device, *, ks=(5,), pairwise=False, chunk=1024):
     Xt = torch.as_tensor(X, dtype=torch.float32, device=device)
     yt = torch.as_tensor(y, dtype=torch.long, device=device)
     n = Xt.shape[0]
-    # sync_on_compute=False: this runs only on rank 0 (the inline callbacks are
-    # world-process-zero gated) over its own sampled spectra, and the metric
+    # sync_on_compute=False: distributed extraction has already gathered the
+    # complete corpus, and metric computation runs on rank zero. The metric
     # state lives on CPU. Left at the default, .compute() would all_gather that
     # CPU state across the NCCL group — which has no CPU backend and no other
     # rank waiting — raising "No backend type associated with device type cpu".
@@ -202,89 +195,3 @@ def retrieval_metrics_tm(X, y, device, *, ks=(5,), pairwise=False, chunk=1024):
     if aucpr is not None:
         out["AUC-PR"] = aucpr.compute().item()
     return out
-
-
-def _evaluate(emb, y, device, *, whiten=0, ks=(5,), pairwise=False):
-    """L2-normalise (optionally all-but-top-`whiten` first) and score."""
-    X = all_but_top(emb, whiten) if whiten > 0 else emb
-    return retrieval_metrics_tm(_l2norm(X), y, device, ks=ks, pairwise=pairwise)
-
-
-# ---------- inline training probes ----------
-
-@torch.no_grad()
-def retrieval_inline_metrics(
-    enc,
-    dataset,
-    device,
-    *,
-    max_peptides: int = 100,
-    per_peptide: int = 20,
-    max_scan: int = 150_000,
-    whiten: int = 0,
-) -> dict[str, float]:
-    """Flat wandb dict from internal spectrum retrieval — the model as an
-    embedding model, vs a 1-Da binned-cosine baseline.
-
-    `dataset` is a preprocessed HF dataset (`build_preprocessed_dataset`). Caps
-    keep it cheap enough to run inline at probe cadence; `_collect_capped`
-    early-exits once buckets fill, so it rarely scans all `max_scan` rows. Logs
-    the learned mAP/P@1/R@5/AUC-PR, the baseline mAP, and the gap. Restores the
-    encoder's train/eval mode on exit.
-    """
-    was_training = enc.training
-    try:
-        specs, labels, binned = _collect_capped(
-            _prepped_from_dataset(dataset, max_scan), max_peptides, per_peptide)
-        if len(labels) < 2 or len(set(labels)) < 2:
-            return {}
-        y = _label_index(labels)
-        emb = embed_spectra(enc, specs, device)
-        m = _evaluate(emb, y, device, whiten=whiten, ks=(5,), pairwise=True)
-        bm = _evaluate(binned, y, device, ks=(5,))
-        return {
-            "retrieval/mAP": m["mAP"],
-            "retrieval/P@1": m["P@1"],
-            "retrieval/R@5": m["R@5"],
-            "retrieval/AUC_PR": m["AUC-PR"],
-            "retrieval/binned_mAP": bm["mAP"],
-            "retrieval/gap_vs_binned": m["mAP"] - bm["mAP"],
-        }
-    finally:
-        if was_training:
-            enc.train()
-
-
-@torch.no_grad()
-def replicate_retrieval_inline_metrics(
-    enc, repo_id, device, pp, *, split="test", whiten=16, batch_size=128,
-) -> dict[str, float]:
-    """Flat wandb dict for the external MS2 peptide-replicate-retrieval
-    benchmark, run inline at probe cadence.
-
-    Encodes the whole benchmark set with the *current* weights and reports the
-    metrics raw and after the all-but-top-`whiten` anisotropy fix. Returns {} if
-    `repo_id` is unset. Restores the encoder's train/eval mode on exit.
-
-    Keys: replicate_retrieval/{Hit@1,MAP,R@5} and their whitened `_w` variants.
-    """
-    if not repo_id:
-        return {}
-    ds, y = load_benchmark(repo_id, split=split)
-    was_training = enc.training
-    try:
-        specs = _collect_benchmark(ds, pp)
-        emb = embed_spectra(enc, specs, device, batch_size=batch_size)
-        raw = _evaluate(emb, y, device, ks=(5,))
-        out = {"replicate_retrieval/Hit@1": raw["P@1"],
-               "replicate_retrieval/MAP": raw["mAP"],
-               "replicate_retrieval/R@5": raw["R@5"]}
-        if whiten > 0:
-            wh = _evaluate(emb, y, device, whiten=whiten, ks=(5,))
-            out.update({"replicate_retrieval/Hit@1_w": wh["P@1"],
-                        "replicate_retrieval/MAP_w": wh["mAP"],
-                        "replicate_retrieval/R@5_w": wh["R@5"]})
-        return out
-    finally:
-        if was_training:
-            enc.train()

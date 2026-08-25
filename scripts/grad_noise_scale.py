@@ -45,7 +45,7 @@ from msdelta.data import (
     build_preprocessed_dataset,
     resolve_dataset_paths,
 )
-from msdelta.train import MSDeltaForPretraining
+from msdelta.model import MSDeltaForPretraining
 
 
 def main(argv: list[str] | None = None) -> int:

@@ -10,16 +10,12 @@
 #PBS -o /home/cgrams/msdelta/pbs/logs/
 #
 # v14 smoke — single A100, debug queue. Runs configs/v14_smoke.yaml (tiny
-# model, 50 steps, probe_every=20) to exercise the FULL inline-probe block
-# on GPU: run_all_probes + alignment_metrics (the path that device-crashed
-# at step 5000) + retrieval_inline_metrics (which never ran). If this
+# model, 50 steps) to exercise evaluation and parameter diagnostics on GPU. If this
 # finishes clean and logs align/* and retrieval/* at steps 20 and 40, the
 # 20h capacity sweep (pbs/v14_capacity.pbs) is safe to launch.
 #
-# SMOKE is intentionally left UNSET: SMOKE=1 in _run_tier.sh forces
-# probe_every→1e7 (disables probes), which would defeat this test. With
-# SMOKE unset, _run_tier.sh only splices data.root + out_dir and respects
-# the config's probe_every=20.
+# SMOKE is intentionally left unset so the config's evaluation cadence is
+# preserved.
 #
 # Pre-req: pbs/setup_venv.sh run once on the login node.
 
