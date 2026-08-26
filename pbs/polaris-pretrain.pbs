@@ -123,6 +123,7 @@ exec mpiexec \
     -n "$TOTAL_GPUS" \
     --ppn "$GPUS_PER_HOST" \
     --hostfile="$PBS_NODEFILE" \
+    /usr/bin/env \
     "$VENV_DIR/bin/python" \
     -m msdelta.train \
     "${TRAIN_ARGS[@]}" \
