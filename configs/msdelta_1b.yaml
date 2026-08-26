@@ -55,7 +55,7 @@ training:
   save_total_limit: 3
   remove_unused_columns: false
   report_to: [wandb]
-  wandb_project: msfound
+  wandb_project: msdelta-pretrain
   bias_curve_steps: 5000
   probe_steps: 5000
   probe_num_spectra: 3000
