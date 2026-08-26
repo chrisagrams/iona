@@ -6,7 +6,7 @@
 #   -l filesystems=home:eagle -j oe -o /path/to/pbs/logs \
 #   -v CONFIG_PATH=configs/msdelta-base-200m.yaml,CHECKPOINT_DIR=/eagle/PROJECT/checkpoints,HF_HOME=/eagle/PROJECT/hf \
 #   pbs/polaris-pretrain.pbs
-# Launch pattern follows the ALCF Polaris DeepSpeed guide:
+# Launch pattern follows the ALCF Polaris DeepSpeed guide's MPICH option:
 # https://docs.alcf.anl.gov/polaris/data-science/frameworks/deepspeed/
 
 set -euo pipefail
@@ -26,8 +26,12 @@ if [[ ! -f $CONFIG_PATH ]]; then
     echo "configuration not found: $CONFIG_PATH" >&2
     exit 2
 fi
-if [[ ! -x $VENV_DIR/bin/deepspeed ]]; then
-    echo "DeepSpeed launcher not found: $VENV_DIR/bin/deepspeed" >&2
+if [[ ! -x $VENV_DIR/bin/python ]]; then
+    echo "Python interpreter not found: $VENV_DIR/bin/python" >&2
+    exit 2
+fi
+if ! command -v mpiexec >/dev/null 2>&1; then
+    echo "mpiexec is required for a multinode Polaris launch" >&2
     exit 2
 fi
 if [[ ! -f ${PBS_NODEFILE:-} ]]; then
@@ -62,7 +66,8 @@ MICRO_BATCH_SIZE=${CONFIG_VALUES[1]}
 RUN_NAME=${CONFIG_RUN_NAME}-${JOB_ID}
 RUN_DIR=$CHECKPOINT_DIR/$RUN_NAME
 LOG_DIR=${LOG_DIR:-$RUN_DIR/logs}
-mkdir -p "$RUN_DIR" "$LOG_DIR"
+HF_HOME=${HF_HOME:-$CHECKPOINT_DIR/huggingface}
+mkdir -p "$RUN_DIR" "$LOG_DIR" "$HF_HOME"
 
 cd "$REPO_DIR"
 GPUS_PER_HOST=${GPUS_PER_HOST:-$(nvidia-smi -L | wc -l)}
@@ -88,18 +93,32 @@ if ((GRADIENT_ACCUMULATION_STEPS < 1)); then
     exit 2
 fi
 
-HOSTFILE=$RUN_DIR/deepspeed-hostfile
-awk -v slots="$GPUS_PER_HOST" '{print $0 " slots=" slots}' "$NODE_LIST" >"$HOSTFILE"
-
 echo "$(date -Is) job=${PBS_JOBID:-local} hosts=$NUM_HOSTS gpus_per_host=$GPUS_PER_HOST total_gpus=$TOTAL_GPUS global_batch=$GLOBAL_BATCH_SIZE accumulation=$GRADIENT_ACCUMULATION_STEPS run=$RUN_NAME"
+echo "nodes:"
+sed 's/^/  /' "$NODE_LIST"
 nvidia-smi -L | sed 's/^/  /'
 
 export OMP_NUM_THREADS=${OMP_NUM_THREADS:-2}
 export MKL_NUM_THREADS=${MKL_NUM_THREADS:-2}
 export OPENBLAS_NUM_THREADS=${OPENBLAS_NUM_THREADS:-2}
+export CC=gcc
+export CXX=g++
 export PYTORCH_CUDA_ALLOC_CONF=${PYTORCH_CUDA_ALLOC_CONF:-expandable_segments:True}
-export HF_HUB_OFFLINE=${HF_HUB_OFFLINE:-1}
+export HF_HOME
+export HF_HUB_OFFLINE=${HF_HUB_OFFLINE:-0}
 export PYTHONPATH=$REPO_DIR${PYTHONPATH:+:$PYTHONPATH}
+export MASTER_ADDR=${MASTER_ADDR:-$(head -n 1 "$NODE_LIST")}
+export MASTER_PORT=${MASTER_PORT:-29500}
+export MSDELTA_GPUS_PER_HOST=$GPUS_PER_HOST
+
+ALCF_PROXY=${ALCF_PROXY:-http://proxy.alcf.anl.gov:3128}
+export HTTP_PROXY=${HTTP_PROXY:-$ALCF_PROXY}
+export HTTPS_PROXY=${HTTPS_PROXY:-$ALCF_PROXY}
+export http_proxy=${http_proxy:-$ALCF_PROXY}
+export https_proxy=${https_proxy:-$ALCF_PROXY}
+export ftp_proxy=${ftp_proxy:-$ALCF_PROXY}
+export no_proxy=${no_proxy:-admin,polaris-adminvm-01,localhost,*.cm.polaris.alcf.anl.gov,polaris-*,*.polaris.alcf.anl.gov,*.alcf.anl.gov}
+export NO_PROXY=${NO_PROXY:-$no_proxy}
 
 export WANDB_DIR=${WANDB_DIR:-$LOG_DIR}
 export WANDB_RESUME=${WANDB_RESUME:-allow}
@@ -115,25 +134,24 @@ if [[ -n ${RESUME_FROM_CHECKPOINT:-} ]]; then
     TRAIN_ARGS+=(--resume "$RESUME_FROM_CHECKPOINT")
 fi
 
-DEEPSPEED_ENV=$RUN_DIR/.deepspeed_env
-: >"$DEEPSPEED_ENV"
-for name in \
-    PATH LD_LIBRARY_PATH PYTHONPATH \
-    http_proxy https_proxy HTTP_PROXY HTTPS_PROXY no_proxy NO_PROXY \
-    HF_HOME HF_HUB_OFFLINE \
-    WANDB_DIR WANDB_RESUME WANDB_RUN_ID WANDB_API_KEY \
-    OMP_NUM_THREADS MKL_NUM_THREADS OPENBLAS_NUM_THREADS \
-    PYTORCH_CUDA_ALLOC_CONF NCCL_DEBUG NCCL_SOCKET_IFNAME; do
-    if [[ -n ${!name:-} ]]; then
-        printf '%s=%s\n' "$name" "${!name}" >>"$DEEPSPEED_ENV"
-    fi
-done
-
 cd "$RUN_DIR"
-exec "$VENV_DIR/bin/deepspeed" \
-    --hostfile="$HOSTFILE" \
-    --module \
-    msdelta.train \
+exec mpiexec \
+    --verbose \
+    --envall \
+    -n "$TOTAL_GPUS" \
+    --ppn "$GPUS_PER_HOST" \
+    --cpu-bind none \
+    --hostfile="$PBS_NODEFILE" \
+    /usr/bin/env \
+    bash -c '
+        export RANK="$PMI_RANK"
+        export WORLD_SIZE="$PMI_SIZE"
+        export LOCAL_RANK="${MPI_LOCALRANKID:-$((RANK % MSDELTA_GPUS_PER_HOST))}"
+        export LOCAL_WORLD_SIZE="${MPI_LOCALNRANKS:-$MSDELTA_GPUS_PER_HOST}"
+        exec "$@"
+    ' bash \
+    "$VENV_DIR/bin/python" \
+    -m msdelta.train \
     "${TRAIN_ARGS[@]}" \
-    >"$LOG_DIR/train.out" \
-    2>"$LOG_DIR/train.err"
+    >"$LOG_DIR/train-$JOB_ID.out" \
+    2>"$LOG_DIR/train-$JOB_ID.err"
