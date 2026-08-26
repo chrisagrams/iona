@@ -34,7 +34,7 @@ training:
   per_device_eval_batch_size: 64
   gradient_accumulation_steps: 4
   dataloader_num_workers: 6
-  learning_rate: 2.0e-4
+  learning_rate: 1.3e-4
   adam_beta1: 0.9
   adam_beta2: 0.95
   lr_scheduler_type: cosine
