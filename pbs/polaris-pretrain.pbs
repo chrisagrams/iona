@@ -4,7 +4,7 @@
 # qsub -A PROJECT -q QUEUE \
 #   -l select=2:system=polaris -l place=scatter -l walltime=12:00:00 \
 #   -l filesystems=home:eagle -j oe -o /path/to/pbs/logs \
-#   -v CONFIG_PATH=configs/msdelta_xl.yaml,CHECKPOINT_DIR=/eagle/PROJECT/checkpoints,HF_HOME=/eagle/PROJECT/hf \
+#   -v CONFIG_PATH=configs/msdelta-base-200m.yaml,CHECKPOINT_DIR=/eagle/PROJECT/checkpoints,HF_HOME=/eagle/PROJECT/hf \
 #   pbs/polaris-pretrain.pbs
 # Launch pattern follows the ALCF Polaris DeepSpeed guide:
 # https://docs.alcf.anl.gov/polaris/data-science/frameworks/deepspeed/

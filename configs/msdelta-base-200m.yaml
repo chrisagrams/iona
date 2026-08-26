@@ -1,4 +1,4 @@
-# Train the XL model on four A100 GPUs. The global batch size is 512.
+# Train the 200M model on four A100 GPUs. The global batch size is 512.
 model:
   hidden_size: 1024
   num_attention_heads: 16
@@ -23,8 +23,8 @@ processor:
   max_peaks: 150
 
 training:
-  output_dir: ./runs/v15-seq1024-bs512
-  run_name: v15-seq1024-bs512
+  output_dir: ./runs/msdelta-base-200m
+  run_name: msdelta-base-200m
   dataset_repo_id: chrisagrams/massive_kb_v1_shuffled
   dataset_train_split: train
   dataset_validation_split: val
