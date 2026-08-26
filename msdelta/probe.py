@@ -11,35 +11,18 @@ from sklearn.linear_model import LogisticRegression, Ridge
 from sklearn.metrics import accuracy_score, f1_score, r2_score, roc_auc_score
 from sklearn.preprocessing import StandardScaler
 
+from msdelta.chemistry import (
+    ISOTOPES,
+    NEUTRAL_LOSSES,
+    PROTON_MASS,
+    RESIDUE_MASSES,
+    WATER_MASS,
+)
 from msdelta.embedding import encode_batch, pool_tokens
 from msdelta.model import MSEncoder
 
-_RES = {
-    "G": 57.02146,
-    "A": 71.03711,
-    "S": 87.03203,
-    "P": 97.05276,
-    "V": 99.06841,
-    "T": 101.04768,
-    "C": 103.00919,
-    "L": 113.08406,
-    "I": 113.08406,
-    "N": 114.04293,
-    "D": 115.02694,
-    "Q": 128.05858,
-    "K": 128.09496,
-    "E": 129.04259,
-    "M": 131.04049,
-    "H": 137.05891,
-    "F": 147.06841,
-    "R": 156.10111,
-    "Y": 163.06333,
-    "W": 186.07931,
-}
-_WATER = 18.0105646
-_PROTON = 1.0072765
-_C13 = 1.0033548
-_LOSSES = {"H2O": 18.0105646, "NH3": 17.0265491, "CO": 27.9949146, "CO2": 43.9898292}
+_C13 = ISOTOPES["¹³C"]
+_LOSSES = {name: NEUTRAL_LOSSES[name] for name in ("H₂O", "NH₃", "CO", "CO₂")}
 _STD_PEP = re.compile(r"[ACDEFGHIKLMNPQRSTVWY]+")
 
 
@@ -58,8 +41,8 @@ def precursor_mz(pc: str) -> float | None:
     pep, z = parts[0], int(parts[1])
     if z < 1 or not _STD_PEP.fullmatch(pep):
         return None
-    mass = sum(_RES[a] for a in pep) + _WATER
-    return (mass + z * _PROTON) / z
+    mass = sum(RESIDUE_MASSES[a] for a in pep) + WATER_MASS
+    return (mass + z * PROTON_MASS) / z
 
 
 def _isotope_labels(mz_sorted_idx, mz: np.ndarray, z: int, tol: float = 0.01) -> np.ndarray:

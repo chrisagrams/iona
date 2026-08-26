@@ -13,48 +13,8 @@ import torch
 import torch.nn.functional as F
 from torch import Tensor
 
+from msdelta.chemistry import ISOTOPES, NEUTRAL_LOSSES, RESIDUES_AA20
 from msdelta.model import DeltaMZBias
-
-_C13 = 1.0033548
-ISOTOPES: dict[str, float] = {
-    "¹³C z3": _C13 / 3,
-    "¹³C z2": _C13 / 2,
-    "2¹³C z3": 2 * _C13 / 3,
-    "¹³C": _C13,
-    "2¹³C": 2 * _C13,
-}
-
-NEUTRAL_LOSSES: dict[str, float] = {
-    "NH₃": 17.027,
-    "H₂O": 18.011,
-    "CO": 27.995,
-    "CO₂": 43.990,
-    "HPO₃": 79.966,
-    "H₃PO₄": 97.977,
-    "Hexose": 162.053,
-}
-
-RESIDUES_AA20: dict[str, float] = {
-    "G": 57.021,
-    "A": 71.037,
-    "S": 87.032,
-    "P": 97.053,
-    "V": 99.068,
-    "T": 101.048,
-    "C": 103.009,
-    "L/I": 113.084,
-    "N": 114.043,
-    "D": 115.027,
-    "Q": 128.059,
-    "K": 128.095,
-    "E": 129.043,
-    "M": 131.040,
-    "H": 137.059,
-    "F": 147.068,
-    "R": 156.101,
-    "Y": 163.063,
-    "W": 186.079,
-}
 
 
 def _references_in_range(lo: float, hi: float) -> list[tuple[str, float, str]]:

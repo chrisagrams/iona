@@ -13,6 +13,7 @@ dependencies = [
     "matplotlib",
     "pyyaml",
     "pyarrow>=24.0.0",
+    "pyteomics>=4.7.5",
     "scikit-learn>=1.8.0",
     "huggingface-hub>=1.20.1",
     "datasets>=4.0.0",

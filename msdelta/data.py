@@ -11,6 +11,8 @@ import torch
 from datasets import load_dataset
 from huggingface_hub import snapshot_download
 
+from msdelta.chemistry import PROTON_MASS, RESIDUE_MASSES, WATER_MASS
+
 
 @dataclass
 class PreprocessConfig:
@@ -20,30 +22,6 @@ class PreprocessConfig:
 
 N_CHARGES = 8
 
-_RESIDUE_MASS = {
-    "G": 57.02146,
-    "A": 71.03711,
-    "S": 87.03203,
-    "P": 97.05276,
-    "V": 99.06841,
-    "T": 101.04768,
-    "C": 103.00919,
-    "L": 113.08406,
-    "I": 113.08406,
-    "N": 114.04293,
-    "D": 115.02694,
-    "Q": 128.05858,
-    "K": 128.09496,
-    "E": 129.04259,
-    "M": 131.04049,
-    "H": 137.05891,
-    "F": 147.06841,
-    "R": 156.10111,
-    "Y": 163.06333,
-    "W": 186.07931,
-}
-_WATER = 18.0105646
-_PROTON = 1.0072765
 _MOD_RE = re.compile(r"\[([+-]?[0-9.]+)\]")
 
 
@@ -69,13 +47,13 @@ def precursor_mz(peptide_charge: str | None) -> float:
         return 0.0
     mods = sum(float(x) for x in _MOD_RE.findall(pep))
     seq = _MOD_RE.sub("", pep)
-    mass = _WATER + mods
+    mass = WATER_MASS + mods
     for a in seq:
-        m = _RESIDUE_MASS.get(a)
+        m = RESIDUE_MASSES.get(a)
         if m is None:
             return 0.0
         mass += m
-    return (mass + z * _PROTON) / z
+    return (mass + z * PROTON_MASS) / z
 
 
 def preprocess_spectrum(
