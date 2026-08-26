@@ -66,7 +66,8 @@ MICRO_BATCH_SIZE=${CONFIG_VALUES[1]}
 RUN_NAME=${CONFIG_RUN_NAME}-${JOB_ID}
 RUN_DIR=$CHECKPOINT_DIR/$RUN_NAME
 LOG_DIR=${LOG_DIR:-$RUN_DIR/logs}
-mkdir -p "$RUN_DIR" "$LOG_DIR"
+HF_HOME=${HF_HOME:-$CHECKPOINT_DIR/huggingface}
+mkdir -p "$RUN_DIR" "$LOG_DIR" "$HF_HOME"
 
 cd "$REPO_DIR"
 GPUS_PER_HOST=${GPUS_PER_HOST:-$(nvidia-smi -L | wc -l)}
@@ -99,8 +100,12 @@ export OMP_NUM_THREADS=${OMP_NUM_THREADS:-2}
 export MKL_NUM_THREADS=${MKL_NUM_THREADS:-2}
 export OPENBLAS_NUM_THREADS=${OPENBLAS_NUM_THREADS:-2}
 export PYTORCH_CUDA_ALLOC_CONF=${PYTORCH_CUDA_ALLOC_CONF:-expandable_segments:True}
-export HF_HUB_OFFLINE=${HF_HUB_OFFLINE:-1}
+export HF_HOME
+export HF_HUB_OFFLINE=${HF_HUB_OFFLINE:-0}
 export PYTHONPATH=$REPO_DIR${PYTHONPATH:+:$PYTHONPATH}
+export MASTER_ADDR=${MASTER_ADDR:-$(head -n 1 "$NODE_LIST")}
+export MASTER_PORT=${MASTER_PORT:-29500}
+export MSDELTA_GPUS_PER_HOST=$GPUS_PER_HOST
 
 export WANDB_DIR=${WANDB_DIR:-$LOG_DIR}
 export WANDB_RESUME=${WANDB_RESUME:-allow}
@@ -124,6 +129,13 @@ exec mpiexec \
     --ppn "$GPUS_PER_HOST" \
     --hostfile="$PBS_NODEFILE" \
     /usr/bin/env \
+    bash -c '
+        export RANK="$PMI_RANK"
+        export WORLD_SIZE="$PMI_SIZE"
+        export LOCAL_RANK="${MPI_LOCALRANKID:-$((RANK % MSDELTA_GPUS_PER_HOST))}"
+        export LOCAL_WORLD_SIZE="${MPI_LOCALNRANKS:-$MSDELTA_GPUS_PER_HOST}"
+        exec "$@"
+    ' bash \
     "$VENV_DIR/bin/python" \
     -m msdelta.train \
     "${TRAIN_ARGS[@]}" \

@@ -39,7 +39,7 @@ def main(argv: list[str] | None = None) -> int:
         os.environ.setdefault("WANDB_DIR", str(out_dir))
 
     model = MSDeltaForPreTraining(model_config)
-    if training_args.local_process_index == 0:
+    if training_args.process_index == 0:
         n_params = sum(p.numel() for p in model.parameters())
         print(f"[model] {n_params / 1e6:.2f}M params", flush=True)
 
