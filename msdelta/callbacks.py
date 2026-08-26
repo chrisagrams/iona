@@ -17,7 +17,7 @@ from msdelta.data import collate_preprocessed
 from msdelta.fourier import dead_freqs, freq_drift, interp_mae
 from msdelta.probe import run_all_probes
 from msdelta.retrieval import replicate_retrieval_inline_metrics, retrieval_inline_metrics
-from msdelta.viz import AttentionRecorder, attention_entropy_per_head, render_bias_panels
+from msdelta.viz import attention_entropy_per_head, render_bias_panels
 
 
 class _InlineCallback(TrainerCallback):
@@ -33,7 +33,7 @@ class _InlineCallback(TrainerCallback):
 
     @property
     def encoder(self):
-        return self.module.encoder
+        return self.module.msdelta
 
     @property
     def device(self) -> torch.device:
@@ -103,7 +103,7 @@ class FourierProbeCallback(_InlineCallback):
         n = min(self.n_spectra, max_spectra)
         for row in itertools.islice(self.dataset, n):
             mz = torch.as_tensor(row["mz"], dtype=torch.float32)
-            li = torch.as_tensor(row["log_int"], dtype=torch.float32)
+            li = torch.as_tensor(row["log_intensity"], dtype=torch.float32)
             if li.numel():
                 li_pool.append(li)
             if mz.numel() >= 2:
@@ -261,11 +261,16 @@ class AttentionEntropyCallback(_InlineCallback):
         batch = {k: v.to(self.device) for k, v in batch.items()}
         was_training = enc.training
         enc.eval()
-        with torch.no_grad(), AttentionRecorder(enc.blocks) as rec:
-            enc(batch["mz"], batch["log_int"], batch["key_padding_mask"], None)
+        with torch.no_grad():
+            outputs = enc(
+                mz=batch["mz"],
+                log_intensity=batch["log_intensity"],
+                attention_mask=batch["attention_mask"],
+                output_attentions=True,
+            )
         if was_training:
             enc.train()
-        return attention_entropy_per_head(rec.attn)
+        return attention_entropy_per_head(list(outputs.attentions))
 
 
 class WandbConfigCallback(TrainerCallback):
@@ -279,27 +284,40 @@ class WandbConfigCallback(TrainerCallback):
             wandb.config.update(self.resolved_config, allow_val_change=True)
 
 
-def build_callbacks(module, val_dataset, pp, log_args, resolved_config, out_dir):
+def build_callbacks(module, val_dataset, pp, training_args, resolved_config, out_dir):
     """Create the callbacks enabled in the configuration."""
     cbs: list[TrainerCallback] = [WandbConfigCallback(resolved_config)]
-    if log_args.bias_curve_every:
-        cbs.append(BiasPanelCallback(module, log_args.bias_curve_every, out_dir=out_dir))
-        cbs.append(AttentionEntropyCallback(module, log_args.bias_curve_every, dataset=val_dataset))
-    if log_args.probe_every:
+    if training_args.bias_curve_steps:
+        cbs.append(BiasPanelCallback(module, training_args.bias_curve_steps, out_dir=out_dir))
         cbs.append(
-            LinearProbeCallback(module, log_args.probe_every, val_dataset, log_args.probe_n_spectra)
+            AttentionEntropyCallback(module, training_args.bias_curve_steps, dataset=val_dataset)
+        )
+    if training_args.probe_steps:
+        cbs.append(
+            LinearProbeCallback(
+                module,
+                training_args.probe_steps,
+                val_dataset,
+                training_args.probe_num_spectra,
+            )
         )
         cbs.append(
             FourierProbeCallback(
-                module, log_args.probe_every, val_dataset, log_args.probe_n_spectra
+                module,
+                training_args.probe_steps,
+                val_dataset,
+                training_args.probe_num_spectra,
             )
         )
-        cbs.append(AlignmentCallback(module, log_args.probe_every))
-        cbs.append(RetrievalCallback(module, log_args.probe_every, dataset=val_dataset))
-        if log_args.replicate_retrieval_repo:
+        cbs.append(AlignmentCallback(module, training_args.probe_steps))
+        cbs.append(RetrievalCallback(module, training_args.probe_steps, dataset=val_dataset))
+        if training_args.replicate_retrieval_repo:
             cbs.append(
                 ReplicateRetrievalCallback(
-                    module, log_args.probe_every, pp, log_args.replicate_retrieval_repo
+                    module,
+                    training_args.probe_steps,
+                    pp,
+                    training_args.replicate_retrieval_repo,
                 )
             )
     return cbs

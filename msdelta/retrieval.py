@@ -10,7 +10,6 @@ from datasets import load_dataset
 from torchmetrics.classification import BinaryAveragePrecision
 from torchmetrics.retrieval import RetrievalHitRate, RetrievalMAP, RetrievalRecall
 
-from msdelta.data import preprocess_spectrum
 from msdelta.embedding import embed_spectra
 
 
@@ -27,7 +26,7 @@ def _prepped_from_dataset(dataset, max_rows):
         yield (
             row["peptide_charge"],
             torch.tensor(row["mz"], dtype=torch.float32),
-            torch.tensor(row["log_int"], dtype=torch.float32),
+            torch.tensor(row["log_intensity"], dtype=torch.float32),
         )
 
 
@@ -79,9 +78,9 @@ def _collect_benchmark(ds, pp, *, batch_size=512):
     for s in range(0, n, batch_size):
         rows = ds[s : min(s + batch_size, n)]
         for mz, it in zip(rows["mz"], rows["intensity"]):
-            mp, lp = preprocess_spectrum(
-                torch.tensor(mz, dtype=torch.float32), torch.tensor(it, dtype=torch.float32), pp
-            )[:2]
+            processed = pp(mz, it, padding=False)
+            mp = torch.tensor(processed["mz"], dtype=torch.float32)
+            lp = torch.tensor(processed["log_intensity"], dtype=torch.float32)
             specs.append((mp, lp))
     return specs
 

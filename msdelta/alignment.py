@@ -11,7 +11,7 @@ from scipy.signal import find_peaks
 from scipy.stats import binomtest
 
 from msdelta.chemistry import ISOTOPES, NEUTRAL_LOSSES, RESIDUES_AA20
-from msdelta.model import MSEncoder
+from msdelta.modeling_msdelta import MSDeltaModel
 
 
 def reference_set(kinds: list[str]) -> dict[str, float]:
@@ -38,7 +38,7 @@ class RangeSpec:
 
 
 @torch.no_grad()
-def _eval_curves(enc: MSEncoder, lo: float, hi: float, step: float):
+def _eval_curves(enc: MSDeltaModel, lo: float, hi: float, step: float):
     dev = next(enc.bias_module.parameters()).device
     grid = torch.arange(lo, hi + step / 2, step, dtype=torch.float32, device=dev)
     curves = enc.bias_module.evaluate(grid).cpu().numpy()
@@ -53,7 +53,7 @@ def _chance_rate(abs_grid: np.ndarray, ref_vals: np.ndarray, tol: float) -> floa
     return float(covered.mean())
 
 
-def analyze_range(enc: MSEncoder, spec: RangeSpec) -> dict[str, Any]:
+def analyze_range(enc: MSDeltaModel, spec: RangeSpec) -> dict[str, Any]:
     refs = reference_set(spec.kinds)
     ref_items = list(refs.items())
     ref_vals = np.array([v for _, v in ref_items], dtype=np.float64)
@@ -123,7 +123,7 @@ def analyze_range(enc: MSEncoder, spec: RangeSpec) -> dict[str, Any]:
 
 
 def alignment_metrics(
-    enc: MSEncoder,
+    enc: MSDeltaModel,
     fine_tol: float = 0.02,
     coarse_tol: float = 0.1,
     prominence: float = 0.3,

@@ -18,14 +18,19 @@ def pool_tokens(tokens: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
 
 
 @torch.no_grad()
-def encode_batch(enc, mzs, lis, device):
+def encode_batch(model, mzs, log_intensities, device):
     """Pad and encode one batch of peak lists."""
     mz = pad_sequence(mzs, batch_first=True)
-    li = pad_sequence(lis, batch_first=True)
+    log_intensity = pad_sequence(log_intensities, batch_first=True)
     lens = torch.tensor([m.numel() for m in mzs])
     mask = torch.arange(mz.shape[1])[None, :] < lens[:, None]
-    tokens = enc(mz.to(device), li.to(device), (~mask).to(device))
-    return tokens, mask.to(device)
+    attention_mask = mask.to(device)
+    outputs = model(
+        mz=mz.to(device),
+        log_intensity=log_intensity.to(device),
+        attention_mask=attention_mask,
+    )
+    return outputs.last_hidden_state, attention_mask
 
 
 @torch.no_grad()

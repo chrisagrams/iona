@@ -19,7 +19,7 @@ dependencies = [
     "datasets>=4.0.0",
     "transformers>=4.46.0",
     "accelerate>=1.0.0",
-    "deepspeed>=0.15.0",
+    "deepspeed>=0.15.0; sys_platform == 'linux'",
     "torchmetrics>=1.9.0",
 ]
 
@@ -48,6 +48,9 @@ select = ["E4", "E7", "E9", "F", "I", "PLC0415", "TID252"]
 
 [tool.ruff.lint.flake8-tidy-imports]
 ban-relative-imports = "all"
+
+[tool.ruff.lint.per-file-ignores]
+"msdelta/modeling_msdelta.py" = ["TID252"]
 
 [tool.uv.sources]
 torch = [

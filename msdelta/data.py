@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass
 from functools import partial
 from pathlib import Path
 
@@ -12,13 +11,7 @@ from datasets import load_dataset
 from huggingface_hub import snapshot_download
 
 from msdelta.chemistry import PROTON_MASS, RESIDUE_MASSES, WATER_MASS
-
-
-@dataclass
-class PreprocessConfig:
-    intensity_threshold_frac: float = 0.01
-    top_n: int = 150
-
+from msdelta.processing_msdelta import MSDeltaProcessor
 
 N_CHARGES = 8
 
@@ -56,40 +49,6 @@ def precursor_mz(peptide_charge: str | None) -> float:
     return (mass + z * PROTON_MASS) / z
 
 
-def preprocess_spectrum(
-    mz: torch.Tensor,
-    intensity: torch.Tensor,
-    cfg: PreprocessConfig,
-) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-    """Filter peaks and return m/z, log intensity, and intensity probability."""
-    mz = mz.to(torch.float32)
-    intensity = intensity.to(torch.float32)
-
-    if intensity.numel() == 0:
-        return mz, intensity, intensity
-
-    base = float(intensity.max())
-    if base <= 0:
-        empty = torch.empty(0, dtype=torch.float32)
-        return empty, empty, empty
-
-    keep = intensity >= cfg.intensity_threshold_frac * base
-    mz = mz[keep]
-    intensity = intensity[keep]
-
-    if mz.numel() > cfg.top_n:
-        topk = torch.topk(intensity, cfg.top_n, sorted=False)
-        mz = mz[topk.indices]
-        intensity = topk.values
-
-    log_int = torch.log1p(intensity)
-    log_int = log_int / log_int.max().clamp_min(1e-8)
-
-    intensity_prob = intensity / intensity.sum().clamp_min(1e-12)
-
-    return mz.contiguous(), log_int.contiguous(), intensity_prob.contiguous()
-
-
 def split_paths(root: str | Path, n_val: int) -> tuple[list[Path], list[Path]]:
     """Use the last sorted shards as validation data."""
     root = Path(root)
@@ -120,67 +79,43 @@ def hf_split_paths(
     return train_paths, val_paths
 
 
-def resolve_dataset_paths(dcfg: dict) -> tuple[list[Path], list[Path]]:
+def resolve_dataset_paths(
+    *,
+    root: str | None,
+    repo_id: str | None,
+    train_split: str,
+    validation_split: str,
+    num_validation_files: int,
+) -> tuple[list[Path], list[Path]]:
     """Get dataset paths from a local directory or Hugging Face."""
-    if dcfg.get("hf_repo"):
+    if repo_id:
         return hf_split_paths(
-            dcfg["hf_repo"],
-            train_split=dcfg.get("hf_train_split", "train"),
-            val_split=dcfg.get("hf_val_split", "val"),
+            repo_id,
+            train_split=train_split,
+            val_split=validation_split,
         )
-    return split_paths(dcfg["root"], dcfg["n_val_files"])
+    if root is None:
+        raise ValueError("root is required when repo_id is not set")
+    return split_paths(root, num_validation_files)
 
 
-def _preprocess_example(example: dict, pp: PreprocessConfig) -> dict:
+def _preprocess_example(example: dict, processor: MSDeltaProcessor) -> dict:
     """Convert one raw dataset row to preprocessed values."""
-    mz = torch.tensor(example["m/z"], dtype=torch.float32)
-    inten = torch.tensor(example["int"], dtype=torch.float32)
-    mz_p, log_int, intensity_prob = preprocess_spectrum(mz, inten, pp)
+    intensity = torch.tensor(example["int"], dtype=torch.float32)
+    try:
+        values = processor(example["m/z"], example["int"], padding=False, return_labels=True)
+    except ValueError:
+        values = {"mz": [], "log_intensity": [], "labels": []}
     pc = example.get("peptide_charge")
     return {
-        "mz": mz_p.tolist(),
-        "log_int": log_int.tolist(),
-        "intensity_prob": intensity_prob.tolist(),
+        "mz": values["mz"],
+        "log_intensity": values["log_intensity"],
+        "labels": values["labels"],
         "charge": charge_index(pc),
         "precursor_mz": precursor_mz(pc),
-        "log_tic": float(torch.log1p(inten.sum())) if inten.numel() else 0.0,
+        "log_tic": float(torch.log1p(intensity.sum())) if intensity.numel() else 0.0,
         "peptide_charge": pc if pc is not None else "",
     }
-
-
-@dataclass
-class MaskIntensityCollator:
-    """Pad rows and select new masked positions for each batch."""
-
-    mask_ratio: float = 0.15
-    min_masked: int = 1
-
-    def __call__(self, features: list[dict]) -> dict[str, torch.Tensor]:
-        B = len(features)
-        Ks = [len(f["mz"]) for f in features]
-        K_max = max(max(Ks) if Ks else 1, 1)
-        mz = torch.zeros(B, K_max, dtype=torch.float32)
-        log_int = torch.zeros(B, K_max, dtype=torch.float32)
-        intensity_prob = torch.zeros(B, K_max, dtype=torch.float32)
-        key_padding_mask = torch.ones(B, K_max, dtype=torch.bool)
-        mask_positions = torch.zeros(B, K_max, dtype=torch.bool)
-        for b, (f, K) in enumerate(zip(features, Ks)):
-            if K == 0:
-                continue
-            mz[b, :K] = torch.as_tensor(f["mz"], dtype=torch.float32)
-            log_int[b, :K] = torch.as_tensor(f["log_int"], dtype=torch.float32)
-            intensity_prob[b, :K] = torch.as_tensor(f["intensity_prob"], dtype=torch.float32)
-            key_padding_mask[b, :K] = False
-            n_mask = min(K, max(self.min_masked, int(round(K * self.mask_ratio))))
-            idx = torch.randperm(K)[:n_mask]
-            mask_positions[b, idx] = True
-        return {
-            "mz": mz,
-            "log_int": log_int,
-            "intensity_prob": intensity_prob,
-            "key_padding_mask": key_padding_mask,
-            "mask_positions": mask_positions,
-        }
 
 
 def collate_preprocessed(features: list[dict]) -> dict[str, torch.Tensor]:
@@ -189,31 +124,31 @@ def collate_preprocessed(features: list[dict]) -> dict[str, torch.Tensor]:
     Ks = [len(f["mz"]) for f in features]
     K_max = max(max(Ks) if Ks else 1, 1)
     mz = torch.zeros(B, K_max, dtype=torch.float32)
-    log_int = torch.zeros(B, K_max, dtype=torch.float32)
-    intensity_prob = torch.zeros(B, K_max, dtype=torch.float32)
-    key_padding_mask = torch.ones(B, K_max, dtype=torch.bool)
+    log_intensity = torch.zeros(B, K_max, dtype=torch.float32)
+    labels = torch.zeros(B, K_max, dtype=torch.float32)
+    attention_mask = torch.zeros(B, K_max, dtype=torch.long)
     for b, (f, K) in enumerate(zip(features, Ks)):
         if K == 0:
             continue
         mz[b, :K] = torch.as_tensor(f["mz"], dtype=torch.float32)
-        log_int[b, :K] = torch.as_tensor(f["log_int"], dtype=torch.float32)
-        intensity_prob[b, :K] = torch.as_tensor(f["intensity_prob"], dtype=torch.float32)
-        key_padding_mask[b, :K] = False
+        log_intensity[b, :K] = torch.as_tensor(f["log_intensity"], dtype=torch.float32)
+        labels[b, :K] = torch.as_tensor(f["labels"], dtype=torch.float32)
+        attention_mask[b, :K] = 1
     return {
         "mz": mz,
-        "log_int": log_int,
-        "intensity_prob": intensity_prob,
-        "key_padding_mask": key_padding_mask,
+        "log_intensity": log_intensity,
+        "labels": labels,
+        "attention_mask": attention_mask,
     }
 
 
 def build_preprocessed_dataset(
-    paths: list[Path], pp: PreprocessConfig, num_proc: int | None = None
+    paths: list[Path], processor: MSDeltaProcessor, num_proc: int | None = None
 ):
     """Load and preprocess Parquet shards."""
     ds = load_dataset("parquet", data_files=[str(p) for p in paths], split="train")
     ds = ds.map(
-        partial(_preprocess_example, pp=pp),
+        partial(_preprocess_example, processor=processor),
         remove_columns=ds.column_names,
         num_proc=num_proc,
         desc="preprocess spectra",
@@ -224,10 +159,10 @@ def build_preprocessed_dataset(
 def build_pretraining_datasets(
     train_paths: list[Path],
     val_paths: list[Path],
-    pp: PreprocessConfig,
+    processor: MSDeltaProcessor,
     num_proc: int | None = None,
 ):
     """Build the training and validation datasets."""
-    train = build_preprocessed_dataset(train_paths, pp, num_proc=num_proc)
-    val = build_preprocessed_dataset(val_paths, pp, num_proc=num_proc)
+    train = build_preprocessed_dataset(train_paths, processor, num_proc=num_proc)
+    val = build_preprocessed_dataset(val_paths, processor, num_proc=num_proc)
     return train, val

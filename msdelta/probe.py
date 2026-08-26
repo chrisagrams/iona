@@ -19,7 +19,7 @@ from msdelta.chemistry import (
     WATER_MASS,
 )
 from msdelta.embedding import encode_batch, pool_tokens
-from msdelta.model import MSEncoder
+from msdelta.modeling_msdelta import MSDeltaModel
 
 _C13 = ISOTOPES["¹³C"]
 _LOSSES = {name: NEUTRAL_LOSSES[name] for name in ("H₂O", "NH₃", "CO", "CO₂")}
@@ -67,7 +67,7 @@ def _isotope_labels(mz_sorted_idx, mz: np.ndarray, z: int, tol: float = 0.01) ->
 
 @torch.no_grad()
 def extract_representations(
-    enc: MSEncoder,
+    enc: MSDeltaModel,
     dataset,
     n_spectra: int,
     batch_size: int,
@@ -131,7 +131,7 @@ def extract_representations(
 
     for row in itertools.islice(dataset, n_spectra):
         mz_p = torch.tensor(row["mz"], dtype=torch.float32)
-        li_p = torch.tensor(row["log_int"], dtype=torch.float32)
+        li_p = torch.tensor(row["log_intensity"], dtype=torch.float32)
         if mz_p.numel() == 0:
             continue
         pc = row["peptide_charge"]
@@ -211,7 +211,7 @@ def _classification(X, y, name) -> dict[str, float]:
 
 
 def run_all_probes(
-    enc: MSEncoder,
+    enc: MSDeltaModel,
     dataset,
     device: torch.device,
     n_spectra: int = 4000,
