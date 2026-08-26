@@ -109,6 +109,15 @@ export MASTER_ADDR=${MASTER_ADDR:-$(head -n 1 "$NODE_LIST")}
 export MASTER_PORT=${MASTER_PORT:-29500}
 export MSDELTA_GPUS_PER_HOST=$GPUS_PER_HOST
 
+ALCF_PROXY=${ALCF_PROXY:-http://proxy.alcf.anl.gov:3128}
+export HTTP_PROXY=${HTTP_PROXY:-$ALCF_PROXY}
+export HTTPS_PROXY=${HTTPS_PROXY:-$ALCF_PROXY}
+export http_proxy=${http_proxy:-$ALCF_PROXY}
+export https_proxy=${https_proxy:-$ALCF_PROXY}
+export ftp_proxy=${ftp_proxy:-$ALCF_PROXY}
+export no_proxy=${no_proxy:-admin,polaris-adminvm-01,localhost,*.cm.polaris.alcf.anl.gov,polaris-*,*.polaris.alcf.anl.gov,*.alcf.anl.gov}
+export NO_PROXY=${NO_PROXY:-$no_proxy}
+
 export WANDB_DIR=${WANDB_DIR:-$LOG_DIR}
 export WANDB_RESUME=${WANDB_RESUME:-allow}
 export WANDB_RUN_ID=${WANDB_RUN_ID:-$RUN_NAME}
