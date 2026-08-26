@@ -1,0 +1,139 @@
+#!/bin/bash
+# Submit from the repository root and provide scheduler policy through qsub.
+# Example:
+# qsub -A PROJECT -q QUEUE \
+#   -l select=2:system=polaris -l place=scatter -l walltime=12:00:00 \
+#   -l filesystems=home:eagle -j oe -o /path/to/pbs/logs \
+#   -v CONFIG_PATH=configs/massivekb_xl.yaml,CHECKPOINT_DIR=/eagle/PROJECT/checkpoints,HF_HOME=/eagle/PROJECT/hf \
+#   pbs/polaris-pretrain.pbs
+# Launch pattern follows the ALCF Polaris DeepSpeed guide:
+# https://docs.alcf.anl.gov/polaris/data-science/frameworks/deepspeed/
+
+set -euo pipefail
+
+REPO_DIR=${REPO_DIR:-${PBS_O_WORKDIR:-$PWD}}
+VENV_DIR=${VENV_DIR:-$REPO_DIR/.venv}
+CONFIG_PATH=${CONFIG_PATH:?set CONFIG_PATH to an MSDelta YAML configuration}
+CHECKPOINT_DIR=${CHECKPOINT_DIR:?set CHECKPOINT_DIR for Trainer checkpoints}
+
+if [[ $CONFIG_PATH != /* ]]; then
+    CONFIG_PATH=$REPO_DIR/$CONFIG_PATH
+fi
+if [[ $CHECKPOINT_DIR != /* ]]; then
+    CHECKPOINT_DIR=$REPO_DIR/$CHECKPOINT_DIR
+fi
+if [[ ! -f $CONFIG_PATH ]]; then
+    echo "configuration not found: $CONFIG_PATH" >&2
+    exit 2
+fi
+if [[ ! -x $VENV_DIR/bin/deepspeed ]]; then
+    echo "DeepSpeed launcher not found: $VENV_DIR/bin/deepspeed" >&2
+    exit 2
+fi
+if [[ ! -f ${PBS_NODEFILE:-} ]]; then
+    echo "PBS_NODEFILE is required for a Polaris DeepSpeed launch" >&2
+    exit 2
+fi
+
+JOB_ID=${PBS_JOBID:-local}
+JOB_ID=${JOB_ID%%.*}
+mapfile -t CONFIG_VALUES < <(
+    "$VENV_DIR/bin/python" - "$CONFIG_PATH" <<'PY'
+import sys
+from pathlib import Path
+
+import yaml
+
+path = Path(sys.argv[1])
+config = yaml.safe_load(path.read_text()) or {}
+training = config.get("training") or {}
+run_name = training.get("run_name") or path.stem
+micro_batch_size = training.get("per_device_train_batch_size")
+if not isinstance(micro_batch_size, int) or micro_batch_size < 1:
+    raise ValueError("training.per_device_train_batch_size must be a positive integer")
+if not training.get("deepspeed"):
+    raise ValueError("training.deepspeed must be configured for this launcher")
+print(run_name)
+print(micro_batch_size)
+PY
+)
+CONFIG_RUN_NAME=${CONFIG_VALUES[0]}
+MICRO_BATCH_SIZE=${CONFIG_VALUES[1]}
+RUN_NAME=${CONFIG_RUN_NAME}-${JOB_ID}
+RUN_DIR=$CHECKPOINT_DIR/$RUN_NAME
+LOG_DIR=${LOG_DIR:-$RUN_DIR/logs}
+mkdir -p "$RUN_DIR" "$LOG_DIR"
+
+cd "$REPO_DIR"
+GPUS_PER_HOST=${GPUS_PER_HOST:-$(nvidia-smi -L | wc -l)}
+if ((GPUS_PER_HOST < 1)); then
+    echo "no GPUs detected" >&2
+    exit 2
+fi
+NODE_LIST=$RUN_DIR/pbs-nodes
+awk '!seen[$0]++ {print $0}' "$PBS_NODEFILE" >"$NODE_LIST"
+NUM_HOSTS=$(wc -l <"$NODE_LIST")
+TOTAL_GPUS=$((NUM_HOSTS * GPUS_PER_HOST))
+
+GLOBAL_BATCH_SIZE=${GLOBAL_BATCH_SIZE:-512}
+DENOMINATOR=$((MICRO_BATCH_SIZE * TOTAL_GPUS))
+if ((GLOBAL_BATCH_SIZE % DENOMINATOR != 0)); then
+    echo "global batch size $GLOBAL_BATCH_SIZE is not divisible by" \
+        "$MICRO_BATCH_SIZE micro-batch x $TOTAL_GPUS GPUs" >&2
+    exit 2
+fi
+GRADIENT_ACCUMULATION_STEPS=$((GLOBAL_BATCH_SIZE / DENOMINATOR))
+if ((GRADIENT_ACCUMULATION_STEPS < 1)); then
+    echo "global batch size $GLOBAL_BATCH_SIZE is smaller than one distributed micro-batch" >&2
+    exit 2
+fi
+
+HOSTFILE=$RUN_DIR/deepspeed-hostfile
+awk -v slots="$GPUS_PER_HOST" '{print $0 " slots=" slots}' "$NODE_LIST" >"$HOSTFILE"
+
+echo "$(date -Is) job=${PBS_JOBID:-local} hosts=$NUM_HOSTS gpus_per_host=$GPUS_PER_HOST total_gpus=$TOTAL_GPUS global_batch=$GLOBAL_BATCH_SIZE accumulation=$GRADIENT_ACCUMULATION_STEPS run=$RUN_NAME"
+nvidia-smi -L | sed 's/^/  /'
+
+export OMP_NUM_THREADS=${OMP_NUM_THREADS:-2}
+export MKL_NUM_THREADS=${MKL_NUM_THREADS:-2}
+export OPENBLAS_NUM_THREADS=${OPENBLAS_NUM_THREADS:-2}
+export PYTORCH_CUDA_ALLOC_CONF=${PYTORCH_CUDA_ALLOC_CONF:-expandable_segments:True}
+export HF_HUB_OFFLINE=${HF_HUB_OFFLINE:-1}
+export PYTHONPATH=$REPO_DIR${PYTHONPATH:+:$PYTHONPATH}
+
+export WANDB_DIR=${WANDB_DIR:-$LOG_DIR}
+export WANDB_RESUME=${WANDB_RESUME:-allow}
+export WANDB_RUN_ID=${WANDB_RUN_ID:-$RUN_NAME}
+
+TRAIN_ARGS=(
+    --config "$CONFIG_PATH"
+    --run_name "$RUN_NAME"
+    --output_dir "$RUN_DIR"
+    --gradient_accumulation_steps "$GRADIENT_ACCUMULATION_STEPS"
+)
+if [[ -n ${RESUME_FROM_CHECKPOINT:-} ]]; then
+    TRAIN_ARGS+=(--resume "$RESUME_FROM_CHECKPOINT")
+fi
+
+DEEPSPEED_ENV=$RUN_DIR/.deepspeed_env
+: >"$DEEPSPEED_ENV"
+for name in \
+    PATH LD_LIBRARY_PATH PYTHONPATH \
+    http_proxy https_proxy HTTP_PROXY HTTPS_PROXY no_proxy NO_PROXY \
+    HF_HOME HF_HUB_OFFLINE \
+    WANDB_DIR WANDB_RESUME WANDB_RUN_ID WANDB_API_KEY \
+    OMP_NUM_THREADS MKL_NUM_THREADS OPENBLAS_NUM_THREADS \
+    PYTORCH_CUDA_ALLOC_CONF NCCL_DEBUG NCCL_SOCKET_IFNAME; do
+    if [[ -n ${!name:-} ]]; then
+        printf '%s=%s\n' "$name" "${!name}" >>"$DEEPSPEED_ENV"
+    fi
+done
+
+cd "$RUN_DIR"
+exec "$VENV_DIR/bin/deepspeed" \
+    --hostfile="$HOSTFILE" \
+    --module \
+    msdelta.train \
+    "${TRAIN_ARGS[@]}" \
+    >"$LOG_DIR/train.out" \
+    2>"$LOG_DIR/train.err"
