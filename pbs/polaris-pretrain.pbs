@@ -94,6 +94,8 @@ if ((GRADIENT_ACCUMULATION_STEPS < 1)); then
 fi
 
 echo "$(date -Is) job=${PBS_JOBID:-local} hosts=$NUM_HOSTS gpus_per_host=$GPUS_PER_HOST total_gpus=$TOTAL_GPUS global_batch=$GLOBAL_BATCH_SIZE accumulation=$GRADIENT_ACCUMULATION_STEPS run=$RUN_NAME"
+echo "nodes:"
+sed 's/^/  /' "$NODE_LIST"
 nvidia-smi -L | sed 's/^/  /'
 
 export OMP_NUM_THREADS=${OMP_NUM_THREADS:-2}
