@@ -1,0 +1,76 @@
+#!/bin/bash
+#PBS -N msdelta_mask
+#PBS -A FRAME-IDP
+#PBS -q capacity
+#PBS -l select=1:system=polaris
+#PBS -l place=scatter
+#PBS -l walltime=06:00:00
+#PBS -l filesystems=home:eagle
+#PBS -j oe
+#PBS -o /home/cgrams/msdelta/pbs/logs/
+#
+# v12 mask-ratio sweep — one Polaris node, 4× A100-40GB, one config per
+# GPU (mask 0.15, 0.35, 0.50, 0.75; v9 architecture d=256/6L/8H; only
+# data.mask.mask_ratio varies). Tests the hypothesis that 15% mask is
+# too small for m/z-free tokens (the BERT default is calibrated for
+# absolute-positional models; ours has no position outside the Δm bias,
+# so low mask ratios let local averaging solve the task without forcing
+# chemistry into the bias). See EXPERIMENTS.md §v11 reframe.
+#
+# Capacity: ~5M params × batch 256 × 50k steps; sps ≈ 8 → ~1.8h compute,
+# plus probe (every 5k) + bias-curve renders → ~3h total. 6h walltime
+# gives comfortable margin for the slowest tier (probably mask75 — more
+# masked positions per spectrum = slightly more head compute).
+#
+# Reads (wandb / msdelta-mask-sweep project):
+#   - train/loss              — does it reach floor for each mask ratio?
+#   - probe/fragment_mz_r2    — does it climb past v9's 0.87 ceiling?
+#   - probe/isotope_f1        — does it climb past v9's 0.90?
+#   - probe/charge_acc        — already 100% at v9; stay there
+# Post-run: msdelta-analyze --mode align on each final.pt → count of
+# correction-surviving (p<0.01 after ×16 correction) chemical heads.
+# Climbs with mask ratio → mask is the lever; flat → next pivot needed.
+#
+# Pre-req: pbs/setup_venv.sh has been run once on the login node.
+
+set -euo pipefail
+
+REPO=/home/cgrams/msdelta
+cd "$REPO"
+
+JOBID=${PBS_JOBID%%.*}
+JOBID=${JOBID:-local}
+LOGDIR=$REPO/pbs/logs/${JOBID}
+mkdir -p "$LOGDIR"
+
+echo "$(date -Is) job=$PBS_JOBID host=$(hostname) gpus=$(nvidia-smi -L | wc -l)"
+nvidia-smi -L | sed "s/^/  /"
+
+CONFIGS=(
+    configs/v12_mask15.yaml
+    configs/v12_mask35.yaml
+    configs/v12_mask50.yaml
+    configs/v12_mask75.yaml
+)
+PIDS=()
+for i in "${!CONFIGS[@]}"; do
+    cfg=${CONFIGS[$i]}
+    gpu=$i
+    bash "$REPO/pbs/_run_tier.sh" "$cfg" "$gpu" &
+    PIDS+=($!)
+    echo "$(date -Is) launched cfg=$cfg gpu=$gpu pid=$!"
+done
+
+set +e
+FAIL=0
+for i in "${!CONFIGS[@]}"; do
+    cfg=${CONFIGS[$i]}
+    wait "${PIDS[$i]}"
+    rc=$?
+    echo "$(date -Is) cfg=$cfg exit=$rc"
+    if [[ $rc -ne 0 ]]; then
+        FAIL=1
+    fi
+done
+
+exit $FAIL

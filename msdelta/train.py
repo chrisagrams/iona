@@ -1,365 +1,164 @@
-"""Pretraining entrypoint: m/z denoising autoencoder with Δm/z-biased transformer."""
+"""Pretraining entrypoint: m/z denoising autoencoder with Δm/z-biased transformer.
+
+Training runs on the Hugging Face `Trainer` with optional DeepSpeed. The Trainer
+owns the things that used to be hand-rolled here — distributed launch, AdamW, the
+cosine schedule, bf16 autocast, gradient clipping, checkpoint save/resume, and
+wandb logging. Data is a Hugging Face `datasets.Dataset` with preprocessing
+precomputed by `.map` (see `build_pretraining_datasets`), so the Trainer's native
+sampling/sharding/eval apply and no per-spectrum transform runs in the loop. What
+stays project-specific is the inline science — frozen-encoder probes, Δm
+bias-curve alignment, retrieval, and the bias-curve/attention-entropy panels,
+each its own callback in `callbacks.py`.
+
+The config schema and parsing live in `config.py` (`ModelArgs`/`DataArgs`/
+`TrainArgs`/`LogArgs`, parsed by `HfArgumentParser`): a YAML file supplies the
+base values and any remaining command-line flags override them, which is exactly
+how a `wandb agent` injects a sweep (it appends `--lr=... --mask_ratio=...` via
+the sweep's `${args}`).
+
+Single GPU / dev (HF Trainer, no launcher needed):
+    msdelta-train --config configs/v14_cap_S.yaml
+    msdelta-train --config configs/v14_cap_S.yaml --lr 2e-4          # CLI override
+Multi-GPU with DeepSpeed (set `deepspeed: true` in the config; torchrun stands
+up the process group — the `deepspeed` launcher can't run a package's `-m`
+entrypoint given the relative imports):
+    torchrun --standalone --nproc_per_node=4 -m msdelta.train --config configs/massivekb_xl.yaml
+"""
 from __future__ import annotations
 
-import argparse
-import math
 import os
 import sys
-import time
-from contextlib import nullcontext
 from dataclasses import asdict
 from pathlib import Path
-from typing import Any
 
-import numpy as np
+import matplotlib.pyplot as plt
 import torch
-import yaml
-from torch.optim import AdamW
-from torch.utils.data import DataLoader
+from torch import nn
 
-import wandb
+from transformers import Trainer
 
+from .callbacks import build_callbacks
+from .config import build_training_arguments, parse_config
 from .data import (
-    ConsensusParquet,
-    DenoiseConfig,
-    PreprocessConfig,
-    denoise_collate,
-    split_paths,
+    MaskIntensityCollator,
+    build_pretraining_datasets,
+    resolve_dataset_paths,
 )
-from .model import (
-    DeltaBiasConfig,
-    DenoiseHead,
-    FourierConfig,
-    MSEncoder,
-    ModelConfig,
-)
-from .viz import attention_entropy_per_head, render_bias_panels
+from .model import IntensityHead, MSEncoder, ModelConfig
+from .viz import render_bias_panels
 
 
-# ---------- config ----------
+# ---------- model ----------
 
-def build_model_config(d: dict[str, Any]) -> ModelConfig:
-    return ModelConfig(
-        d_model=d["d_model"],
-        n_heads=d["n_heads"],
-        n_layers=d["n_layers"],
-        ffn_mult=d["ffn_mult"],
-        dropout=d["dropout"],
-        max_peaks=d["max_peaks"],
-        fourier_mz=FourierConfig(**d["fourier_mz"]),
-        fourier_int=FourierConfig(**d["fourier_int"]),
-        delta_bias=DeltaBiasConfig(**d["delta_bias"]),
-    )
+class MSDeltaForPretraining(nn.Module):
+    """Encoder + intensity head as one `Trainer`-compatible module.
+
+    `forward` consumes the collated batch keys as keyword args and returns
+    ``{"loss", "kl"}`` so `Trainer.compute_loss` reads ``outputs["loss"]``
+    directly (loss == the masked-intensity KL). The submodules stay plain
+    `MSEncoder`/`IntensityHead`, so the probe/panel code reaches ``.encoder``
+    and runs its own forwards unchanged.
+    """
+
+    def __init__(self, model_cfg: ModelConfig):
+        super().__init__()
+        self.encoder = MSEncoder(model_cfg)
+        self.heads = IntensityHead(model_cfg.d_model)
+
+    def forward(
+        self,
+        mz: torch.Tensor,
+        log_int: torch.Tensor,
+        key_padding_mask: torch.Tensor,
+        mask_positions: torch.Tensor,
+        intensity_prob: torch.Tensor,
+    ) -> dict[str, torch.Tensor]:
+        tokens = self.encoder(mz, log_int, key_padding_mask, mask_positions)
+        loss, parts = self.heads.loss(tokens, intensity_prob, mask_positions)
+        return {"loss": loss, "kl": parts["kl"]}
 
 
-def load_config(path: str | Path) -> dict[str, Any]:
-    with open(path) as f:
-        return yaml.safe_load(f)
+class MSDeltaTrainer(Trainer):
+    """Trainer that exempts the learnable Fourier frequencies from weight decay.
 
+    Stock HF only exempts LayerNorm/bias params from AdamW's decay. The Fourier
+    `freqs` are a frequency *scale*, not a weight — decaying them shrinks every
+    frequency toward 0 (flattening the encoding), so we drop any `.freqs`
+    parameter from the decay group and it lands in the weight_decay=0.0 group.
+    """
 
-# ---------- scheduler ----------
-
-def lr_lambda(step: int, warmup: int, total: int) -> float:
-    if step < warmup:
-        return step / max(1, warmup)
-    if step >= total:
-        return 0.0
-    progress = (step - warmup) / max(1, total - warmup)
-    return 0.5 * (1.0 + math.cos(math.pi * progress))
+    def get_decay_parameter_names(self, model):
+        return [n for n in super().get_decay_parameter_names(model)
+                if not n.endswith(".freqs")]
 
 
 # ---------- training ----------
 
-def grad_norm(parameters) -> float:
-    total = 0.0
-    for p in parameters:
-        if p.grad is not None:
-            total += p.grad.detach().float().pow(2).sum().item()
-    return math.sqrt(total)
-
-
-def make_loaders(cfg: dict[str, Any]) -> tuple[DataLoader, DataLoader]:
-    dcfg = cfg["data"]
-    pp = PreprocessConfig(
-        intensity_threshold_frac=dcfg["intensity_threshold_frac"],
-        top_n=dcfg["top_n"],
-    )
-    train_paths, val_paths = split_paths(dcfg["root"], dcfg["n_val_files"])
-    print(f"[data] {len(train_paths)} train shards, {len(val_paths)} val shards", flush=True)
-
-    train_ds = ConsensusParquet(train_paths, preprocess=pp, seed=cfg["train"].get("seed", 0))
-    val_ds = ConsensusParquet(val_paths, preprocess=pp, seed=cfg["train"].get("seed", 0) + 1)
-    print(
-        f"[data] train row-groups: {len(train_ds._units)}  val row-groups: {len(val_ds._units)}",
-        flush=True,
-    )
-
-    den_cfg = DenoiseConfig(
-        gauss_sigma=dcfg["denoise"]["gauss_sigma"],
-    )
-
-    def collate(batch):
-        batch = [b for b in batch if b[0].numel() > 0]
-        if not batch:
-            return None
-        return denoise_collate(batch, den_cfg)
-
-    tcfg = cfg["train"]
-    train_loader = DataLoader(
-        train_ds,
-        batch_size=tcfg["batch_size"],
-        num_workers=tcfg["num_workers"],
-        collate_fn=collate,
-        pin_memory=True,
-        persistent_workers=tcfg["num_workers"] > 0,
-    )
-    val_loader = DataLoader(
-        val_ds,
-        batch_size=tcfg["batch_size"],
-        num_workers=max(1, tcfg["num_workers"] // 2) if tcfg["num_workers"] > 0 else 0,
-        collate_fn=collate,
-        pin_memory=True,
-        persistent_workers=tcfg["num_workers"] > 0,
-    )
-    return train_loader, val_loader
-
-
-def to_device(batch: dict[str, torch.Tensor], device: torch.device) -> dict[str, torch.Tensor]:
-    return {k: v.to(device, non_blocking=True) for k, v in batch.items()}
-
-
-def run_validation(
-    encoder: MSEncoder,
-    heads: DenoiseHead,
-    val_loader: DataLoader,
-    device: torch.device,
-    autocast_ctx,
-    max_batches: int,
-) -> dict[str, float]:
-    encoder.eval()
-    heads.eval()
-    sums = {"nll_mz": 0.0, "rmse_mz": 0.0}
-    n = 0
-    with torch.no_grad():
-        for i, batch in enumerate(val_loader):
-            if batch is None:
-                continue
-            if i >= max_batches:
-                break
-            batch = to_device(batch, device)
-            with autocast_ctx:
-                tokens = encoder(batch["mz_noisy"], batch["log_int"], batch["key_padding_mask"])
-            loss, parts = heads.loss(
-                tokens, batch["mz_noisy"], batch["mz_clean"], batch["key_padding_mask"],
-            )
-            sums["nll_mz"] += float(parts["nll_mz"])
-            sums["rmse_mz"] += float(parts["rmse_mz"])
-            n += 1
-    encoder.train()
-    heads.train()
-    return {f"val/{k}": v / max(1, n) for k, v in sums.items()}
-
-
-def save_ckpt(path: Path, encoder, heads, optimizer, scheduler, step, cfg) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    torch.save({
-        "step": step,
-        "encoder": encoder.state_dict(),
-        "heads": heads.state_dict(),
-        "optimizer": optimizer.state_dict(),
-        "scheduler": scheduler.state_dict() if scheduler is not None else None,
-        "cfg": cfg,
-    }, path)
-
-
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--config", required=True, type=Path)
-    parser.add_argument("--resume", type=Path, default=None)
-    parser.add_argument("--run-name", type=str, default=None,
-                        help="override log.wandb_run_name and the output dir name")
-    args = parser.parse_args(argv)
+    cli, margs, dargs, targs, largs = parse_config(argv)
 
-    cfg = load_config(args.config)
-    if args.run_name:
-        cfg["log"]["wandb_run_name"] = args.run_name
-
-    tcfg = cfg["train"]
-    lcfg = cfg["log"]
-
-    device = torch.device(tcfg["device"])
-    run_name = lcfg["wandb_run_name"] or time.strftime("%Y%m%d-%H%M%S")
-    out_dir = Path(lcfg["out_dir"]) / run_name
+    run_name = largs.wandb_run_name or cli.config.stem
+    out_dir = Path(largs.out_dir) / run_name
     out_dir.mkdir(parents=True, exist_ok=True)
     (out_dir / "figs").mkdir(exist_ok=True)
-    print(f"[run] {run_name} → {out_dir}", flush=True)
 
-    # wandb
-    wandb.init(
-        project=lcfg["wandb_project"],
-        name=run_name,
-        config=cfg,
-        dir=str(out_dir),
-    )
+    # wandb — the HF integration reads WANDB_PROJECT and TrainingArguments.run_name.
+    report_to: list[str] = []
+    if largs.wandb_project:
+        os.environ.setdefault("WANDB_PROJECT", largs.wandb_project)
+        os.environ.setdefault("WANDB_DIR", str(out_dir))
+        report_to = ["wandb"]
 
-    # Model
-    model_cfg = build_model_config(cfg["model"])
-    encoder = MSEncoder(model_cfg).to(device)
-    heads = DenoiseHead(model_cfg.d_model).to(device)
-    n_params = sum(p.numel() for p in encoder.parameters()) + sum(p.numel() for p in heads.parameters())
-    print(f"[model] {n_params/1e6:.2f}M params", flush=True)
+    training_args = build_training_arguments(targs, largs, out_dir, run_name, report_to)
 
-    # Optimizer & scheduler
-    params = list(encoder.parameters()) + list(heads.parameters())
-    optimizer = AdamW(params, lr=tcfg["lr"], weight_decay=tcfg["weight_decay"], betas=(0.9, 0.95))
-    scheduler = torch.optim.lr_scheduler.LambdaLR(
-        optimizer, lr_lambda=lambda s: lr_lambda(s, tcfg["warmup_steps"], tcfg["total_steps"])
-    )
+    # Model — placement + precision are the Trainer/DeepSpeed engine's job.
+    model = MSDeltaForPretraining(margs.to_model_config())
+    if training_args.local_process_index == 0:
+        n_params = sum(p.numel() for p in model.parameters())
+        print(f"[model] {n_params/1e6:.2f}M params", flush=True)
 
-    # Loaders
-    train_loader, val_loader = make_loaders(cfg)
-
-    # Precision
-    if tcfg["precision"] == "bf16":
-        autocast_ctx = torch.amp.autocast(device_type=device.type, dtype=torch.bfloat16)
-    elif tcfg["precision"] == "fp16":
-        autocast_ctx = torch.amp.autocast(device_type=device.type, dtype=torch.float16)
-    else:
-        autocast_ctx = nullcontext()
-
-    # Resume
-    start_step = 0
-    if args.resume:
-        ckpt = torch.load(args.resume, map_location=device)
-        encoder.load_state_dict(ckpt["encoder"])
-        heads.load_state_dict(ckpt["heads"])
-        optimizer.load_state_dict(ckpt["optimizer"])
-        if ckpt.get("scheduler") is not None:
-            scheduler.load_state_dict(ckpt["scheduler"])
-        start_step = int(ckpt["step"]) + 1
-        print(f"[resume] step {start_step} from {args.resume}", flush=True)
-
-    encoder.train()
-    heads.train()
-    delta_bias_params = list(encoder.bias_module.parameters())
-
-    step = start_step
-    t0 = time.time()
-    running_loss = 0.0
-    running_n = 0
-
-    train_iter = iter(train_loader)
-    while step < tcfg["total_steps"]:
-        try:
-            batch = next(train_iter)
-        except StopIteration:
-            train_iter = iter(train_loader)
-            batch = next(train_iter)
-        if batch is None:
-            continue
-        batch = to_device(batch, device)
-
-        # Save attention once just before bias-curve renders so we can also
-        # log per-head attention entropy at the same cadence.
-        save_attn_this_step = (step % lcfg["bias_curve_every"] == 0)
-        encoder.set_save_attn(save_attn_this_step)
-
-        with autocast_ctx:
-            tokens = encoder(batch["mz_noisy"], batch["log_int"], batch["key_padding_mask"])
-        loss, parts = heads.loss(
-            tokens, batch["mz_noisy"], batch["mz_clean"], batch["key_padding_mask"],
-        )
-        # L1 sparsity penalty on the bias curve (λ=0 → no-op, reproduces denoise baseline).
-        l1_lambda = tcfg.get("l1_lambda", 0.0)
-        if l1_lambda > 0:
-            bias_l1 = encoder.bias_module.l1_penalty()
-            loss = loss + l1_lambda * bias_l1
-        else:
-            bias_l1 = torch.zeros((), device=device)
-
-        optimizer.zero_grad(set_to_none=True)
-        loss.backward()
-        gn_total = grad_norm(params)
-        gn_bias = grad_norm(delta_bias_params)
-        torch.nn.utils.clip_grad_norm_(params, tcfg["grad_clip"])
-        optimizer.step()
-        scheduler.step()
-
-        running_loss += float(loss)
-        running_n += 1
-
-        if save_attn_this_step:
-            ent = attention_entropy_per_head(encoder.blocks)
-            encoder.set_save_attn(False)
-        else:
-            ent = None
-
-        # Logging
-        if step % lcfg["log_every"] == 0:
-            lr = optimizer.param_groups[0]["lr"]
-            wandb_log = {
-                "train/loss": running_loss / max(1, running_n),
-                "train/nll_mz": float(parts["nll_mz"]),
-                "train/rmse_mz": float(parts["rmse_mz"]),
-                "train/mean_log_var": float(parts["mean_log_var"]),
-                "train/bias_l1": float(bias_l1),
-                "train/grad_norm_total": gn_total,
-                "train/grad_norm_delta_bias": gn_bias,
-                "train/lr": lr,
-                "train/step_per_sec": running_n / max(1e-6, time.time() - t0),
-                "step": step,
-            }
-            if ent is not None:
-                for layer_i, row in enumerate(ent):
-                    for h_i, e in enumerate(row):
-                        wandb_log[f"attn_entropy/L{layer_i}_H{h_i}"] = float(e)
-            wandb.log(wandb_log, step=step)
+    # Only global rank 0 performs the expensive map/filter. Other ranks wait,
+    # then execute the same calls and immediately load rank 0's completed Arrow
+    # cache. This requires the ranks to share the HF/datasets cache, as they do
+    # on a single multi-GPU node (and on multi-node jobs with shared storage).
+    with training_args.main_process_first(local=False, desc="dataset preprocessing"):
+        if training_args.process_index == 0:
             print(
-                f"step {step:>6} loss {wandb_log['train/loss']:.4f} "
-                f"nll {wandb_log['train/nll_mz']:.4f} rmse {wandb_log['train/rmse_mz']:.4f} "
-                f"|g| {gn_total:.3f} |g_bias| {gn_bias:.3f} lr {lr:.2e}",
+                f"[data] preprocessing with {dargs.preprocess_num_workers} CPU workers",
                 flush=True,
             )
-            running_loss = 0.0
-            running_n = 0
-            t0 = time.time()
+        train_paths, val_paths = resolve_dataset_paths(dargs.to_source_dict())
+        train_ds, val_ds = build_pretraining_datasets(
+            train_paths, val_paths, dargs.preprocess(),
+            num_proc=dargs.preprocess_num_workers or None,
+        )
+    eval_size = targs.val_batches * targs.batch_size
+    eval_ds = val_ds.select(range(min(len(val_ds), eval_size)))
 
-        if step > 0 and step % lcfg["val_every"] == 0:
-            val_metrics = run_validation(
-                encoder, heads, val_loader, device, autocast_ctx,
-                max_batches=tcfg["val_batches"],
-            )
-            wandb.log({**val_metrics, "step": step}, step=step)
-            print(f"  val: " + "  ".join(f"{k}={v:.4f}" for k, v in val_metrics.items()), flush=True)
+    trainer = MSDeltaTrainer(
+        model=model,
+        args=training_args,
+        train_dataset=train_ds,
+        eval_dataset=eval_ds,
+        data_collator=MaskIntensityCollator(mask_ratio=dargs.mask_ratio),
+    )
+    # The model always returns a loss but exposes no label columns for HF to
+    # detect, so the eval loop would otherwise skip loss and report no eval_loss
+    # (our val KL). Force it on.
+    trainer.can_return_loss = True
+    resolved = {**asdict(margs), **asdict(dargs), **asdict(targs), **asdict(largs)}
+    for cb in build_callbacks(model, val_ds, dargs.preprocess(), largs, resolved, out_dir):
+        trainer.add_callback(cb)
 
-        if step % lcfg["bias_curve_every"] == 0:
-            panels = render_bias_panels(encoder.bias_module, step)
-            wandb_imgs = {}
-            for name, fig in panels.items():
-                fig_path = out_dir / "figs" / f"{name.replace('/', '_')}_step{step:06d}.png"
-                fig.savefig(fig_path, dpi=110)
-                wandb_imgs[name] = wandb.Image(str(fig_path))
-                import matplotlib.pyplot as plt
-                plt.close(fig)
-            wandb.log({**wandb_imgs, "step": step}, step=step)
+    trainer.train(resume_from_checkpoint=str(cli.resume) if cli.resume else None)
 
-        if step > 0 and step % lcfg["ckpt_every"] == 0:
-            ckpt_path = out_dir / f"step{step:06d}.pt"
-            save_ckpt(ckpt_path, encoder, heads, optimizer, scheduler, step, cfg)
-            save_ckpt(out_dir / "last.pt", encoder, heads, optimizer, scheduler, step, cfg)
-            print(f"  ckpt → {ckpt_path}", flush=True)
-
-        step += 1
-
-    # Final
-    save_ckpt(out_dir / "final.pt", encoder, heads, optimizer, scheduler, step, cfg)
-    panels = render_bias_panels(encoder.bias_module, step)
-    import matplotlib.pyplot as plt
-    for name, fig in panels.items():
-        fig_path = out_dir / "figs" / f"{name.replace('/', '_')}_final.png"
-        fig.savefig(fig_path, dpi=110)
-        plt.close(fig)
-    wandb.finish()
+    # Final artifacts — main process writes the model + a last bias-curve render.
+    if trainer.is_world_process_zero():
+        trainer.save_model(str(out_dir / "final"))
+        panels = render_bias_panels(model.encoder.bias_module, trainer.state.global_step)
+        for name, fig in panels.items():
+            fig.savefig(out_dir / "figs" / f"{name.replace('/', '_')}_final.png", dpi=110)
+            plt.close(fig)
     return 0
 
 

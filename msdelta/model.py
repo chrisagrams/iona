@@ -1,7 +1,6 @@
 """Peak-token transformer with learned per-head Δm/z attention bias + MPM heads."""
 from __future__ import annotations
 
-import math
 from dataclasses import dataclass, field
 
 import torch
@@ -16,6 +15,7 @@ class FourierConfig:
     n_freqs: int
     f_min: float
     f_max: float
+    learnable: bool = True
 
 
 @dataclass
@@ -24,16 +24,15 @@ class DeltaBiasConfig:
     # Per-head hidden width. Each head gets its OWN MLP (no parameter
     # sharing across heads), so total bias capacity is n_heads * per_head_hidden.
     # Smaller than the old shared `hidden` because activation memory is
-    # (B, K, K, n_heads * per_head_hidden) — set this to keep that under
-    # ~6 GB at bf16 (per_head_hidden=32 with B=256, K=150, H=8).
+    # (B, K, K, n_heads * per_head_hidden)
     per_head_hidden: int = 32
     f_min: float = 1e-2
     f_max: float = 1e3
     # Bound the per-head bias to ±scale logits via scale*tanh(raw/scale).
     # Keeps the bias comparable to the content term (q·k/√d ~ O(1-2)) so
-    # neither can steamroll the other — prevents the "bias dominates
-    # content" runaway (high-level plan §6.3).
+    # neither can steamroll the other
     scale: float = 3.0
+    learnable: bool = True
 
 
 @dataclass
@@ -44,104 +43,107 @@ class ModelConfig:
     ffn_mult: int = 4
     dropout: float = 0.1
     max_peaks: int = 150
-    fourier_mz: FourierConfig = field(default_factory=lambda: FourierConfig(64, 1e-2, 1e3))
     fourier_int: FourierConfig = field(default_factory=lambda: FourierConfig(16, 1e-2, 1e2))
     delta_bias: DeltaBiasConfig = field(default_factory=DeltaBiasConfig)
+    # Zero the (i, i) entry of the Δm bias so the bias module can't modulate
+    # self-attention (Δm=0 → a per-head constant self-logit offset).
+    zero_bias_diagonal: bool = True
 
 
 class PeakEmbed(nn.Module):
-    """(m/z, log_int) → d_model token. No masking; denoising autoencoder."""
+    """m/z-FREE token embedding (v9): token = MLP(Fourier(log_int)).
+
+    Tokens deliberately do NOT encode m/z — m/z flows only through the Δm
+    bias, making the bias the sole carrier of m/z structure (ALiBi/T5-style
+    relative-only position). A learned [MASK] vector replaces the token at
+    masked positions for masked-intensity prediction.
+    """
 
     def __init__(self, cfg: ModelConfig):
         super().__init__()
-        self.ff_mz = FourierFeatures(cfg.fourier_mz.n_freqs, cfg.fourier_mz.f_min, cfg.fourier_mz.f_max)
-        self.ff_int = FourierFeatures(cfg.fourier_int.n_freqs, cfg.fourier_int.f_min, cfg.fourier_int.f_max)
-        in_dim = self.ff_mz.out_dim + self.ff_int.out_dim
+        self.ff_int = FourierFeatures(
+            cfg.fourier_int.n_freqs, cfg.fourier_int.f_min, cfg.fourier_int.f_max,
+            learnable=cfg.fourier_int.learnable)
         self.mlp = nn.Sequential(
-            nn.Linear(in_dim, cfg.d_model),
+            nn.Linear(self.ff_int.out_dim, cfg.d_model),
             nn.GELU(),
             nn.Linear(cfg.d_model, cfg.d_model),
         )
+        self.mask_token = nn.Parameter(torch.randn(cfg.d_model) * 0.02)
 
-    def forward(self, mz: Tensor, log_int: Tensor) -> Tensor:
-        """mz, log_int: (B, K) → (B, K, d_model)."""
-        feats = torch.cat([self.ff_mz(mz), self.ff_int(log_int)], dim=-1)
-        return self.mlp(feats)
+    def forward(self, log_int: Tensor, mask_positions: Tensor | None = None) -> Tensor:
+        """log_int: (B, K); mask_positions: (B, K) bool or None → (B, K, d_model)."""
+        feats = self.ff_int(log_int)  # fp32 Fourier features
+        tokens = self.mlp(feats.to(self.mlp[0].weight.dtype))
+        if mask_positions is not None:
+            tokens = torch.where(mask_positions.unsqueeze(-1), self.mask_token, tokens)
+        return tokens
 
 
 class DeltaMZBias(nn.Module):
     """Learned per-head additive attention bias from signed Δm/z.
 
-    Each head has its OWN independent MLP (no parameter sharing across
-    heads). Implemented as stacked per-head Parameter tensors with einsum
-    for efficient batched compute. Decoupling the gradient pools lets
-    heads specialize on different Δm regions instead of all collapsing
-    to whichever single feature dominates the data (e.g., suppression of
-    small-Δm near-duplicate peaks).
+    The bias is H independent 2-layer MLPs of a single scalar (Δm/z, lifted
+    through log-spaced Fourier features), one per attention head, bounded to
+    ±scale by a tanh. Decoupling the heads lets each specialize on a
+    different Δm region instead of all collapsing onto whichever feature
+    dominates the data (e.g. suppression of small-Δm near-duplicate peaks).
+
+    "H independent MLPs sharing one input" needs no special machinery:
+      * Layer 1 (shared Fourier features → per-head hidden) is a plain
+        ``Linear(in_dim, H*D_h)`` whose outputs we simply *view* as
+        ``(H, D_h)`` — every Linear output unit is already an independent
+        function of the whole input, which is exactly per-head independence.
+      * Layer 2 (per-head hidden → per-head scalar) is a per-head weighted
+        sum over the hidden dim: ``(h * w2).sum(-1) + b2``.
+    ``forward`` (the Δm matrix) and ``evaluate`` (a 1-D grid) both route
+    through :meth:`_curve`, so the whole architecture lives in one place.
     """
 
     def __init__(self, n_heads: int, cfg: DeltaBiasConfig):
         super().__init__()
-        self.ff = FourierFeatures(cfg.n_freqs, cfg.f_min, cfg.f_max, log_spaced=True)
+        self.ff = FourierFeatures(cfg.n_freqs, cfg.f_min, cfg.f_max, log_spaced=True,
+                                  learnable=cfg.learnable)
         self.n_heads = n_heads
         self.per_head_hidden = cfg.per_head_hidden
         self.scale = cfg.scale
 
-        in_dim = self.ff.out_dim
         H, D_h = n_heads, cfg.per_head_hidden
 
-        # Per-head first layer: 8 separate Linear(in_dim, per_head_hidden).
-        self.w1 = nn.Parameter(torch.empty(H, in_dim, D_h))
-        self.b1 = nn.Parameter(torch.zeros(H, D_h))
-        # Per-head output projection: 8 separate Linear(per_head_hidden, 1).
-        self.w2 = nn.Parameter(torch.zeros(H, D_h))     # zero-init → bias starts at 0
+        # Layer 1: one Linear whose H*D_h outputs we view as H per-head blocks.
+        self.fc1 = nn.Linear(self.ff.out_dim, H * D_h)
+        # Layer 2: per-head readout (D_h → scalar), applied as a weighted sum.
+        # Zero-init so every head's bias starts at exactly 0.
+        self.w2 = nn.Parameter(torch.zeros(H, D_h))
         self.b2 = nn.Parameter(torch.zeros(H))
-
-        # Init each head's first layer the same way nn.Linear does (Kaiming).
-        for h in range(H):
-            nn.init.kaiming_uniform_(self.w1[h], a=math.sqrt(5))
-        bound = 1 / math.sqrt(in_dim)
-        nn.init.uniform_(self.b1, -bound, bound)
 
     def _bound(self, out: Tensor) -> Tensor:
         # Bound to ±scale logits so the bias can't steamroll the content term.
         return self.scale * torch.tanh(out / self.scale)
 
+    def _curve(self, feats: Tensor) -> Tensor:
+        """feats: (..., ff_dim) → bounded per-head bias (..., H).
+
+        The whole bias architecture. `feats` may carry any leading dims (the
+        (B, K, K) Δm matrix in `forward`, a flat (N,) grid in `evaluate`).
+        """
+        h = self.fc1(feats.to(self.fc1.weight.dtype)).unflatten(-1, (self.n_heads, self.per_head_hidden))  # (..., H, D_h)
+        h = F.gelu(h)
+        out = (h * self.w2).sum(-1) + self.b2                                    # (..., H)
+        return self._bound(out)
+
     def forward(self, mz: Tensor) -> Tensor:
         """mz: (B, K) → bias: (B, n_heads, K, K)."""
-        dm = mz.unsqueeze(-1) - mz.unsqueeze(-2)              # (B, K, K), signed
-        feats = self.ff(dm)                                   # (B, K, K, in_dim)
-        # Per-head first layer: (B, K, K, H, D_h)
-        h = torch.einsum("bijd,hde->bijhe", feats, self.w1) + self.b1
-        h = F.gelu(h)
-        # Per-head output: (B, K, K, H)
-        out = torch.einsum("bijhe,he->bijh", h, self.w2) + self.b2
-        out = self._bound(out)
-        return out.permute(0, 3, 1, 2).contiguous()           # (B, H, K, K)
+        dm = mz.unsqueeze(-1) - mz.unsqueeze(-2)             # (B, K, K), signed
+        curve = self._curve(self.ff(dm))                     # (B, K, K, H)
+        return curve.permute(0, 3, 1, 2).contiguous()        # (B, H, K, K)
 
     def evaluate(self, dm_grid: Tensor) -> Tensor:
-        """For visualization: evaluate per-head bias on a 1-D Δm grid.
+        """Evaluate per-head bias on a 1-D Δm grid.
 
-        dm_grid: (N,) → (N, n_heads). Returns the bounded bias (what the
-        attention actually sees).
+        dm_grid: (N,) → (N, n_heads). Bounded bias (what attention sees).
         """
-        feats = self.ff(dm_grid)                              # (N, in_dim)
-        h = torch.einsum("nd,hde->nhe", feats, self.w1) + self.b1
-        h = F.gelu(h)
-        out = torch.einsum("nhe,he->nh", h, self.w2) + self.b2
-        return self._bound(out)                               # (N, H)
-
-    def l1_penalty(self, lo: float = -200.0, hi: float = 200.0, n: int = 4001) -> Tensor:
-        """Mean |bias| over a uniform Δm grid, for an L1 sparsity penalty.
-
-        Data-independent — penalizes the *shape* of the learned bias curve
-        uniformly over Δm, so the broad locality bump (wide → lots of area)
-        and the noise floor (everywhere) are taxed while a narrow chemistry
-        spike costs almost nothing. Added to the training loss as
-        λ · l1_penalty() to push the bias toward a few sharp spikes.
-        """
-        grid = torch.linspace(lo, hi, n, device=self.w1.device, dtype=self.w1.dtype)
-        return self.evaluate(grid).abs().mean()
+        return self._curve(self.ff(dm_grid)).float()         # (N, H)
 
 
 class BiasedMHA(nn.Module):
@@ -152,18 +154,10 @@ class BiasedMHA(nn.Module):
         assert d_model % n_heads == 0
         self.n_heads = n_heads
         self.d_head = d_model // n_heads
-        self.scale = 1.0 / math.sqrt(self.d_head)
         self.qkv = nn.Linear(d_model, 3 * d_model, bias=True)
         self.out = nn.Linear(d_model, d_model, bias=True)
         self.attn_dropout = dropout
         self.proj_dropout = nn.Dropout(dropout)
-        self._save_attn = False
-        self.last_attn: Tensor | None = None  # (B, H, K, K), no grad
-
-    def set_save_attn(self, save: bool) -> None:
-        self._save_attn = save
-        if not save:
-            self.last_attn = None
 
     def forward(self, x: Tensor, bias: Tensor, key_padding_mask: Tensor) -> Tensor:
         """x: (B, K, D); bias: (B, H, K, K); key_padding_mask: (B, K) True=pad."""
@@ -174,19 +168,14 @@ class BiasedMHA(nn.Module):
         k = k.transpose(1, 2)
         v = v.transpose(1, 2)
 
-        logits = torch.matmul(q, k.transpose(-1, -2)) * self.scale  # (B, H, K, K)
-        logits = logits + bias
+        # Fold key padding into the additive bias: one float mask for SDPA.
+        attn_mask = bias.masked_fill(key_padding_mask[:, None, None, :], float("-inf"))
 
-        # Mask out keys that are padding. mask: (B, 1, 1, K)
-        mask = key_padding_mask[:, None, None, :]
-        logits = logits.masked_fill(mask, float("-inf"))
-
-        attn = F.softmax(logits, dim=-1)
-        if self._save_attn:
-            self.last_attn = attn.detach()
-        attn = F.dropout(attn, p=self.attn_dropout, training=self.training)
-
-        out = torch.matmul(attn, v)  # (B, H, K, d_head)
+        out = F.scaled_dot_product_attention(
+            q, k, v,
+            attn_mask=attn_mask,
+            dropout_p=self.attn_dropout if self.training else 0.0,
+        )
         out = out.transpose(1, 2).reshape(B, K, -1)
         return self.proj_dropout(self.out(out))
 
@@ -219,6 +208,7 @@ class MSEncoder(nn.Module):
         super().__init__()
         self.cfg = cfg
         self.embed = PeakEmbed(cfg)
+        self.zero_bias_diagonal = cfg.zero_bias_diagonal
         self.bias_module = DeltaMZBias(cfg.n_heads, cfg.delta_bias)
         self.blocks = nn.ModuleList([EncoderBlock(cfg) for _ in range(cfg.n_layers)])
         self.norm = nn.LayerNorm(cfg.d_model)
@@ -228,83 +218,79 @@ class MSEncoder(nn.Module):
         mz: Tensor,
         log_int: Tensor,
         key_padding_mask: Tensor,
+        mask_positions: Tensor | None = None,
     ) -> Tensor:
-        tokens = self.embed(mz, log_int)
-        bias = self.bias_module(mz)  # (B, H, K, K)
-        # Zero the Δm bias on any pair touching a padded position so the
-        # zero-padding sentinel doesn't pollute the bias gradient.
-        real = ~key_padding_mask                                       # (B, K)
-        bias_valid = real[:, None, :, None] & real[:, None, None, :]   # (B, 1, K, K)
-        bias = bias * bias_valid
-        # Also zero the diagonal so self-attention is never modulated by
-        # the bias — forces self-suppression onto the content (Q/K) path
-        # and frees the bias module to specialize on chemistry.
-        K = mz.size(1)
-        diag = torch.eye(K, dtype=torch.bool, device=mz.device).view(1, 1, K, K)
-        bias = bias.masked_fill(diag, 0.0)
+        tokens = self.embed(log_int, mask_positions)   # m/z-free tokens (B, K, D)
+
+        bias = self.bias_module(mz)  # (B, H, K, K) — the only place m/z enters
+        # Zero the diagonal so self-attention is never modulated by the
+        # bias — forces self-suppression onto the content (Q/K) path and
+        # frees the bias module to specialize on chemistry. Key-padding is
+        # handled in BiasedMHA (folded into the SDPA attn_mask as -inf), so
+        # the bias needs no separate padding mask here. Toggled off by the
+        # diagonal-zero ablation (cfg.zero_bias_diagonal).
+        if self.zero_bias_diagonal:
+            K = mz.size(1)
+            diag = torch.eye(K, dtype=torch.bool, device=mz.device).view(1, 1, K, K)
+            bias = bias.masked_fill(diag, 0.0)
         for blk in self.blocks:
             tokens = blk(tokens, bias, key_padding_mask)
-        return self.norm(tokens)
-
-    def set_save_attn(self, save: bool) -> None:
-        for blk in self.blocks:
-            blk.attn.set_save_attn(save)
+        tokens = self.norm(tokens)
+        return tokens
 
 
-class DenoiseHead(nn.Module):
-    """m/z denoising head.
+class IntensityHead(nn.Module):
+    """Masked-intensity prediction head (v13 — KL on the masked subset).
 
-    Predicts a per-peak (residual, log_var). The cleaned m/z is then
-    ``mz_noisy + residual``; loss is Gaussian NLL on the residual against
-    the true delta (mz_clean - mz_noisy). Residual parameterization keeps
-    the target small (~0.1 Da Gaussian noise, ±1.003 isotope shifts) and
-    makes "do nothing" a meaningful identity init.
+    Per-peak scalar logit; per-spectrum softmax across masked positions
+    gives a predicted distribution over the masked subset, compared via
+    KL against the true intensity distribution (raw intensity normalised
+    to sum to 1 across the masked peaks). Tokens are m/z-free, so the only
+    way the model can localise a masked peak is via the Δm bias — and
+    framing the target as a distribution puts intensity *ratios* (M+0/M+1
+    ≈ 5:1 for ¹³C, residue-ladder ratios, …) directly into the loss.
+
+    Pre-v13 used MSE on the per-spectrum max-normalised log_int; that
+    target was so concentrated (mean ≈ 0.76, var ≈ 0.007) that constant-
+    predict was near-optimal and the bias chemistry never got real
+    gradient pressure (see EXPERIMENTS.md §v13).
     """
 
-    def __init__(self, d_model: int, init_log_var: float = -2.0):
+    def __init__(self, d_model: int):
         super().__init__()
-        self.head = nn.Linear(d_model, 2)  # (residual, log_var)
-        # Initialize the residual prediction near zero (default identity
-        # behavior) and the log_var bias to ~-2 so initial variance is
-        # exp(-2) ≈ 0.14 — between the Gaussian noise σ=0.1 and the
-        # isotope shift 1.003. Reasonable starting uncertainty.
-        with torch.no_grad():
-            self.head.weight.zero_()
-            self.head.bias.zero_()
-            self.head.bias[1] = init_log_var
+        self.head = nn.Linear(d_model, 1)
 
     def loss(
         self,
         tokens: Tensor,
-        mz_noisy: Tensor,
-        mz_clean: Tensor,
-        key_padding_mask: Tensor,
+        intensity_prob_target: Tensor,
+        mask_positions: Tensor,
     ) -> tuple[Tensor, dict[str, Tensor]]:
-        """Per-peak Gaussian NLL on the cleaning residual, masked to real peaks."""
-        real = ~key_padding_mask                       # (B, K)
-        if not real.any():
+        """KL(p || q) on masked positions, batch-mean."""
+        if not mask_positions.any():
             zero = tokens.new_zeros(())
-            return zero, {"nll_mz": zero, "rmse_mz": zero, "mean_log_var": zero}
+            return zero, {"kl": zero}
 
-        out = self.head(tokens.float())                # (B, K, 2)
-        residual = out[..., 0]                         # predicted (clean - noisy)
-        log_var = out[..., 1].clamp(-10.0, 10.0)
-        true_delta = mz_clean - mz_noisy               # (B, K)
+        # Matmul in the token/weight dtype (bf16 under DeepSpeed), then upcast
+        # the per-peak logits to fp32 for the numerically-sensitive KL below.
+        logits = self.head(tokens).squeeze(-1).float()             # (B, K)
+        m = mask_positions
 
-        sq_err = (true_delta - residual) ** 2          # (B, K)
-        # Gaussian NLL (drop the constant 0.5*log(2π))
-        nll = 0.5 * log_var + 0.5 * sq_err / log_var.exp()
+        # Predicted distribution q over masked positions, per row. Setting
+        # non-masked logits to -inf zeros them in the softmax denominator;
+        # we then overwrite the -inf in log_q with 0 so the subsequent
+        # multiply-by-zero target doesn't produce 0·(-inf) = NaN.
+        log_q = F.log_softmax(logits.masked_fill(~m, float("-inf")), dim=-1)
+        log_q = log_q.masked_fill(~m, 0.0)
 
-        nll = nll[real].mean()
-        rmse = sq_err[real].mean().sqrt()
-        return nll, {
-            "nll_mz": nll.detach(),
-            "rmse_mz": rmse.detach(),
-            "mean_log_var": log_var[real].detach().mean(),
-        }
+        # Target distribution p over masked positions, per row. Re-normalise
+        # the per-spectrum (sum-to-1) intensity probabilities to sum-to-1
+        # over the masked subset only.
+        p = intensity_prob_target.masked_fill(~m, 0.0)
+        p = p / p.sum(dim=-1, keepdim=True).clamp_min(1e-12)
 
-    @torch.no_grad()
-    def predict(self, tokens: Tensor, mz_noisy: Tensor) -> Tensor:
-        """Return predicted clean m/z = mz_noisy + residual."""
-        out = self.head(tokens.float())
-        return mz_noisy + out[..., 0]
+        # F.kl_div expects log-prob input + prob target; 'batchmean' = / B.
+        # (The default 'mean' divides by B·K which is wrong for variable K.)
+        kl = F.kl_div(log_q, p, reduction="batchmean")
+
+        return kl, {"kl": kl.detach()}

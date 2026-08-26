@@ -1,0 +1,49 @@
+# Capacity-sweep tier XL  (one per A100-40GB; run all 4 in parallel).
+# Equal data exposure: 160000 steps x batch 80 = ~12.8M spectra (~0.12 epoch).
+# Baseline architecture (m/z-free + per-head bias + masked-intensity); charge/precursor
+# OFF to isolate the effect of capacity on head specialization. ~30 GB est. peak.
+# Launch: CUDA_VISIBLE_DEVICES=<gpu> msdelta-train --config configs/scale_XL.yaml
+d_model: 1024
+n_heads: 16
+n_layers: 16
+ffn_mult: 4
+dropout: 0.1
+max_peaks: 150
+fourier_int_n_freqs: 16
+fourier_int_f_min: 1.0e-2
+fourier_int_f_max: 1.0e+2
+fourier_int_learnable: true
+delta_bias_n_freqs: 64
+delta_bias_per_head_hidden: 48
+delta_bias_f_min: 1.0e-2
+delta_bias_f_max: 1.0e+3
+delta_bias_scale: 3.0
+delta_bias_learnable: true
+
+root: /mnt/vault-1/k8/concensus_spec_30M/consensus_100M/
+n_val_files: 2
+intensity_threshold_frac: 0.01
+top_n: 150
+mask_ratio: 0.15
+
+batch_size: 80
+num_workers: 8
+lr: 1.0e-4
+warmup_steps: 2000
+total_steps: 160000
+weight_decay: 0.01
+grad_clip: 1.0
+precision: bf16
+val_batches: 50
+device: cuda
+seed: 0
+
+wandb_project: msdelta-scale
+wandb_run_name: scale_XL
+log_every: 50
+val_every: 2000
+bias_curve_every: 5000
+ckpt_every: 10000
+probe_every: 10000
+probe_n_spectra: 3000
+out_dir: ./runs

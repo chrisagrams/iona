@@ -436,6 +436,580 @@ everything else frozen):
 
 `l1_lambda: 0.0` reproduces v7 exactly.
 
+**Result (3 runs, 20k steps each: λ = 0.01, 0.1, 1.0).** Neither fork
+branch — a *third* outcome we hadn't written down.
+
+| run | mean\|bias\| | RMSE | head outcome | best align p |
+|---|---|---|---|---|
+| v7 (λ=0) | 1.56 | ~0.039 | 8 noisy heads (~40 pk ea) | 0.064 |
+| λ=0.01 | 0.55 | 0.043 | shrunk uniformly, still noisy | n.s. |
+| λ=0.1 | 0.035 | 0.047 | **7/8 heads zeroed; 1 survivor still a thicket** | n.s. |
+| λ=1.0 | 0.00 | 0.048 | all heads dead (content-only) | n.s. |
+
+The L1 worked mechanically (bias magnitude collapsed with λ) but produced
+**head-death, not head-sharpening** — the optimizer zeroed whole heads
+rather than concentrating each onto a few chemistry spikes. No setting
+produced significant chemistry.
+
+**The decisive insight — an ablation hiding in the sweep.** λ=1.0 is a
+clean ablation: bias ≡ 0, pure content attention. Its RMSE (0.048) is only
+~0.005 Da (~11%) worse than the near-full-bias λ=0.01 run (0.043). So:
+
+> **The Δm bias is *used* (probe: attention follows it) but nearly
+> *dispensable* (ablation: removing it costs ~11% RMSE). Content attention
+> reproduces ~90% of what it does.**
+
+That reconciles "load-bearing" (probe) with "head-death under L1": since
+the bias barely helps denoising, the optimizer happily sacrifices 7 heads
+to satisfy the penalty. There is no gradient pressure to encode chemistry
+because **the denoising task can be solved by content attention alone** —
+it never *needs* Δm-relational reasoning.
+
+**Verdict — the real fork was a third branch:** *the bias is optional for
+this task; no regularizer can force chemistry into a parameter the
+objective doesn't require.* Four interventions (per-head MLPs v4, bounded
+bias v6, smaller noise v7, sparsity v8) all leave the bias chemistry-free.
+v7's head 3 (p=0.064) was a lucky fluctuation, not an amplifiable signal.
+→ **Pivot to a task where Δm-relational reasoning is irreducibly necessary
+(can't be done peak-by-peak). See v9.**
+
+### Interlude — the probe suite (plan §6.1) flips the narrative
+
+Before pivoting we built `msdelta-probe` (frozen-encoder linear probes) and
+ran it on v7's checkpoint. The result reframes everything:
+
+| tier | probe | result | baseline |
+|---|---|---|---|
+| 1 | precursor m/z | MAE 7.9 Da, R²=0.997 | 520 Da |
+| 1 | peak count | R²=0.994 | — |
+| 1 | log TIC | R²=0.989 | — |
+| 2 | **charge** | **acc 100%** | 59% |
+| 2 | **neutral loss** | **AUC 0.96** | 0.49 |
+| 2 | **isotope M+k** | **F1 0.86** | — |
+
+**The encoder learned the chemistry — extremely well.** Charge is read
+straight from isotope spacing (1/z Da); the encoder gets it 100%. So the
+chemistry is *present* — it just lives in the **content path** (Q/K/V over
+m/z-bearing tokens), not in the Δm bias. The bias-curve analyses weren't
+wrong; the chemistry simply isn't where we were looking.
+
+Root cause, made precise: **tokens carry m/z** (`PeakEmbed` =
+`MLP([Fourier(m/z) ⊕ Fourier(int)])`), so `q_i·k_j` can compute any
+function of `(m/z_i, m/z_j)`. Content attention is a complete substitute
+for a Δm bias — so the bias is never forced to carry chemistry. This is
+the "absolute position baked into tokens" regime; relative-position
+biases (ALiBi/T5) only become load-bearing when absolute position is
+*stripped from the tokens*.
+
+### v9 — m/z-free tokens + masked-intensity prediction *(this branch)*
+
+The T5 mapping for a spectrum: **m/z = position**, **intensity = content**.
+T5 strips position from tokens (relative bias carries it) and predicts
+*content*. Our v5–v7 denoising predicted m/z = *position* — the one thing
+you can't predict once you strip it. The faithful analog predicts
+intensity instead:
+
+- **`PeakEmbed` becomes m/z-free:** token = `MLP(Fourier(log_int))` + a
+  learned `[MASK]`. Tokens no longer know their own m/z.
+- **m/z flows only through `DeltaMZBias`** → the bias is now the *sole*
+  carrier of all m/z structure. Forced load-bearing, ALiBi-style.
+- **Task = masked-intensity prediction:** mask ~15% of peaks' intensity
+  (token → `[MASK]`), predict it. Loss = **MSE on masked positions only**:
+  `L = mean_{(b,i)∈mask} (pred_i − logint_i)²`.
+- No leak: a masked peak is handed its *position* (m/z, via the bias) and
+  asked for *content* (intensity) — never the reverse. Its identity is
+  purely relational, exactly the T5 sentinel.
+
+**Why this forces chemistry into the bias.** To predict a masked peak's
+intensity the cleanest move is to find its M+0 partner at −1.003 Da and
+scale by the isotope ratio — which the model can *only* do by reading a
+¹³C feature off the bias (tokens have no m/z). Minimizing this MSE
+directly rewards a +1.003 bias spike. The incentive is in the objective,
+not hoped for.
+
+**Why MSE not Gaussian-NLL:** intensity is bounded in (0,1]; the NLL
+variance head caused the v5–v7 grad-norm explosions. Point estimate is
+safer for the fork test.
+
+**The gate (don't repeat the v8 mistake):** before a full run, train this
+**with the bias ablated** (content-only). With m/z-free tokens, content
+attention has no m/z at all — if content-only *still* solves masked-
+intensity, the task doesn't need the bias and we rethink. If content-only
+fails and the full model succeeds, the bias is doing the work.
+
+**Risk:** a single scalar/peak is thin signal; intensity may lean on
+absolute m/z (now unavailable) more than relational structure, making the
+task too hard. The ablation gate + probe suite tell us before we commit.
+
+**Scoreboard:** rerun `msdelta-probe` on the v9 checkpoint. The question
+is whether charge/isotope/neutral-loss *still* decode well now that the
+bias is forced to carry m/z — and whether the bias curves finally show
+significant alignment (`msdelta-analyze`).
+
+**RESULT (full 50k run, `runs/20260524-140946`) — the pivot worked.**
+First positive result of the project.
+
+*Transfer (probe suite) — chemistry fully decodable, now necessarily via
+the bias:*
+
+| probe | v9 (m/z-free) | note |
+|---|---|---|
+| precursor m/z | R² 0.996 | reconstructed with **no m/z in tokens** |
+| charge | **100%** | charge = isotope spacing → only reachable via the bias |
+| neutral loss | AUC 0.95 | |
+| isotope M+k | F1 0.87 | |
+
+charge=100% + precursor R²=0.996 with m/z-free tokens proves the Δm bias
+is carrying the m/z chemistry — the load-bearing property v4–v8 never had.
+
+*Bias-curve alignment (`msdelta-analyze`) — first significant chemistry head:*
+
+| | enrichment | p | top hits |
+|---|---|---|---|
+| **coarse head 4** | **2.2×** | **0.002** | M·131, V·99, E·129, L/I·113 (<0.1 Da) |
+| **fine head 4** | **2.5×** | **0.011** | ¹³C/z3·0.334, ¹³C/z2·0.501, ¹³C·1.003 |
+
+Head 4 is significant in **both** ranges. Coarse **survives
+multiple-comparison correction** (16 tests × 0.002 ≈ 0.032 < 0.05) — vs
+v7's best non-surviving p=0.064.
+
+**Measurement fix (charge-aware isotopes).** Initially fine-isotope
+alignment looked merely near-significant (p=0.06) — because we scored
+only the z=1 spacings {1.003, 2.005}. But ¹³C spacing in *m/z* is
+`1.003/z`, and the data is mostly z=2/3, so the real isotope peaks sit at
+**0.502 (z=2)** and **0.334 (z=3)** — which the model learned and we were
+scoring as misses. Adding the `1.003/z` references (z=1,2,3) to
+`viz.ISOTOPES` flipped head 4 fine to p=0.011, with hits landing exactly
+at 0.334 / 0.501 / 1.003. The model learned **charge-resolved isotope
+spacing**. (Heads 2/3/5/7 also show precise 0.33/0.50/0.67 hits, p≈0.05–0.10.)
+Lesson, again: score the right targets — most of the isotope signal was
+at Δm we weren't looking at.
+
+![v9 coarse alignment — head 4 residue peaks](figures/v9_align_coarse_50k.png)
+![v9 functional probe — attention follows bias](figures/v9_probe_fine_50k.png)
+
+*Functional probe:* Spearman(bias, attention) 0.56–0.91 (fine) — attention
+concentrates where the bias peaks. Load-bearing confirmed directly.
+
+**Honest calibration.** It's primarily *one* head (head 4) that clearly
+specialized; others are at/near chance in coarse. Fine-isotope alignment
+is near- (not past-) significant, though hit precision (±1.003 to the mDa)
+is more convincing than the p-value. Coarse functional-probe correlations
+are modest (0.13–0.48) — residue-scale bias structure is real but doesn't
+dominate attention. So: "a head learned residues + isotopes," not "all 8
+did" — but a correction-surviving chemical head is a categorical step up
+from eight versions of "vestigial."
+
+**Conclusion.** The original thesis — heads specialize on chemically
+meaningful Δm, surfaced in a learned per-head bias — is **demonstrated**
+for head 4, and the m/z-free architecture is *why*: stripping m/z from
+tokens made the bias the only path for relational chemistry, exactly as
+the T5/ALiBi analogy predicted.
+
+**Next steps (decided — NOT ready to scale yet; n=1 head, n=1 seed).**
+Before a big expensive run, confirm the effect is robust and get more
+heads to specialize, all at current (small) scale:
+1. **Reproducibility:** 2 more seeds of the v9 config. A correction-
+   surviving chemical head in all 3 → green light to scale. (Gate.)
+2. **Charge-conditioned bias `bias_h(Δm, z)`** — now the *best-motivated*
+   lever: head 4 is cramming isotope spacing at 0.33 *and* 0.50 *and*
+   1.003 into one curve (it learned all three!). Let each charge index
+   its own spacing and the isotope head should sharpen sharply, and more
+   heads may free up for residues.
+3. **L1 sparsity penalty** — meaningful now that the bias is load-bearing
+   (v8's head-death was on a *dispensable* bias).
+
+Scaling (d=512 / 12 layers / 16 heads) comes *after* these confirm a
+robust, multi-head effect — scaling amplifies what's there, and "1 of 8
+on 1 seed" is too fragile to bet a 4–8× run on. "Only 1 head" looks like
+an optimization/incentive problem, not a capacity one.
+
+### v9 seed gate — RESULT (3 seeds, 35k each)
+
+Ran the reproducibility gate (seed configs, `train.seed` knob). Best
+coarse-range head per seed, with charge-aware isotope refs:
+
+| seed | best coarse head | enrich | p | survives ×16 corr? |
+|---|---|---|---|---|
+| 0 (`20260524-140946`) | head 4 | 2.2× | **0.002** | ✅ |
+| 1 | head 7 | 1.6× | 0.045 | ❌ |
+| 2 | head 6 | 1.6× | 0.041 | ❌ |
+
+**Strict gate (coarse p<0.01 every seed) FAILS** — only seed 0 survives
+correction; seed 1/2 top out at p≈0.04, which for 16 tests is ≈ the chance
+expectation (~0.8 false positives/seed). So seed 0 was the lucky-strong
+one; per-seed statistical strength is modest and init-variable.
+
+**But the qualitative chemistry reproduces convincingly.** In the *fine*
+range, every seed independently put bias peaks at the **exact
+charge-resolved ¹³C spacings** (1.003/z = 0.334, 0.501, 0.669, 1.003) on
+*multiple* heads, precise to the mDa:
+- seed 1: heads 1,4,5,7 → 0.501 / 0.334 / 1.003 / 0.667
+- seed 2: heads 2,5,6 → 0.501 / 0.333 / 1.003
+- seed 0: head 4 → 0.334 / 0.501 / 1.003
+
+Chance does not reproduce the *same precise Δm values* across 3 independent
+inits — scattered noise peaks land differently each time. The per-head
+binomial is just low-powered (few strong peaks); it under-credits a signal
+that's clearly there. Coarse significant heads also hit consistent real
+residues/losses (V·99, L/I·113, E·129, G·57, CO·28, H₂O·18).
+
+**Verdict: qualified pass.** The architecture *reproducibly* learns
+chemistry in the bias (charge-resolved isotopes + residues, all 3 seeds) —
+validated. But it's modest, not yet *strong* (1 head at p≈0.04 for 2 of 3
+seeds; only seed 0 is unambiguous). Real and reproducible ≠ headline-robust.
+
+**Implication:** this *reinforces* charge-conditioning + precursor anchor
+as the immediate priority (v10) — the smeared 0.33/0.50/1.003 isotope
+signal is precisely what charge-conditioning should sharpen, and the
+single-marginal-head weakness is what to fix *before* scaling, not by
+scaling. → merge v9 to master (architecture validated), branch v10.
+
+### v10a — charge-conditioned bias `bias_h(Δm, z)` — NO-OP (disabled)
+
+Hypothesis: a learned precursor-charge embedding would let each head put a
+*charge-specific* isotope peak (0.50 Da for z=2, 0.33 for z=3) instead of
+one curve carrying all spacings. Implemented as an additive per-head
+charge term in the bias hidden layer (`h = h_dm + h_ch`, w1_charge
+zero-init). Full 50k run.
+
+**Result: the charge embedding did not relocate peaks. Disabled.**
+
+- `corr(z=2 curve, z=3 curve) = 1.000` for **every** head → curves are
+  *identical in shape* across charge. Every head has isotope peaks at all
+  three spacings (0.33/0.50/1.003) regardless of z.
+- `w1_charge` is nonzero (norm 8.7) and charge varied in data (z=2:1800,
+  3:675, 4:300, 5:225) — *not* a bug. But correlation is affine-invariant,
+  so the charge term learned only a per-charge **offset/scale**, not peak
+  relocation.
+- Probe/alignment ≈ v9: fragment_mz 0.873, charge 100%, iso-F1 0.901;
+  3 significant head×range (vs v9's 2) but best p=0.025 (does *not*
+  survive ×16 correction; v9's head-4 p=0.002 was stronger). "3 vs 2" is
+  seed noise.
+
+**Root cause (implementation):** the *additive* factorization (h_dm + h_ch)
+is Δm-independent in the charge term → even through the GELU it can only
+offset/scale the curve, never move a peak from 1.003 to 0.50. Peak
+relocation needs charge×Δm *interaction* — concat-charge-to-Fourier (memory
+cost) or **Δm×z scaling** (collapse isotopes to neutral mass; caveat:
+fragment charge ≠ precursor charge).
+
+**Reframe:** the premise was a partial misdiagnosis. A charge-agnostic
+all-spacings curve isn't *hurting* — it gives more isotope hits, not fewer,
+and probe metrics are unchanged. The seed-gate marginality is an
+**effect-size / low-power** problem, not charge-smearing. So charge-
+conditioning was the wrong lever; `charge_dim: 0` (off). → move to the
+**precursor anchor** (real measured deficit: fragment_mz 0.87, absolute m/z).
+
+### v10b — precursor anchor token — NO-OP for fragment m/z
+
+Prepend a precursor anchor token (the one token with absolute m/z + charge);
+fragments stay m/z-free; bias spans all pairs incl. precursor. Hypothesis:
+resolve the absolute-frame ambiguity → fragment_mz_r2 0.89 → ~0.97. Full 50k run.
+
+**Result: no improvement.** `fragment_mz_r2 = 0.866` (≈ v9), precursor_mz
+0.994 (already maxed in v9), all probes ≈ v9, alignment comparable (head 6
+coarse p=0.003 survives correction). The anchor **is** used (ablating it
+shifts fragment tokens ~10%) — used-but-unhelpful.
+
+**Why — the bottleneck wasn't the absolute frame.** v9 already recovers
+precursor m/z at R²=0.996, so the frame was never ambiguous. The ~0.89
+fragment-m/z ceiling is the *token representation*: a fragment's own m/z
+offset lives in the Δm bias (attention logits, relative), not as a readable
+feature in its m/z-free token. An anchor gives a reference the fragment
+can't measure its offset from. **The ~0.89 ceiling is intrinsic to m/z-free
+tokens; not fixable by anchoring — only by putting m/z (weakly) back in
+fragment tokens (costs interpretability).**
+
+**Head-to-head fragment_mz_r2 (n=6000, matched):** v9 0.855 < precursor
+0.861 < **charge 0.872**. Charge (a spectrum-level scale cue) helps the
+*representation* slightly more than the anchor — even though it was a no-op
+for the *bias curve shape*. → v10b run = `v10_both.yaml` tests charge +
+precursor together (do the spectrum-level cues stack? expect ≤~0.88; the
+m/z-free ceiling dominates).
+
+### Per-head profile (last completed model = precursor-anchor)
+
+2 specialists + 2 weak + 4 unspecialized, consistent since v9:
+- **head 6 — residues**, 2.0×, **p=0.003** (survives ×16 correction): M·131,
+  V·99, E·129, F·147, L/I·113 to <0.1 Da. Strongest/most robust head.
+- **head 4 — isotopes**, 2.2×, p=0.028 (nominal): ¹³C at 1.003/0.50/0.33;
+  flat in coarse (dedicated isotope head).
+- heads 0,3: weak loss/residue lean (p≈0.12–0.15).
+- heads 1,2,5,7: unspecialized (coarse at/below chance).
+
+Neither v10 bolt-on (charge, precursor) broadened head specialization — still
+~2 chemical heads. The chemistry present is precise (mDa hits) but narrow.
+
+### v11 — capacity scaling, 4× A100-40GB — PARTIAL RUN, EARLY FALSIFICATION
+
+**Why scale now (original premise):** at 50k×256 we've seen **11.9% of the
+107.8M train spectra (0.12 epoch; 1 epoch = 421k steps)** — nowhere near
+data-limited. Yet the small model plateaus by ~30k. That's
+**capacity-limited, not data-limited**, and the cheap feature levers
+(charge, precursor) didn't broaden heads → the remaining lever was assumed
+to be capacity. Test: does more capacity *broaden* head specialization
+(>2 correction-surviving chemical heads)?
+
+Matrix — one model per A100, **equal data exposure (~12.8M spectra)**,
+baseline arch (m/z-free, charge/precursor OFF) to isolate capacity. Memory
+from a model calibrated to the 19.7 GB measurement (verified during smoke):
+
+| tier | d / L / H | params | batch | steps | ~mem |
+|---|---|---|---|---|---|
+| S  | 384 / 8 / 8   | 14M  | 256 | 50k  | 24 GB |
+| M  | 512 / 12 / 16 | 38M  | 128 | 100k | 29 GB |
+| L  | 768 / 12 / 16 | 86M  | 112 | 114k | 25 GB |
+| XL | 1024 / 16 / 16| 203M | 80  | 160k | 30 GB |
+
+Configs: `configs/scale_{S,M,L,XL}.yaml`; launched via
+`pbs/scale_all.pbs` (FRAME-IDP / capacity / 1 node).
+
+**What actually happened.**
+
+*Smoke (`pbs/scale_smoke.pbs`, 10-min debug-queue, job 7173422)* — caught
+two infra fixes before the real run:
+- **M tier OOM at bs=160:** backward at step 0 needed 6.87 GB on top of
+  33 GB allocated; A100-40GB has only 39.5 GB usable. Dropped to bs=128
+  / total_steps 100k (kept equal exposure: 100k × 128 = 12.8M).
+- **Step-rate timings (median, post-init, from wandb):** S 4.62, M 4.31,
+  L 4.14, XL 3.45 sps → ~13h pure compute for XL set the walltime
+  (18:00:00, with ~5h margin for probe/val/render).
+
+*Full run (job 7173429)* — **killed at ~50 min after `/home` hit quota.**
+The `out_dir: ./runs` default was writing to the home filesystem (10 GB
+quota); each L checkpoint is ~150 MB so M+L together saturated quickly.
+Fixed by adding a `log.out_dir` splice in `pbs/_run_tier.sh` →
+`/eagle/UIC-HPC/cgrams/msdelta-runs`. All four tiers had crossed their
+first probe checkpoint (step 10000) before kill — enough for an early
+read against the v11 falsification condition:
+
+| tier | loss | rmse | frag_r² | prec_r² | charge | iso F1 | NL AUC |
+|---|---|---|---|---|---|---|---|
+| S  | 0.0021 | 0.045 | 0.818 | 0.994 | 1.000 | 0.887 | 0.933 |
+| M  | 0.0021 | 0.047 | 0.800 | 0.995 | 0.999 | 0.864 | 0.934 |
+| L  | 0.0023 | 0.050 | 0.800 | 0.996 | 0.999 | 0.849 | 0.929 |
+| XL | 0.0020 | 0.047 | **0.849** | 0.996 | 1.000 | **0.895** | 0.946 |
+
+**S already matches v9's published probe ceiling** (frag_r² 0.873, iso F1
+0.901, charge 100%, NL AUC 0.95) at step 10k. XL clears v9 by ~3 points
+on frag_r² and ~−1 on iso F1 — for 14× the params. Loss + rmse stack
+across tiers; all four sizes solve the task to floor within 10k steps.
+
+**This is the v11 falsification signal stated upfront in the original
+plan:** *"Flat at ~2 even for XL → capacity isn't it, rethink before
+spending real-data compute."* Caveat: at step 10k, S has burned 20% of
+its step budget while XL has burned 6.25%, so the bigger tiers could
+pull away later. But S matching v9 at step 10k undercuts the premise
+that capacity is what's missing — if more parameters were the lever,
+the gap should be visible already, not deferred to step 100k+.
+
+**Decision: don't resubmit the full sweep.** Pivot to *task-incentive*
+levers (the alternative branch §6 listed). First candidate is mask ratio
+(v12 below); ELECTRA-style replaced-peak detection is the fallback.
+
+### v13 — KL on the masked-peak intensity *distribution* *(implemented, on deck)*
+
+**The deeper diagnosis** that surfaced while planning v12. The MSE target
+was `log_int = log1p(intensity) / log1p(intensity).max()` — concentrated
+in **[0.66, 1.00]** with mean ≈ 0.76 and **variance ≈ 0.007** (measured
+on one batch from the eagle parquet). Predicting the constant 0.76 gives
+MSE ≈ 0.007 — *exactly* the value every run from v9 through v11 has
+converged to within 400 steps. **The model is converging to a trivial
+predictor**, not learning chemistry, because there is almost no gradient
+pressure above the constant baseline. This explains why:
+- v9 → v10a → v10b → v11 all plateau at the same probe ceiling.
+- All four scale tiers in v11 stack on top of each other in loss.
+- Bias-chemistry head count stays at 2/8 across all interventions.
+
+**The fix is the target, not the architecture.** Mass spectra *are*
+discrete probability distributions over m/z (each intensity is an ion
+count); the natural pretraining loss is **KL between the predicted and
+true intensity distribution over masked peaks**, not MSE on a normalised
+scalar. Per-spectrum softmax across masked logits gives `q`; raw
+intensities renormalised over the masked subset give `p`; loss is
+`KL(p || q)` via `F.kl_div(log_q, p, reduction='batchmean')`.
+
+**Why KL is uniquely well-fitted for this task.**
+- Trivial-baseline KL (predict uniform) = `log(K_masked) − H(p)` ≈ 0.5–1
+  nat depending on K_masked; **~100× the v9–v11 gradient pressure**.
+- Intensity *ratios* are first-class in the loss: M+0/M+1 ≈ 5:1 for ¹³C
+  is encoded as a 1:5 probability ratio in `p`, and the loss directly
+  penalises the model for getting that ratio wrong. MSE on rank/z-score
+  obscures the ratio; KL exposes it.
+- Couples masked positions per spectrum (softmax normalises across them),
+  so the model has to predict their *relative* shares, not independent
+  per-position scalars. Stronger structural constraint.
+- Scale-invariant by construction — no per-spectrum σ leaks into the
+  loss (the failure mode of the z-score variant we considered).
+
+**Plumbing changes.**
+- `data.preprocess_spectrum` now returns `(mz, log_int, intensity_prob)`.
+  `log_int` is unchanged (still log1p÷max, the input feature for
+  `PeakEmbed`); `intensity_prob = intensity / intensity.sum()` is the
+  new KL target carried through `_pad_batch`, `pad_collate`, and
+  `mask_intensity_collate` as a new dict key.
+- `model.IntensityHead.loss` swapped from `F.mse_loss(pred[m], log_int[m])`
+  to `F.kl_div(log_q, p, reduction='batchmean')` with the standard
+  `masked_fill(-inf)` trick to vectorise per-spectrum softmax. Also logs
+  CE and `H(p)` so we can separate "model is bad" from "target is nearly
+  uniform" (i.e. no data signal). `nn.functional.kl_div`'s lesser-known
+  defaults (`input` is *log*-probs; `reduction='batchmean'` not `'mean'`)
+  are the only API gotchas.
+- `train.run_validation` + main loop updated wandb keys: `train/mse_int` →
+  `train/{kl, ce, h_p, kl_baseline}`. `kl_baseline = log(K_masked) − H(p)`
+  is logged as the "headroom to beat by predicting uniform."
+
+**Smoke-tested** on CPU (1 layer, d=32, 8 spectra): loss is finite,
+intensity_prob sums to 1 per spectrum, freshly-initialised KL ≈ baseline
+across all mask ratios as expected (random softmax ≈ uniform).
+
+**The sweep — KL × mask-ratio, in one job.** v12's mask-ratio hypothesis
+(locality is the shortcut, raise mask ratio to break it) was *correct in
+direction* — only the upstream loss was misdiagnosed. Now that KL puts
+real gradient pressure on the bias, the mask-ratio dimension actually
+matters again, and the two hypotheses test cleanly together:
+
+| run | mask_ratio | ~visible peaks | role |
+|---|---|---|---|
+| `v13_mask15.yaml` | 0.15 | 127 | v9-position reference, KL-only change |
+| `v13_mask35.yaml` | 0.35 | 98  | locality starting to break |
+| `v13_mask50.yaml` | 0.50 | 75  | locality clearly insufficient — primary candidate |
+| `v13_mask75.yaml` | 0.75 | 37  | MAE-style stretch; brackets the degenerate end |
+
+All four share v9 architecture + KL loss; only `mask.mask_ratio` varies.
+One Polaris node, one config per A100, ~6h capacity-queue walltime
+(`pbs/v13_sweep.pbs`).
+
+**Reads (wandb `msdelta-kl-sweep`):**
+- `train/kl` vs `train/kl_baseline` — does kl drop *below* the
+  predict-uniform headroom for any ratio? (The new analog of "is the
+  model learning anything beyond the marginal?")
+- `train/h_p` — sanity. If h_p is already near `log(K_masked)`, the
+  target is nearly uniform and no model could do much; we'd be debugging
+  the data, not the model.
+- `probe/fragment_mz_r2`, `probe/isotope_f1`, etc. — past v9's
+  0.87 / 0.90 / 0.95 / 100% ceiling on any setting?
+- Post-run `msdelta-analyze --mode align` per `final.pt` — count of
+  correction-surviving (p < 0.01 after ×16) chemical heads.
+
+**Forks.**
+- Any ratio's chemical-head count ≥ 4 (vs v9's 2) **and** kl < baseline
+  → KL+locality-stress is the lever; promote the winning ratio + scale
+  up in v14.
+- KL drops below baseline uniformly but probe/alignment numbers don't
+  move → the model is learning the distribution but not via chemistry
+  (some non-Δm shortcut we haven't identified). Investigate the bias-
+  curves before pivoting.
+- All four plateau at baseline → distribution learning is shallow on
+  this data → pivot to ELECTRA-style replaced-peak detection (§6).
+
+**RESULT** (train job 7173699, analysis job 7174681 via
+`pbs/v13_analyze.pbs`). **Outcome = Fork 2: KL fixed the loss, not the
+chemistry.**
+
+*The loss switch worked.* Every run sheds ~85% of the predict-uniform
+headroom — real gradient signal, unlike the old MSE constant-predict
+floor (0.007 = the target's own variance):
+
+| run | train/kl | kl_baseline | gap (learned) | val/kl |
+|---|---|---|---|---|
+| mask15 | 0.093 | 0.596 | 0.502 | 0.089 |
+| mask35 | 0.104 | 0.701 | 0.597 | 0.100 |
+| mask50 | 0.117 | 0.720 | 0.604 | 0.110 |
+| mask75 | 0.142 | 0.743 | 0.602 | 0.127 |
+
+The model genuinely learns the masked-peak intensity *distribution* now;
+the MSE-on-a-concentrated-target gradient-starvation diagnosis was right.
+
+*But the bias chemistry did not concentrate.* The Δm alignment test
+(`--mode align`) shows a clear inverted-U, peaking at mask50 then
+collapsing at mask75:
+
+| run | raw-sig head×ranges (p<0.05) | best raw p | best ×16-corrected p |
+|---|---|---|---|
+| mask15 | 1 (coarse h5) | 1.4e-2 | 0.22 |
+| mask35 | 2 (fine h5, coarse h7) | 1.1e-2 | 0.18 |
+| **mask50** | **4 (fine h5/6/7, coarse h7)** | **2.3e-3** | **0.037** |
+| mask75 | 0 | — | — |
+
+Under the gate above (`p<0.01 after ×16`) **nothing survives at any mask
+ratio** — mask50's best (coarse head 7) lands at corrected p≈0.037,
+clears 0.05 but misses 0.01. Chemistry is *present* (coverage 5/5 isotope
++ 26/26 residue refs; enrichments up to 2.4×) but stays **diffuse across
+heads**, not concentrated into clean specialists — the same qualitative
+picture as v9–v11.
+
+*Functional probe high everywhere* (best-head Spearman 0.91–0.92, most
+heads "uses bias") — confirms the bias is load-bearing, but that was
+never the question. Attention follows the bias; the bias just isn't a
+sharp chemistry comb.
+
+*Retrieval is a uniform negative* — the learned embedding never beats
+binned-cosine (mAP 0.96) and degrades as mask climbs: mask15 0.824 →
+mask35 0.784 → mask50 0.763 → mask75 0.744. mask75 degenerated as
+predicted (insufficient anchor coverage: 0 aligned heads, fewer
+fine-range peaks, worst retrieval).
+
+**Takeaways.**
+- mask50's inverted-U peak is the one real, repeatable-looking signal —
+  directionally confirms the locality hypothesis but is too weak to call
+  KL "the answer."
+- The bias being load-bearing yet diffuse across *four* loss/arch
+  changes (v9 → v10a → v10b → v13) says the remaining lever is making
+  locality genuinely *insufficient*, not just stressed. Next move:
+  **ELECTRA-style replaced-peak detection** (§6 lever 2) — a swapped
+  peak breaks the isotope/residue ladder, which a smooth bump cannot
+  detect, so the bias is forced to learn specific Δm offsets to solve
+  the task.
+
+**Note on v12.** The original v12 plan (a mask-ratio sweep against the
+*MSE* baseline) was abandoned: the loss is the upstream blocker — no
+mask ratio can move loss off the 0.007 constant-predictor plateau when
+the target itself is concentrated in [0.66, 1.0]. The mask-ratio
+hypothesis was correct in direction, just unrunnable until the target
+was fixed. The four `configs/v12_mask{15,35,50,75}.yaml` configs are
+kept on disk as historical artifacts; the equivalent KL-loss sweep is
+v13_mask{15,35,50,75}.yaml (the four runs `pbs/v13_sweep.pbs` launches).
+
+### v14 — capacity sweep ON KL loss *(implemented, on deck)*
+
+**Why this exists.** v13's "it's the task incentive, not capacity"
+conclusion leans on the v11 capacity falsification — but v11 swept
+capacity on the **broken MSE target** (constant-predict floor, no
+gradient), so it could not have detected a capacity effect on chemistry
+even if one existed. v13 fixed the loss (KL) but only ever at d=256.
+**Capacity × working-loss has never been run** — and "diffuse across
+heads, not concentrated into specialists" is itself a plausible
+under-capacity signature. So the v13 verdict was premature; this is the
+missing experiment.
+
+**Design.** The clean re-run of v11: same d=384→1024 ladder, same equal
+data exposure (~12.8M spectra), same baseline arch (charge/precursor
+OFF) — but with KL loss (global since v13) and `mask_ratio=0.50` (the
+v13 sweet spot, where chemistry was closest to significant, so capacity
+has the best chance to push it over). Configs
+`v14_cap_{S,M,L,XL}.yaml`; one per A100 via `pbs/v14_capacity.pbs`
+(20h capacity walltime, XL 160k steps is the binding tier).
+
+**Inline-probe instrumentation (new).** The point of this run is the
+*trajectory*, not just the final ckpt. `train.py`'s probe block now also
+logs, every `probe_every` steps:
+- `align/*` — bias-curve chemistry alignment (`analyze.alignment_metrics`,
+  no data, ~free): `n_sig05`, `n_sig01_bonf` (heads surviving ×16
+  Bonferroni — the strict gate), `best_p`, per-range `max_enrich` /
+  `coverage`.
+- `retrieval/*` — embedding retrieval vs binned-cosine
+  (`retrieval.retrieval_inline_metrics`): `mAP`, `P@1`, `AUC_PR`,
+  `binned_mAP`, `gap_vs_binned`.
+
+So we can watch whether bias chemistry *sharpens with training* and
+*scales with capacity*, instead of inferring it from one endpoint.
+
+**Verdict.** `align/n_sig01_bonf` climbs S→XL → capacity IS the lever
+under a working loss, and v13's conclusion was wrong → scale up + real
+data. Flat across tiers → genuinely the task incentive → ELECTRA (§6).
+
 ---
 
 ## 4. Targets to watch on the v7 run (σ = 0.1)
@@ -541,6 +1115,63 @@ isn't pointing it at chemistry.
 
 ---
 
+## 4c. Embedding-model / retrieval evaluation (`msdelta-retrieval`)
+
+"Can we use this as an embedding model and measure precision/recall?"
+`msdelta/retrieval.py` pools the encoder → one vector/spectrum and does
+leave-one-out same-peptide retrieval (mAP, P@1, R@k, pairwise AUC-PR) vs
+a **binned-spectral-cosine baseline**, ground truth = peptide_charge.
+Works on the consensus parquet *and* on real experimental MGF
+(`--mgf`, SEQ/CHARGE/peaks inline — the holdout PXD053296 benchmark).
+
+**Result — v9 is a poor retrieval embedding, and the baseline number was
+misleading.**
+
+| (consensus, ~100 peptides) | mAP | AUC-PR |
+|---|---|---|
+| learned embed (v9) | 0.75 | 0.68 |
+| binned cosine | 0.93 | **0.996** |
+
+The binned-cosine 0.996 looked too good — and it is. Diagnostic:
+same-peptide binned cos = **0.89**, different-peptide = **0.16**
+(near-orthogonal). The task as posed — same-peptide replicate vs *random
+different* peptide in a tiny library — is trivially separable and **not
+comparable to literature** (which discriminates against decoys /
+near-isobaric / analogs at library scale, where negatives sit at high
+cosine). Lesson (again): the metric was measuring an easy thing. A real
+retrieval claim needs hard negatives (decoys via psms.parquet) + scale.
+
+**Two findings that *do* matter (robust regardless of task difficulty):**
+
+1. **The v9 embedding is near-collapsed (anisotropic).** Diagnostic:
+   same-peptide cos 0.997 *and* different-peptide cos 0.987 — everything
+   at ~0.99. But it's mostly *fixable*: `all-but-top-k` (remove the few
+   dominant directions, **zero training**) lifts AUC-PR 0.68 → 0.90,
+   mAP 0.75 → 0.85. Now a `--whiten K` flag. → the discriminative
+   fragment info is *present*, just squashed.
+2. **Fragment m/z is mostly in the representation** (new inline probe
+   `probe/fragment_mz_r2`): recover each peak's *own* m/z from its
+   m/z-free token → **R²=0.889** (MAE 82 Da). High (the Δm bias
+   re-injected it) but below precursor m/z (R²=0.996) — the residual
+   m/z-free handicap, corroborating the whitening gap.
+
+**Strategic read (pretrain → contrastive post-train).** Sound recipe:
+contrastive is the textbook cure for the anisotropy we measured, the
+data has ~225 replicates/peptide (ideal), and the fragment info is
+present (R²=0.89) so there's good material. Caveats:
+- The m/z-free choice (the v9 interpretability win) is a **modest
+  retrieval handicap** — fragment fidelity is 0.89 not ~0.99.
+- **Full contrastive fine-tune specializes**: it would likely flatten
+  the interpretable bias and risk forgetting broad chemistry → no longer
+  the general/interpretable model. **Frozen encoder + contrastive
+  projection head** preserves everything at a lower ceiling. Can't max
+  interpretability + retrieval in one set of weights; pick the primary.
+- `fragment_mz_r2` is the leading indicator to watch — if a future
+  retrieval-focused pretrain keeps m/z in tokens, it should climb toward
+  ~0.97 and the retrieval ceiling rises with it.
+
+---
+
 ## 5. Things we changed along the way that aren't task-related
 
 A few infrastructure / small fixes worth recording so we don't re-litigate:
@@ -560,41 +1191,98 @@ A few infrastructure / small fixes worth recording so we don't re-litigate:
 - **Diagonal-zero:** kept it in v5 even though we changed the task. The
   argument is the same: self-attention suppression isn't a Δm-driven
   decision, so the bias path shouldn't carry it.
+- **Polaris PBS deployment (`pbs/`):** `setup_venv.sh` (uv-managed
+  `.venv` on Polaris login node, torch 2.11.0+cu128 wheels self-contain
+  the CUDA libs; no `module load conda` needed), `_run_tier.sh` (per-GPU
+  helper; takes a config path + GPU id, splices `data.root` → eagle and
+  `log.out_dir` → eagle via a temp overlay, sets ALCF HTTPS proxy +
+  wandb run id), `scale_all.pbs` / `scale_smoke.pbs` / `mask_sweep.pbs`
+  (1-node 4-GPU fan-outs; one config per A100; FRAME-IDP / capacity).
+  `SMOKE=1` env flag shrinks any config to 100 steps for the 10-min
+  debug-queue smoke.
+- **Output directory on eagle, not home.** `/home` quota is small and
+  L-tier checkpoints (~150 MB each, every 10k steps) saturated it
+  inside an hour. `log.out_dir` is now spliced to
+  `/eagle/UIC-HPC/cgrams/msdelta-runs/`. The in-repo YAMLs still say
+  `./runs` so the configs stay portable.
+- **ALCF HTTPS proxy required from compute nodes.** Polaris compute
+  nodes can't reach `api.wandb.ai` directly — without `http_proxy =
+  https_proxy = http://proxy.alcf.anl.gov:3128` (and a matching
+  `no_proxy` for `.alcf.anl.gov` / loopback), `wandb.init` silently
+  falls back to offline mode. Set in `_run_tier.sh`. The same gotcha
+  affects any compute-node Python that hits HTTPS.
 
 ---
 
 ## 6. What I'd consider next
 
-**Reframe from the probe finding (§4b mode c):** the bias is load-bearing,
-so the goal is no longer "make the model use the bias" — it does. The goal
-is "make the bias's *shape* be chemistry, not a broad locality bump." That
-means changing the incentive so the broad-locality solution stops being
-optimal.
+**Updated reframe after v13.** The bias is load-bearing (§4b mode c) but
+its chemistry plateaus across every change to date — model-side (v9 →
+v10a → v10b → v11) *and* loss-side (v13 KL). KL fixed the gradient-
+starvation problem (the model now genuinely learns the masked-peak
+distribution) but the path of least resistance is still a **smooth
+locality bias**, not a sharp Δm comb. Diffuse-but-present chemistry has
+now survived four interventions. The remaining lever is making locality
+genuinely *insufficient to solve the task*, not merely stressed —
+**unless it's capacity**, which has never been tested under a working
+loss (v11 swept capacity on the broken MSE target; v13 fixed the loss
+only at d=256). Current priority order:
 
-Direct levers on the incentive (most-aligned with the finding first):
+0. **Capacity sweep on KL loss (v14, run this first).** Gates everything
+   below. Sweeps d=384→1024 with KL + mask50, logging `align/*` per step.
+   If `align/n_sig01_bonf` climbs with capacity, the "task incentive not
+   capacity" framing is wrong and we scale up instead of changing the
+   task. Cheap relative to its leverage on the whole direction. Configs
+   `v14_cap_*`, launcher `pbs/v14_capacity.pbs`.
+1. **ELECTRA-style replaced-peak detection (if v14 is flat).** Swap a
+   fraction of peaks between spectra; the
+   model must classify real vs. replaced. A swapped peak breaks the
+   isotope/residue ladder — a smooth locality bump *cannot* detect it,
+   only chemistry-specific Δm features can — so the bias is forced to
+   learn specific offsets to solve the task. Lift: new collate (cross-
+   spectrum peak swap) + binary-classification head. The cleanest
+   version of "make locality stop being a sufficient solution."
+2. **L1 on the bias curve, redux** (parallel side-bet). v8 ablated L1
+   when the bias was *dispensable* and got head-death. In v9+ the bias
+   is load-bearing (probe Spearman 0.91), so L1 has gradient pressure to
+   *sharpen* the diffuse bias toward the few real chemistry offsets
+   rather than zero it. One-line config (`l1_lambda`); 3-point sweep.
+   Independent of ELECTRA — could run alongside. Especially worth trying
+   on the mask50 checkpoint, where chemistry is closest to significant.
+3. **Peptide-charge contrastive / classification.** Biggest scope; the
+   supervision is structural so the bias would have reason to encode
+   real spacings. Also the likely cure for the retrieval gap (learned
+   embedding < binned-cosine in every v13 run). Defer until ELECTRA
+   resolves whether a pretrain task change can sharpen the bias — if it
+   does, this becomes the downstream finetune, not the pretrain
+   replacement.
 
-1. **Penalize the broad-locality bias shape.** Add a regularizer that
-   discourages a smooth low-frequency bump (e.g. L1 on the bias curve, or
-   penalize bias mass at small |Δm|), forcing the limited bias budget onto
-   sparse, specific Δm offsets. Cheapest test of the hypothesis.
-2. **Make locality unhelpful for the task.** The denoising-by-local-average
-   shortcut works because nearby peaks exist. A task where the *useful*
-   reference is at a specific chemical Δm — not just "nearby" — would force
-   sharp peaks. E.g. ELECTRA-style replaced-peak detection (decide if a
-   peak is real or swapped from another spectrum); a swapped peak breaks
-   the residue/isotope ladder, which a locality bump can't detect.
-3. **Use the `peptide_charge` label** (already in the parquet) for
-   contrastive / classification. Biggest scope; the supervision is
-   structural so the bias would have reason to encode real spacings.
-
-Task-noise tweaks (lower priority now that we know the bias is used):
-- Wider/narrower σ — affects resolution but not the locality-bump
-  incentive itself.
+**Hypotheses parked:**
+- *Capacity is the lever* (v11). Falsified at step 10k — S matches v9 at
+  every probe, XL gains 3 points of frag_r² for 14× params. Bigger
+  models train fine but don't broaden head specialization.
+- *Charge-conditioned bias `bias_h(Δm, z)`* (v10a). Additive
+  factorization was a no-op (only offset/scaled the curve, didn't
+  relocate peaks).
+- *Precursor anchor for fragment-m/z resolution* (v10b). No-op. The
+  ~0.89 fragment-m/z ceiling is intrinsic to m/z-free tokens — only
+  fixable by putting m/z (weakly) back into fragment tokens, which costs
+  interpretability.
+- *KL loss / mask-ratio sweep is the lever* (v13). Partially falsified:
+  KL fixes gradient starvation (model learns the distribution, gap ~0.5
+  nats vs baseline) but does **not** concentrate the bias chemistry —
+  alignment peaks at mask50 (inverted-U) yet doesn't survive ×16
+  correction at p<0.01. Mask ratio is a real but weak knob; the loss
+  target was a genuine bug worth keeping fixed, just not sufficient.
 
 Things we should *not* go back to without a new idea:
 - MPM as originally formulated (positional ambiguity is fundamental).
 - Bigger shared bias MLP (gradient-pool competition, not raw capacity).
 - Chemistry-specific noise (engineers the answers).
+- Pure capacity scaling on this task without changing the incentive
+  (v11 — bigger models don't help when locality already solves it).
+- MSE on the per-spectrum max-normalised log_int (v13 — constant-predict
+  is ~optimal; keep the KL distribution loss).
 
 ---
 
@@ -604,18 +1292,37 @@ Things we should *not* go back to without a new idea:
 msdelta/
 ├── pyproject.toml         # uv-managed; pinned torch cu128
 ├── configs/
-│   ├── pretrain_small.yaml   # production: d=256, 6 layers, 50k steps
-│   └── toy.yaml              # smoke: d=64, 2 layers, 100 steps
+│   ├── pretrain_small.yaml   # v10b: d=256, 6 layers, precursor anchor on, 50k steps
+│   ├── toy.yaml              # smoke: d=64, 2 layers, 100 steps
+│   ├── seed{1,2}.yaml        # v9 reproducibility seeds (the gate)
+│   ├── l1_{0.01,0.1,1.0}.yaml  # v8 L1 sparsity probe (parked — bias was dispensable then)
+│   ├── v10_both.yaml         # v10b ablation: charge + precursor stacked
+│   ├── scale_{S,M,L,XL}.yaml # v11 capacity sweep (partial; pivoted to v13)
+│   ├── v12_mask{15,35,50,75}.yaml  # v12 mask-ratio sweep (abandoned — MSE was upstream blocker)
+│   ├── v13_mask{15,35,50,75}.yaml  # v13 KL × mask-ratio sweep (done: fixes loss, not chemistry)
+│   └── v14_cap_{S,M,L,XL}.yaml      # v14 capacity sweep on KL loss + mask50 (on deck)
 ├── msdelta/
 │   ├── __init__.py
 │   ├── fourier.py            # Fourier feature module
-│   ├── data.py               # ConsensusParquet + DenoiseConfig + denoise_collate
-│   ├── model.py              # MSEncoder, DeltaMZBias (per-head), DenoiseHead
-│   ├── viz.py                # bias-curve plots with chemistry references
-│   ├── train.py              # CLI: msdelta-train --config ...
-│   └── analyze.py            # CLI: msdelta-analyze --mode {align,probe,both}
+│   ├── data.py               # ConsensusParquet + MaskConfig + mask_intensity_collate + pad_collate
+│   ├── model.py              # MSEncoder, DeltaMZBias (per-head, bounded), IntensityHead (v9)
+│   ├── viz.py                # bias-curve plots; ISOTOPES incl. charge-aware 1.003/z
+│   ├── train.py              # CLI: msdelta-train (+ seed, l1_lambda, inline probes)
+│   ├── analyze.py            # CLI: msdelta-analyze --mode {align,probe,both}
+│   ├── probe.py              # CLI: msdelta-probe (Tier-1/2 linear probes + fragment_mz)
+│   └── retrieval.py          # CLI: msdelta-retrieval (embedding eval, --mgf, --whiten)
+├── pbs/                      # Polaris (ALCF) deployment; gitignored logs
+│   ├── setup_venv.sh         # one-shot uv sync on the login node
+│   ├── _run_tier.sh          # per-GPU helper; splices data.root + log.out_dir
+│   ├── scale_all.pbs         # 1-node 4-GPU capacity-sweep launcher (parked w/ v11)
+│   ├── scale_smoke.pbs       # 10-min debug-queue smoke; SMOKE=1 schedule shrink
+│   ├── mask_sweep.pbs        # v12 launcher (parked; superseded by v13_sweep.pbs)
+│   ├── v13_sweep.pbs         # 1-node 4-GPU v13 KL × mask-ratio launcher
+│   ├── v13_analyze.pbs       # debug-queue post-sweep analyze + retrieval
+│   └── v14_capacity.pbs      # 1-node 4-GPU v14 capacity-on-KL launcher
 ├── docs/
 │   ├── EXPERIMENTS.md        # this file
 │   └── figures/              # PNGs referenced above
-└── runs/                     # gitignored: checkpoints + bias-curve PNGs + wandb
+└── runs/                     # gitignored placeholder; real run artifacts now
+                              # live at /eagle/UIC-HPC/cgrams/msdelta-runs/ (home quota)
 ```
