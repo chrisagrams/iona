@@ -6,9 +6,7 @@ import matplotlib
 
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
-import numpy as np
 import torch
-from torch import Tensor
 
 from msdelta.chemistry import ISOTOPES, NEUTRAL_LOSSES, RESIDUES_AA20
 from msdelta.modeling_msdelta import DeltaMZBias
@@ -92,13 +90,3 @@ def render_bias_panels(bias_module: DeltaMZBias, step: int) -> dict[str, plt.Fig
         title=f"Δm/z bias — coarse [-200, 200] Da @ step {step} (Δm=0 not used)",
     )
     return {"bias/fine": fine, "bias/coarse": coarse}
-
-
-def attention_entropy_per_head(attn_layers: list[Tensor]) -> np.ndarray | None:
-    """Calculate the mean attention entropy for each head."""
-    rows = []
-    for attn in attn_layers:
-        eps = 1e-12
-        ent = -(attn * (attn + eps).log()).sum(dim=-1).mean(dim=(0, 2))
-        rows.append(ent.float().cpu().numpy())
-    return np.stack(rows, axis=0) if rows else None

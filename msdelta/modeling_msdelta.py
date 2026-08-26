@@ -21,8 +21,6 @@ class MSDeltaForPreTrainingOutput(ModelOutput):
 
     loss: Tensor | None = None
     logits: Tensor | None = None
-    hidden_states: tuple[Tensor, ...] | None = None
-    attentions: tuple[Tensor, ...] | None = None
 
 
 class PeakEmbed(nn.Module):
@@ -105,8 +103,7 @@ class BiasedMHA(nn.Module):
         hidden_states: Tensor,
         bias: Tensor,
         padding_mask: Tensor,
-        output_attentions: bool = False,
-    ) -> tuple[Tensor, Tensor | None]:
+    ) -> Tensor:
         batch_size, n_peaks, _ = hidden_states.shape
         qkv = self.qkv(hidden_states).reshape(batch_size, n_peaks, 3, self.n_heads, self.d_head)
         query, key, value = qkv.unbind(dim=2)
@@ -115,27 +112,15 @@ class BiasedMHA(nn.Module):
         value = value.transpose(1, 2)
         attention_bias = bias.masked_fill(padding_mask[:, None, None, :], float("-inf"))
 
-        attention_probs = None
-        if output_attentions:
-            scores = torch.matmul(query.float(), key.float().transpose(-1, -2))
-            scores = scores / self.d_head**0.5 + attention_bias.float()
-            attention_probs = F.softmax(scores, dim=-1, dtype=torch.float32)
-            attention_probs = F.dropout(
-                attention_probs,
-                p=self.attn_dropout,
-                training=self.training,
-            )
-            context = torch.matmul(attention_probs.to(value.dtype), value)
-        else:
-            context = F.scaled_dot_product_attention(
-                query,
-                key,
-                value,
-                attn_mask=attention_bias,
-                dropout_p=self.attn_dropout if self.training else 0.0,
-            )
+        context = F.scaled_dot_product_attention(
+            query,
+            key,
+            value,
+            attn_mask=attention_bias,
+            dropout_p=self.attn_dropout if self.training else 0.0,
+        )
         context = context.transpose(1, 2).reshape(batch_size, n_peaks, -1)
-        return self.proj_dropout(self.out(context)), attention_probs
+        return self.proj_dropout(self.out(context))
 
 
 class EncoderBlock(nn.Module):
@@ -157,14 +142,11 @@ class EncoderBlock(nn.Module):
         hidden_states: Tensor,
         bias: Tensor,
         padding_mask: Tensor,
-        output_attentions: bool = False,
-    ) -> tuple[Tensor, Tensor | None]:
-        attention_output, attention_probs = self.attn(
-            self.norm1(hidden_states), bias, padding_mask, output_attentions
-        )
+    ) -> Tensor:
+        attention_output = self.attn(self.norm1(hidden_states), bias, padding_mask)
         hidden_states = hidden_states + attention_output
         hidden_states = hidden_states + self.ffn(self.norm2(hidden_states))
-        return hidden_states, attention_probs
+        return hidden_states
 
 
 class MSDeltaPreTrainedModel(PreTrainedModel):
@@ -206,18 +188,8 @@ class MSDeltaModel(MSDeltaPreTrainedModel):
         log_intensity: Tensor,
         attention_mask: Tensor | None = None,
         mask_positions: Tensor | None = None,
-        output_attentions: bool | None = None,
-        output_hidden_states: bool | None = None,
         return_dict: bool | None = None,
     ) -> BaseModelOutput | tuple[Tensor, ...]:
-        output_attentions = (
-            self.config.output_attentions if output_attentions is None else output_attentions
-        )
-        output_hidden_states = (
-            self.config.output_hidden_states
-            if output_hidden_states is None
-            else output_hidden_states
-        )
         if return_dict is None:
             return_dict = self.config.return_dict
 
@@ -238,46 +210,18 @@ class MSDeltaModel(MSDeltaPreTrainedModel):
             diagonal = torch.eye(n_peaks, dtype=torch.bool, device=mz.device)[None, None]
             bias = bias.masked_fill(diagonal, 0.0)
 
-        all_hidden_states = () if output_hidden_states else None
-        all_attentions = () if output_attentions else None
         for block in self.blocks:
-            if output_hidden_states:
-                all_hidden_states += (hidden_states,)
             if self.gradient_checkpointing and self.training:
-                if output_attentions:
-                    raise ValueError(
-                        "output_attentions=True is incompatible with gradient checkpointing"
-                    )
-
-                def custom_forward(*inputs):
-                    return block(*inputs, output_attentions=False)[0]
-
                 hidden_states = self._gradient_checkpointing_func(
-                    custom_forward, hidden_states, bias, padding_mask
+                    block.__call__, hidden_states, bias, padding_mask
                 )
-                attention_probs = None
             else:
-                hidden_states, attention_probs = block(
-                    hidden_states, bias, padding_mask, output_attentions
-                )
-            if output_attentions:
-                all_attentions += (attention_probs,)
+                hidden_states = block(hidden_states, bias, padding_mask)
         hidden_states = self.norm(hidden_states)
-        if output_hidden_states:
-            all_hidden_states += (hidden_states,)
 
         if not return_dict:
-            outputs = (hidden_states,)
-            if output_hidden_states:
-                outputs += (all_hidden_states,)
-            if output_attentions:
-                outputs += (all_attentions,)
-            return outputs
-        return BaseModelOutput(
-            last_hidden_state=hidden_states,
-            hidden_states=all_hidden_states,
-            attentions=all_attentions,
-        )
+            return (hidden_states,)
+        return BaseModelOutput(last_hidden_state=hidden_states)
 
 
 class IntensityHead(nn.Module):
@@ -307,8 +251,6 @@ class MSDeltaForPreTraining(MSDeltaPreTrainedModel):
         attention_mask: Tensor | None = None,
         mask_positions: Tensor | None = None,
         labels: Tensor | None = None,
-        output_attentions: bool | None = None,
-        output_hidden_states: bool | None = None,
         return_dict: bool | None = None,
     ) -> MSDeltaForPreTrainingOutput | tuple[Tensor, ...]:
         if return_dict is None:
@@ -318,8 +260,6 @@ class MSDeltaForPreTraining(MSDeltaPreTrainedModel):
             log_intensity=log_intensity,
             attention_mask=attention_mask,
             mask_positions=mask_positions,
-            output_attentions=output_attentions,
-            output_hidden_states=output_hidden_states,
             return_dict=True,
         )
         logits = self.intensity_head(outputs.last_hidden_state)
@@ -342,16 +282,10 @@ class MSDeltaForPreTraining(MSDeltaPreTrainedModel):
 
         if not return_dict:
             result = (logits,)
-            if outputs.hidden_states is not None:
-                result += (outputs.hidden_states,)
-            if outputs.attentions is not None:
-                result += (outputs.attentions,)
             return ((loss,) + result) if loss is not None else result
         return MSDeltaForPreTrainingOutput(
             loss=loss,
             logits=logits,
-            hidden_states=outputs.hidden_states,
-            attentions=outputs.attentions,
         )
 
 

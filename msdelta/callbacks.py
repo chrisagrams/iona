@@ -13,11 +13,10 @@ from transformers import TrainerCallback
 
 import wandb
 from msdelta.alignment import alignment_metrics
-from msdelta.data import collate_preprocessed
 from msdelta.fourier import dead_freqs, freq_drift, interp_mae
 from msdelta.probe import run_all_probes
 from msdelta.retrieval import replicate_retrieval_inline_metrics, retrieval_inline_metrics
-from msdelta.viz import attention_entropy_per_head, render_bias_panels
+from msdelta.viz import render_bias_panels
 
 
 class _InlineCallback(TrainerCallback):
@@ -236,43 +235,6 @@ class BiasPanelCallback(_InlineCallback):
         self._wlog(payload, step)
 
 
-class AttentionEntropyCallback(_InlineCallback):
-    """Measure attention entropy for each head."""
-
-    empty_cache_before = True
-    batch_size = 64
-
-    def run(self, step):
-        ent = self._entropy()
-        if ent is None:
-            return
-        payload = {}
-        for layer_i, row in enumerate(ent):
-            for h_i, e in enumerate(row):
-                payload[f"attn_entropy/L{layer_i}_H{h_i}"] = float(e)
-        self._wlog(payload, step)
-
-    def _entropy(self):
-        enc = self.encoder
-        rows = list(itertools.islice(self.dataset, self.batch_size))
-        if not rows:
-            return None
-        batch = collate_preprocessed(rows)
-        batch = {k: v.to(self.device) for k, v in batch.items()}
-        was_training = enc.training
-        enc.eval()
-        with torch.no_grad():
-            outputs = enc(
-                mz=batch["mz"],
-                log_intensity=batch["log_intensity"],
-                attention_mask=batch["attention_mask"],
-                output_attentions=True,
-            )
-        if was_training:
-            enc.train()
-        return attention_entropy_per_head(list(outputs.attentions))
-
-
 class WandbConfigCallback(TrainerCallback):
     """Log the resolved configuration at the start of training."""
 
@@ -289,9 +251,6 @@ def build_callbacks(module, val_dataset, pp, training_args, resolved_config, out
     cbs: list[TrainerCallback] = [WandbConfigCallback(resolved_config)]
     if training_args.bias_curve_steps:
         cbs.append(BiasPanelCallback(module, training_args.bias_curve_steps, out_dir=out_dir))
-        cbs.append(
-            AttentionEntropyCallback(module, training_args.bias_curve_steps, dataset=val_dataset)
-        )
     if training_args.probe_steps:
         cbs.append(
             LinearProbeCallback(
