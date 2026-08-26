@@ -1,11 +1,5 @@
-"""Run the encoder over spectra → token / pooled embeddings.
+"""Create token and spectrum embeddings."""
 
-Shared inference plumbing for the frozen-encoder diagnostics (`probe`,
-`retrieval`): pad a batch of preprocessed peak lists, forward through the
-encoder, and mean⊕max-pool. `MSEncoder.forward` returns per-token embeddings
-`(B, K, D)`; pooling to one vector per spectrum lives here (not in the model)
-because the probes also consume the raw tokens.
-"""
 from __future__ import annotations
 
 import numpy as np
@@ -14,7 +8,7 @@ from torch.nn.utils.rnn import pad_sequence
 
 
 def pool_tokens(tokens: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
-    """mean ⊕ max over real peaks. tokens (B,K,D), mask (B,K) True=real."""
+    """Apply mean and maximum pooling to real peaks."""
     m = mask.unsqueeze(-1)
     summed = (tokens * m).sum(1)
     mean = summed / m.sum(1).clamp_min(1)
@@ -25,34 +19,27 @@ def pool_tokens(tokens: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
 
 @torch.no_grad()
 def encode_batch(enc, mzs, lis, device):
-    """Pad one batch of (mz_p, log_int) peak lists and forward through `enc`.
-
-    `mzs`/`lis` are lists of 1-D CPU tensors (empty tensors allowed). Returns
-    (tokens (B,K,D), mask (B,K) True=real), both on `device`."""
-    mz = pad_sequence(mzs, batch_first=True)               # (B,K), 0-padded
+    """Pad and encode one batch of peak lists."""
+    mz = pad_sequence(mzs, batch_first=True)
     li = pad_sequence(lis, batch_first=True)
     lens = torch.tensor([m.numel() for m in mzs])
-    mask = torch.arange(mz.shape[1])[None, :] < lens[:, None]   # True = real peak
+    mask = torch.arange(mz.shape[1])[None, :] < lens[:, None]
     tokens = enc(mz.to(device), li.to(device), (~mask).to(device))
     return tokens, mask.to(device)
 
 
 @torch.no_grad()
 def embed_spectra(enc, specs, device, *, batch_size=128):
-    """One mean⊕max-pooled vector per (mz_p, log_int) spectrum.
-
-    Returns an (n, D) float32 matrix (NOT L2-normalised); empty spectra get a
-    zero row so the output stays index-aligned with `specs` (they can never be a
-    real neighbour, i.e. a miss)."""
+    """Return one float32 vector for each spectrum."""
     enc.to(device).eval()
     n = len(specs)
     emb = None
     for s in range(0, n, batch_size):
         e = min(s + batch_size, n)
         mzs = [m for m, _ in specs[s:e]]
-        lis = [l for _, l in specs[s:e]]
+        lis = [log_intensity for _, log_intensity in specs[s:e]]
         if max((m.numel() for m in mzs), default=0) == 0:
-            continue                            # whole batch empty; rows stay zero
+            continue
         tokens, mask = encode_batch(enc, mzs, lis, device)
         pooled = pool_tokens(tokens, mask).float().cpu().numpy().astype(np.float32)
         if emb is None:

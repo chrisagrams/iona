@@ -1,3 +1,3 @@
-"""msdelta — mass-spec transformer with learned per-head Δm/z attention bias."""
+"""Provide a mass spectrum transformer with a learned delta m/z bias."""
 
 __version__ = "0.1.0"

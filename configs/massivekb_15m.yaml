@@ -1,7 +1,4 @@
-# MassIVE-KB v15 — 15M tier (d=384, n_layers=8, n_heads=8), single GPU.
-# Mirrors wandb run massivekb-v15-t5-15m-k1024
-# (https://wandb.ai/CS_Pharm/msfound/runs/v1vq9jwf) — a small/fast model
-# trained with top_n=1024 peaks kept per spectrum (vs. 150 on the XL configs).
+# Train the 15M model on one GPU. Keep 1024 peaks for each spectrum.
 d_model: 384
 n_heads: 8
 n_layers: 8
@@ -20,17 +17,17 @@ delta_bias_f_max: 1.0e+3
 delta_bias_scale: 3.0
 delta_bias_learnable: true
 
-hf_repo: chrisagrams/massive_kb_v1_shuffled   # takes precedence over root; train/ + val/ splits
+hf_repo: chrisagrams/massive_kb_v1_shuffled
 hf_train_split: train
 hf_val_split: val
 n_val_files: 2
 intensity_threshold_frac: 0.01
 top_n: 1024
 mask_ratio: 0.50
-preprocess_num_workers: 24  # rank 0 only; other ranks wait and load its cache
+preprocess_num_workers: 24
 
-batch_size: 32           # per-device micro-batch
-grad_accum_steps: 8      # global batch = 32 × 8 = 256 (single GPU)
+batch_size: 32
+grad_accum_steps: 8
 num_workers: 6
 lr: 2.0e-4
 lr_scheduler_type: cosine
@@ -57,5 +54,5 @@ bias_curve_every: 5000
 ckpt_every: 10000
 probe_every: 5000
 probe_n_spectra: 3000
-replicate_retrieval_repo: chrisagrams/ms2-peptide-replicate-retrieval  # MS2 replicate-retrieval benchmark probe (omit to skip)
+replicate_retrieval_repo: chrisagrams/ms2-peptide-replicate-retrieval
 out_dir: ./runs
