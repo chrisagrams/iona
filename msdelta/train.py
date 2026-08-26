@@ -29,14 +29,6 @@ class MSDeltaTrainer(Trainer):
 
 def main(argv: list[str] | None = None) -> int:
     cli, model_config, processor, training_args = parse_config(argv)
-    print(
-        f"[distributed] RANK={os.environ.get('RANK')} "
-        f"LOCAL_RANK={os.environ.get('LOCAL_RANK')} "
-        f"WORLD_SIZE={os.environ.get('WORLD_SIZE')} "
-        f"process_index={training_args.process_index} "
-        f"local_process_index={training_args.local_process_index}",
-        flush=True,
-    )
 
     out_dir = Path(training_args.output_dir)
     out_dir.mkdir(parents=True, exist_ok=True)

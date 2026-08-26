@@ -129,6 +129,7 @@ exec mpiexec \
     --envall \
     -n "$TOTAL_GPUS" \
     --ppn "$GPUS_PER_HOST" \
+    --cpu-bind none \
     --hostfile="$PBS_NODEFILE" \
     /usr/bin/env \
     bash -c '
