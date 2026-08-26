@@ -101,6 +101,8 @@ nvidia-smi -L | sed 's/^/  /'
 export OMP_NUM_THREADS=${OMP_NUM_THREADS:-2}
 export MKL_NUM_THREADS=${MKL_NUM_THREADS:-2}
 export OPENBLAS_NUM_THREADS=${OPENBLAS_NUM_THREADS:-2}
+export CC=gcc
+export CXX=g++
 export PYTORCH_CUDA_ALLOC_CONF=${PYTORCH_CUDA_ALLOC_CONF:-expandable_segments:True}
 export HF_HOME
 export HF_HUB_OFFLINE=${HF_HUB_OFFLINE:-0}
