@@ -1,4 +1,4 @@
-# Train the 15M model on one GPU. Keep 1024 peaks for each spectrum.
+# Train the 15M model on one GPU at global batch size 512. Keep 1024 peaks per spectrum.
 model:
   hidden_size: 384
   num_attention_heads: 8
@@ -32,7 +32,7 @@ training:
   mask_ratio: 0.50
   per_device_train_batch_size: 32
   per_device_eval_batch_size: 32
-  gradient_accumulation_steps: 8
+  gradient_accumulation_steps: 16
   dataloader_num_workers: 6
   learning_rate: 2.0e-4
   adam_beta1: 0.9
