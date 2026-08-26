@@ -1,16 +1,5 @@
-"""Δm bias-curve chemistry-alignment probe.
+"""Measure the alignment of bias peaks with chemical mass differences."""
 
-Evaluates each head's learned bias curve on a dense Δm grid, detects strong
-peaks, and tests whether their locations align with chemically meaningful Δm
-values (isotopes, neutral losses, amino-acid residues) *better than chance*.
-
-The guardrail: with ~27 reference values packed into [2, 200] Da, some peak is
-always near some reference — so "a peak landed near a residue mass" means
-nothing without asking "more often than random peaks would?". Each head gets a
-p-value from `binomtest(n_aligned, n_peaks, chance_rate)`. `alignment_metrics`
-is the flat wandb dict logged inline every probe step; the encoder never sees a
-spectrum, so it is cheap and safe at that cadence.
-"""
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -21,11 +10,9 @@ import torch
 from scipy.signal import find_peaks
 from scipy.stats import binomtest
 
-from .model import MSEncoder
-from .viz import ISOTOPES, NEUTRAL_LOSSES, RESIDUES_AA20
+from msdelta.chemistry import ISOTOPES, NEUTRAL_LOSSES, RESIDUES_AA20
+from msdelta.modeling_msdelta import MSDeltaModel
 
-
-# ---------- references ----------
 
 def reference_set(kinds: list[str]) -> dict[str, float]:
     refs: dict[str, float] = {}
@@ -38,8 +25,6 @@ def reference_set(kinds: list[str]) -> dict[str, float]:
     return refs
 
 
-# ---------- core analysis ----------
-
 @dataclass
 class RangeSpec:
     name: str
@@ -47,30 +32,28 @@ class RangeSpec:
     hi: float
     step: float
     kinds: list[str]
-    tol: float          # Da; how close a peak must be to a reference to count
-    prominence: float   # min peak prominence (logit units) to count as "strong"
-    min_sep: float      # Da; minimum separation between detected peaks
+    tol: float
+    prominence: float
+    min_sep: float
 
 
 @torch.no_grad()
-def _eval_curves(enc: MSEncoder, lo: float, hi: float, step: float):
-    # Build the grid on the bias module's device so this works both for a
-    # CPU-loaded checkpoint (CLI) and the live GPU encoder (inline probe).
+def _eval_curves(enc: MSDeltaModel, lo: float, hi: float, step: float):
     dev = next(enc.bias_module.parameters()).device
     grid = torch.arange(lo, hi + step / 2, step, dtype=torch.float32, device=dev)
-    curves = enc.bias_module.evaluate(grid).cpu().numpy()  # (N, H)
+    curves = enc.bias_module.evaluate(grid).cpu().numpy()
     return grid.cpu().numpy(), curves
 
 
 def _chance_rate(abs_grid: np.ndarray, ref_vals: np.ndarray, tol: float) -> float:
-    """Fraction of the (folded, |Δm|) axis within `tol` of any reference."""
+    """Calculate the axis fraction that is near a reference value."""
     covered = np.zeros_like(abs_grid, dtype=bool)
     for v in ref_vals:
         covered |= np.abs(abs_grid - v) < tol
     return float(covered.mean())
 
 
-def analyze_range(enc: MSEncoder, spec: RangeSpec) -> dict[str, Any]:
+def analyze_range(enc: MSDeltaModel, spec: RangeSpec) -> dict[str, Any]:
     refs = reference_set(spec.kinds)
     ref_items = list(refs.items())
     ref_vals = np.array([v for _, v in ref_items], dtype=np.float64)
@@ -79,8 +62,6 @@ def analyze_range(enc: MSEncoder, spec: RangeSpec) -> dict[str, Any]:
     H = curves.shape[1]
     distance = max(1, int(spec.min_sep / spec.step))
 
-    # Chance computed on |Δm| since a feature at ±v both indicate the same
-    # chemical relationship (Δm is signed; the bias may be asymmetric).
     abs_grid = np.abs(grid)
     chance = _chance_rate(abs_grid, ref_vals, spec.tol)
 
@@ -97,33 +78,35 @@ def analyze_range(enc: MSEncoder, spec: RangeSpec) -> dict[str, Any]:
             j = int(np.argmin(np.abs(ref_vals - abs(dm))))
             off = abs(dm) - ref_vals[j]
             if abs(off) < spec.tol:
-                hits.append({
-                    "dm": round(float(dm), 4),
-                    "ref": ref_items[j][0],
-                    "ref_dm": float(ref_vals[j]),
-                    "offset": round(float(off), 4),
-                    "prominence": round(float(prom), 3),
-                })
+                hits.append(
+                    {
+                        "dm": round(float(dm), 4),
+                        "ref": ref_items[j][0],
+                        "ref_dm": float(ref_vals[j]),
+                        "offset": round(float(off), 4),
+                        "prominence": round(float(prom), 3),
+                    }
+                )
                 covered_refs.add(ref_items[j][0])
 
         n_pk = int(len(pk))
         n_hit = len(hits)
-        # Binomial null: would n_hit aligned out of n_pk peaks be surprising
-        # if each peak landed within tol of a ref with probability `chance`?
         if n_pk > 0:
             pval = float(binomtest(n_hit, n_pk, chance, alternative="greater").pvalue)
         else:
             pval = 1.0
 
-        per_head.append({
-            "head": h,
-            "n_peaks": n_pk,
-            "n_aligned": n_hit,
-            "expected_by_chance": round(chance * n_pk, 2),
-            "enrichment": round((n_hit / n_pk) / chance, 2) if n_pk and chance > 0 else 0.0,
-            "p_value": pval,
-            "hits": sorted(hits, key=lambda x: -x["prominence"]),
-        })
+        per_head.append(
+            {
+                "head": h,
+                "n_peaks": n_pk,
+                "n_aligned": n_hit,
+                "expected_by_chance": round(chance * n_pk, 2),
+                "enrichment": round((n_hit / n_pk) / chance, 2) if n_pk and chance > 0 else 0.0,
+                "p_value": pval,
+                "hits": sorted(hits, key=lambda x: -x["prominence"]),
+            }
+        )
 
     return {
         "range": spec.name,
@@ -140,30 +123,30 @@ def analyze_range(enc: MSEncoder, spec: RangeSpec) -> dict[str, Any]:
 
 
 def alignment_metrics(
-    enc: MSEncoder,
+    enc: MSDeltaModel,
     fine_tol: float = 0.02,
     coarse_tol: float = 0.1,
     prominence: float = 0.3,
 ) -> dict[str, float]:
-    """Flat wandb dict from the Δm bias-curve chemistry alignment (mode b).
-
-    Pure bias-curve analysis — the encoder never sees a spectrum, so this is
-    fast (peak-find on `bias_h(Δm)`) and safe to call inline every probe step.
-    Tracks, per range and overall: how many head×range tests beat chance
-    (p<0.05), how many survive Bonferroni at p<0.01 (the strict gate), the
-    best p-value, the peak enrichment, and reference coverage. Watching
-    `align/n_sig01_bonf` over training shows whether the bias is *sharpening*
-    onto chemistry as the model learns, rather than only at the final ckpt.
-    """
+    """Return alignment metrics for logging."""
     specs = [
-        RangeSpec("fine", -5.0, 5.0, 0.001, ["isotope"],
-                  tol=fine_tol, prominence=prominence, min_sep=0.05),
-        RangeSpec("coarse", 2.0, 200.0, 0.01, ["loss", "residue"],
-                  tol=coarse_tol, prominence=prominence, min_sep=0.3),
+        RangeSpec(
+            "fine", -5.0, 5.0, 0.001, ["isotope"], tol=fine_tol, prominence=prominence, min_sep=0.05
+        ),
+        RangeSpec(
+            "coarse",
+            2.0,
+            200.0,
+            0.01,
+            ["loss", "residue"],
+            tol=coarse_tol,
+            prominence=prominence,
+            min_sep=0.3,
+        ),
     ]
     results = [analyze_range(enc, spec) for spec in specs]
     all_p = [ph["p_value"] for res in results for ph in res["per_head"]]
-    n_tests = max(1, len(all_p))   # 8 heads × 2 ranges = 16
+    n_tests = max(1, len(all_p))
 
     out: dict[str, float] = {}
     for res in results:

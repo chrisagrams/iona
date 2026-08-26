@@ -1,14 +1,5 @@
-"""Trainer callbacks for the inline diagnostics — one callback per probe.
+"""Provide Trainer callbacks for model diagnostics."""
 
-Each concrete callback runs a single diagnostic on the main process at its
-configured cadence, reaching the eager `.encoder` shared with the training
-engine for its own forwards. That sharing assumes DeepSpeed ZeRO stage ≤ 2:
-under ZeRO-3 the params live in the engine and a bare `encoder(...)` would see
-empty shells.
-
-`build_callbacks` assembles the right set from the `LogArgs` cadences (a probe
-is only registered when its cadence is set), so nothing runs as a no-op.
-"""
 from __future__ import annotations
 
 import itertools
@@ -17,47 +8,37 @@ from typing import Any
 
 import matplotlib.pyplot as plt
 import torch
-import wandb
 from torch import nn
 from transformers import TrainerCallback
 
-from .data import collate_preprocessed
-from .fourier import dead_freqs, freq_drift, interp_mae
-from .probe import run_all_probes
-from .alignment import alignment_metrics
-from .retrieval import retrieval_inline_metrics, replicate_retrieval_inline_metrics
-from .viz import AttentionRecorder, attention_entropy_per_head, render_bias_panels
+import wandb
+from msdelta.alignment import alignment_metrics
+from msdelta.fourier import dead_freqs, freq_drift, interp_mae
+from msdelta.probe import run_all_probes
+from msdelta.retrieval import replicate_retrieval_inline_metrics, retrieval_inline_metrics
+from msdelta.viz import render_bias_panels
 
-
-# ---------- shared plumbing ----------
 
 class _InlineCallback(TrainerCallback):
-    """Base for a step-cadenced, main-process-only diagnostic.
-
-    Subclasses set `empty_cache_before` (whether to free the allocator before a
-    forward-heavy run) and implement `run(step)`. Not registered directly.
-    """
+    """Run a diagnostic at a specified interval on the main process."""
 
     empty_cache_before: bool = False
 
-    def __init__(self, module: nn.Module, every: int, *,
-                 dataset=None, out_dir: Path | None = None):
+    def __init__(self, module: nn.Module, every: int, *, dataset=None, out_dir: Path | None = None):
         self.module = module
         self.every = every
-        self.dataset = dataset      # preprocessed HF val dataset (probes/retrieval)
+        self.dataset = dataset
         self.out_dir = out_dir
 
     @property
     def encoder(self):
-        return self.module.encoder
+        return self.module.msdelta
 
     @property
     def device(self) -> torch.device:
         return next(self.module.parameters()).device
 
     def _wlog(self, payload: dict, step: int) -> None:
-        # Log on the same x-axis (train/global_step) the HF WandbCallback uses,
-        # without passing an explicit wandb step (avoids step-ordering clashes).
         if payload and wandb.run is not None:
             wandb.log({**payload, "train/global_step": step})
 
@@ -68,8 +49,6 @@ class _InlineCallback(TrainerCallback):
         if step <= 0 or step % self.every != 0:
             return
         if self.empty_cache_before and self.device.type == "cuda":
-            # Return reserved-but-unallocated blocks so the forward gets
-            # contiguous room (big tiers OOM'd here on a fragmented 40GB A100).
             torch.cuda.empty_cache()
         self.run(step)
 
@@ -77,10 +56,8 @@ class _InlineCallback(TrainerCallback):
         raise NotImplementedError
 
 
-# ---------- one callback per probe ----------
-
 class LinearProbeCallback(_InlineCallback):
-    """Frozen-encoder linear probes (precursor m/z, charge, neutral loss, …)."""
+    """Run linear probes on the frozen encoder."""
 
     empty_cache_before = True
 
@@ -89,56 +66,46 @@ class LinearProbeCallback(_InlineCallback):
         self.n_spectra = n_spectra
 
     def run(self, step):
-        m = run_all_probes(self.encoder, self.dataset, self.device,
-                           n_spectra=self.n_spectra)
+        m = run_all_probes(self.encoder, self.dataset, self.device, n_spectra=self.n_spectra)
         self._wlog(m, step)
-        key = lambda k: m.get(k, float("nan"))
-        print(f"  probe: precursor_r2={key('probe/precursor_mz_r2'):.3f} "
-              f"fragment_mz_r2={key('probe/fragment_mz_r2'):.3f} "
-              f"charge_acc={key('probe/charge_acc'):.3f} "
-              f"nloss_auc={key('probe/neutral_loss_auc'):.3f} "
-              f"iso_f1={key('probe/isotope_f1'):.3f}", flush=True)
+
+        def key(k):
+            return m.get(k, float("nan"))
+
+        print(
+            f"  probe: precursor_r2={key('probe/precursor_mz_r2'):.3f} "
+            f"fragment_mz_r2={key('probe/fragment_mz_r2'):.3f} "
+            f"charge_acc={key('probe/charge_acc'):.3f} "
+            f"nloss_auc={key('probe/neutral_loss_auc'):.3f} "
+            f"iso_f1={key('probe/isotope_f1'):.3f}",
+            flush=True,
+        )
 
 
 class FourierProbeCallback(_InlineCallback):
-    """Are the learned Fourier frequencies effective?
-
-    Evaluates each learnable featurizer on REAL values drawn from the val set —
-    real log-intensities for `PeakEmbed.ff_int`, real intra-spectrum Δm/z (what
-    `DeltaMZBias.ff` actually sees) for the bias — rather than a synthetic grid.
-    Per featurizer we log reconstruction MAE (can a small MLP recover the scalar
-    from its Fourier code — the effectiveness number), the dead-frequency count,
-    how far the frequencies have drifted from init, their current range, and a
-    histogram of where they sit. A frozen (non-learnable) featurizer is skipped.
-    """
+    """Measure learned Fourier frequencies on validation data."""
 
     empty_cache_before = True
 
     def __init__(self, module, every, dataset, n_spectra):
         super().__init__(module, every, dataset=dataset)
         self.n_spectra = n_spectra
-        self._vals: dict[str, torch.Tensor] | None = None   # cached real samples
-        self._init_freqs: dict[str, torch.Tensor] = {}      # snapshot at first run
+        self._vals: dict[str, torch.Tensor] | None = None
+        self._init_freqs: dict[str, torch.Tensor] = {}
 
-    # ---- one-time real-value sampling ----
-
-    def _sample_values(self, budget: int = 8192, max_spectra: int = 1000,
-                       pairs_per_spectrum: int = 64) -> dict[str, torch.Tensor]:
-        """Pool real log_int values and real intra-spectrum Δm/z from the val set.
-
-        Both pools are subsampled to `budget` points so the throwaway MLP fit
-        stays cheap. Deterministic (seeded) so the metric is comparable step to
-        step."""
+    def _sample_values(
+        self, budget: int = 8192, max_spectra: int = 1000, pairs_per_spectrum: int = 64
+    ) -> dict[str, torch.Tensor]:
+        """Sample intensity and delta m/z values from validation data."""
         g = torch.Generator().manual_seed(0)
         li_pool, dm_pool = [], []
         n = min(self.n_spectra, max_spectra)
         for row in itertools.islice(self.dataset, n):
             mz = torch.as_tensor(row["mz"], dtype=torch.float32)
-            li = torch.as_tensor(row["log_int"], dtype=torch.float32)
+            li = torch.as_tensor(row["log_intensity"], dtype=torch.float32)
             if li.numel():
                 li_pool.append(li)
             if mz.numel() >= 2:
-                # signed Δm/z for a random sample of ordered peak pairs
                 k = mz.numel()
                 idx = torch.randint(0, k, (pairs_per_spectrum, 2), generator=g)
                 idx = idx[idx[:, 0] != idx[:, 1]]
@@ -155,20 +122,15 @@ class FourierProbeCallback(_InlineCallback):
 
         return {"int": _cat(li_pool), "dm": _cat(dm_pool)}
 
-    # ---- per-featurizer metrics ----
-
     def _featurizer_metrics(self, name: str, ff, vals: torch.Tensor) -> dict:
         freqs = ff.freqs
         if not isinstance(freqs, nn.Parameter):
-            return {}                       # frozen featurizer — nothing to watch
+            return {}
         if name not in self._init_freqs:
             self._init_freqs[name] = freqs.detach().abs().cpu().clone()
         if vals.numel() < 8:
             return {}
         span = float(vals.max() - vals.min())
-        # .float(): freqs is a learnable nn.Parameter, so under bf16 training it
-        # comes back as bfloat16 — which Tensor.numpy() (the histogram below)
-        # rejects. Cast to fp32 at the source, matching interp_mae's idiom.
         f = freqs.detach().abs().float().cpu()
         m = {
             f"fourier/{name}_mae": interp_mae(freqs, vals),
@@ -178,8 +140,7 @@ class FourierProbeCallback(_InlineCallback):
             f"fourier/{name}_f_max": float(f.max()),
         }
         if wandb.run is not None:
-            m[f"fourier/{name}_log10_freqs"] = wandb.Histogram(
-                f.clamp_min(1e-12).log10().numpy())
+            m[f"fourier/{name}_log10_freqs"] = wandb.Histogram(f.clamp_min(1e-12).log10().numpy())
         return m
 
     def run(self, step):
@@ -192,61 +153,75 @@ class FourierProbeCallback(_InlineCallback):
         if not payload:
             return
         self._wlog(payload, step)
-        g = lambda k: payload.get(k, float("nan"))
-        print(f"  fourier: int_mae={g('fourier/int_mae'):.4g} "
-              f"int_dead={g('fourier/int_dead'):.0f} "
-              f"dm_mae={g('fourier/dm_mae'):.4g} "
-              f"dm_dead={g('fourier/dm_dead'):.0f}", flush=True)
+
+        def g(k):
+            return payload.get(k, float("nan"))
+
+        print(
+            f"  fourier: int_mae={g('fourier/int_mae'):.4g} "
+            f"int_dead={g('fourier/int_dead'):.0f} "
+            f"dm_mae={g('fourier/dm_mae'):.4g} "
+            f"dm_dead={g('fourier/dm_dead'):.0f}",
+            flush=True,
+        )
 
 
 class AlignmentCallback(_InlineCallback):
-    """Δm bias-curve chemistry alignment — pure bias-curve analysis, no data."""
+    """Measure bias alignment with chemical mass differences."""
 
     def run(self, step):
         a = alignment_metrics(self.encoder)
         self._wlog(a, step)
-        print(f"  align: n_sig05={a.get('align/n_sig05', 0):.0f} "
-              f"n_sig01_bonf={a.get('align/n_sig01_bonf', 0):.0f} "
-              f"best_p={a.get('align/best_p', 1):.1e}", flush=True)
+        print(
+            f"  align: n_sig05={a.get('align/n_sig05', 0):.0f} "
+            f"n_sig01_bonf={a.get('align/n_sig01_bonf', 0):.0f} "
+            f"best_p={a.get('align/best_p', 1):.1e}",
+            flush=True,
+        )
 
 
 class RetrievalCallback(_InlineCallback):
-    """Spectrum retrieval — the model as an embedding model, vs a binned baseline."""
+    """Measure spectrum retrieval against a binned baseline."""
 
     empty_cache_before = True
 
     def run(self, step):
         r = retrieval_inline_metrics(self.encoder, self.dataset, self.device)
         self._wlog(r, step)
-        print(f"  retrieval: mAP={r.get('retrieval/mAP', float('nan')):.3f} "
-              f"binned={r.get('retrieval/binned_mAP', float('nan')):.3f} "
-              f"gap={r.get('retrieval/gap_vs_binned', float('nan')):+.3f}", flush=True)
+        print(
+            f"  retrieval: mAP={r.get('retrieval/mAP', float('nan')):.3f} "
+            f"binned={r.get('retrieval/binned_mAP', float('nan')):.3f} "
+            f"gap={r.get('retrieval/gap_vs_binned', float('nan')):+.3f}",
+            flush=True,
+        )
 
 
 class ReplicateRetrievalCallback(_InlineCallback):
-    """External MS2 peptide-replicate-retrieval benchmark (Hit@1 / MAP / R@5)."""
+    """Measure retrieval on the external replicate dataset."""
 
     empty_cache_before = True
 
     def __init__(self, module, every, pp, repo_id):
         super().__init__(module, every)
-        self.pp = pp                # external benchmark preprocessed on the fly
+        self.pp = pp
         self.repo_id = repo_id
 
     def run(self, step):
-        rr = replicate_retrieval_inline_metrics(
-            self.encoder, self.repo_id, self.device, self.pp)
+        rr = replicate_retrieval_inline_metrics(self.encoder, self.repo_id, self.device, self.pp)
         if not rr:
             return
         self._wlog(rr, step)
-        print(f"  replicate-retrieval: "
-              f"Hit@1={rr.get('replicate_retrieval/Hit@1', float('nan')):.3f} "
-              f"MAP={rr.get('replicate_retrieval/MAP', float('nan')):.3f} "
-              f"R@5={rr.get('replicate_retrieval/R@5', float('nan')):.3f}", flush=True)
+        print(
+            f"  replicate-retrieval: "
+            f"Hit@1={rr.get('replicate_retrieval/Hit@1', float('nan')):.3f} "
+            f"MAP={rr.get('replicate_retrieval/MAP', float('nan')):.3f} "
+            f"R@5={rr.get('replicate_retrieval/R@5', float('nan')):.3f}",
+            flush=True,
+        )
 
 
 class BiasPanelCallback(_InlineCallback):
-    """Δm bias-curve panels (fine + coarse) rendered to figs/ and logged as images."""
+    """Render and log bias curves."""
 
     def run(self, step):
         panels = render_bias_panels(self.encoder.bias_module, step)
@@ -260,42 +235,8 @@ class BiasPanelCallback(_InlineCallback):
         self._wlog(payload, step)
 
 
-class AttentionEntropyCallback(_InlineCallback):
-    """Per-head attention entropy on one val batch (SDPA doesn't expose the
-    weights, so `AttentionRecorder` recomputes them under no_grad)."""
-
-    empty_cache_before = True
-    batch_size = 64
-
-    def run(self, step):
-        ent = self._entropy()
-        if ent is None:
-            return
-        payload = {}
-        for layer_i, row in enumerate(ent):
-            for h_i, e in enumerate(row):
-                payload[f"attn_entropy/L{layer_i}_H{h_i}"] = float(e)
-        self._wlog(payload, step)
-
-    def _entropy(self):
-        enc = self.encoder
-        rows = list(itertools.islice(self.dataset, self.batch_size))
-        if not rows:
-            return None
-        batch = collate_preprocessed(rows)
-        batch = {k: v.to(self.device) for k, v in batch.items()}
-        was_training = enc.training
-        enc.eval()
-        with torch.no_grad(), AttentionRecorder(enc.blocks) as rec:
-            enc(batch["mz"], batch["log_int"], batch["key_padding_mask"], None)
-        if was_training:
-            enc.train()
-        return attention_entropy_per_head(rec.attn)
-
-
 class WandbConfigCallback(TrainerCallback):
-    """Log the resolved config to the wandb run once training begins (the run is
-    created by HF's WandbCallback, which fires before this)."""
+    """Log the resolved configuration at the start of training."""
 
     def __init__(self, resolved_config: dict[str, Any]):
         self.resolved_config = resolved_config
@@ -305,27 +246,37 @@ class WandbConfigCallback(TrainerCallback):
             wandb.config.update(self.resolved_config, allow_val_change=True)
 
 
-# ---------- assembly ----------
-
-def build_callbacks(module, val_dataset, pp, log_args, resolved_config, out_dir):
-    """Assemble the callbacks the config asks for. A probe is registered only
-    when its cadence is set, so no callback ever fires as a no-op. `val_dataset`
-    is the preprocessed HF val dataset the probes/retrieval read; `pp` is only
-    for the external replicate-retrieval benchmark (its own dataset)."""
+def build_callbacks(module, val_dataset, pp, training_args, resolved_config, out_dir):
+    """Create the callbacks enabled in the configuration."""
     cbs: list[TrainerCallback] = [WandbConfigCallback(resolved_config)]
-    if log_args.bias_curve_every:
-        cbs.append(BiasPanelCallback(module, log_args.bias_curve_every, out_dir=out_dir))
-        cbs.append(AttentionEntropyCallback(
-            module, log_args.bias_curve_every, dataset=val_dataset))
-    if log_args.probe_every:
-        cbs.append(LinearProbeCallback(
-            module, log_args.probe_every, val_dataset, log_args.probe_n_spectra))
-        cbs.append(FourierProbeCallback(
-            module, log_args.probe_every, val_dataset, log_args.probe_n_spectra))
-        cbs.append(AlignmentCallback(module, log_args.probe_every))
-        cbs.append(RetrievalCallback(
-            module, log_args.probe_every, dataset=val_dataset))
-        if log_args.replicate_retrieval_repo:
-            cbs.append(ReplicateRetrievalCallback(
-                module, log_args.probe_every, pp, log_args.replicate_retrieval_repo))
+    if training_args.bias_curve_steps:
+        cbs.append(BiasPanelCallback(module, training_args.bias_curve_steps, out_dir=out_dir))
+    if training_args.probe_steps:
+        cbs.append(
+            LinearProbeCallback(
+                module,
+                training_args.probe_steps,
+                val_dataset,
+                training_args.probe_num_spectra,
+            )
+        )
+        cbs.append(
+            FourierProbeCallback(
+                module,
+                training_args.probe_steps,
+                val_dataset,
+                training_args.probe_num_spectra,
+            )
+        )
+        cbs.append(AlignmentCallback(module, training_args.probe_steps))
+        cbs.append(RetrievalCallback(module, training_args.probe_steps, dataset=val_dataset))
+        if training_args.replicate_retrieval_repo:
+            cbs.append(
+                ReplicateRetrievalCallback(
+                    module,
+                    training_args.probe_steps,
+                    pp,
+                    training_args.replicate_retrieval_repo,
+                )
+            )
     return cbs
