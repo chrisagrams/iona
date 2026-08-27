@@ -96,15 +96,12 @@ class FourierProbeCallback(_InlineCallback):
     def _sample_values(
         self, budget: int = 8192, max_spectra: int = 1000, pairs_per_spectrum: int = 64
     ) -> dict[str, torch.Tensor]:
-        """Sample intensity and delta m/z values from validation data."""
+        """Sample delta m/z values from validation data."""
         g = torch.Generator().manual_seed(0)
-        li_pool, dm_pool = [], []
+        dm_pool = []
         n = min(self.n_spectra, max_spectra)
         for row in itertools.islice(self.dataset, n):
             mz = torch.as_tensor(row["mz"], dtype=torch.float32)
-            li = torch.as_tensor(row["log_intensity"], dtype=torch.float32)
-            if li.numel():
-                li_pool.append(li)
             if mz.numel() >= 2:
                 k = mz.numel()
                 idx = torch.randint(0, k, (pairs_per_spectrum, 2), generator=g)
@@ -120,7 +117,7 @@ class FourierProbeCallback(_InlineCallback):
                 v = v[sel]
             return v
 
-        return {"int": _cat(li_pool), "dm": _cat(dm_pool)}
+        return {"dm": _cat(dm_pool)}
 
     def _featurizer_metrics(self, name: str, ff, vals: torch.Tensor) -> dict:
         freqs = ff.freqs
@@ -148,7 +145,6 @@ class FourierProbeCallback(_InlineCallback):
             self._vals = self._sample_values()
         enc = self.encoder
         payload: dict[str, Any] = {}
-        payload.update(self._featurizer_metrics("int", enc.embed.ff_int, self._vals["int"]))
         payload.update(self._featurizer_metrics("dm", enc.bias_module.ff, self._vals["dm"]))
         if not payload:
             return
@@ -158,9 +154,7 @@ class FourierProbeCallback(_InlineCallback):
             return payload.get(k, float("nan"))
 
         print(
-            f"  fourier: int_mae={g('fourier/int_mae'):.4g} "
-            f"int_dead={g('fourier/int_dead'):.0f} "
-            f"dm_mae={g('fourier/dm_mae'):.4g} "
+            f"  fourier: dm_mae={g('fourier/dm_mae'):.4g} "
             f"dm_dead={g('fourier/dm_dead'):.0f}",
             flush=True,
         )
