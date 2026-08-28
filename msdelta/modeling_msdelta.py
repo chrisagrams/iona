@@ -208,10 +208,6 @@ class MSDeltaModel(MSDeltaPreTrainedModel):
 
         hidden_states = self.embed(log_intensity, mask_positions)
         bias = self.bias_module(mz)
-        if self.config.zero_bias_diagonal:
-            n_peaks = mz.size(1)
-            diagonal = torch.eye(n_peaks, dtype=torch.bool, device=mz.device)[None, None]
-            bias = bias.masked_fill(diagonal, 0.0)
 
         for block in self.blocks:
             if self.gradient_checkpointing and self.training:

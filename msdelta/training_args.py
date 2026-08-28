@@ -19,7 +19,7 @@ class ModelArguments:
         metadata={
             "help": (
                 "Comma-separated model configuration overrides, for example "
-                "'hidden_size=768,zero_bias_diagonal=false'."
+                "'hidden_size=768,num_hidden_layers=12'."
             )
         },
     )
