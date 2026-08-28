@@ -20,6 +20,7 @@ from msdelta.modeling_msdelta import MSDeltaForPreTraining
 from msdelta.processing_msdelta import MSDeltaDataCollatorForPreTraining, MSDeltaProcessor
 from msdelta.training_args import DataArguments, ModelArguments, MSDeltaTrainingArguments
 from msdelta.viz import render_bias_panels
+from msdelta.wandb_distributed import init_wandb_run
 
 
 class MSDeltaTrainer(Trainer):
@@ -46,6 +47,23 @@ def main(argv: list[str] | None = None) -> int:
         os.environ.setdefault("WANDB_PROJECT", training_args.wandb_project)
         os.environ.setdefault("WANDB_DIR", str(out_dir))
 
+    wandb_run = None
+    if training_args.wandb_project:
+        wandb_run = init_wandb_run(
+            project=training_args.wandb_project,
+            run_name=training_args.run_name,
+        )
+
+    try:
+        return _train(model_args, data_args, training_args, out_dir)
+    finally:
+        if wandb_run is not None:
+            wandb_run.finish()
+
+
+def _train(model_args, data_args, training_args, out_dir: Path) -> int:
+    """Build and train the model after experiment tracking is initialized."""
+
     set_seed(training_args.seed)
     model_config = MSDeltaConfig.from_pretrained(model_args.config_name)
     if model_args.config_overrides is not None:
@@ -53,9 +71,7 @@ def main(argv: list[str] | None = None) -> int:
         model_config._validate()
     processor_overrides = {}
     if data_args.intensity_threshold_frac is not None:
-        processor_overrides["intensity_threshold_frac"] = (
-            data_args.intensity_threshold_frac
-        )
+        processor_overrides["intensity_threshold_frac"] = data_args.intensity_threshold_frac
     if data_args.max_peaks is not None:
         processor_overrides["max_peaks"] = data_args.max_peaks
     processor = MSDeltaProcessor.from_pretrained(

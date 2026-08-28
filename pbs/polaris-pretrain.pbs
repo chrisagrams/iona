@@ -55,16 +55,19 @@ def argument(name: str, default: str | None = None) -> str | None:
 
 run_name = argument("--run_name", path.parent.name)
 micro_batch_size = int(argument("--per_device_train_batch_size", "0"))
+wandb_project = argument("--wandb_project", "")
 if micro_batch_size < 1:
     raise ValueError("--per_device_train_batch_size must be a positive integer")
 if argument("--deepspeed") is None:
     raise ValueError("--deepspeed must be configured for this launcher")
 print(run_name)
 print(micro_batch_size)
+print(wandb_project)
 PY
 )
 CONFIG_RUN_NAME=${CONFIG_VALUES[0]}
 MICRO_BATCH_SIZE=${CONFIG_VALUES[1]}
+CONFIG_WANDB_PROJECT=${CONFIG_VALUES[2]}
 RUN_NAME=${CONFIG_RUN_NAME}-${JOB_ID}
 RUN_DIR=$CHECKPOINT_DIR/$RUN_NAME
 LOG_DIR=${LOG_DIR:-$RUN_DIR/logs}
@@ -125,6 +128,9 @@ export NO_PROXY=${NO_PROXY:-$no_proxy}
 export WANDB_DIR=${WANDB_DIR:-$LOG_DIR}
 export WANDB_RESUME=${WANDB_RESUME:-allow}
 export WANDB_RUN_ID=${WANDB_RUN_ID:-$RUN_NAME}
+export WANDB_PROJECT=${WANDB_PROJECT:-$CONFIG_WANDB_PROJECT}
+export MSDELTA_NUM_HOSTS=$NUM_HOSTS
+export MSDELTA_TOTAL_GPUS=$TOTAL_GPUS
 
 TRAIN_ARGS=(
     --args_file "$ARGS_FILE"
