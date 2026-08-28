@@ -4,11 +4,14 @@ from __future__ import annotations
 
 import os
 import socket
+from typing import Any
 
 import wandb
 
 
-def init_wandb_run(*, project: str, run_name: str):
+def init_wandb_run(
+    *, project: str, run_name: str, config: dict[str, Any]
+) -> wandb.Run | None:
     """Create one W&B client per node, sharing a run across multiple nodes."""
     rank = int(os.environ.get("RANK", "0"))
     world_size = int(os.environ.get("WORLD_SIZE", "1"))
@@ -21,15 +24,25 @@ def init_wandb_run(*, project: str, run_name: str):
 
     is_multinode = world_size > local_world_size
     is_primary = rank == 0
-    init_kwargs = {"project": project}
+    run_config = (
+        {
+            **config,
+            "distributed": {
+                "num_nodes": max(1, world_size // local_world_size),
+                "world_size": world_size,
+                "gpus_per_node": local_world_size,
+                "total_gpus": world_size,
+            },
+        }
+        if is_primary
+        else None
+    )
 
-    if is_primary:
-        init_kwargs["name"] = run_name
-
+    settings = None
     if is_multinode:
         if not os.environ.get("WANDB_RUN_ID"):
             raise RuntimeError("WANDB_RUN_ID must be set before launching a multi-node job")
-        init_kwargs["settings"] = wandb.Settings(
+        settings = wandb.Settings(
             mode="shared",
             x_label=socket.gethostname(),
             x_primary=is_primary,
@@ -37,20 +50,9 @@ def init_wandb_run(*, project: str, run_name: str):
             x_stats_gpu_device_ids=list(range(local_world_size)),
         )
 
-    run = wandb.init(**init_kwargs)
-    if is_primary:
-        run.config.update(
-            {
-                "distributed/num_nodes": int(
-                    os.environ.get(
-                        "MSDELTA_NUM_HOSTS",
-                        max(1, world_size // local_world_size),
-                    )
-                ),
-                "distributed/world_size": world_size,
-                "distributed/gpus_per_node": local_world_size,
-                "distributed/total_gpus": int(os.environ.get("MSDELTA_TOTAL_GPUS", world_size)),
-            },
-            allow_val_change=True,
-        )
-    return run
+    return wandb.init(
+        project=project,
+        name=run_name if is_primary else None,
+        config=run_config,
+        settings=settings,
+    )
