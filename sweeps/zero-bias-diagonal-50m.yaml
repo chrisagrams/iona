@@ -1,6 +1,6 @@
 program: msdelta/train.py
 
-project: msdelta-zero-bias-diagonal
+project: msdelta-pretrain
 name: 50m-10k-paired-seeds
 
 method: grid
@@ -26,7 +26,7 @@ command:
   - configs/msdelta-base-50m/training.args
   - "--run_name=${envvar:WANDB_RUN_ID}"
   - "--output_dir=./runs/zero-bias-diagonal/${envvar:WANDB_RUN_ID}"
-  - --wandb_project=msdelta-zero-bias-diagonal
+  - --wandb_project=msdelta-pretrain
   - --max_steps=10000
   - --warmup_steps=400
   - --eval_steps=500
