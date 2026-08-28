@@ -1,0 +1,15 @@
+{
+  "gradient_accumulation_steps": "auto",
+  "gradient_clipping": "auto",
+  "train_batch_size": "auto",
+  "train_micro_batch_size_per_gpu": "auto",
+  "torch_autocast": {
+    "dtype": "bfloat16",
+    "enabled": true
+  },
+  "zero_optimization": {
+    "contiguous_gradients": true,
+    "overlap_comm": true,
+    "stage": 2
+  }
+}
