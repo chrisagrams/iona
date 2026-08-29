@@ -235,20 +235,9 @@ class BiasPanelCallback(_InlineCallback):
         self._wlog(payload, step)
 
 
-class WandbConfigCallback(TrainerCallback):
-    """Log the resolved configuration at the start of training."""
-
-    def __init__(self, resolved_config: dict[str, Any]):
-        self.resolved_config = resolved_config
-
-    def on_train_begin(self, args, state, control, **kwargs):
-        if state.is_world_process_zero and wandb.run is not None:
-            wandb.config.update(self.resolved_config, allow_val_change=True)
-
-
-def build_callbacks(module, val_dataset, pp, training_args, resolved_config, out_dir):
+def build_callbacks(module, val_dataset, pp, training_args, out_dir):
     """Create the callbacks enabled in the configuration."""
-    cbs: list[TrainerCallback] = [WandbConfigCallback(resolved_config)]
+    cbs: list[TrainerCallback] = []
     if training_args.bias_curve_steps:
         cbs.append(BiasPanelCallback(module, training_args.bias_curve_steps, out_dir=out_dir))
     if training_args.probe_steps:
