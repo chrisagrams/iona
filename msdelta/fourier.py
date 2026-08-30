@@ -11,6 +11,8 @@ from torch import Tensor, nn
 class FourierFeatures(nn.Module):
     """Convert scalar values to sine and cosine features."""
 
+    freqs: Tensor
+
     def __init__(
         self,
         n_freqs: int,
