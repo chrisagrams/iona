@@ -23,13 +23,11 @@ class MSDeltaConfig(PretrainedConfig):
         fourier_int_n_freqs: int = 16,
         fourier_int_f_min: float = 1e-2,
         fourier_int_f_max: float = 1e2,
-        fourier_int_learnable: bool = True,
         delta_bias_n_freqs: int = 64,
         delta_bias_per_head_hidden: int = 32,
         delta_bias_f_min: float = 1e-2,
         delta_bias_f_max: float = 1e3,
         delta_bias_scale: float = 3.0,
-        delta_bias_learnable: bool = True,
         **kwargs,
     ):
         super().__init__(**kwargs)
@@ -50,13 +48,11 @@ class MSDeltaConfig(PretrainedConfig):
         self.fourier_int_n_freqs = fourier_int_n_freqs
         self.fourier_int_f_min = fourier_int_f_min
         self.fourier_int_f_max = fourier_int_f_max
-        self.fourier_int_learnable = fourier_int_learnable
         self.delta_bias_n_freqs = delta_bias_n_freqs
         self.delta_bias_per_head_hidden = delta_bias_per_head_hidden
         self.delta_bias_f_min = delta_bias_f_min
         self.delta_bias_f_max = delta_bias_f_max
         self.delta_bias_scale = delta_bias_scale
-        self.delta_bias_learnable = delta_bias_learnable
         self._validate()
 
     def _validate(self) -> None:

@@ -23,13 +23,6 @@ from msdelta.viz import render_bias_panels
 from msdelta.wandb_distributed import init_wandb_run
 
 
-class MSDeltaTrainer(Trainer):
-    """Exclude Fourier frequencies from weight decay."""
-
-    def get_decay_parameter_names(self, model):
-        return [n for n in super().get_decay_parameter_names(model) if not n.endswith(".freqs")]
-
-
 def main(argv: list[str] | None = None) -> int:
     parser = HfArgumentParser(
         (ModelArguments, DataArguments, MSDeltaTrainingArguments)  # pyright: ignore[reportArgumentType]
@@ -105,7 +98,7 @@ def main(argv: list[str] | None = None) -> int:
         eval_size = training_args.validation_batches * training_args.per_device_eval_batch_size
         eval_ds = val_ds.select(range(min(len(val_ds), eval_size)))
 
-        trainer = MSDeltaTrainer(
+        trainer = Trainer(
             model=model,
             args=training_args,
             train_dataset=train_ds,
