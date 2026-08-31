@@ -14,6 +14,8 @@ from transformers.utils.generic import ModelOutput
 from .configuration_msdelta import MSDeltaConfig
 from .fourier import FourierFeatures
 
+MODEL_INPUT_WIDTH = 150
+
 
 @dataclass
 class MSDeltaForPreTrainingOutput(ModelOutput):
@@ -21,6 +23,214 @@ class MSDeltaForPreTrainingOutput(ModelOutput):
 
     loss: Tensor | None = None
     logits: Tensor | None = None
+
+
+@dataclass
+class MSDeltaForDenoisingOutput(ModelOutput):
+    """Peak-level Monte Carlo influence and signal scores."""
+
+    mean_influence: Tensor | None = None
+    signal_score: Tensor | None = None
+    std_influence: Tensor | None = None
+    num_contexts: Tensor | None = None
+    sem: Tensor | None = None
+    z_score: Tensor | None = None
+    original_peak_index: Tensor | None = None
+    mz: Tensor | None = None
+    intensity: Tensor | None = None
+    log_intensity: Tensor | None = None
+    num_views: int | None = None
+    coverage_complete: bool | None = None
+
+
+@dataclass(frozen=True)
+class UniformViewSampler:
+    """Sample uniformly random peak subsets while preserving spectrum order."""
+
+    max_peaks_per_view: int = MODEL_INPUT_WIDTH
+
+    def sample(self, num_peaks: int, generator: torch.Generator) -> Tensor:
+        """Return CPU indices for one independently sampled view."""
+        if num_peaks <= self.max_peaks_per_view:
+            return torch.arange(num_peaks)
+        selected = torch.randperm(num_peaks, generator=generator)[: self.max_peaks_per_view]
+        return selected.sort().values
+
+
+def _one_dimensional(values, dtype: torch.dtype) -> Tensor:
+    return torch.as_tensor(values, dtype=dtype).reshape(-1).detach().cpu().contiguous()
+
+
+def _masked_intensity_kl_per_row(
+    logits: Tensor,
+    labels: Tensor,
+    mask_positions: Tensor,
+) -> Tensor:
+    """Match the model's masked-intensity KL objective without batch reduction."""
+    selected = mask_positions.bool()
+    log_prob = F.log_softmax(logits.masked_fill(~selected, float("-inf")), dim=-1).masked_fill(
+        ~selected, 0.0
+    )
+    target = labels.float().masked_fill(~selected, 0.0)
+    target = target / target.sum(dim=-1, keepdim=True).clamp_min(1e-12)
+    return F.kl_div(log_prob, target, reduction="none").sum(dim=-1)
+
+
+def _pad_view(values: Tensor, width: int) -> Tensor:
+    result = torch.zeros(width, dtype=values.dtype, device=values.device)
+    result[: values.numel()] = values
+    return result
+
+
+def monte_carlo_loo_denoise(
+    *,
+    model: "MSDeltaForDenoising",
+    mz,
+    log_intensity,
+    labels,
+    intensity=None,
+    attention_mask=None,
+    original_peak_index=None,
+    min_contexts_per_peak: int = 10,
+    mask_fraction: float = 0.50,
+    max_peaks_per_view: int = MODEL_INPUT_WIDTH,
+    loo_batch_size: int = 64,
+    max_views: int = 1000,
+    seed: int = 42,
+    eps: float = 1e-8,
+) -> MSDeltaForDenoisingOutput:
+    """Score peaks by their influence on masked-intensity reconstruction.
+
+    Positive influence is more noise-like. Negative influence is more signal-like;
+    ``signal_score`` is the negated mean influence.
+    """
+    mz_cpu = _one_dimensional(mz, torch.float32)
+    log_intensity_cpu = _one_dimensional(log_intensity, torch.float32)
+    labels_cpu = _one_dimensional(labels, torch.float32)
+    num_peaks = mz_cpu.numel()
+    intensity_cpu = (
+        labels_cpu.clone() if intensity is None else _one_dimensional(intensity, torch.float32)
+    )
+    original_index_cpu = (
+        torch.arange(num_peaks, dtype=torch.long)
+        if original_peak_index is None
+        else _one_dimensional(original_peak_index, torch.long)
+    )
+    device = next(model.parameters()).device
+    sampler = UniformViewSampler(max_peaks_per_view=max_peaks_per_view)
+    generator = torch.Generator(device="cpu")
+    generator.manual_seed(seed)
+    counts_cpu = torch.zeros(num_peaks, dtype=torch.long)
+    sums = torch.zeros(num_peaks, dtype=torch.float64, device=device)
+    squared_sums = torch.zeros_like(sums)
+    num_views = 0
+    was_training = model.training
+
+    model.eval()
+    try:
+        with torch.inference_mode():
+            while num_views < max_views and bool((counts_cpu < min_contexts_per_peak).any()):
+                view_indices = sampler.sample(num_peaks, generator)
+                view_size = view_indices.numel()
+                num_probes = min(
+                    view_size - 1,
+                    max(2, int(round(view_size * mask_fraction))),
+                )
+                probe_positions = torch.randperm(view_size, generator=generator)[:num_probes]
+                probe_mask_cpu = torch.zeros(view_size, dtype=torch.bool)
+                probe_mask_cpu[probe_positions] = True
+                candidate_positions = torch.nonzero(~probe_mask_cpu, as_tuple=False).squeeze(-1)
+
+                baseline_mz = _pad_view(
+                    mz_cpu[view_indices].to(device), MODEL_INPUT_WIDTH
+                ).unsqueeze(0)
+                baseline_log_intensity = _pad_view(
+                    log_intensity_cpu[view_indices].to(device), MODEL_INPUT_WIDTH
+                ).unsqueeze(0)
+                baseline_labels = _pad_view(
+                    labels_cpu[view_indices].to(device), MODEL_INPUT_WIDTH
+                ).unsqueeze(0)
+                baseline_attention = torch.zeros(
+                    1, MODEL_INPUT_WIDTH, dtype=torch.bool, device=device
+                )
+                baseline_attention[:, :view_size] = True
+                baseline_probes = torch.zeros_like(baseline_attention)
+                baseline_probes[0, probe_positions.to(device)] = True
+
+                baseline_loss = model(
+                    mz=baseline_mz,
+                    log_intensity=baseline_log_intensity,
+                    attention_mask=baseline_attention,
+                    mask_positions=baseline_probes,
+                    labels=baseline_labels,
+                    return_dict=True,
+                ).loss
+
+                for start in range(0, candidate_positions.numel(), loo_batch_size):
+                    positions_cpu = candidate_positions[start : start + loo_batch_size]
+                    positions = positions_cpu.to(device)
+                    batch_size = positions.numel()
+                    rows = torch.arange(batch_size, device=device)
+                    loo_mz = baseline_mz.expand(batch_size, -1).clone()
+                    loo_log_intensity = baseline_log_intensity.expand(batch_size, -1).clone()
+                    loo_labels = baseline_labels.expand(batch_size, -1).clone()
+                    loo_attention = baseline_attention.expand(batch_size, -1).clone()
+                    loo_probes = baseline_probes.expand(batch_size, -1).clone()
+                    loo_mz[rows, positions] = 0.0
+                    loo_log_intensity[rows, positions] = 0.0
+                    loo_labels[rows, positions] = 0.0
+                    loo_attention[rows, positions] = False
+                    loo_probes[rows, positions] = False
+
+                    loo_logits = model(
+                        mz=loo_mz,
+                        log_intensity=loo_log_intensity,
+                        attention_mask=loo_attention,
+                        mask_positions=loo_probes,
+                        return_dict=True,
+                    ).logits
+                    loo_losses = _masked_intensity_kl_per_row(loo_logits, loo_labels, loo_probes)
+                    influences = (baseline_loss - loo_losses).to(torch.float64)
+                    original_positions_cpu = view_indices[positions_cpu]
+                    original_positions = original_positions_cpu.to(device)
+                    sums.index_add_(0, original_positions, influences)
+                    squared_sums.index_add_(0, original_positions, influences.square())
+                    counts_cpu.index_add_(
+                        0,
+                        original_positions_cpu,
+                        torch.ones_like(original_positions_cpu),
+                    )
+                num_views += 1
+    finally:
+        model.train(was_training)
+
+    counts = counts_cpu.to(device)
+    covered = counts > 0
+    mean = torch.full_like(sums, torch.nan)
+    std = torch.full_like(sums, torch.nan)
+    mean[covered] = sums[covered] / counts[covered]
+    variance = torch.zeros_like(sums)
+    variance[covered] = squared_sums[covered] / counts[covered] - mean[covered].square()
+    std[covered] = variance[covered].clamp_min(0.0).sqrt()
+    sem = torch.full_like(sums, torch.nan)
+    sem[covered] = std[covered] / counts[covered].sqrt()
+    z_score = torch.full_like(sums, torch.nan)
+    z_score[covered] = mean[covered] / (sem[covered] + eps)
+
+    return MSDeltaForDenoisingOutput(
+        mean_influence=mean.float().cpu(),
+        signal_score=(-mean).float().cpu(),
+        std_influence=std.float().cpu(),
+        num_contexts=counts_cpu,
+        sem=sem.float().cpu(),
+        z_score=z_score.float().cpu(),
+        original_peak_index=original_index_cpu,
+        mz=mz_cpu,
+        intensity=intensity_cpu,
+        log_intensity=log_intensity_cpu,
+        num_views=num_views,
+        coverage_complete=bool((counts_cpu >= min_contexts_per_peak).all()),
+    )
 
 
 class PeakEmbed(nn.Module):
@@ -285,6 +495,50 @@ class MSDeltaForPreTraining(MSDeltaPreTrainedModel):
         return MSDeltaForPreTrainingOutput(
             loss=loss,
             logits=logits,
+        )
+
+
+class MSDeltaForDenoising(MSDeltaForPreTraining):
+    """Pretrained MSDelta model with inference-time peak signal scoring.
+
+    This class adds no parameters to :class:`MSDeltaForPreTraining`. Its inherited
+    ``forward`` retains the masked-intensity objective, while :meth:`denoise`
+    performs Monte Carlo leave-one-out inference over arbitrary-length spectra.
+    """
+
+    def denoise(
+        self,
+        mz,
+        log_intensity,
+        labels,
+        intensity=None,
+        attention_mask=None,
+        original_peak_index=None,
+        *,
+        min_contexts_per_peak: int = 10,
+        mask_fraction: float = 0.50,
+        max_peaks_per_view: int = 150,
+        loo_batch_size: int = 64,
+        max_views: int = 1000,
+        seed: int = 42,
+        eps: float = 1e-8,
+    ) -> MSDeltaForDenoisingOutput:
+        """Return signal scores; larger values indicate more signal-like peaks."""
+        return monte_carlo_loo_denoise(
+            model=self,
+            mz=mz,
+            log_intensity=log_intensity,
+            labels=labels,
+            intensity=intensity,
+            attention_mask=attention_mask,
+            original_peak_index=original_peak_index,
+            min_contexts_per_peak=min_contexts_per_peak,
+            mask_fraction=mask_fraction,
+            max_peaks_per_view=max_peaks_per_view,
+            loo_batch_size=loo_batch_size,
+            max_views=max_views,
+            seed=seed,
+            eps=eps,
         )
 
 

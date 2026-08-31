@@ -149,6 +149,36 @@ class MSDeltaProcessor(FeatureExtractionMixin):
             data = {name: values[0] for name, values in data.items()}
         return BatchFeature(data=data, tensor_type=return_tensors)
 
+    def prepare_denoising_inputs(
+        self,
+        mz,
+        intensity,
+        *,
+        return_tensors: str | None = "pt",
+    ) -> BatchFeature:
+        """Prepare one untruncated spectrum for Monte Carlo denoising.
+
+        Unlike normal preprocessing, this path preserves every supplied peak. Raw
+        intensity is converted both to the model's normalized log-intensity input
+        and to the normalized intensity labels required by the pretrained KL loss.
+        """
+        mz_tensor = torch.as_tensor(mz, dtype=torch.float32).reshape(-1)
+        intensity_tensor = torch.as_tensor(intensity, dtype=torch.float32).reshape(-1)
+
+        log_intensity = torch.log1p(intensity_tensor)
+        log_intensity = log_intensity / log_intensity.max().clamp_min(1e-8)
+        labels = intensity_tensor / intensity_tensor.sum().clamp_min(1e-12)
+        num_peaks = mz_tensor.numel()
+        data = {
+            "mz": [mz_tensor.tolist()],
+            "intensity": [intensity_tensor.tolist()],
+            "log_intensity": [log_intensity.tolist()],
+            "labels": [labels.tolist()],
+            "attention_mask": [[1] * num_peaks],
+            "original_peak_index": [list(range(num_peaks))],
+        }
+        return BatchFeature(data=data, tensor_type=return_tensors)
+
 
 @dataclass
 class MSDeltaDataCollatorForPreTraining:

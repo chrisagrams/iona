@@ -4,10 +4,13 @@ from transformers import AutoConfig, AutoModel, AutoModelForPreTraining, AutoPro
 
 from msdelta.configuration_msdelta import MSDeltaConfig
 from msdelta.modeling_msdelta import (
+    MSDeltaForDenoising,
+    MSDeltaForDenoisingOutput,
     MSDeltaForPreTraining,
     MSDeltaForPreTrainingOutput,
     MSDeltaModel,
     MSDeltaPreTrainedModel,
+    monte_carlo_loo_denoise,
 )
 from msdelta.processing_msdelta import MSDeltaDataCollatorForPreTraining, MSDeltaProcessor
 
@@ -21,9 +24,12 @@ AutoProcessor.register(MSDeltaConfig, MSDeltaProcessor, exist_ok=True)
 __all__ = [
     "MSDeltaConfig",
     "MSDeltaDataCollatorForPreTraining",
+    "MSDeltaForDenoising",
+    "MSDeltaForDenoisingOutput",
     "MSDeltaForPreTraining",
     "MSDeltaForPreTrainingOutput",
     "MSDeltaModel",
     "MSDeltaPreTrainedModel",
     "MSDeltaProcessor",
+    "monte_carlo_loo_denoise",
 ]
