@@ -56,6 +56,19 @@ class _InlineCallback(TrainerCallback):
         raise NotImplementedError
 
 
+class FlopsCallback(TrainerCallback):
+    """Log Hugging Face's distributed cumulative FLOP estimate to W&B."""
+
+    def on_log(self, args, state, control, **kwargs):
+        if state.is_world_process_zero and wandb.run is not None:
+            wandb.log(
+                {
+                    "train/cumulative_flos": state.total_flos,
+                    "train/global_step": state.global_step,
+                }
+            )
+
+
 class LinearProbeCallback(_InlineCallback):
     """Run linear probes on the frozen encoder."""
 
@@ -237,7 +250,7 @@ class BiasPanelCallback(_InlineCallback):
 
 def build_callbacks(module, val_dataset, pp, training_args, out_dir):
     """Create the callbacks enabled in the configuration."""
-    cbs: list[TrainerCallback] = []
+    cbs: list[TrainerCallback] = [FlopsCallback()]
     if training_args.bias_curve_steps:
         cbs.append(BiasPanelCallback(module, training_args.bias_curve_steps, out_dir=out_dir))
     if training_args.probe_steps:
