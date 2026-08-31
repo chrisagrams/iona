@@ -18,14 +18,10 @@ class FourierFeatures(nn.Module):
         n_freqs: int,
         f_min: float,
         f_max: float,
-        log_spaced: bool = True,
         clamp_abs: float = 2000.0,
     ):
         super().__init__()
-        if log_spaced:
-            freqs = torch.logspace(math.log10(f_min), math.log10(f_max), n_freqs)
-        else:
-            freqs = torch.linspace(f_min, f_max, n_freqs)
+        freqs = torch.logspace(math.log10(f_min), math.log10(f_max), n_freqs)
 
         self.register_buffer("freqs", freqs, persistent=True)
 

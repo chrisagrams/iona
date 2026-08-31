@@ -57,7 +57,6 @@ class DeltaMZBias(nn.Module):
             config.delta_bias_n_freqs,
             config.delta_bias_f_min,
             config.delta_bias_f_max,
-            log_spaced=True,
         )
         self.n_heads = config.num_attention_heads
         self.scale = config.delta_bias_scale
