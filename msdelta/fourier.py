@@ -37,10 +37,13 @@ class FourierFeatures(nn.Module):
         self.clamp_abs = clamp_abs
 
     def forward(self, x: Tensor) -> Tensor:
-        """Return float32 features with shape ``(..., 2 * n_freqs)``."""
+        """Compute features in float32, then cast them to the active autocast dtype."""
         x = x.float().clamp(-self.clamp_abs, self.clamp_abs)
         phase = 2.0 * math.pi * x.unsqueeze(-1) * self.freqs.float().abs()
-        return torch.cat([phase.sin(), phase.cos()], dim=-1)
+        features = torch.cat([phase.sin(), phase.cos()], dim=-1)
+        if torch.is_autocast_enabled(features.device.type):
+            features = features.to(torch.get_autocast_dtype(features.device.type))
+        return features
 
 
 def interp_mae(

@@ -43,7 +43,7 @@ class PeakEmbed(nn.Module):
 
     def forward(self, log_intensity: Tensor, mask_positions: Tensor | None = None) -> Tensor:
         feats = self.ff_int(log_intensity)
-        tokens = self.mlp(feats.to(self.mlp[0].weight.dtype))
+        tokens = self.mlp(feats)
         if mask_positions is not None:
             tokens = torch.where(mask_positions.unsqueeze(-1), self.mask_token, tokens)
         return tokens
@@ -75,7 +75,6 @@ class DeltaMZBias(nn.Module):
         )
 
     def _curve(self, feats: Tensor) -> Tensor:
-        feats = feats.to(next(self.head_mlps.parameters()).dtype)
         out = torch.cat([mlp(feats) for mlp in self.head_mlps], dim=-1)
         return self.scale * torch.tanh(out / self.scale)
 
