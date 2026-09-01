@@ -1,0 +1,164 @@
+#!/bin/bash
+# Temporary one-hour A/B throughput test: master vs. Fourier-output autocast.
+# Each variant runs concurrently on one Polaris node with four GPUs.
+#
+# Submit from the repository root:
+#   qsub -A PROJECT \
+#     -v CHECKPOINT_DIR=/eagle/PROJECT/checkpoints,HF_HOME=/eagle/PROJECT/hf \
+#     pbs/polaris-fourier-ab-temp.pbs
+
+#PBS -q debug
+#PBS -l select=2:system=polaris
+#PBS -l place=scatter
+#PBS -l walltime=01:00:00
+#PBS -l filesystems=home:eagle
+#PBS -j oe
+
+set -euo pipefail
+
+REPO_DIR=${REPO_DIR:-${PBS_O_WORKDIR:-$PWD}}
+VENV_DIR=${VENV_DIR:-$REPO_DIR/.venv}
+CHECKPOINT_DIR=${CHECKPOINT_DIR:?set CHECKPOINT_DIR for A/B outputs}
+HF_HOME=${HF_HOME:-$CHECKPOINT_DIR/huggingface}
+ARGS_REL=configs/msdelta-base-200m/training.args
+GPUS_PER_VARIANT=4
+RUN_SECONDS=${RUN_SECONDS:-3300}
+JOB_ID=${PBS_JOBID:-local}
+JOB_ID=${JOB_ID%%.*}
+AB_ROOT=$CHECKPOINT_DIR/fourier-autocast-ab-$JOB_ID
+
+if [[ ! -x $VENV_DIR/bin/python ]]; then
+    echo "Python interpreter not found: $VENV_DIR/bin/python" >&2
+    exit 2
+fi
+if [[ ! -f ${PBS_NODEFILE:-} ]]; then
+    echo "PBS_NODEFILE is required" >&2
+    exit 2
+fi
+if ! command -v mpiexec >/dev/null 2>&1; then
+    echo "mpiexec is required" >&2
+    exit 2
+fi
+
+mkdir -p "$AB_ROOT" "$HF_HOME"
+mapfile -t NODES < <(awk '!seen[$0]++ {print $0}' "$PBS_NODEFILE")
+if (( ${#NODES[@]} != 2 )); then
+    echo "expected exactly two allocated nodes, found ${#NODES[@]}" >&2
+    exit 2
+fi
+
+# Export immutable snapshots so neither run changes the submit-side checkout.
+stage_ref() {
+    local name=$1
+    local ref=$2
+    local source_dir=$AB_ROOT/source-$name
+    local archive=$AB_ROOT/source-$name.tar
+
+    mkdir -p "$source_dir"
+    git -C "$REPO_DIR" archive --format=tar --output="$archive" "$ref"
+    tar -xf "$archive" -C "$source_dir"
+    git -C "$REPO_DIR" rev-parse "$ref" >"$AB_ROOT/$name.commit"
+}
+
+stage_ref master origin/master
+stage_ref autocast origin/feature/fourier-output-autocast
+
+export OMP_NUM_THREADS=${OMP_NUM_THREADS:-2}
+export MKL_NUM_THREADS=${MKL_NUM_THREADS:-2}
+export OPENBLAS_NUM_THREADS=${OPENBLAS_NUM_THREADS:-2}
+export CC=gcc
+export CXX=g++
+export PYTORCH_CUDA_ALLOC_CONF=${PYTORCH_CUDA_ALLOC_CONF:-expandable_segments:True}
+export HF_HOME
+export HF_HUB_OFFLINE=${HF_HUB_OFFLINE:-0}
+
+ALCF_PROXY=${ALCF_PROXY:-http://proxy.alcf.anl.gov:3128}
+export HTTP_PROXY=${HTTP_PROXY:-$ALCF_PROXY}
+export HTTPS_PROXY=${HTTPS_PROXY:-$ALCF_PROXY}
+export http_proxy=${http_proxy:-$ALCF_PROXY}
+export https_proxy=${https_proxy:-$ALCF_PROXY}
+export ftp_proxy=${ftp_proxy:-$ALCF_PROXY}
+export no_proxy=${no_proxy:-admin,polaris-adminvm-01,localhost,*.cm.polaris.alcf.anl.gov,polaris-*,*.polaris.alcf.anl.gov,*.alcf.anl.gov}
+export NO_PROXY=${NO_PROXY:-$no_proxy}
+
+run_variant() {
+    local name=$1
+    local node=$2
+    local port=$3
+    local source_dir=$AB_ROOT/source-$name
+    local run_dir=$AB_ROOT/$name
+    local hostfile=$AB_ROOT/$name.host
+    local run_name=msdelta-base-200m-$name-$JOB_ID
+
+    mkdir -p "$run_dir/logs"
+    printf '%s\n' "$node" >"$hostfile"
+    echo "$(date -Is) starting $name on $node; commit=$(cat "$AB_ROOT/$name.commit")"
+
+    set +e
+    timeout --signal=TERM --kill-after=30s "$RUN_SECONDS" \
+        mpiexec \
+        --verbose \
+        --envall \
+        -n "$GPUS_PER_VARIANT" \
+        --ppn "$GPUS_PER_VARIANT" \
+        --cpu-bind none \
+        --hostfile="$hostfile" \
+        /usr/bin/env \
+        MSDELTA_SOURCE_DIR="$source_dir" \
+        MSDELTA_MASTER_ADDR="$node" \
+        MSDELTA_MASTER_PORT="$port" \
+        MSDELTA_GPUS_PER_HOST="$GPUS_PER_VARIANT" \
+        bash -c '
+            export RANK="$PMI_RANK"
+            export WORLD_SIZE="$PMI_SIZE"
+            export LOCAL_RANK="${MPI_LOCALRANKID:-$((RANK % MSDELTA_GPUS_PER_HOST))}"
+            export LOCAL_WORLD_SIZE="${MPI_LOCALNRANKS:-$MSDELTA_GPUS_PER_HOST}"
+            export MASTER_ADDR="$MSDELTA_MASTER_ADDR"
+            export MASTER_PORT="$MSDELTA_MASTER_PORT"
+            export PYTHONPATH="$MSDELTA_SOURCE_DIR${PYTHONPATH:+:$PYTHONPATH}"
+            cd "$MSDELTA_SOURCE_DIR"
+            exec "$@"
+        ' bash \
+        "$VENV_DIR/bin/python" \
+        -m msdelta.train \
+        --args_file "$source_dir/$ARGS_REL" \
+        --run_name "$run_name" \
+        --output_dir "$run_dir" \
+        --gradient_accumulation_steps 2 \
+        --eval_strategy no \
+        --save_strategy no \
+        --bias_curve_steps 0 \
+        --probe_steps 0 \
+        --max_steps 1000000 \
+        >"$run_dir/logs/train.out" \
+        2>"$run_dir/logs/train.err"
+    local status=$?
+    set -e
+
+    # timeout returns 124 for the expected end of a time-boxed run.
+    if (( status != 0 && status != 124 )); then
+        echo "$(date -Is) $name failed with status $status" >&2
+        return "$status"
+    fi
+    echo "$(date -Is) finished $name with status $status"
+}
+
+run_variant master "${NODES[0]}" 29500 &
+MASTER_PID=$!
+run_variant autocast "${NODES[1]}" 29501 &
+AUTOCAST_PID=$!
+
+set +e
+wait "$MASTER_PID"
+MASTER_STATUS=$?
+wait "$AUTOCAST_PID"
+AUTOCAST_STATUS=$?
+set -e
+
+echo "A/B outputs: $AB_ROOT"
+echo "master status=$MASTER_STATUS node=${NODES[0]}"
+echo "autocast status=$AUTOCAST_STATUS node=${NODES[1]}"
+
+if (( MASTER_STATUS != 0 || AUTOCAST_STATUS != 0 )); then
+    exit 1
+fi
