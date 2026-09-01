@@ -1,16 +1,14 @@
 program: msdelta/train.py
 
 project: msdelta-pretrain
-name: 50m-delta-bias-scale-10k
+name: 50m-uncapped-delta-bias-10k
 
 method: grid
-run_cap: 2
+run_cap: 1
 
 parameters:
-  config_overrides:
-    values:
-      - delta_bias_scale=3.0
-      - delta_bias_scale=1.0
+  seed:
+    value: 0
 
 command:
   - bash
@@ -19,7 +17,7 @@ command:
     exec uv run torchrun --standalone --nproc_per_node=2 -m msdelta.train
     --args_file configs/msdelta-base-50m/training.args
     --run_name="$WANDB_RUN_ID"
-    --output_dir="./runs/delta-bias-scale/$WANDB_RUN_ID"
+    --output_dir="./runs/uncapped-delta-bias/$WANDB_RUN_ID"
     --wandb_project=msdelta-pretrain
     --max_steps=10000
     --warmup_steps=400
