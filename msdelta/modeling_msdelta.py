@@ -23,13 +23,17 @@ class MSDeltaForPreTrainingOutput(ModelOutput):
     logits: Tensor | None = None
 
 
+class ScalarInputLinear(nn.Linear):
+    """Linear layer that retains PyTorch's fan-in-aware initialization."""
+
+
 class PeakEmbed(nn.Module):
     """Create m/z-free tokens from normalized log intensity."""
 
     def __init__(self, config: MSDeltaConfig):
         super().__init__()
         self.mlp = nn.Sequential(
-            nn.Linear(1, config.hidden_size),
+            ScalarInputLinear(1, config.hidden_size),
             nn.GELU(),
             nn.Linear(config.hidden_size, config.hidden_size),
         )
@@ -140,9 +144,9 @@ class EncoderBlock(nn.Module):
         bias: Tensor,
         padding_mask: Tensor,
     ) -> Tensor:
-        attention_output = self.attn(hidden_states, bias, padding_mask)
-        hidden_states = self.norm1(hidden_states + attention_output)
-        hidden_states = self.norm2(hidden_states + self.ffn(hidden_states))
+        attention_output = self.attn(self.norm1(hidden_states), bias, padding_mask)
+        hidden_states = hidden_states + attention_output
+        hidden_states = hidden_states + self.ffn(self.norm2(hidden_states))
         return hidden_states
 
 
@@ -156,6 +160,8 @@ class MSDeltaPreTrainedModel(PreTrainedModel):
     _no_split_modules = ["EncoderBlock"]
 
     def _init_weights(self, module: nn.Module) -> None:
+        if isinstance(module, ScalarInputLinear):
+            return
         if isinstance(module, nn.Linear):
             module.weight.data.normal_(mean=0.0, std=self.config.initializer_range)
             if module.bias is not None:
@@ -175,6 +181,7 @@ class MSDeltaModel(MSDeltaPreTrainedModel):
         self.embed = PeakEmbed(config)
         self.bias_module = DeltaMZBias(config)
         self.blocks = nn.ModuleList([EncoderBlock(config) for _ in range(config.num_hidden_layers)])
+        self.norm = nn.LayerNorm(config.hidden_size, eps=config.layer_norm_eps)
         self.gradient_checkpointing = False
         self.post_init()
 
@@ -209,6 +216,7 @@ class MSDeltaModel(MSDeltaPreTrainedModel):
                 )
             else:
                 hidden_states = block(hidden_states, bias, padding_mask)
+        hidden_states = self.norm(hidden_states)
 
         if not return_dict:
             return (hidden_states,)
