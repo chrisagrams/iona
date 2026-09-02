@@ -4,7 +4,7 @@
 # qsub -A PROJECT -q QUEUE \
 #   -l select=2:system=polaris -l place=scatter -l walltime=12:00:00 \
 #   -l filesystems=home:eagle -j oe -o /path/to/pbs/logs \
-#   -v CONFIG_PATH=configs/msdelta-base-200m.yaml,CHECKPOINT_DIR=/eagle/PROJECT/checkpoints,HF_HOME=/eagle/PROJECT/hf \
+#   -v ARGS_FILE=configs/msdelta-base-200m/training.args,CHECKPOINT_DIR=/eagle/PROJECT/checkpoints,HF_HOME=/eagle/PROJECT/hf \
 #   pbs/polaris-pretrain.pbs
 # Launch pattern follows the ALCF Polaris DeepSpeed guide's MPICH option:
 # https://docs.alcf.anl.gov/polaris/data-science/frameworks/deepspeed/
@@ -13,17 +13,17 @@ set -euo pipefail
 
 REPO_DIR=${REPO_DIR:-${PBS_O_WORKDIR:-$PWD}}
 VENV_DIR=${VENV_DIR:-$REPO_DIR/.venv}
-CONFIG_PATH=${CONFIG_PATH:?set CONFIG_PATH to an MSDelta YAML configuration}
+ARGS_FILE=${ARGS_FILE:?set ARGS_FILE to an MSDelta training args file}
 CHECKPOINT_DIR=${CHECKPOINT_DIR:?set CHECKPOINT_DIR for Trainer checkpoints}
 
-if [[ $CONFIG_PATH != /* ]]; then
-    CONFIG_PATH=$REPO_DIR/$CONFIG_PATH
+if [[ $ARGS_FILE != /* ]]; then
+    ARGS_FILE=$REPO_DIR/$ARGS_FILE
 fi
 if [[ $CHECKPOINT_DIR != /* ]]; then
     CHECKPOINT_DIR=$REPO_DIR/$CHECKPOINT_DIR
 fi
-if [[ ! -f $CONFIG_PATH ]]; then
-    echo "configuration not found: $CONFIG_PATH" >&2
+if [[ ! -f $ARGS_FILE ]]; then
+    echo "arguments file not found: $ARGS_FILE" >&2
     exit 2
 fi
 if [[ ! -x $VENV_DIR/bin/python ]]; then
@@ -42,27 +42,32 @@ fi
 JOB_ID=${PBS_JOBID:-local}
 JOB_ID=${JOB_ID%%.*}
 mapfile -t CONFIG_VALUES < <(
-    "$VENV_DIR/bin/python" - "$CONFIG_PATH" <<'PY'
+    "$VENV_DIR/bin/python" - "$ARGS_FILE" <<'PY'
 import sys
 from pathlib import Path
 
-import yaml
-
 path = Path(sys.argv[1])
-config = yaml.safe_load(path.read_text()) or {}
-training = config.get("training") or {}
-run_name = training.get("run_name") or path.stem
-micro_batch_size = training.get("per_device_train_batch_size")
-if not isinstance(micro_batch_size, int) or micro_batch_size < 1:
-    raise ValueError("training.per_device_train_batch_size must be a positive integer")
-if not training.get("deepspeed"):
-    raise ValueError("training.deepspeed must be configured for this launcher")
+tokens = path.read_text().split()
+
+def argument(name: str, default: str | None = None) -> str | None:
+    values = [tokens[index + 1] for index, token in enumerate(tokens[:-1]) if token == name]
+    return values[-1] if values else default
+
+run_name = argument("--run_name", path.parent.name)
+micro_batch_size = int(argument("--per_device_train_batch_size", "0"))
+wandb_project = argument("--wandb_project", "")
+if micro_batch_size < 1:
+    raise ValueError("--per_device_train_batch_size must be a positive integer")
+if argument("--deepspeed") is None:
+    raise ValueError("--deepspeed must be configured for this launcher")
 print(run_name)
 print(micro_batch_size)
+print(wandb_project)
 PY
 )
 CONFIG_RUN_NAME=${CONFIG_VALUES[0]}
 MICRO_BATCH_SIZE=${CONFIG_VALUES[1]}
+CONFIG_WANDB_PROJECT=${CONFIG_VALUES[2]}
 RUN_NAME=${CONFIG_RUN_NAME}-${JOB_ID}
 RUN_DIR=$CHECKPOINT_DIR/$RUN_NAME
 LOG_DIR=${LOG_DIR:-$RUN_DIR/logs}
@@ -123,18 +128,18 @@ export NO_PROXY=${NO_PROXY:-$no_proxy}
 export WANDB_DIR=${WANDB_DIR:-$LOG_DIR}
 export WANDB_RESUME=${WANDB_RESUME:-allow}
 export WANDB_RUN_ID=${WANDB_RUN_ID:-$RUN_NAME}
+export WANDB_PROJECT=${WANDB_PROJECT:-$CONFIG_WANDB_PROJECT}
 
 TRAIN_ARGS=(
-    --config "$CONFIG_PATH"
+    --args_file "$ARGS_FILE"
     --run_name "$RUN_NAME"
     --output_dir "$RUN_DIR"
     --gradient_accumulation_steps "$GRADIENT_ACCUMULATION_STEPS"
 )
 if [[ -n ${RESUME_FROM_CHECKPOINT:-} ]]; then
-    TRAIN_ARGS+=(--resume "$RESUME_FROM_CHECKPOINT")
+    TRAIN_ARGS+=(--resume_from_checkpoint "$RESUME_FROM_CHECKPOINT")
 fi
 
-cd "$RUN_DIR"
 exec mpiexec \
     --verbose \
     --envall \

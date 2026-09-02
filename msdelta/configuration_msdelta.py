@@ -26,7 +26,6 @@ class MSDeltaConfig(PretrainedConfig):
         delta_bias_f_max: float = 1e3,
         delta_bias_scale: float = 3.0,
         delta_bias_learnable: bool = True,
-        zero_bias_diagonal: bool = True,
         **kwargs,
     ):
         super().__init__(**kwargs)
@@ -50,7 +49,6 @@ class MSDeltaConfig(PretrainedConfig):
         self.delta_bias_f_max = delta_bias_f_max
         self.delta_bias_scale = delta_bias_scale
         self.delta_bias_learnable = delta_bias_learnable
-        self.zero_bias_diagonal = zero_bias_diagonal
         self._validate()
 
     def _validate(self) -> None:

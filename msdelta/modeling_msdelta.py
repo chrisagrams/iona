@@ -56,18 +56,21 @@ class DeltaMZBias(nn.Module):
             learnable=config.delta_bias_learnable,
         )
         self.n_heads = config.num_attention_heads
-        self.per_head_hidden = config.delta_bias_per_head_hidden
         self.scale = config.delta_bias_scale
-        self.fc1 = nn.Linear(self.ff.out_dim, self.n_heads * self.per_head_hidden)
-        self.w2 = nn.Parameter(torch.zeros(self.n_heads, self.per_head_hidden))
-        self.b2 = nn.Parameter(torch.zeros(self.n_heads))
+        self.head_mlps = nn.ModuleList(
+            [
+                nn.Sequential(
+                    nn.Linear(self.ff.out_dim, config.delta_bias_per_head_hidden),
+                    nn.GELU(),
+                    nn.Linear(config.delta_bias_per_head_hidden, 1),
+                )
+                for _ in range(self.n_heads)
+            ]
+        )
 
     def _curve(self, feats: Tensor) -> Tensor:
-        hidden = self.fc1(feats.to(self.fc1.weight.dtype)).unflatten(
-            -1, (self.n_heads, self.per_head_hidden)
-        )
-        hidden = F.gelu(hidden)
-        out = (hidden * self.w2).sum(-1) + self.b2
+        feats = feats.to(next(self.head_mlps.parameters()).dtype)
+        out = torch.cat([mlp(feats) for mlp in self.head_mlps], dim=-1)
         return self.scale * torch.tanh(out / self.scale)
 
     def forward(self, mz: Tensor) -> Tensor:
@@ -198,10 +201,6 @@ class MSDeltaModel(MSDeltaPreTrainedModel):
 
         hidden_states = self.embed(log_intensity, mask_positions)
         bias = self.bias_module(mz)
-        if self.config.zero_bias_diagonal:
-            n_peaks = mz.size(1)
-            diagonal = torch.eye(n_peaks, dtype=torch.bool, device=mz.device)[None, None]
-            bias = bias.masked_fill(diagonal, 0.0)
 
         for block in self.blocks:
             if self.gradient_checkpointing and self.training:
