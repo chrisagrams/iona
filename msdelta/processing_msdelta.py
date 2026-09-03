@@ -87,7 +87,7 @@ class MSDeltaProcessor(FeatureExtractionMixin):
         labels = intensity / intensity.sum().clamp_min(1e-12)
         return mz.contiguous(), log_intensity.contiguous(), labels.contiguous(), selected
 
-    def process_denoising_example(self, mz, intensity, noise) -> dict[str, list]:
+    def process_denoising_example(self, mz, intensity, noise) -> dict[str, list | int]:
         """Process one spectrum while preserving peak/noise-label alignment."""
         noise = torch.as_tensor(noise, dtype=torch.bool)
         mz_tensor = torch.as_tensor(mz, dtype=torch.float32)
@@ -99,7 +99,42 @@ class MSDeltaProcessor(FeatureExtractionMixin):
             "mz": mass.tolist(),
             "log_intensity": log_intensity.tolist(),
             "labels": noise[selected].float().tolist(),
+            "length": mass.numel(),
         }
+
+    def pad(
+        self,
+        encoded_inputs: list[dict[str, Any]],
+        *,
+        padding: bool | str = True,
+        max_length: int | None = None,
+        return_tensors: str | None = None,
+        **kwargs,
+    ) -> BatchFeature:
+        """Pad processed peak-classification examples to a common length."""
+        lengths = [len(example["mz"]) for example in encoded_inputs]
+        if padding == "max_length":
+            if max_length is None:
+                raise ValueError("max_length is required with padding='max_length'")
+            target_length = max_length
+        else:
+            target_length = max(lengths)
+
+        data: dict[str, list] = {
+            "mz": [],
+            "log_intensity": [],
+            "attention_mask": [],
+            "labels": [],
+        }
+        for example, length in zip(encoded_inputs, lengths):
+            pad = target_length - length
+            data["mz"].append(example["mz"] + [self.padding_value] * pad)
+            data["log_intensity"].append(
+                example["log_intensity"] + [self.padding_value] * pad
+            )
+            data["attention_mask"].append([1] * length + [0] * pad)
+            data["labels"].append(example["labels"] + [-100.0] * pad)
+        return BatchFeature(data=data, tensor_type=return_tensors)
 
     def __call__(
         self,
@@ -220,22 +255,6 @@ class MSDeltaDataCollatorForPreTraining:
             "attention_mask": attention_mask,
             "mask_positions": mask_positions,
             "labels": labels,
-        }
-
-
-class MSDeltaDataCollatorForDenoising:
-    """Tensorize one labeled spectrum for peak-level classification."""
-
-    def __call__(self, features: list[dict]) -> dict[str, torch.Tensor]:
-        feature = features[0]
-        mz = torch.tensor(feature["mz"], dtype=torch.float32).unsqueeze(0)
-        return {
-            "mz": mz,
-            "log_intensity": torch.tensor(
-                feature["log_intensity"], dtype=torch.float32
-            ).unsqueeze(0),
-            "attention_mask": torch.ones_like(mz, dtype=torch.long),
-            "labels": torch.tensor(feature["labels"], dtype=torch.float32).unsqueeze(0),
         }
 
 

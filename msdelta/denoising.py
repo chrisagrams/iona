@@ -5,9 +5,11 @@ from __future__ import annotations
 import copy
 import random
 from pathlib import Path
+from typing import cast
 
 import numpy as np
 import torch
+from datasets import Dataset
 from sklearn.metrics import (
     accuracy_score,
     auc,
@@ -18,10 +20,77 @@ from sklearn.metrics import (
     recall_score,
     roc_auc_score,
 )
-from transformers import EvalPrediction, Trainer, TrainingArguments
+from torch.utils.data import BatchSampler, DataLoader
+from transformers import DataCollatorWithPadding, EvalPrediction, Trainer, TrainingArguments
 
 from msdelta.modeling_msdelta import MSDeltaForDenoising
-from msdelta.processing_msdelta import MSDeltaDataCollatorForDenoising
+
+
+class PeakBudgetBatchSampler(BatchSampler):
+    """Build batches bounded by their padded pairwise-attention size."""
+
+    batch_size = None  # type: ignore[assignment]
+    drop_last = False
+
+    def __init__(self, lengths, peak_pair_budget: int, seed: int):
+        self.lengths = lengths
+        self.peak_pair_budget = peak_pair_budget
+        self.seed = seed
+        self.epoch = 0
+
+    def set_epoch(self, epoch: int) -> None:
+        self.epoch = epoch
+
+    def _batches(self) -> list[list[int]]:
+        indices = sorted(range(len(self.lengths)), key=self.lengths.__getitem__)
+        batches: list[list[int]] = []
+        batch: list[int] = []
+        longest = 0
+        for index in indices:
+            candidate_longest = max(longest, self.lengths[index])
+            attention_size = (len(batch) + 1) * candidate_longest**2
+            if batch and attention_size > self.peak_pair_budget:
+                batches.append(batch)
+                batch = []
+                longest = 0
+            batch.append(index)
+            longest = max(longest, self.lengths[index])
+        if batch:
+            batches.append(batch)
+
+        generator = torch.Generator().manual_seed(self.seed + self.epoch)
+        order = torch.randperm(len(batches), generator=generator).tolist()
+        return [batches[index] for index in order]
+
+    def __iter__(self):
+        return iter(self._batches())
+
+    def __len__(self) -> int:
+        return len(self._batches())
+
+
+class DenoisingTrainer(Trainer):
+    """Use attention-aware variable-sized batches for head training."""
+
+    def __init__(self, *args, peak_pair_budget: int, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.peak_pair_budget = peak_pair_budget
+
+    def get_train_dataloader(self) -> DataLoader:
+        train_dataset = cast(Dataset, self.train_dataset)
+        batch_sampler = PeakBudgetBatchSampler(
+            train_dataset["length"],
+            peak_pair_budget=self.peak_pair_budget,
+            seed=self.args.data_seed or self.args.seed,
+        )
+        dataloader = DataLoader(
+            train_dataset,  # pyright: ignore[reportArgumentType]
+            batch_sampler=batch_sampler,
+            collate_fn=self.data_collator,
+            num_workers=self.args.dataloader_num_workers,
+            pin_memory=self.args.dataloader_pin_memory,
+        )
+        return self.accelerator.prepare(dataloader)
 
 
 def denoising_metrics(prediction: EvalPrediction) -> dict[str, float]:
@@ -51,6 +120,7 @@ def run_denoising_probe(
     *,
     output_dir: Path,
     processor,
+    peak_pair_budget: int,
     epochs: int,
     learning_rate: float,
     weight_decay: float,
@@ -95,14 +165,19 @@ def run_denoising_probe(
                 report_to=[],
                 ddp_find_unused_parameters=False,
             )
-            trainer = Trainer(
+            trainer = DenoisingTrainer(
                 model=model,
                 args=args,
                 train_dataset=train_dataset,
                 eval_dataset=validation_dataset,
-                data_collator=MSDeltaDataCollatorForDenoising(),
+                data_collator=DataCollatorWithPadding(
+                    tokenizer=processor,
+                    padding=True,
+                    return_tensors="pt",
+                ),
                 processing_class=processor,
                 compute_metrics=denoising_metrics,
+                peak_pair_budget=peak_pair_budget,
             )
             trainer.train()
             evaluated = trainer.evaluate()

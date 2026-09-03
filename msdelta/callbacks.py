@@ -266,6 +266,7 @@ class DenoisingProbeCallback(TrainerCallback):
             self.datasets["validation"],
             output_dir=destination,
             processor=self.pp,
+            peak_pair_budget=self.training_args.denoise_peak_pair_budget,
             epochs=self.training_args.denoise_epochs,
             learning_rate=self.training_args.denoise_learning_rate,
             weight_decay=self.training_args.denoise_weight_decay,

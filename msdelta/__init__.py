@@ -18,7 +18,6 @@ from msdelta.modeling_msdelta import (
     MSDeltaPreTrainedModel,
 )
 from msdelta.processing_msdelta import (
-    MSDeltaDataCollatorForDenoising,
     MSDeltaDataCollatorForPreTraining,
     MSDeltaProcessor,
 )
@@ -33,7 +32,6 @@ AutoProcessor.register(MSDeltaConfig, MSDeltaProcessor, exist_ok=True)
 
 __all__ = [
     "MSDeltaConfig",
-    "MSDeltaDataCollatorForDenoising",
     "MSDeltaDataCollatorForPreTraining",
     "MSDeltaForDenoising",
     "MSDeltaForDenoisingOutput",
