@@ -7,8 +7,8 @@
 #   -v ARGS_FILE=configs/msdelta-base-200m/training.args,CHECKPOINT_DIR=/flare/PROJECT/checkpoints,HF_HOME=/flare/PROJECT/hf,XPUS_PER_HOST=8,GLOBAL_BATCH_SIZE=512 \
 #   pbs/aurora-pretrain.pbs
 #
-# The launch follows the ALCF Aurora DeepSpeed MPICH guidance:
-# https://docs.alcf.anl.gov/aurora/data-science/frameworks/deepspeed/
+# The launch follows the ALCF Aurora PyTorch DDP guidance:
+# https://docs.alcf.anl.gov/aurora/data-science/frameworks/pytorch/
 
 module load frameworks
 
@@ -18,7 +18,6 @@ REPO_DIR=${REPO_DIR:-${PBS_O_WORKDIR:-$PWD}}
 VENV_DIR=${VENV_DIR:-$REPO_DIR/.venv}
 ARGS_FILE=${ARGS_FILE:?set ARGS_FILE to an MSDelta training args file}
 CHECKPOINT_DIR=${CHECKPOINT_DIR:?set CHECKPOINT_DIR for Trainer checkpoints}
-DEEPSPEED_CONFIG=${DEEPSPEED_CONFIG:-$REPO_DIR/configs/deepspeed-zero2-aurora.json}
 
 if [[ $ARGS_FILE != /* ]]; then
     ARGS_FILE=$REPO_DIR/$ARGS_FILE
@@ -26,15 +25,8 @@ fi
 if [[ $CHECKPOINT_DIR != /* ]]; then
     CHECKPOINT_DIR=$REPO_DIR/$CHECKPOINT_DIR
 fi
-if [[ $DEEPSPEED_CONFIG != /* ]]; then
-    DEEPSPEED_CONFIG=$REPO_DIR/$DEEPSPEED_CONFIG
-fi
 if [[ ! -f $ARGS_FILE ]]; then
     echo "arguments file not found: $ARGS_FILE" >&2
-    exit 2
-fi
-if [[ ! -f $DEEPSPEED_CONFIG ]]; then
-    echo "DeepSpeed config not found: $DEEPSPEED_CONFIG" >&2
     exit 2
 fi
 if [[ ! -x $VENV_DIR/bin/python ]]; then
@@ -67,23 +59,21 @@ def argument(name: str, default: str | None = None) -> str | None:
 
 
 run_name = argument("--run_name", path.parent.name)
-micro_batch_size = int(argument("--per_device_train_batch_size", "0"))
 wandb_project = argument("--wandb_project", "")
-if micro_batch_size < 1:
-    raise ValueError("--per_device_train_batch_size must be a positive integer")
 print(run_name)
-print(micro_batch_size)
 print(wandb_project)
 PY
 )
 CONFIG_RUN_NAME=${CONFIG_VALUES[0]}
-MICRO_BATCH_SIZE=${MICRO_BATCH_SIZE:-${CONFIG_VALUES[1]}}
-CONFIG_WANDB_PROJECT=${CONFIG_VALUES[2]}
+MICRO_BATCH_SIZE=${MICRO_BATCH_SIZE:-64}
+CONFIG_WANDB_PROJECT=${CONFIG_VALUES[1]}
 RUN_NAME=${RUN_NAME:-${CONFIG_RUN_NAME}-${JOB_ID}}
 RUN_DIR=$CHECKPOINT_DIR/$RUN_NAME
 LOG_DIR=${LOG_DIR:-$RUN_DIR/logs}
 HF_HOME=${HF_HOME:-$CHECKPOINT_DIR/huggingface}
 mkdir -p "$RUN_DIR" "$LOG_DIR" "$HF_HOME"
+DDP_ARGS_FILE=$RUN_DIR/training-ddp.args
+awk '$1 != "--deepspeed"' "$ARGS_FILE" >"$DDP_ARGS_FILE"
 
 cd "$REPO_DIR"
 NODE_LIST=$RUN_DIR/pbs-nodes
@@ -124,7 +114,7 @@ fi
 echo "$(date -Is) job=${PBS_JOBID:-local} hosts=$NUM_HOSTS xpus_per_host=$XPUS_PER_HOST total_xpus=$TOTAL_XPUS global_batch=$GLOBAL_BATCH_SIZE micro_batch=$MICRO_BATCH_SIZE accumulation=$GRADIENT_ACCUMULATION_STEPS run=$RUN_NAME"
 echo "nodes:"
 sed 's/^/  /' "$NODE_LIST"
-"$VENV_DIR/bin/python" -c 'import deepspeed, torch; print(f"torch={torch.__version__} deepspeed={deepspeed.__version__} xccl={torch.distributed.is_xccl_available()}")'
+"$VENV_DIR/bin/python" -c 'import torch; print(f"torch={torch.__version__} xccl={torch.distributed.is_xccl_available()}")'
 
 export OMP_NUM_THREADS=${OMP_NUM_THREADS:-4}
 export MKL_NUM_THREADS=${MKL_NUM_THREADS:-4}
@@ -159,8 +149,7 @@ export WANDB_RUN_ID=${WANDB_RUN_ID:-$RUN_NAME}
 export WANDB_PROJECT=${WANDB_PROJECT:-$CONFIG_WANDB_PROJECT}
 
 TRAIN_ARGS=(
-    --args_file "$ARGS_FILE"
-    --deepspeed "$DEEPSPEED_CONFIG"
+    --args_file "$DDP_ARGS_FILE"
     --run_name "$RUN_NAME"
     --output_dir "$RUN_DIR"
     --per_device_train_batch_size "$MICRO_BATCH_SIZE"
