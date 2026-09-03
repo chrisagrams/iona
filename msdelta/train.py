@@ -8,6 +8,7 @@ from dataclasses import asdict
 from pathlib import Path
 
 import matplotlib.pyplot as plt
+import torch
 from transformers import HfArgumentParser, Trainer, set_seed
 
 from msdelta.callbacks import build_callbacks
@@ -31,6 +32,10 @@ class MSDeltaTrainer(Trainer):
 
 
 def main(argv: list[str] | None = None) -> int:
+    local_rank = int(os.environ.get("LOCAL_RANK", "-1"))
+    if local_rank >= 0 and torch.xpu.is_available():
+        torch.xpu.set_device(local_rank)
+
     parser = HfArgumentParser(
         (ModelArguments, DataArguments, MSDeltaTrainingArguments)  # pyright: ignore[reportArgumentType]
     )
