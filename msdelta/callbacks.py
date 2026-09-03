@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import itertools
+import logging
 from pathlib import Path
 from typing import Any
 
@@ -11,7 +12,7 @@ import torch
 import wandb
 from torch import nn
 from transformers import TrainerCallback
-from transformers.utils import logging
+from transformers.utils import logging as hf_logging
 
 from msdelta.alignment import alignment_metrics
 from msdelta.denoising import run_denoising_probe
@@ -20,7 +21,8 @@ from msdelta.probe import run_all_probes
 from msdelta.retrieval import replicate_retrieval_inline_metrics, retrieval_inline_metrics
 from msdelta.viz import render_bias_panels
 
-logger = logging.get_logger(__name__)
+logger = hf_logging.get_logger(__name__)
+logger.setLevel(logging.INFO)
 
 
 class _InlineCallback(TrainerCallback):
