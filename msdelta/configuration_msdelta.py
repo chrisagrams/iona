@@ -34,16 +34,6 @@ class MSDeltaConfig(PretrainedConfig):
         **kwargs,
     ):
         super().__init__(**kwargs)
-        auto_map = dict(getattr(self, "auto_map", None) or {})
-        auto_map.setdefault("AutoConfig", "configuration_msdelta.MSDeltaConfig")
-        auto_map.setdefault("AutoModel", "modeling_msdelta.MSDeltaModel")
-        auto_map.setdefault(
-            "AutoModelForPreTraining", "modeling_msdelta.MSDeltaForPreTraining"
-        )
-        auto_map.setdefault(
-            "AutoModelForTokenClassification", "modeling_msdelta.MSDeltaForDenoising"
-        )
-        self.auto_map = auto_map
         self.hidden_size = hidden_size
         self.num_attention_heads = num_attention_heads
         self.num_hidden_layers = num_hidden_layers
