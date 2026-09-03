@@ -29,6 +29,7 @@ from transformers import (
     TrainingArguments,
 )
 
+from msdelta.configuration_msdelta import MSDeltaDenoisingConfig
 from msdelta.modeling_msdelta import MSDeltaForDenoising
 
 
@@ -154,9 +155,11 @@ def run_denoising_probe(
     fp16: bool,
 ) -> dict[str, float]:
     """Post-train a fresh denoising head using Hugging Face Trainer."""
-    config = copy.deepcopy(module.config)
-    config.denoising_head_hidden_size = hidden_size
-    config.denoising_head_dropout = dropout
+    config = MSDeltaDenoisingConfig(
+        encoder=copy.deepcopy(module.config),
+        head_hidden_size=hidden_size,
+        head_dropout=dropout,
+    )
     requires_grad = [parameter.requires_grad for parameter in module.msdelta.parameters()]
     was_training = module.training
     python_rng = random.getstate()
@@ -166,7 +169,11 @@ def run_denoising_probe(
 
     try:
         with torch.random.fork_rng(devices=cuda_devices):
-            model = MSDeltaForDenoising(config, encoder=module.msdelta)
+            model = MSDeltaForDenoising(
+                config,
+                encoder=module.msdelta,
+                freeze_encoder=True,
+            )
             args = TrainingArguments(
                 output_dir=str(output_dir),
                 num_train_epochs=epochs,

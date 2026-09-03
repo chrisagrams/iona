@@ -8,7 +8,7 @@ from transformers import (
     AutoProcessor,
 )
 
-from msdelta.configuration_msdelta import MSDeltaConfig
+from msdelta.configuration_msdelta import MSDeltaConfig, MSDeltaDenoisingConfig
 from msdelta.modeling_msdelta import (
     MSDeltaForDenoising,
     MSDeltaForDenoisingOutput,
@@ -25,13 +25,24 @@ from msdelta.processing_msdelta import (
 __version__ = "0.1.0"
 
 AutoConfig.register(MSDeltaConfig.model_type, MSDeltaConfig, exist_ok=True)
+AutoConfig.register(
+    MSDeltaDenoisingConfig.model_type,
+    MSDeltaDenoisingConfig,
+    exist_ok=True,
+)
 AutoModel.register(MSDeltaConfig, MSDeltaModel, exist_ok=True)
 AutoModelForPreTraining.register(MSDeltaConfig, MSDeltaForPreTraining, exist_ok=True)
-AutoModelForTokenClassification.register(MSDeltaConfig, MSDeltaForDenoising, exist_ok=True)
+AutoModelForTokenClassification.register(
+    MSDeltaDenoisingConfig,
+    MSDeltaForDenoising,
+    exist_ok=True,
+)
 AutoProcessor.register(MSDeltaConfig, MSDeltaProcessor, exist_ok=True)
+AutoProcessor.register(MSDeltaDenoisingConfig, MSDeltaProcessor, exist_ok=True)
 
 __all__ = [
     "MSDeltaConfig",
+    "MSDeltaDenoisingConfig",
     "MSDeltaDataCollatorForPreTraining",
     "MSDeltaForDenoising",
     "MSDeltaForDenoisingOutput",

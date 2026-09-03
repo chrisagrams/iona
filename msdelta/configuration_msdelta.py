@@ -29,8 +29,6 @@ class MSDeltaConfig(PretrainedConfig):
         delta_bias_f_min: float = 1e-2,
         delta_bias_f_max: float = 1e3,
         delta_bias_learnable: bool = True,
-        denoising_head_hidden_size: int = 128,
-        denoising_head_dropout: float = 0.1,
         **kwargs,
     ):
         super().__init__(**kwargs)
@@ -51,8 +49,6 @@ class MSDeltaConfig(PretrainedConfig):
         self.delta_bias_f_min = delta_bias_f_min
         self.delta_bias_f_max = delta_bias_f_max
         self.delta_bias_learnable = delta_bias_learnable
-        self.denoising_head_hidden_size = denoising_head_hidden_size
-        self.denoising_head_dropout = denoising_head_dropout
         self._validate()
 
     def _validate(self) -> None:
@@ -68,10 +64,6 @@ class MSDeltaConfig(PretrainedConfig):
             raise ValueError("hidden_dropout_prob must be in [0, 1)")
         if not 0.0 <= self.attention_probs_dropout_prob < 1.0:
             raise ValueError("attention_probs_dropout_prob must be in [0, 1)")
-        if self.denoising_head_hidden_size <= 0:
-            raise ValueError("denoising_head_hidden_size must be positive")
-        if not 0.0 <= self.denoising_head_dropout < 1.0:
-            raise ValueError("denoising_head_dropout must be in [0, 1)")
         for name in ("fourier_int_n_freqs", "delta_bias_n_freqs", "delta_bias_per_head_hidden"):
             if getattr(self, name) <= 0:
                 raise ValueError(f"{name} must be positive")
@@ -82,4 +74,30 @@ class MSDeltaConfig(PretrainedConfig):
                 raise ValueError(f"{prefix}_f_min and {prefix}_f_max must satisfy 0 < min < max")
 
 
+class MSDeltaDenoisingConfig(PretrainedConfig):
+    """Compose an MSDelta encoder configuration with a denoising head."""
+
+    model_type = "msdelta-denoising"
+    sub_configs = {"encoder": MSDeltaConfig}
+
+    def __init__(
+        self,
+        encoder: MSDeltaConfig | dict | None = None,
+        head_hidden_size: int = 128,
+        head_dropout: float = 0.1,
+        **kwargs,
+    ):
+        super().__init__(**kwargs)
+        self.encoder = (
+            encoder if isinstance(encoder, MSDeltaConfig) else MSDeltaConfig(**(encoder or {}))
+        )
+        self.head_hidden_size = head_hidden_size
+        self.head_dropout = head_dropout
+
+    @property
+    def initializer_range(self) -> float:
+        return self.encoder.initializer_range
+
+
 MSDeltaConfig.register_for_auto_class()
+MSDeltaDenoisingConfig.register_for_auto_class()

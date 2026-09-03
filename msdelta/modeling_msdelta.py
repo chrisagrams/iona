@@ -11,7 +11,7 @@ from transformers import PreTrainedModel
 from transformers.modeling_outputs import BaseModelOutput
 from transformers.utils.generic import ModelOutput
 
-from .configuration_msdelta import MSDeltaConfig
+from .configuration_msdelta import MSDeltaConfig, MSDeltaDenoisingConfig
 from .fourier import FourierFeatures
 
 
@@ -243,13 +243,13 @@ class IntensityHead(nn.Module):
 class PeakDenoisingHead(nn.Module):
     """Predict one noise logit per encoded peak."""
 
-    def __init__(self, config: MSDeltaConfig):
+    def __init__(self, config: MSDeltaDenoisingConfig):
         super().__init__()
         self.projection = nn.Sequential(
-            nn.Linear(config.hidden_size, config.denoising_head_hidden_size),
+            nn.Linear(config.encoder.hidden_size, config.head_hidden_size),
             nn.GELU(),
-            nn.Dropout(config.denoising_head_dropout),
-            nn.Linear(config.denoising_head_hidden_size, 1),
+            nn.Dropout(config.head_dropout),
+            nn.Linear(config.head_hidden_size, 1),
         )
 
     def forward(self, hidden_states: Tensor) -> Tensor:
@@ -311,32 +311,37 @@ class MSDeltaForPreTraining(MSDeltaPreTrainedModel):
 
 
 class MSDeltaForDenoising(MSDeltaPreTrainedModel):
-    """Frozen MSDelta encoder with a trainable peak-level noise classifier."""
+    """MSDelta encoder with a peak-level noise classifier."""
 
-    def __init__(self, config: MSDeltaConfig, encoder: MSDeltaModel | None = None):
+    config_class = MSDeltaDenoisingConfig
+
+    def __init__(
+        self,
+        config: MSDeltaDenoisingConfig,
+        encoder: MSDeltaModel | None = None,
+        freeze_encoder: bool = False,
+    ):
         super().__init__(config)
-        self.msdelta = encoder if encoder is not None else MSDeltaModel(config)
+        self.msdelta = encoder if encoder is not None else MSDeltaModel(config.encoder)
         self.denoising_head = PeakDenoisingHead(config)
+        self._encoder_is_frozen = False
         if encoder is None:
             self.post_init()
         else:
             self.denoising_head.apply(self._init_weights)
-        self.freeze_encoder()
+        if freeze_encoder:
+            self.freeze_encoder()
 
     def freeze_encoder(self) -> None:
         """Freeze the encoder and keep its stochastic layers disabled."""
+        self._encoder_is_frozen = True
         self.msdelta.requires_grad_(False)
         self.msdelta.eval()
 
-    @classmethod
-    def from_pretrained(cls, *args, **kwargs):
-        model = super().from_pretrained(*args, **kwargs)
-        model.freeze_encoder()
-        return model
-
     def train(self, mode: bool = True):
         super().train(mode)
-        self.msdelta.eval()
+        if self._encoder_is_frozen:
+            self.msdelta.eval()
         return self
 
     def forward(
@@ -349,7 +354,15 @@ class MSDeltaForDenoising(MSDeltaPreTrainedModel):
     ) -> MSDeltaForDenoisingOutput | tuple[Tensor, ...]:
         if return_dict is None:
             return_dict = self.config.return_dict
-        with torch.no_grad():
+        if self._encoder_is_frozen:
+            with torch.no_grad():
+                outputs = self.msdelta(
+                    mz=mz,
+                    log_intensity=log_intensity,
+                    attention_mask=attention_mask,
+                    return_dict=True,
+                )
+        else:
             outputs = self.msdelta(
                 mz=mz,
                 log_intensity=log_intensity,
