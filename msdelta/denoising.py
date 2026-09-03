@@ -91,7 +91,6 @@ def run_denoising_probe(
                 seed=seed,
                 data_seed=seed,
                 report_to=[],
-                disable_tqdm=True,
                 ddp_find_unused_parameters=False,
             )
             trainer = Trainer(
