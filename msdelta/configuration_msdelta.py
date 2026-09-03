@@ -24,7 +24,6 @@ class MSDeltaConfig(PretrainedConfig):
         delta_bias_per_head_hidden: int = 32,
         delta_bias_f_min: float = 1e-2,
         delta_bias_f_max: float = 1e3,
-        delta_bias_scale: float = 3.0,
         delta_bias_learnable: bool = True,
         **kwargs,
     ):
@@ -47,7 +46,6 @@ class MSDeltaConfig(PretrainedConfig):
         self.delta_bias_per_head_hidden = delta_bias_per_head_hidden
         self.delta_bias_f_min = delta_bias_f_min
         self.delta_bias_f_max = delta_bias_f_max
-        self.delta_bias_scale = delta_bias_scale
         self.delta_bias_learnable = delta_bias_learnable
         self._validate()
 
@@ -69,8 +67,7 @@ class MSDeltaConfig(PretrainedConfig):
                 raise ValueError(f"{name} must be positive")
         if not 0 < self.delta_bias_f_min < self.delta_bias_f_max:
             raise ValueError("delta_bias_f_min and delta_bias_f_max must satisfy 0 < min < max")
-        if self.delta_bias_scale <= 0:
-            raise ValueError("delta_bias_scale must be positive")
+
 
 
 MSDeltaConfig.register_for_auto_class()

@@ -60,7 +60,6 @@ class DeltaMZBias(nn.Module):
             learnable=config.delta_bias_learnable,
         )
         self.n_heads = config.num_attention_heads
-        self.scale = config.delta_bias_scale
         self.head_mlps = nn.ModuleList(
             [
                 nn.Sequential(
@@ -74,8 +73,7 @@ class DeltaMZBias(nn.Module):
 
     def _curve(self, feats: Tensor) -> Tensor:
         feats = feats.to(next(self.head_mlps.parameters()).dtype)
-        out = torch.cat([mlp(feats) for mlp in self.head_mlps], dim=-1)
-        return self.scale * torch.tanh(out / self.scale)
+        return torch.cat([mlp(feats) for mlp in self.head_mlps], dim=-1)
 
     def forward(self, mz: Tensor) -> Tensor:
         delta_mz = mz.unsqueeze(-1) - mz.unsqueeze(-2)
