@@ -281,7 +281,7 @@ class DenoisingProbeCallback(TrainerCallback):
                 wandb.log({**metrics, "train/global_step": step})
             print(
                 f"  denoise: AUROC={metrics['denoise/auroc']:.3f} "
-                f"AP={metrics['denoise/average_precision']:.3f} "
+                f"AUPRC={metrics['denoise/auprc']:.3f} "
                 f"F1={metrics['denoise/f1']:.3f} model={destination}",
                 flush=True,
             )

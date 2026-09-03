@@ -10,9 +10,10 @@ import numpy as np
 import torch
 from sklearn.metrics import (
     accuracy_score,
-    average_precision_score,
+    auc,
     balanced_accuracy_score,
     f1_score,
+    precision_recall_curve,
     precision_score,
     recall_score,
     roc_auc_score,
@@ -31,6 +32,7 @@ def denoising_metrics(prediction: EvalPrediction) -> dict[str, float]:
     logits = logits[valid]
     labels = labels[valid].astype(np.int64)
     predicted = logits >= 0
+    pr_precision, pr_recall, _ = precision_recall_curve(labels, logits)
     return {
         "accuracy": float(accuracy_score(labels, predicted)),
         "balanced_accuracy": float(balanced_accuracy_score(labels, predicted)),
@@ -38,7 +40,7 @@ def denoising_metrics(prediction: EvalPrediction) -> dict[str, float]:
         "recall": float(recall_score(labels, predicted, zero_division=0)),
         "f1": float(f1_score(labels, predicted, zero_division=0)),
         "auroc": float(roc_auc_score(labels, logits)),
-        "average_precision": float(average_precision_score(labels, logits)),
+        "auprc": float(auc(pr_recall, pr_precision)),
     }
 
 
@@ -112,7 +114,7 @@ def run_denoising_probe(
                 "denoise/recall": evaluated["eval_recall"],
                 "denoise/f1": evaluated["eval_f1"],
                 "denoise/auroc": evaluated["eval_auroc"],
-                "denoise/average_precision": evaluated["eval_average_precision"],
+                "denoise/auprc": evaluated["eval_auprc"],
             }
             trainer.save_model()
             trainer.save_metrics("denoise", metrics)
