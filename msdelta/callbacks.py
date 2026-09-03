@@ -11,6 +11,7 @@ import torch
 import wandb
 from torch import nn
 from transformers import TrainerCallback
+from transformers.utils import logging
 
 from msdelta.alignment import alignment_metrics
 from msdelta.denoising import run_denoising_probe
@@ -18,6 +19,8 @@ from msdelta.fourier import dead_freqs, freq_drift, interp_mae
 from msdelta.probe import run_all_probes
 from msdelta.retrieval import replicate_retrieval_inline_metrics, retrieval_inline_metrics
 from msdelta.viz import render_bias_panels
+
+logger = logging.get_logger(__name__)
 
 
 class _InlineCallback(TrainerCallback):
@@ -280,11 +283,12 @@ class DenoisingProbeCallback(TrainerCallback):
         if state.is_world_process_zero:
             if wandb.run is not None:
                 wandb.log({**metrics, "train/global_step": step})
-            print(
-                f"  denoise: AUROC={metrics['denoise/auroc']:.3f} "
-                f"AUPRC={metrics['denoise/auprc']:.3f} "
-                f"F1={metrics['denoise/f1']:.3f} model={destination}",
-                flush=True,
+            logger.info(
+                "denoise: AUROC=%.3f AUPRC=%.3f F1=%.3f model=%s",
+                metrics["denoise/auroc"],
+                metrics["denoise/auprc"],
+                metrics["denoise/f1"],
+                destination,
             )
         if torch.distributed.is_available() and torch.distributed.is_initialized():
             torch.distributed.barrier()

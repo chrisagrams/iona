@@ -21,7 +21,13 @@ from sklearn.metrics import (
     roc_auc_score,
 )
 from torch.utils.data import BatchSampler, DataLoader
-from transformers import DataCollatorWithPadding, EvalPrediction, Trainer, TrainingArguments
+from transformers import (
+    DataCollatorWithPadding,
+    EvalPrediction,
+    ProgressCallback,
+    Trainer,
+    TrainingArguments,
+)
 
 from msdelta.modeling_msdelta import MSDeltaForDenoising
 
@@ -67,6 +73,22 @@ class PeakBudgetBatchSampler(BatchSampler):
 
     def __len__(self) -> int:
         return len(self._batches())
+
+
+class DenoisingProgressCallback(ProgressCallback):
+    """Label the nested Trainer's training and evaluation progress bars."""
+
+    def on_train_begin(self, args, state, control, **kwargs):
+        super().on_train_begin(args, state, control, **kwargs)
+        if self.training_bar is not None:
+            self.training_bar.set_description("Denoising train")
+
+    def on_prediction_step(self, args, state, control, eval_dataloader=None, **kwargs):
+        super().on_prediction_step(
+            args, state, control, eval_dataloader=eval_dataloader, **kwargs
+        )
+        if self.prediction_bar is not None:
+            self.prediction_bar.set_description("Denoising eval")
 
 
 class DenoisingTrainer(Trainer):
@@ -179,6 +201,8 @@ def run_denoising_probe(
                 compute_metrics=denoising_metrics,
                 peak_pair_budget=peak_pair_budget,
             )
+            trainer.remove_callback(ProgressCallback)
+            trainer.add_callback(DenoisingProgressCallback())
             trainer.train()
             evaluated = trainer.evaluate()
             metrics = {
