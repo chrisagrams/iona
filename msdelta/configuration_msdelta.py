@@ -32,12 +32,6 @@ class MSDeltaConfig(PretrainedConfig):
         **kwargs,
     ):
         super().__init__(**kwargs)
-        if not getattr(self, "auto_map", None):
-            self.auto_map = {
-                "AutoConfig": "configuration_msdelta.MSDeltaConfig",
-                "AutoModel": "modeling_msdelta.MSDeltaModel",
-                "AutoModelForPreTraining": "modeling_msdelta.MSDeltaForPreTraining",
-            }
         self.hidden_size = hidden_size
         self.num_attention_heads = num_attention_heads
         self.num_hidden_layers = num_hidden_layers
@@ -80,4 +74,30 @@ class MSDeltaConfig(PretrainedConfig):
                 raise ValueError(f"{prefix}_f_min and {prefix}_f_max must satisfy 0 < min < max")
 
 
+class MSDeltaDenoisingConfig(PretrainedConfig):
+    """Compose an MSDelta encoder configuration with a denoising head."""
+
+    model_type = "msdelta-denoising"
+    sub_configs = {"encoder": MSDeltaConfig}
+
+    def __init__(
+        self,
+        encoder: MSDeltaConfig | dict | None = None,
+        head_hidden_size: int = 128,
+        head_dropout: float = 0.1,
+        **kwargs,
+    ):
+        super().__init__(**kwargs)
+        self.encoder = (
+            encoder if isinstance(encoder, MSDeltaConfig) else MSDeltaConfig(**(encoder or {}))
+        )
+        self.head_hidden_size = head_hidden_size
+        self.head_dropout = head_dropout
+
+    @property
+    def initializer_range(self) -> float:
+        return self.encoder.initializer_range
+
+
 MSDeltaConfig.register_for_auto_class()
+MSDeltaDenoisingConfig.register_for_auto_class()
