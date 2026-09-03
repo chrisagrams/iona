@@ -55,7 +55,7 @@ class MSDeltaProcessor(FeatureExtractionMixin):
 
     def _process_one(
         self, mz: torch.Tensor, intensity: torch.Tensor
-    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
         mz = torch.as_tensor(mz, dtype=torch.float32)
         intensity = torch.as_tensor(intensity, dtype=torch.float32)
         if mz.ndim != 1 or intensity.ndim != 1:
@@ -72,17 +72,34 @@ class MSDeltaProcessor(FeatureExtractionMixin):
         if base_peak <= 0:
             raise ValueError("spectra must contain at least one positive intensity")
 
-        keep = intensity >= self.intensity_threshold_frac * base_peak
-        mz = mz[keep]
-        intensity = intensity[keep]
+        selected = torch.nonzero(
+            intensity >= self.intensity_threshold_frac * base_peak, as_tuple=False
+        ).squeeze(-1)
+        mz = mz[selected]
+        intensity = intensity[selected]
         if mz.numel() > self.max_peaks:
-            selected = torch.topk(intensity, self.max_peaks, sorted=False).indices.sort().values
-            mz = mz[selected]
-            intensity = intensity[selected]
+            top = torch.topk(intensity, self.max_peaks, sorted=False).indices.sort().values
+            mz = mz[top]
+            intensity = intensity[top]
+            selected = selected[top]
         log_intensity = torch.log1p(intensity)
         log_intensity = log_intensity / log_intensity.max().clamp_min(1e-8)
         labels = intensity / intensity.sum().clamp_min(1e-12)
-        return mz.contiguous(), log_intensity.contiguous(), labels.contiguous()
+        return mz.contiguous(), log_intensity.contiguous(), labels.contiguous(), selected
+
+    def process_denoising_example(self, mz, intensity, noise) -> dict[str, list]:
+        """Process one spectrum while preserving peak/noise-label alignment."""
+        noise = torch.as_tensor(noise, dtype=torch.bool)
+        mz_tensor = torch.as_tensor(mz, dtype=torch.float32)
+        intensity_tensor = torch.as_tensor(intensity, dtype=torch.float32)
+        if noise.ndim != 1 or noise.shape != mz_tensor.shape:
+            raise ValueError("mz, intensity, and noise must have equal one-dimensional shapes")
+        mass, log_intensity, _, selected = self._process_one(mz_tensor, intensity_tensor)
+        return {
+            "mz": mass.tolist(),
+            "log_intensity": log_intensity.tolist(),
+            "labels": noise[selected].float().tolist(),
+        }
 
     def __call__(
         self,
@@ -102,7 +119,7 @@ class MSDeltaProcessor(FeatureExtractionMixin):
         if len(mz_batch) != len(intensity_batch) or mz_was_single != intensity_was_single:
             raise ValueError("mz and intensity must describe the same number of spectra")
 
-        processed = [self._process_one(m, i) for m, i in zip(mz_batch, intensity_batch)]
+        processed = [self._process_one(m, i)[:3] for m, i in zip(mz_batch, intensity_batch)]
         limit = self.max_peaks if max_length is None else max_length
         if limit <= 0:
             raise ValueError("max_length must be positive")
@@ -203,6 +220,22 @@ class MSDeltaDataCollatorForPreTraining:
             "attention_mask": attention_mask,
             "mask_positions": mask_positions,
             "labels": labels,
+        }
+
+
+class MSDeltaDataCollatorForDenoising:
+    """Tensorize one labeled spectrum for peak-level classification."""
+
+    def __call__(self, features: list[dict]) -> dict[str, torch.Tensor]:
+        feature = features[0]
+        mz = torch.tensor(feature["mz"], dtype=torch.float32).unsqueeze(0)
+        return {
+            "mz": mz,
+            "log_intensity": torch.tensor(
+                feature["log_intensity"], dtype=torch.float32
+            ).unsqueeze(0),
+            "attention_mask": torch.ones_like(mz, dtype=torch.long),
+            "labels": torch.tensor(feature["labels"], dtype=torch.float32).unsqueeze(0),
         }
 
 

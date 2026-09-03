@@ -29,15 +29,21 @@ class MSDeltaConfig(PretrainedConfig):
         delta_bias_f_min: float = 1e-2,
         delta_bias_f_max: float = 1e3,
         delta_bias_learnable: bool = True,
+        denoising_head_hidden_size: int = 128,
+        denoising_head_dropout: float = 0.1,
         **kwargs,
     ):
         super().__init__(**kwargs)
-        if not getattr(self, "auto_map", None):
-            self.auto_map = {
-                "AutoConfig": "configuration_msdelta.MSDeltaConfig",
-                "AutoModel": "modeling_msdelta.MSDeltaModel",
-                "AutoModelForPreTraining": "modeling_msdelta.MSDeltaForPreTraining",
-            }
+        auto_map = dict(getattr(self, "auto_map", None) or {})
+        auto_map.setdefault("AutoConfig", "configuration_msdelta.MSDeltaConfig")
+        auto_map.setdefault("AutoModel", "modeling_msdelta.MSDeltaModel")
+        auto_map.setdefault(
+            "AutoModelForPreTraining", "modeling_msdelta.MSDeltaForPreTraining"
+        )
+        auto_map.setdefault(
+            "AutoModelForTokenClassification", "modeling_msdelta.MSDeltaForDenoising"
+        )
+        self.auto_map = auto_map
         self.hidden_size = hidden_size
         self.num_attention_heads = num_attention_heads
         self.num_hidden_layers = num_hidden_layers
@@ -55,6 +61,8 @@ class MSDeltaConfig(PretrainedConfig):
         self.delta_bias_f_min = delta_bias_f_min
         self.delta_bias_f_max = delta_bias_f_max
         self.delta_bias_learnable = delta_bias_learnable
+        self.denoising_head_hidden_size = denoising_head_hidden_size
+        self.denoising_head_dropout = denoising_head_dropout
         self._validate()
 
     def _validate(self) -> None:
@@ -70,6 +78,10 @@ class MSDeltaConfig(PretrainedConfig):
             raise ValueError("hidden_dropout_prob must be in [0, 1)")
         if not 0.0 <= self.attention_probs_dropout_prob < 1.0:
             raise ValueError("attention_probs_dropout_prob must be in [0, 1)")
+        if self.denoising_head_hidden_size <= 0:
+            raise ValueError("denoising_head_hidden_size must be positive")
+        if not 0.0 <= self.denoising_head_dropout < 1.0:
+            raise ValueError("denoising_head_dropout must be in [0, 1)")
         for name in ("fourier_int_n_freqs", "delta_bias_n_freqs", "delta_bias_per_head_hidden"):
             if getattr(self, name) <= 0:
                 raise ValueError(f"{name} must be positive")

@@ -23,6 +23,14 @@ class MSDeltaForPreTrainingOutput(ModelOutput):
     logits: Tensor | None = None
 
 
+@dataclass
+class MSDeltaForDenoisingOutput(ModelOutput):
+    """Output of peak-level signal/noise classification."""
+
+    loss: Tensor | None = None
+    logits: Tensor | None = None
+
+
 class PeakEmbed(nn.Module):
     """Create m/z-free tokens from normalized log intensity."""
 
@@ -232,6 +240,22 @@ class IntensityHead(nn.Module):
         return self.projection(hidden_states).squeeze(-1).float()
 
 
+class PeakDenoisingHead(nn.Module):
+    """Predict one noise logit per encoded peak."""
+
+    def __init__(self, config: MSDeltaConfig):
+        super().__init__()
+        self.projection = nn.Sequential(
+            nn.Linear(config.hidden_size, config.denoising_head_hidden_size),
+            nn.GELU(),
+            nn.Dropout(config.denoising_head_dropout),
+            nn.Linear(config.denoising_head_hidden_size, 1),
+        )
+
+    def forward(self, hidden_states: Tensor) -> Tensor:
+        return self.projection(hidden_states).squeeze(-1).float()
+
+
 class MSDeltaForPreTraining(MSDeltaPreTrainedModel):
     """MSDelta with the masked-intensity pretraining objective."""
 
@@ -286,5 +310,72 @@ class MSDeltaForPreTraining(MSDeltaPreTrainedModel):
         )
 
 
+class MSDeltaForDenoising(MSDeltaPreTrainedModel):
+    """Frozen MSDelta encoder with a trainable peak-level noise classifier."""
+
+    def __init__(self, config: MSDeltaConfig, encoder: MSDeltaModel | None = None):
+        super().__init__(config)
+        self.msdelta = encoder if encoder is not None else MSDeltaModel(config)
+        self.denoising_head = PeakDenoisingHead(config)
+        if encoder is None:
+            self.post_init()
+        else:
+            self.denoising_head.apply(self._init_weights)
+        self.freeze_encoder()
+
+    def freeze_encoder(self) -> None:
+        """Freeze the encoder and keep its stochastic layers disabled."""
+        self.msdelta.requires_grad_(False)
+        self.msdelta.eval()
+
+    @classmethod
+    def from_pretrained(cls, *args, **kwargs):
+        model = super().from_pretrained(*args, **kwargs)
+        model.freeze_encoder()
+        return model
+
+    def train(self, mode: bool = True):
+        super().train(mode)
+        self.msdelta.eval()
+        return self
+
+    def forward(
+        self,
+        mz: Tensor,
+        log_intensity: Tensor,
+        attention_mask: Tensor | None = None,
+        labels: Tensor | None = None,
+        return_dict: bool | None = None,
+    ) -> MSDeltaForDenoisingOutput | tuple[Tensor, ...]:
+        if return_dict is None:
+            return_dict = self.config.return_dict
+        with torch.no_grad():
+            outputs = self.msdelta(
+                mz=mz,
+                log_intensity=log_intensity,
+                attention_mask=attention_mask,
+                return_dict=True,
+            )
+        logits = self.denoising_head(outputs.last_hidden_state)
+        loss = None
+        if labels is not None:
+            if labels.shape != logits.shape:
+                raise ValueError("labels must have the same shape as mz")
+            valid = labels != -100
+            if attention_mask is not None:
+                valid = valid & attention_mask.bool()
+            loss = (
+                F.binary_cross_entropy_with_logits(logits[valid], labels[valid].float())
+                if valid.any()
+                else logits.sum() * 0.0
+            )
+
+        if not return_dict:
+            result = (logits,)
+            return ((loss,) + result) if loss is not None else result
+        return MSDeltaForDenoisingOutput(loss=loss, logits=logits)
+
+
 MSDeltaModel.register_for_auto_class("AutoModel")
 MSDeltaForPreTraining.register_for_auto_class("AutoModelForPreTraining")
+MSDeltaForDenoising.register_for_auto_class("AutoModelForTokenClassification")

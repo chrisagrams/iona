@@ -52,4 +52,15 @@ class MSDeltaTrainingArguments(TrainingArguments):
     probe_steps: int = 0
     probe_num_spectra: int = 3000
     replicate_retrieval_repo: str | None = None
+    denoise_steps: int = 0
+    denoise_dataset_repo: str = "chrisagrams/ms-denoise-100k"
+    denoise_max_peaks: int = 1024
+    denoise_intensity_threshold_frac: float = 0.0
+    denoise_head_hidden_size: int = 128
+    denoise_head_dropout: float = 0.1
+    denoise_epochs: int = 1
+    denoise_learning_rate: float = 1e-3
+    denoise_weight_decay: float = 1e-2
+    denoise_num_workers: int = 4
+    denoise_seed: int = 0
     wandb_project: str | None = None

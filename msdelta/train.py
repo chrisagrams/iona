@@ -13,6 +13,7 @@ from transformers import HfArgumentParser, Trainer, set_seed
 from msdelta.callbacks import build_callbacks
 from msdelta.configuration_msdelta import MSDeltaConfig
 from msdelta.data import (
+    build_denoising_datasets,
     build_pretraining_datasets,
     resolve_dataset_paths,
 )
@@ -104,6 +105,20 @@ def main(argv: list[str] | None = None) -> int:
             )
         eval_size = training_args.validation_batches * training_args.per_device_eval_batch_size
         eval_ds = val_ds.select(range(min(len(val_ds), eval_size)))
+        denoising_datasets = None
+        denoising_processor = None
+        if training_args.denoise_steps:
+            denoising_processor = MSDeltaProcessor.from_pretrained(
+                data_args.processor_name_or_path,
+                max_peaks=training_args.denoise_max_peaks,
+                intensity_threshold_frac=training_args.denoise_intensity_threshold_frac,
+            )
+            with training_args.main_process_first(local=False, desc="denoising preprocessing"):
+                denoising_datasets = build_denoising_datasets(
+                    training_args.denoise_dataset_repo,
+                    denoising_processor,
+                    num_proc=data_args.preprocessing_num_workers or None,
+                )
 
         trainer = MSDeltaTrainer(
             model=model,
@@ -115,7 +130,15 @@ def main(argv: list[str] | None = None) -> int:
         )
         # Force Trainer to report the validation loss.
         trainer.can_return_loss = True
-        for cb in build_callbacks(model, val_ds, processor, training_args, out_dir):
+        for cb in build_callbacks(
+            model,
+            val_ds,
+            processor,
+            training_args,
+            out_dir,
+            denoising_datasets=denoising_datasets,
+            denoising_processor=denoising_processor,
+        ):
             trainer.add_callback(cb)
 
         trainer.train(resume_from_checkpoint=training_args.resume_from_checkpoint)
