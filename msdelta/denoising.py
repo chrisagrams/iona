@@ -79,7 +79,7 @@ class DenoisingTrainer(Trainer):
     def get_train_dataloader(self) -> DataLoader:
         train_dataset = cast(Dataset, self.train_dataset)
         batch_sampler = PeakBudgetBatchSampler(
-            train_dataset["length"],
+            lengths=[len(mz) for mz in train_dataset["mz"]],
             peak_pair_budget=self.peak_pair_budget,
             seed=self.args.data_seed or self.args.seed,
         )

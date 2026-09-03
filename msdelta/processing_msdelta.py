@@ -99,7 +99,6 @@ class MSDeltaProcessor(FeatureExtractionMixin):
             "mz": mass.tolist(),
             "log_intensity": log_intensity.tolist(),
             "labels": noise[selected].float().tolist(),
-            "length": mass.numel(),
         }
 
     def pad(
