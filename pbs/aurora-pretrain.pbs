@@ -131,6 +131,8 @@ export MKL_NUM_THREADS=${MKL_NUM_THREADS:-4}
 export OPENBLAS_NUM_THREADS=${OPENBLAS_NUM_THREADS:-4}
 export CCL_PROCESS_LAUNCHER=pmix
 export CCL_ATL_TRANSPORT=mpi
+export CCL_KVS_MODE=mpi
+export FI_MR_CACHE_MONITOR=${FI_MR_CACHE_MONITOR:-userfaultfd}
 export CCL_ZE_IPC=${CCL_ZE_IPC:-0}
 export CCL_ZE_IPC_EXCHANGE=${CCL_ZE_IPC_EXCHANGE:-sockets}
 export HF_HOME
@@ -140,6 +142,7 @@ export PYTHONPATH=$REPO_DIR${PYTHONPATH:+:$PYTHONPATH}
 export MASTER_ADDR=${MASTER_ADDR:-$(head -n 1 "$NODE_LIST")}
 export MASTER_PORT=${MASTER_PORT:-29500}
 export MSDELTA_XPUS_PER_HOST=$XPUS_PER_HOST
+export MSDELTA_WORLD_SIZE=$TOTAL_XPUS
 
 ALCF_PROXY=${ALCF_PROXY:-http://proxy.alcf.anl.gov:3128}
 export HTTP_PROXY=${HTTP_PROXY:-$ALCF_PROXY}
@@ -178,10 +181,14 @@ exec mpiexec \
     --hostfile="$PBS_NODEFILE" \
     /usr/bin/env \
     bash -c '
-        export RANK="$PMI_RANK"
-        export WORLD_SIZE="$PMI_SIZE"
+        export RANK="${PMIX_RANK:-${PALS_RANKID:-${PMI_RANK:-}}}"
+        if [[ -z $RANK ]]; then
+            echo "Aurora launcher did not provide PMIX_RANK, PALS_RANKID, or PMI_RANK" >&2
+            exit 2
+        fi
+        export WORLD_SIZE="$MSDELTA_WORLD_SIZE"
         export LOCAL_RANK="${PALS_LOCAL_RANKID:-${MPI_LOCALRANKID:-$((RANK % MSDELTA_XPUS_PER_HOST))}}"
-        export LOCAL_WORLD_SIZE="${MPI_LOCALNRANKS:-$MSDELTA_XPUS_PER_HOST}"
+        export LOCAL_WORLD_SIZE="$MSDELTA_XPUS_PER_HOST"
         exec "$@"
     ' bash \
     "$VENV_DIR/bin/python" \
