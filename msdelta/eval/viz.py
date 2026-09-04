@@ -8,8 +8,8 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import torch
 
-from msdelta.chemistry import ISOTOPES, NEUTRAL_LOSSES, RESIDUES_AA20
-from msdelta.modeling_msdelta import DeltaMZBias
+from msdelta.data.chemistry import ISOTOPES, NEUTRAL_LOSSES, RESIDUES_AA20
+from msdelta.model.modeling import DeltaMZBias
 
 
 def _references_in_range(lo: float, hi: float) -> list[tuple[str, float, str]]:

@@ -10,7 +10,7 @@ from datasets import load_dataset
 from torchmetrics.classification import BinaryAveragePrecision
 from torchmetrics.retrieval import RetrievalHitRate, RetrievalMAP, RetrievalRecall
 
-from msdelta.embedding import embed_spectra
+from msdelta.eval.embedding import embed_spectra
 
 
 def load_benchmark(repo_id: str, split: str = "test"):

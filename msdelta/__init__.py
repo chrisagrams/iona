@@ -8,18 +8,18 @@ from transformers import (
     AutoProcessor,
 )
 
-from msdelta.configuration_msdelta import MSDeltaConfig, MSDeltaDenoisingConfig
-from msdelta.modeling_msdelta import (
+from msdelta.data.processing import (
+    MSDeltaDataCollatorForPreTraining,
+    MSDeltaProcessor,
+)
+from msdelta.model.configuration import MSDeltaConfig, MSDeltaDenoisingConfig
+from msdelta.model.modeling import (
     MSDeltaForDenoising,
     MSDeltaForDenoisingOutput,
     MSDeltaForPreTraining,
     MSDeltaForPreTrainingOutput,
     MSDeltaModel,
     MSDeltaPreTrainedModel,
-)
-from msdelta.processing_msdelta import (
-    MSDeltaDataCollatorForPreTraining,
-    MSDeltaProcessor,
 )
 
 __version__ = "0.1.0"

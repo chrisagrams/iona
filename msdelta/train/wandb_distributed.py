@@ -9,9 +9,7 @@ from typing import Any
 import wandb
 
 
-def init_wandb_run(
-    *, project: str, run_name: str, config: dict[str, Any]
-) -> wandb.Run | None:
+def init_wandb_run(*, project: str, run_name: str, config: dict[str, Any]) -> wandb.Run | None:
     """Create one W&B client per node, sharing a run across multiple nodes."""
     rank = int(os.environ.get("RANK", "0"))
     world_size = int(os.environ.get("WORLD_SIZE", "1"))

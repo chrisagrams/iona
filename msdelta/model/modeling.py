@@ -11,7 +11,7 @@ from transformers import PreTrainedModel
 from transformers.modeling_outputs import BaseModelOutput
 from transformers.utils.generic import ModelOutput
 
-from .configuration_msdelta import MSDeltaConfig, MSDeltaDenoisingConfig
+from .configuration import MSDeltaConfig, MSDeltaDenoisingConfig
 from .fourier import FourierFeatures
 
 

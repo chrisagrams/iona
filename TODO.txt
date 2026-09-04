@@ -1,0 +1,13 @@
+Is the model cheating? Precursors are an easily learned signal: Gao is working on this
+Architecture changes: regularization, residual layers, bias insertion
+Dataset: on huggingface
+Ablation studies: tanh vs sigmoid, Hadamard for position, 
+Embedding retrieval 
+Dataset of multiple ms2s per precursor 
+
+FLops: estimates is fine, total/training steps
+
+Important point: show that the approach scales
+Scaling laws: ours vs theirs
+
+Sparse autoencoder for embedding interpretability  

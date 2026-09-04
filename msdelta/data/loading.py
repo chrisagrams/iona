@@ -10,8 +10,8 @@ import torch
 from datasets import DatasetDict, load_dataset
 from huggingface_hub import snapshot_download
 
-from msdelta.chemistry import PROTON_MASS, RESIDUE_MASSES, WATER_MASS
-from msdelta.processing_msdelta import MSDeltaProcessor
+from msdelta.data.chemistry import PROTON_MASS, RESIDUE_MASSES, WATER_MASS
+from msdelta.data.processing import MSDeltaProcessor
 
 N_CHARGES = 8
 

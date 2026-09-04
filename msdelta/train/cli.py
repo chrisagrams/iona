@@ -10,18 +10,18 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 from transformers import HfArgumentParser, Trainer, set_seed
 
-from msdelta.callbacks import build_callbacks
-from msdelta.configuration_msdelta import MSDeltaConfig
-from msdelta.data import (
+from msdelta.data.loading import (
     build_denoising_datasets,
     build_pretraining_datasets,
     resolve_dataset_paths,
 )
-from msdelta.modeling_msdelta import MSDeltaForPreTraining
-from msdelta.processing_msdelta import MSDeltaDataCollatorForPreTraining, MSDeltaProcessor
-from msdelta.training_args import DataArguments, ModelArguments, MSDeltaTrainingArguments
-from msdelta.viz import render_bias_panels
-from msdelta.wandb_distributed import init_wandb_run
+from msdelta.data.processing import MSDeltaDataCollatorForPreTraining, MSDeltaProcessor
+from msdelta.eval.viz import render_bias_panels
+from msdelta.model.configuration import MSDeltaConfig
+from msdelta.model.modeling import MSDeltaForPreTraining
+from msdelta.train.args import DataArguments, ModelArguments, MSDeltaTrainingArguments
+from msdelta.train.callbacks import build_callbacks
+from msdelta.train.wandb_distributed import init_wandb_run
 
 
 class MSDeltaTrainer(Trainer):

@@ -10,8 +10,8 @@ import torch
 from scipy.signal import find_peaks
 from scipy.stats import binomtest
 
-from msdelta.chemistry import ISOTOPES, NEUTRAL_LOSSES, RESIDUES_AA20
-from msdelta.modeling_msdelta import MSDeltaModel
+from msdelta.data.chemistry import ISOTOPES, NEUTRAL_LOSSES, RESIDUES_AA20
+from msdelta.model.modeling import MSDeltaModel
 
 
 def reference_set(kinds: list[str]) -> dict[str, float]:

@@ -29,8 +29,8 @@ from transformers import (
     TrainingArguments,
 )
 
-from msdelta.configuration_msdelta import MSDeltaDenoisingConfig
-from msdelta.modeling_msdelta import MSDeltaForDenoising
+from msdelta.model.configuration import MSDeltaDenoisingConfig
+from msdelta.model.modeling import MSDeltaForDenoising
 
 
 class PeakBudgetBatchSampler(BatchSampler):
@@ -85,9 +85,7 @@ class DenoisingProgressCallback(ProgressCallback):
             self.training_bar.set_description("Denoising train")
 
     def on_prediction_step(self, args, state, control, eval_dataloader=None, **kwargs):
-        super().on_prediction_step(
-            args, state, control, eval_dataloader=eval_dataloader, **kwargs
-        )
+        super().on_prediction_step(args, state, control, eval_dataloader=eval_dataloader, **kwargs)
         if self.prediction_bar is not None:
             self.prediction_bar.set_description("Denoising eval")
 

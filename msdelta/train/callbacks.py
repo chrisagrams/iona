@@ -13,12 +13,12 @@ from torch import nn
 from tqdm.auto import tqdm
 from transformers import TrainerCallback
 
-from msdelta.alignment import alignment_metrics
-from msdelta.denoising import run_denoising_probe
-from msdelta.fourier import dead_freqs, freq_drift, interp_mae
-from msdelta.probe import run_all_probes
-from msdelta.retrieval import replicate_retrieval_inline_metrics, retrieval_inline_metrics
-from msdelta.viz import render_bias_panels
+from msdelta.eval.alignment import alignment_metrics
+from msdelta.eval.denoising import run_denoising_probe
+from msdelta.eval.probe import run_all_probes
+from msdelta.eval.retrieval import replicate_retrieval_inline_metrics, retrieval_inline_metrics
+from msdelta.eval.viz import render_bias_panels
+from msdelta.model.fourier import dead_freqs, freq_drift, interp_mae
 
 
 class _InlineCallback(TrainerCallback):

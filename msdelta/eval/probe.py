@@ -11,15 +11,15 @@ from sklearn.linear_model import LogisticRegression, Ridge
 from sklearn.metrics import accuracy_score, f1_score, r2_score, roc_auc_score
 from sklearn.preprocessing import StandardScaler
 
-from msdelta.chemistry import (
+from msdelta.data.chemistry import (
     ISOTOPES,
     NEUTRAL_LOSSES,
     PROTON_MASS,
     RESIDUE_MASSES,
     WATER_MASS,
 )
-from msdelta.embedding import encode_batch, pool_tokens
-from msdelta.modeling_msdelta import MSDeltaModel
+from msdelta.eval.embedding import encode_batch, pool_tokens
+from msdelta.model.modeling import MSDeltaModel
 
 _C13 = ISOTOPES["¹³C"]
 _LOSSES = {name: NEUTRAL_LOSSES[name] for name in ("H₂O", "NH₃", "CO", "CO₂")}

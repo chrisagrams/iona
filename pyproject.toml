@@ -24,7 +24,7 @@ dependencies = [
 ]
 
 [project.scripts]
-msdelta-train = "msdelta.train:main"
+msdelta-train = "msdelta.train.cli:main"
 
 [dependency-groups]
 dev = [
@@ -50,7 +50,10 @@ select = ["E4", "E7", "E9", "F", "I", "PLC0415", "TID252"]
 ban-relative-imports = "all"
 
 [tool.ruff.lint.per-file-ignores]
-"msdelta/modeling_msdelta.py" = ["TID252"]
+# Relative imports are load-bearing here: Hugging Face's `custom_object_save` follows
+# them to copy dependent modules into a checkpoint for `trust_remote_code` loading.
+"msdelta/model/modeling.py" = ["TID252"]
+"msdelta/model/experimental.py" = ["TID252"]
 
 [tool.uv.sources]
 torch = [
