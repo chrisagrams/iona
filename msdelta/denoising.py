@@ -144,15 +144,9 @@ def run_denoising_probe(
     output_dir: Path,
     processor,
     peak_pair_budget: int,
-    epochs: int,
-    learning_rate: float,
-    weight_decay: float,
     hidden_size: int,
     dropout: float,
-    num_workers: int,
-    seed: int,
-    bf16: bool,
-    fp16: bool,
+    training_args: TrainingArguments,
 ) -> dict[str, float]:
     """Post-train a fresh denoising head using Hugging Face Trainer."""
     config = MSDeltaDenoisingConfig(
@@ -173,26 +167,8 @@ def run_denoising_probe(
                 encoder=probe_encoder,
                 freeze_encoder=True,
             )
-            args = TrainingArguments(
-                output_dir=str(output_dir),
-                num_train_epochs=epochs,
-                per_device_train_batch_size=1,
-                per_device_eval_batch_size=1,
-                learning_rate=learning_rate,
-                weight_decay=weight_decay,
-                eval_strategy="no",
-                save_strategy="no",
-                logging_strategy="no",
-                remove_unused_columns=False,
-                label_names=["labels"],
-                dataloader_num_workers=num_workers,
-                bf16=bf16,
-                fp16=fp16,
-                seed=seed,
-                data_seed=seed,
-                report_to=[],
-                ddp_find_unused_parameters=False,
-            )
+            args = copy.deepcopy(training_args)
+            args.output_dir = str(output_dir)
             trainer = DenoisingTrainer(
                 model=model,
                 args=args,

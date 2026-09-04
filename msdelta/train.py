@@ -135,6 +135,15 @@ def main(argv: list[str] | None = None) -> int:
                     num_proc=data_args.preprocessing_num_workers or None,
                 )
 
+        callbacks = build_callbacks(
+            model,
+            val_ds,
+            processor,
+            training_args,
+            out_dir,
+            denoising_datasets=denoising_datasets,
+            denoising_processor=denoising_processor,
+        )
         trainer = MSDeltaTrainer(
             model=model,
             args=training_args,
@@ -146,15 +155,7 @@ def main(argv: list[str] | None = None) -> int:
         )
         # Force Trainer to report the validation loss.
         trainer.can_return_loss = True
-        for callback in build_callbacks(
-            model,
-            val_ds,
-            processor,
-            training_args,
-            out_dir,
-            denoising_datasets=denoising_datasets,
-            denoising_processor=denoising_processor,
-        ):
+        for callback in callbacks:
             trainer.add_callback(callback)
 
         trainer.train(resume_from_checkpoint=training_args.resume_from_checkpoint)
