@@ -8,17 +8,24 @@ from transformers import (
     AutoProcessor,
 )
 
-from msdelta.configuration_msdelta import MSDeltaConfig, MSDeltaDenoisingConfig
+from msdelta.configuration_msdelta import (
+    MSDeltaConfig,
+    MSDeltaDenoisingConfig,
+    MSDeltaRetrievalConfig,
+)
 from msdelta.modeling_msdelta import (
     MSDeltaForDenoising,
     MSDeltaForDenoisingOutput,
     MSDeltaForPreTraining,
     MSDeltaForPreTrainingOutput,
+    MSDeltaForRetrieval,
+    MSDeltaForRetrievalOutput,
     MSDeltaModel,
     MSDeltaPreTrainedModel,
 )
 from msdelta.processing_msdelta import (
     MSDeltaDataCollatorForPreTraining,
+    MSDeltaDataCollatorForRetrieval,
     MSDeltaProcessor,
 )
 
@@ -30,7 +37,13 @@ AutoConfig.register(
     MSDeltaDenoisingConfig,
     exist_ok=True,
 )
+AutoConfig.register(
+    MSDeltaRetrievalConfig.model_type,
+    MSDeltaRetrievalConfig,
+    exist_ok=True,
+)
 AutoModel.register(MSDeltaConfig, MSDeltaModel, exist_ok=True)
+AutoModel.register(MSDeltaRetrievalConfig, MSDeltaForRetrieval, exist_ok=True)
 AutoModelForPreTraining.register(MSDeltaConfig, MSDeltaForPreTraining, exist_ok=True)
 AutoModelForTokenClassification.register(
     MSDeltaDenoisingConfig,
@@ -39,15 +52,20 @@ AutoModelForTokenClassification.register(
 )
 AutoProcessor.register(MSDeltaConfig, MSDeltaProcessor, exist_ok=True)
 AutoProcessor.register(MSDeltaDenoisingConfig, MSDeltaProcessor, exist_ok=True)
+AutoProcessor.register(MSDeltaRetrievalConfig, MSDeltaProcessor, exist_ok=True)
 
 __all__ = [
     "MSDeltaConfig",
     "MSDeltaDenoisingConfig",
+    "MSDeltaRetrievalConfig",
     "MSDeltaDataCollatorForPreTraining",
+    "MSDeltaDataCollatorForRetrieval",
     "MSDeltaForDenoising",
     "MSDeltaForDenoisingOutput",
     "MSDeltaForPreTraining",
     "MSDeltaForPreTrainingOutput",
+    "MSDeltaForRetrieval",
+    "MSDeltaForRetrievalOutput",
     "MSDeltaModel",
     "MSDeltaPreTrainedModel",
     "MSDeltaProcessor",

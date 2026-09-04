@@ -183,3 +183,30 @@ def build_denoising_datasets(
         num_proc=num_proc,
         desc="preprocess denoising spectra",
     )
+
+
+def build_retrieval_datasets(
+    repo_id: str,
+    processor: MSDeltaProcessor,
+    num_proc: int | None = None,
+) -> DatasetDict:
+    """Load and preprocess grouped consensus/experimental retrieval spectra."""
+    datasets = load_dataset(repo_id)
+    required = {"train", "validation"}
+    if missing := required.difference(datasets):
+        raise ValueError(f"retrieval dataset is missing splits: {sorted(missing)}")
+    datasets = DatasetDict({split: datasets[split] for split in ("train", "validation")})
+
+    processed = datasets.map(
+        lambda example: processor.process_retrieval_example(
+            example["consensus"], example["experimental"]
+        ),
+        remove_columns=datasets["train"].column_names,
+        num_proc=num_proc,
+        desc="preprocess retrieval spectra",
+    )
+    return processed.filter(
+        lambda example: len(example["mz"]) == 4 and all(example["mz"]),
+        num_proc=num_proc,
+        desc="drop invalid retrieval groups",
+    )

@@ -17,7 +17,7 @@ from msdelta.alignment import alignment_metrics
 from msdelta.denoising import run_denoising_probe
 from msdelta.fourier import dead_freqs, freq_drift, interp_mae
 from msdelta.probe import run_all_probes
-from msdelta.retrieval import replicate_retrieval_inline_metrics, retrieval_inline_metrics
+from msdelta.retrieval import run_retrieval_probe
 from msdelta.viz import render_bias_panels
 
 
@@ -182,46 +182,6 @@ class AlignmentCallback(_InlineCallback):
         )
 
 
-class RetrievalCallback(_InlineCallback):
-    """Measure spectrum retrieval against a binned baseline."""
-
-    empty_cache_before = True
-
-    def run(self, step):
-        r = retrieval_inline_metrics(self.encoder, self.dataset, self.device)
-        self._wlog(r, step)
-        print(
-            f"  retrieval: mAP={r.get('retrieval/mAP', float('nan')):.3f} "
-            f"binned={r.get('retrieval/binned_mAP', float('nan')):.3f} "
-            f"gap={r.get('retrieval/gap_vs_binned', float('nan')):+.3f}",
-            flush=True,
-        )
-
-
-class ReplicateRetrievalCallback(_InlineCallback):
-    """Measure retrieval on the external replicate dataset."""
-
-    empty_cache_before = True
-
-    def __init__(self, module, every, pp, repo_id):
-        super().__init__(module, every)
-        self.pp = pp
-        self.repo_id = repo_id
-
-    def run(self, step):
-        rr = replicate_retrieval_inline_metrics(self.encoder, self.repo_id, self.device, self.pp)
-        if not rr:
-            return
-        self._wlog(rr, step)
-        print(
-            f"  replicate-retrieval: "
-            f"Hit@1={rr.get('replicate_retrieval/Hit@1', float('nan')):.3f} "
-            f"MAP={rr.get('replicate_retrieval/MAP', float('nan')):.3f} "
-            f"R@5={rr.get('replicate_retrieval/R@5', float('nan')):.3f}",
-            flush=True,
-        )
-
-
 class BiasPanelCallback(_InlineCallback):
     """Render and log bias curves."""
 
@@ -290,6 +250,64 @@ class DenoisingProbeCallback(TrainerCallback):
             torch.distributed.barrier()
 
 
+class RetrievalProbeCallback(TrainerCallback):
+    """Post-train a fresh distributed retrieval head at fixed intervals."""
+
+    def __init__(self, module, every, datasets, pp, training_args, out_dir):
+        self.module = module
+        self.every = every
+        self.datasets = datasets
+        self.pp = pp
+        self.training_args = training_args
+        self.out_dir = out_dir
+        self.last_step = -1
+
+    @property
+    def device(self) -> torch.device:
+        return next(self.module.parameters()).device
+
+    def on_step_end(self, args, state, control, **kwargs):
+        step = state.global_step
+        if not self.every or step <= 0 or step % self.every or step == self.last_step:
+            return
+        self.last_step = step
+        if self.device.type == "cuda":
+            torch.cuda.empty_cache()
+        destination = self.out_dir / "retrieval-probes" / f"step-{step}"
+        metrics = run_retrieval_probe(
+            self.module,
+            self.datasets["train"],
+            self.datasets["validation"],
+            output_dir=destination,
+            processor=self.pp,
+            replicate_repo_id=self.training_args.replicate_retrieval_repo,
+            per_device_batch_size=self.training_args.retrieval_per_device_batch_size,
+            epochs=self.training_args.retrieval_epochs,
+            learning_rate=self.training_args.retrieval_learning_rate,
+            weight_decay=self.training_args.retrieval_weight_decay,
+            projection_hidden_size=self.training_args.retrieval_projection_hidden_size,
+            embedding_size=self.training_args.retrieval_embedding_size,
+            dropout=self.training_args.retrieval_head_dropout,
+            temperature=self.training_args.retrieval_temperature,
+            validation_analytes=self.training_args.retrieval_validation_analytes,
+            num_workers=self.training_args.retrieval_num_workers,
+            seed=self.training_args.retrieval_seed,
+            bf16=self.training_args.bf16,
+            fp16=self.training_args.fp16,
+        )
+        if state.is_world_process_zero:
+            if wandb.run is not None:
+                wandb.log({**metrics, "train/global_step": step})
+            tqdm.write(
+                f"retrieval: loss={metrics['retrieval/loss']:.3f} "
+                f"Hit@1={metrics['retrieval/Hit@1']:.3f} "
+                f"MAP={metrics['retrieval/MAP']:.3f} "
+                f"R@5={metrics['retrieval/R@5']:.3f} model={destination}"
+            )
+        if torch.distributed.is_available() and torch.distributed.is_initialized():
+            torch.distributed.barrier()
+
+
 def build_callbacks(
     module,
     val_dataset,
@@ -298,6 +316,7 @@ def build_callbacks(
     out_dir,
     denoising_datasets=None,
     denoising_processor=None,
+    retrieval_datasets=None,
 ):
     """Create the callbacks enabled in the configuration."""
     cbs: list[TrainerCallback] = []
@@ -321,16 +340,19 @@ def build_callbacks(
             )
         )
         cbs.append(AlignmentCallback(module, training_args.probe_steps))
-        cbs.append(RetrievalCallback(module, training_args.probe_steps, dataset=val_dataset))
-        if training_args.replicate_retrieval_repo:
-            cbs.append(
-                ReplicateRetrievalCallback(
-                    module,
-                    training_args.probe_steps,
-                    pp,
-                    training_args.replicate_retrieval_repo,
-                )
+    if training_args.retrieval_steps:
+        if retrieval_datasets is None:
+            raise ValueError("retrieval datasets are required when retrieval_steps is enabled")
+        cbs.append(
+            RetrievalProbeCallback(
+                module,
+                training_args.retrieval_steps,
+                retrieval_datasets,
+                pp,
+                training_args,
+                out_dir,
             )
+        )
     if training_args.denoise_steps:
         if denoising_datasets is None:
             raise ValueError("denoising datasets are required when denoise_steps is enabled")

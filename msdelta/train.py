@@ -15,6 +15,7 @@ from msdelta.configuration_msdelta import MSDeltaConfig
 from msdelta.data import (
     build_denoising_datasets,
     build_pretraining_datasets,
+    build_retrieval_datasets,
     resolve_dataset_paths,
 )
 from msdelta.modeling_msdelta import MSDeltaForPreTraining
@@ -119,6 +120,14 @@ def main(argv: list[str] | None = None) -> int:
                     denoising_processor,
                     num_proc=data_args.preprocessing_num_workers or None,
                 )
+        retrieval_datasets = None
+        if training_args.retrieval_steps:
+            with training_args.main_process_first(local=False, desc="retrieval preprocessing"):
+                retrieval_datasets = build_retrieval_datasets(
+                    training_args.retrieval_dataset_repo,
+                    processor,
+                    num_proc=data_args.preprocessing_num_workers or None,
+                )
 
         trainer = MSDeltaTrainer(
             model=model,
@@ -138,6 +147,7 @@ def main(argv: list[str] | None = None) -> int:
             out_dir,
             denoising_datasets=denoising_datasets,
             denoising_processor=denoising_processor,
+            retrieval_datasets=retrieval_datasets,
         ):
             trainer.add_callback(cb)
 
