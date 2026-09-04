@@ -223,6 +223,58 @@ class MSDeltaModel(MSDeltaPreTrainedModel):
         return BaseModelOutput(last_hidden_state=hidden_states)
 
 
+class MSDeltaModel_2(MSDeltaPreTrainedModel):
+    """Encode mass-spectrum peaks with continuous relative-mass attention."""
+
+    def __init__(self, config: MSDeltaConfig):
+        super().__init__(config)
+        self.embed = PeakEmbed(config)
+        self.bias_module = DeltaMZBias(config)
+        self.blocks = nn.ModuleList([EncoderBlock(config) for _ in range(config.num_hidden_layers)])
+        self.norm = nn.LayerNorm(config.hidden_size, eps=config.layer_norm_eps)
+        self.gradient_checkpointing = False
+        self.post_init()
+
+    def forward(
+        self,
+        mz: Tensor,
+        log_intensity: Tensor,
+        attention_mask: Tensor | None = None,
+        mask_positions: Tensor | None = None,
+        return_dict: bool | None = None,
+    ) -> BaseModelOutput | tuple[Tensor, ...]:
+        if return_dict is None:
+            return_dict = self.config.return_dict
+
+        if mz.ndim != 2 or log_intensity.shape != mz.shape:
+            raise ValueError("mz and log_intensity must have the same two-dimensional shape")
+        if attention_mask is None:
+            attention_mask = torch.ones_like(mz, dtype=torch.bool)
+        elif attention_mask.shape != mz.shape:
+            raise ValueError("attention_mask must have the same shape as mz")
+        if mask_positions is not None and mask_positions.shape != mz.shape:
+            raise ValueError("mask_positions must have the same shape as mz")
+        padding_mask = ~attention_mask.bool()
+
+        hidden_states = self.embed(log_intensity, mask_positions)
+        bias = self.bias_module(mz)
+
+        for block in self.blocks:
+            if self.gradient_checkpointing and self.training:
+                hidden_states_residual = self._gradient_checkpointing_func(
+                    block.__call__, hidden_states, bias, padding_mask
+                )
+            else:
+                hidden_states_residual = block(hidden_states, bias, padding_mask)
+        hidden_states = self.norm(hidden_states+hidden_states_residual)
+
+        if not return_dict:
+            return (hidden_states,)
+        return BaseModelOutput(last_hidden_state=hidden_states)
+
+
+
+
 class IntensityHead(nn.Module):
     """Predict one masked-intensity logit per peak."""
 
