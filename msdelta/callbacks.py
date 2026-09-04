@@ -9,6 +9,8 @@ from typing import Any
 import matplotlib.pyplot as plt
 import torch
 import wandb
+from accelerate.state import AcceleratorState
+from accelerate.utils import DistributedType
 from torch import nn
 from tqdm.auto import tqdm
 from transformers import TrainerCallback
@@ -238,7 +240,7 @@ class BiasPanelCallback(_InlineCallback):
 
 
 class DenoisingProbeCallback(TrainerCallback):
-    """Pause training for a checkpointed denoising probe at fixed intervals."""
+    """Post-train a fresh distributed denoising head at fixed intervals."""
 
     def __init__(self, module, every, datasets, pp, training_args, out_dir):
         self.module = module
@@ -248,7 +250,6 @@ class DenoisingProbeCallback(TrainerCallback):
         self.training_args = training_args
         self.out_dir = out_dir
         self.last_step = -1
-        self.pending_step: int | None = None
 
     @property
     def device(self) -> torch.device:
@@ -259,37 +260,39 @@ class DenoisingProbeCallback(TrainerCallback):
         if not self.every or step <= 0 or step % self.every or step == self.last_step:
             return
         self.last_step = step
-        self.pending_step = step
-        control.should_save = True
-        control.should_training_stop = True
-        return control
-
-    def run_pending_probe(self) -> None:
-        """Run the requested probe after the outer Trainer has checkpointed and stopped."""
-        if self.pending_step is None:
-            return
-        step = self.pending_step
         if self.device.type == "cuda":
             torch.cuda.empty_cache()
         destination = self.out_dir / "denoise-probes" / f"step-{step}"
-        metrics = run_denoising_probe(
-            self.module,
-            self.datasets["train"],
-            self.datasets["validation"],
-            output_dir=destination,
-            processor=self.pp,
-            peak_pair_budget=self.training_args.denoise_peak_pair_budget,
-            epochs=self.training_args.denoise_epochs,
-            learning_rate=self.training_args.denoise_learning_rate,
-            weight_decay=self.training_args.denoise_weight_decay,
-            hidden_size=self.training_args.denoise_head_hidden_size,
-            dropout=self.training_args.denoise_head_dropout,
-            num_workers=self.training_args.denoise_num_workers,
-            seed=self.training_args.denoise_seed,
-            bf16=self.training_args.bf16,
-            fp16=self.training_args.fp16,
+        accelerator_state = AcceleratorState()
+        use_named_plugins = (
+            accelerator_state.distributed_type == DistributedType.DEEPSPEED
+            and accelerator_state.deepspeed_plugins is not None
+            and "denoise" in accelerator_state.deepspeed_plugins
         )
-        if self.training_args.process_index == 0:
+        if use_named_plugins:
+            accelerator_state.select_deepspeed_plugin("denoise")
+        try:
+            metrics = run_denoising_probe(
+                self.module,
+                self.datasets["train"],
+                self.datasets["validation"],
+                output_dir=destination,
+                processor=self.pp,
+                peak_pair_budget=self.training_args.denoise_peak_pair_budget,
+                epochs=self.training_args.denoise_epochs,
+                learning_rate=self.training_args.denoise_learning_rate,
+                weight_decay=self.training_args.denoise_weight_decay,
+                hidden_size=self.training_args.denoise_head_hidden_size,
+                dropout=self.training_args.denoise_head_dropout,
+                num_workers=self.training_args.denoise_num_workers,
+                seed=self.training_args.denoise_seed,
+                bf16=self.training_args.bf16,
+                fp16=self.training_args.fp16,
+            )
+        finally:
+            if use_named_plugins:
+                accelerator_state.select_deepspeed_plugin("pretrain")
+        if state.is_world_process_zero:
             if wandb.run is not None:
                 wandb.log({**metrics, "train/global_step": step})
             tqdm.write(
@@ -299,7 +302,6 @@ class DenoisingProbeCallback(TrainerCallback):
             )
         if torch.distributed.is_available() and torch.distributed.is_initialized():
             torch.distributed.barrier()
-        self.pending_step = None
 
 
 def build_callbacks(

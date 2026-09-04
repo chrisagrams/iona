@@ -8,9 +8,10 @@ from dataclasses import asdict
 from pathlib import Path
 
 import matplotlib.pyplot as plt
+from accelerate.utils import DeepSpeedPlugin
 from transformers import HfArgumentParser, Trainer, set_seed
 
-from msdelta.callbacks import DenoisingProbeCallback, build_callbacks
+from msdelta.callbacks import build_callbacks
 from msdelta.configuration_msdelta import MSDeltaConfig
 from msdelta.data import (
     build_denoising_datasets,
@@ -26,6 +27,20 @@ from msdelta.wandb_distributed import init_wandb_run
 
 class MSDeltaTrainer(Trainer):
     """Exclude Fourier frequencies from weight decay."""
+
+    def __init__(self, *args, use_denoising_probe: bool = False, **kwargs):
+        self.use_denoising_probe = use_denoising_probe
+        super().__init__(*args, **kwargs)
+
+    def _build_accelerator_args(self, **kwargs):
+        args = super()._build_accelerator_args(**kwargs)
+        pretrain_plugin = args.get("deepspeed_plugin")
+        if self.use_denoising_probe and pretrain_plugin is not None:
+            args["deepspeed_plugin"] = {
+                "pretrain": pretrain_plugin,
+                "denoise": DeepSpeedPlugin(hf_ds_config=self.args.deepspeed),
+            }
+        return args
 
     def get_decay_parameter_names(self, model):
         return [n for n in super().get_decay_parameter_names(model) if not n.endswith(".freqs")]
@@ -120,48 +135,29 @@ def main(argv: list[str] | None = None) -> int:
                     num_proc=data_args.preprocessing_num_workers or None,
                 )
 
-        def build_trainer() -> tuple[MSDeltaTrainer, DenoisingProbeCallback | None]:
-            trainer = MSDeltaTrainer(
-                model=model,
-                args=training_args,
-                train_dataset=train_ds,
-                eval_dataset=eval_ds,
-                data_collator=MSDeltaDataCollatorForPreTraining(
-                    mask_ratio=training_args.mask_ratio
-                ),
-                processing_class=processor,
-            )
-            # Force Trainer to report the validation loss.
-            trainer.can_return_loss = True
-            callbacks = build_callbacks(
-                model,
-                val_ds,
-                processor,
-                training_args,
-                out_dir,
-                denoising_datasets=denoising_datasets,
-                denoising_processor=denoising_processor,
-            )
-            for callback in callbacks:
-                trainer.add_callback(callback)
-            denoising_callback = next(
-                (cb for cb in callbacks if isinstance(cb, DenoisingProbeCallback)),
-                None,
-            )
-            return trainer, denoising_callback
+        trainer = MSDeltaTrainer(
+            model=model,
+            args=training_args,
+            train_dataset=train_ds,
+            eval_dataset=eval_ds,
+            data_collator=MSDeltaDataCollatorForPreTraining(mask_ratio=training_args.mask_ratio),
+            processing_class=processor,
+            use_denoising_probe=bool(training_args.denoise_steps),
+        )
+        # Force Trainer to report the validation loss.
+        trainer.can_return_loss = True
+        for callback in build_callbacks(
+            model,
+            val_ds,
+            processor,
+            training_args,
+            out_dir,
+            denoising_datasets=denoising_datasets,
+            denoising_processor=denoising_processor,
+        ):
+            trainer.add_callback(callback)
 
-        checkpoint = training_args.resume_from_checkpoint
-        while True:
-            trainer, denoising_callback = build_trainer()
-            trainer.train(resume_from_checkpoint=checkpoint)
-            if denoising_callback is None or denoising_callback.pending_step is None:
-                break
-
-            step = denoising_callback.pending_step
-            checkpoint = str(out_dir / f"checkpoint-{step}")
-            if not Path(checkpoint).is_dir():
-                raise RuntimeError(f"expected checkpoint was not saved: {checkpoint}")
-            denoising_callback.run_pending_probe()
+        trainer.train(resume_from_checkpoint=training_args.resume_from_checkpoint)
 
         if trainer.is_world_process_zero():
             trainer.save_model(str(out_dir / "final"))
