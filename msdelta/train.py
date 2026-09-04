@@ -120,34 +120,39 @@ def main(argv: list[str] | None = None) -> int:
                     num_proc=data_args.preprocessing_num_workers or None,
                 )
 
-        trainer = MSDeltaTrainer(
-            model=model,
-            args=training_args,
-            train_dataset=train_ds,
-            eval_dataset=eval_ds,
-            data_collator=MSDeltaDataCollatorForPreTraining(mask_ratio=training_args.mask_ratio),
-            processing_class=processor,
-        )
-        # Force Trainer to report the validation loss.
-        trainer.can_return_loss = True
-        callbacks = build_callbacks(
-            model,
-            val_ds,
-            processor,
-            training_args,
-            out_dir,
-            denoising_datasets=denoising_datasets,
-            denoising_processor=denoising_processor,
-        )
-        for cb in callbacks:
-            trainer.add_callback(cb)
+        def build_trainer() -> tuple[MSDeltaTrainer, DenoisingProbeCallback | None]:
+            trainer = MSDeltaTrainer(
+                model=model,
+                args=training_args,
+                train_dataset=train_ds,
+                eval_dataset=eval_ds,
+                data_collator=MSDeltaDataCollatorForPreTraining(
+                    mask_ratio=training_args.mask_ratio
+                ),
+                processing_class=processor,
+            )
+            # Force Trainer to report the validation loss.
+            trainer.can_return_loss = True
+            callbacks = build_callbacks(
+                model,
+                val_ds,
+                processor,
+                training_args,
+                out_dir,
+                denoising_datasets=denoising_datasets,
+                denoising_processor=denoising_processor,
+            )
+            for callback in callbacks:
+                trainer.add_callback(callback)
+            denoising_callback = next(
+                (cb for cb in callbacks if isinstance(cb, DenoisingProbeCallback)),
+                None,
+            )
+            return trainer, denoising_callback
 
-        denoising_callback = next(
-            (cb for cb in callbacks if isinstance(cb, DenoisingProbeCallback)),
-            None,
-        )
         checkpoint = training_args.resume_from_checkpoint
         while True:
+            trainer, denoising_callback = build_trainer()
             trainer.train(resume_from_checkpoint=checkpoint)
             if denoising_callback is None or denoising_callback.pending_step is None:
                 break
