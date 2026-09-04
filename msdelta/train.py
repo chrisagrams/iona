@@ -10,7 +10,7 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 from transformers import HfArgumentParser, Trainer, set_seed
 
-from msdelta.callbacks import build_callbacks
+from msdelta.callbacks import DenoisingProbeCallback, build_callbacks
 from msdelta.configuration_msdelta import MSDeltaConfig
 from msdelta.data import (
     build_denoising_datasets,
@@ -130,7 +130,7 @@ def main(argv: list[str] | None = None) -> int:
         )
         # Force Trainer to report the validation loss.
         trainer.can_return_loss = True
-        for cb in build_callbacks(
+        callbacks = build_callbacks(
             model,
             val_ds,
             processor,
@@ -138,10 +138,25 @@ def main(argv: list[str] | None = None) -> int:
             out_dir,
             denoising_datasets=denoising_datasets,
             denoising_processor=denoising_processor,
-        ):
+        )
+        for cb in callbacks:
             trainer.add_callback(cb)
 
-        trainer.train(resume_from_checkpoint=training_args.resume_from_checkpoint)
+        denoising_callback = next(
+            (cb for cb in callbacks if isinstance(cb, DenoisingProbeCallback)),
+            None,
+        )
+        checkpoint = training_args.resume_from_checkpoint
+        while True:
+            trainer.train(resume_from_checkpoint=checkpoint)
+            if denoising_callback is None or denoising_callback.pending_step is None:
+                break
+
+            step = denoising_callback.pending_step
+            checkpoint = str(out_dir / f"checkpoint-{step}")
+            if not Path(checkpoint).is_dir():
+                raise RuntimeError(f"expected checkpoint was not saved: {checkpoint}")
+            denoising_callback.run_pending_probe()
 
         if trainer.is_world_process_zero():
             trainer.save_model(str(out_dir / "final"))

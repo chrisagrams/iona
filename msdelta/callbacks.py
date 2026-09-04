@@ -238,7 +238,7 @@ class BiasPanelCallback(_InlineCallback):
 
 
 class DenoisingProbeCallback(TrainerCallback):
-    """Post-train a fresh distributed denoising head at fixed intervals."""
+    """Pause training for a checkpointed denoising probe at fixed intervals."""
 
     def __init__(self, module, every, datasets, pp, training_args, out_dir):
         self.module = module
@@ -248,6 +248,7 @@ class DenoisingProbeCallback(TrainerCallback):
         self.training_args = training_args
         self.out_dir = out_dir
         self.last_step = -1
+        self.pending_step: int | None = None
 
     @property
     def device(self) -> torch.device:
@@ -258,6 +259,16 @@ class DenoisingProbeCallback(TrainerCallback):
         if not self.every or step <= 0 or step % self.every or step == self.last_step:
             return
         self.last_step = step
+        self.pending_step = step
+        control.should_save = True
+        control.should_training_stop = True
+        return control
+
+    def run_pending_probe(self) -> None:
+        """Run the requested probe after the outer Trainer has checkpointed and stopped."""
+        if self.pending_step is None:
+            return
+        step = self.pending_step
         if self.device.type == "cuda":
             torch.cuda.empty_cache()
         destination = self.out_dir / "denoise-probes" / f"step-{step}"
@@ -278,7 +289,7 @@ class DenoisingProbeCallback(TrainerCallback):
             bf16=self.training_args.bf16,
             fp16=self.training_args.fp16,
         )
-        if state.is_world_process_zero:
+        if self.training_args.process_index == 0:
             if wandb.run is not None:
                 wandb.log({**metrics, "train/global_step": step})
             tqdm.write(
@@ -288,6 +299,7 @@ class DenoisingProbeCallback(TrainerCallback):
             )
         if torch.distributed.is_available() and torch.distributed.is_initialized():
             torch.distributed.barrier()
+        self.pending_step = None
 
 
 def build_callbacks(
