@@ -8,3 +8,6 @@ Dataset of multiple ms2s per precursor
 FLops: estimates is fine, total/training steps
 
 Important point: show that the approach scales
+Scaling laws: ours vs theirs
+
+Sparse autoencoder for embedding interpretability  
