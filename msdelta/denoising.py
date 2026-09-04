@@ -29,8 +29,8 @@ from transformers import (
     TrainingArguments,
 )
 
-from msdelta.configuration_msdelta import MSDeltaDenoisingConfig
-from msdelta.modeling_msdelta import MSDeltaForDenoising
+from msdelta.configuration_msdelta import MSDeltaConfig, MSDeltaDenoisingConfig
+from msdelta.modeling_msdelta import MSDeltaForDenoising, MSDeltaForPreTraining
 
 
 class PeakBudgetBatchSampler(BatchSampler):
@@ -137,9 +137,9 @@ def denoising_metrics(prediction: EvalPrediction) -> dict[str, float]:
 
 
 def run_denoising_probe(
-    module,
-    train_dataset,
-    validation_dataset,
+    module: MSDeltaForPreTraining,
+    train_dataset: Dataset,
+    validation_dataset: Dataset,
     *,
     output_dir: Path,
     processor,
@@ -156,12 +156,10 @@ def run_denoising_probe(
 ) -> dict[str, float]:
     """Post-train a fresh denoising head using Hugging Face Trainer."""
     config = MSDeltaDenoisingConfig(
-        encoder=copy.deepcopy(module.config),
+        encoder=copy.deepcopy(cast(MSDeltaConfig, module.config)),
         head_hidden_size=hidden_size,
         head_dropout=dropout,
     )
-    requires_grad = [parameter.requires_grad for parameter in module.msdelta.parameters()]
-    was_training = module.training
     python_rng = random.getstate()
     numpy_rng = np.random.get_state()
     device = next(module.parameters()).device
@@ -169,9 +167,10 @@ def run_denoising_probe(
 
     try:
         with torch.random.fork_rng(devices=cuda_devices):
+            probe_encoder = copy.deepcopy(module.msdelta)
             model = MSDeltaForDenoising(
                 config,
-                encoder=module.msdelta,
+                encoder=probe_encoder,
                 freeze_encoder=True,
             )
             args = TrainingArguments(
@@ -226,8 +225,5 @@ def run_denoising_probe(
             trainer.save_metrics("denoise", metrics)
             return metrics
     finally:
-        for parameter, trainable in zip(module.msdelta.parameters(), requires_grad):
-            parameter.requires_grad_(trainable)
-        module.train(was_training)
         random.setstate(python_rng)
         np.random.set_state(numpy_rng)
