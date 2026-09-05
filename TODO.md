@@ -162,7 +162,7 @@ per-layer curves are nearly free in weights. Highest-leverage architecture exper
 recipe and the four call sites it breaks are in
 [ARCHITECTURE.md §6.1](docs/ARCHITECTURE.md#61-per-layer-bias-curves-highest-leverage).
 
-### 11. Seven of sixteen intensity Fourier frequencies are dead at init — **Verified**
+### 11. Seven of sixteen intensity Fourier frequencies are dead at init — **FIXED**
 
 `fourier_int_f_min=0.01` with `log_intensity ∈ (0,1]` (span ≈ 1.0). By the repo's own
 `dead_freqs` metric — frequencies completing less than half a cycle across the data span —
@@ -177,10 +177,12 @@ Nearly half the intensity featurizer's capacity is wasted unless training moves 
 (which `fourier/int_drift_log10` would show). The Δ featurizer is fine: 0/64 dead over a 2000 Da
 span.
 
-- [ ] Check `fourier/int_dead` on a real run — if it stays at 7, raise `fourier_int_f_min` to
-      ~0.5 and re-tune. Cheap ablation, and it is already instrumented.
+- [x] **Confirmed on the full 56k-step run: `fourier/int_dead` stayed at 8 throughout** — the
+      dead frequencies never recovered. Measured `log_intensity` span on real data = **0.5465**,
+      so `f_min = 0.5/span = 0.92`. All `configs/*/config.json` now set
+      `fourier_int_f_min: 1.0`, which gives **0/16 dead**.
 
-### 11b. float32 m/z undercuts the top of the Δ-bias frequency range — **Verified**
+### 11b. float32 m/z undercuts the top of the Δ-bias frequency range — **Verified (open)**
 
 `delta_bias_f_max = 1000` implies a finest period of **1e-3 Da**, which is what justifies the claim
 that the bias can resolve isotope fine structure. But m/z arrives as float32 from the processor and
@@ -208,6 +210,33 @@ So the highest-frequency Δ features are progressively noisier as m/z grows, exa
       `FourierFeatures.forward` already casts to float32 internally, so only the subtraction in
       `DeltaMZBias.forward` needs to change.
 - [ ] If the top of the range is unusable, lower `delta_bias_f_max` and reclaim the frequencies.
+
+### 11c. Learnable frequencies were only trainable at the low end — **FIXED**
+
+Adam's update is ~`lr` in absolute parameter units regardless of gradient scale, so on a
+log-spaced grid a raw-frequency parameter let the bottom of the range move decades while the
+top was effectively frozen. Confirmed on the full run: `fourier/dm_drift_log10 = 5.8e-4` after
+56,250 steps.
+
+Measured over 2000 AdamW steps at the configured `lr=1.3e-4`, low-end vs high-end movement in
+log space:
+
+| parameterization | f=0.01 | f=1000 | ratio |
+| --- | ---: | ---: | ---: |
+| raw `f` (old) | 1.398 | 0.000106 | **13,176x** |
+| log `f` (new) | 0.1131 | 0.1131 | **1.0x** |
+
+`FourierFeatures` now accepts `log_parameterized`, storing `log(f)` so one fixed absolute step
+is a fixed *relative* change at every scale. Enabled via `fourier_log_parameterized: true`,
+now set in all `configs/*/config.json`.
+
+- [x] Parameter is still named `.freqs`, so `MSDeltaTrainer`'s no-decay filter still matches.
+- [x] `FourierProbeCallback` reads `ff.frequencies()`, not the raw parameter — otherwise every
+      `fourier/*` metric would have silently reported log-frequencies as frequencies.
+- [ ] **Checkpoint hazard:** `.freqs` now means something different under this flag. Do not
+      resume a pre-fix checkpoint against a post-fix config — `cli.py` builds the model from
+      `--config_name`, not from the checkpoint's own config, so the stored frequencies would be
+      re-read as logs. Start new runs in a fresh output directory.
 
 ### 12. Pretraining loss is not comparable across `--mask_ratio` — **Flagged**
 
