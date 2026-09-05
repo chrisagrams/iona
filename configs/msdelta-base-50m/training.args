@@ -36,8 +36,7 @@
 --bias_curve_steps 5000
 --probe_steps 5000
 --probe_num_spectra 3000
---replicate_retrieval_repo chrisagrams/ms2-peptide-replicate-retrieval
---denoise_steps 10000
+--denoise_steps 0
 --denoise_dataset_repo chrisagrams/ms-denoise-100k
 --denoise_max_peaks 1024
 --denoise_peak_pair_budget 4194304
