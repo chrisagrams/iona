@@ -2,18 +2,20 @@
 
 from __future__ import annotations
 
-import itertools
 from pathlib import Path
 from typing import Any
 
 import matplotlib.pyplot as plt
 import torch
-from torch import nn
-from transformers import TrainerCallback
-
 import wandb
+from accelerate.state import AcceleratorState
+from accelerate.utils import DistributedType
+from torch import nn
+from tqdm.auto import tqdm
+from transformers import TrainerCallback, TrainingArguments
+
 from msdelta.alignment import alignment_metrics
-from msdelta.fourier import dead_freqs, freq_drift, interp_mae
+from msdelta.denoising import run_denoising_probe
 from msdelta.probe import run_all_probes
 from msdelta.retrieval import replicate_retrieval_inline_metrics, retrieval_inline_metrics
 from msdelta.viz import render_bias_panels
@@ -78,84 +80,6 @@ class LinearProbeCallback(_InlineCallback):
             f"charge_acc={key('probe/charge_acc'):.3f} "
             f"nloss_auc={key('probe/neutral_loss_auc'):.3f} "
             f"iso_f1={key('probe/isotope_f1'):.3f}",
-            flush=True,
-        )
-
-
-class FourierProbeCallback(_InlineCallback):
-    """Measure learned Fourier frequencies on validation data."""
-
-    empty_cache_before = True
-
-    def __init__(self, module, every, dataset, n_spectra):
-        super().__init__(module, every, dataset=dataset)
-        self.n_spectra = n_spectra
-        self._vals: dict[str, torch.Tensor] | None = None
-        self._init_freqs: dict[str, torch.Tensor] = {}
-
-    def _sample_values(
-        self, budget: int = 8192, max_spectra: int = 1000, pairs_per_spectrum: int = 64
-    ) -> dict[str, torch.Tensor]:
-        """Sample delta m/z values from validation data."""
-        g = torch.Generator().manual_seed(0)
-        dm_pool = []
-        n = min(self.n_spectra, max_spectra)
-        for row in itertools.islice(self.dataset, n):
-            mz = torch.as_tensor(row["mz"], dtype=torch.float32)
-            if mz.numel() >= 2:
-                k = mz.numel()
-                idx = torch.randint(0, k, (pairs_per_spectrum, 2), generator=g)
-                idx = idx[idx[:, 0] != idx[:, 1]]
-                dm_pool.append(mz[idx[:, 0]] - mz[idx[:, 1]])
-
-        def _cat(pool):
-            if not pool:
-                return torch.empty(0)
-            v = torch.cat(pool)
-            if v.numel() > budget:
-                sel = torch.randperm(v.numel(), generator=g)[:budget]
-                v = v[sel]
-            return v
-
-        return {"dm": _cat(dm_pool)}
-
-    def _featurizer_metrics(self, name: str, ff, vals: torch.Tensor) -> dict:
-        freqs = ff.freqs
-        if not isinstance(freqs, nn.Parameter):
-            return {}
-        if name not in self._init_freqs:
-            self._init_freqs[name] = freqs.detach().abs().cpu().clone()
-        if vals.numel() < 8:
-            return {}
-        span = float(vals.max() - vals.min())
-        f = freqs.detach().abs().float().cpu()
-        m = {
-            f"fourier/{name}_mae": interp_mae(freqs, vals),
-            f"fourier/{name}_dead": dead_freqs(freqs, span),
-            f"fourier/{name}_drift_log10": freq_drift(freqs, self._init_freqs[name]),
-            f"fourier/{name}_f_min": float(f.min()),
-            f"fourier/{name}_f_max": float(f.max()),
-        }
-        if wandb.run is not None:
-            m[f"fourier/{name}_log10_freqs"] = wandb.Histogram(f.clamp_min(1e-12).log10().numpy())
-        return m
-
-    def run(self, step):
-        if self._vals is None:
-            self._vals = self._sample_values()
-        enc = self.encoder
-        payload: dict[str, Any] = {}
-        payload.update(self._featurizer_metrics("dm", enc.bias_module.ff, self._vals["dm"]))
-        if not payload:
-            return
-        self._wlog(payload, step)
-
-        def g(k):
-            return payload.get(k, float("nan"))
-
-        print(
-            f"  fourier: dm_mae={g('fourier/dm_mae'):.4g} "
-            f"dm_dead={g('fourier/dm_dead'):.0f}",
             flush=True,
         )
 
@@ -229,7 +153,94 @@ class BiasPanelCallback(_InlineCallback):
         self._wlog(payload, step)
 
 
-def build_callbacks(module, val_dataset, pp, training_args, out_dir):
+class DenoisingProbeCallback(TrainerCallback):
+    """Post-train a fresh distributed denoising head at fixed intervals."""
+
+    def __init__(self, module, every, datasets, pp, training_args, out_dir):
+        self.module = module
+        self.every = every
+        self.datasets = datasets
+        self.pp = pp
+        self.training_args = training_args
+        self.out_dir = out_dir
+        self.last_step = -1
+        self.probe_training_args = TrainingArguments(
+            output_dir=str(out_dir / "denoise-probes"),
+            num_train_epochs=training_args.denoise_epochs,
+            per_device_train_batch_size=1,
+            per_device_eval_batch_size=1,
+            learning_rate=training_args.denoise_learning_rate,
+            weight_decay=training_args.denoise_weight_decay,
+            eval_strategy="no",
+            save_strategy="no",
+            logging_strategy="no",
+            remove_unused_columns=False,
+            label_names=["labels"],
+            dataloader_num_workers=training_args.denoise_num_workers,
+            bf16=training_args.bf16,
+            fp16=training_args.fp16,
+            seed=training_args.denoise_seed,
+            data_seed=training_args.denoise_seed,
+            report_to=[],
+            ddp_find_unused_parameters=False,
+        )
+
+    @property
+    def device(self) -> torch.device:
+        return next(self.module.parameters()).device
+
+    def on_step_end(self, args, state, control, **kwargs):
+        step = state.global_step
+        if not self.every or step <= 0 or step % self.every or step == self.last_step:
+            return
+        self.last_step = step
+        if self.device.type == "cuda":
+            torch.cuda.empty_cache()
+        destination = self.out_dir / "denoise-probes" / f"step-{step}"
+        accelerator_state = AcceleratorState()
+        use_named_plugins = (
+            accelerator_state.distributed_type == DistributedType.DEEPSPEED
+            and isinstance(accelerator_state.deepspeed_plugins, dict)
+            and "denoise" in accelerator_state.deepspeed_plugins
+        )
+        if use_named_plugins:
+            accelerator_state.select_deepspeed_plugin("denoise")
+        try:
+            metrics = run_denoising_probe(
+                self.module,
+                self.datasets["train"],
+                self.datasets["validation"],
+                output_dir=destination,
+                processor=self.pp,
+                peak_pair_budget=self.training_args.denoise_peak_pair_budget,
+                hidden_size=self.training_args.denoise_head_hidden_size,
+                dropout=self.training_args.denoise_head_dropout,
+                training_args=self.probe_training_args,
+            )
+        finally:
+            if use_named_plugins:
+                accelerator_state.select_deepspeed_plugin("pretrain")
+        if state.is_world_process_zero:
+            if wandb.run is not None:
+                wandb.log({**metrics, "train/global_step": step})
+            tqdm.write(
+                f"denoise: AUROC={metrics['denoise/auroc']:.3f} "
+                f"AUPRC={metrics['denoise/auprc']:.3f} "
+                f"F1={metrics['denoise/f1']:.3f} model={destination}"
+            )
+        if torch.distributed.is_available() and torch.distributed.is_initialized():
+            torch.distributed.barrier()
+
+
+def build_callbacks(
+    module,
+    val_dataset,
+    pp,
+    training_args,
+    out_dir,
+    denoising_datasets=None,
+    denoising_processor=None,
+):
     """Create the callbacks enabled in the configuration."""
     cbs: list[TrainerCallback] = []
     if training_args.bias_curve_steps:
@@ -237,14 +248,6 @@ def build_callbacks(module, val_dataset, pp, training_args, out_dir):
     if training_args.probe_steps:
         cbs.append(
             LinearProbeCallback(
-                module,
-                training_args.probe_steps,
-                val_dataset,
-                training_args.probe_num_spectra,
-            )
-        )
-        cbs.append(
-            FourierProbeCallback(
                 module,
                 training_args.probe_steps,
                 val_dataset,
@@ -262,4 +265,19 @@ def build_callbacks(module, val_dataset, pp, training_args, out_dir):
                     training_args.replicate_retrieval_repo,
                 )
             )
+    if training_args.denoise_steps:
+        if denoising_datasets is None:
+            raise ValueError("denoising datasets are required when denoise_steps is enabled")
+        if denoising_processor is None:
+            raise ValueError("denoising processor is required when denoise_steps is enabled")
+        cbs.append(
+            DenoisingProbeCallback(
+                module,
+                training_args.denoise_steps,
+                denoising_datasets,
+                denoising_processor,
+                training_args,
+                out_dir,
+            )
+        )
     return cbs
