@@ -42,6 +42,7 @@ class MSDeltaTrainer(Trainer):
             }
         return args
 
+
 def main(argv: list[str] | None = None) -> int:
     parser = HfArgumentParser(
         (ModelArguments, DataArguments, MSDeltaTrainingArguments)  # pyright: ignore[reportArgumentType]

@@ -23,6 +23,10 @@ class MSDeltaForPreTrainingOutput(ModelOutput):
     logits: Tensor | None = None
 
 
+class ScalarInputLinear(nn.Linear):
+    """Linear layer that retains PyTorch's fan-in-aware initialization."""
+
+
 @dataclass
 class MSDeltaForDenoisingOutput(ModelOutput):
     """Output of peak-level signal/noise classification."""
@@ -36,21 +40,16 @@ class PeakEmbed(nn.Module):
 
     def __init__(self, config: MSDeltaConfig):
         super().__init__()
-        self.ff_int = FourierFeatures(
-            config.fourier_int_n_freqs,
-            config.fourier_int_f_min,
-            config.fourier_int_f_max,
-        )
         self.mlp = nn.Sequential(
-            nn.Linear(self.ff_int.out_dim, config.hidden_size),
+            ScalarInputLinear(1, config.hidden_size),
             nn.GELU(),
             nn.Linear(config.hidden_size, config.hidden_size),
         )
         self.mask_token = nn.Parameter(torch.empty(config.hidden_size))
 
     def forward(self, log_intensity: Tensor, mask_positions: Tensor | None = None) -> Tensor:
-        feats = self.ff_int(log_intensity)
-        tokens = self.mlp(feats.to(self.mlp[0].weight.dtype))
+        intensity = log_intensity.unsqueeze(-1).to(dtype=self.mask_token.dtype)
+        tokens = self.mlp(intensity)
         if mask_positions is not None:
             tokens = torch.where(mask_positions.unsqueeze(-1), self.mask_token, tokens)
         return tokens
@@ -165,6 +164,8 @@ class MSDeltaPreTrainedModel(PreTrainedModel):
     _no_split_modules = ["EncoderBlock"]
 
     def _init_weights(self, module: nn.Module) -> None:
+        if isinstance(module, ScalarInputLinear):
+            return
         if isinstance(module, nn.Linear):
             module.weight.data.normal_(mean=0.0, std=self.config.initializer_range)
             if module.bias is not None:
