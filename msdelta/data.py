@@ -7,7 +7,7 @@ from functools import partial
 from pathlib import Path
 
 import torch
-from datasets import load_dataset
+from datasets import DatasetDict, load_dataset
 from huggingface_hub import snapshot_download
 
 from msdelta.chemistry import PROTON_MASS, RESIDUE_MASSES, WATER_MASS
@@ -166,3 +166,20 @@ def build_pretraining_datasets(
     train = build_preprocessed_dataset(train_paths, processor, num_proc=num_proc)
     val = build_preprocessed_dataset(val_paths, processor, num_proc=num_proc)
     return train, val
+
+
+def build_denoising_datasets(
+    repo_id: str,
+    processor: MSDeltaProcessor,
+    num_proc: int | None = None,
+) -> DatasetDict:
+    """Load and preprocess the labeled signal/noise dataset."""
+    datasets = load_dataset(repo_id)
+    return datasets.map(
+        lambda example: processor.process_denoising_example(
+            example["mz"], example["intensity"], example["noise"]
+        ),
+        remove_columns=datasets["train"].column_names,
+        num_proc=num_proc,
+        desc="preprocess denoising spectra",
+    )

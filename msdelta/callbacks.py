@@ -8,10 +8,14 @@ from typing import Any
 import matplotlib.pyplot as plt
 import torch
 import wandb
+from accelerate.state import AcceleratorState
+from accelerate.utils import DistributedType
 from torch import nn
-from transformers import TrainerCallback
+from tqdm.auto import tqdm
+from transformers import TrainerCallback, TrainingArguments
 
 from msdelta.alignment import alignment_metrics
+from msdelta.denoising import run_denoising_probe
 from msdelta.probe import run_all_probes
 from msdelta.retrieval import replicate_retrieval_inline_metrics, retrieval_inline_metrics
 from msdelta.viz import render_bias_panels
@@ -149,7 +153,94 @@ class BiasPanelCallback(_InlineCallback):
         self._wlog(payload, step)
 
 
-def build_callbacks(module, val_dataset, pp, training_args, out_dir):
+class DenoisingProbeCallback(TrainerCallback):
+    """Post-train a fresh distributed denoising head at fixed intervals."""
+
+    def __init__(self, module, every, datasets, pp, training_args, out_dir):
+        self.module = module
+        self.every = every
+        self.datasets = datasets
+        self.pp = pp
+        self.training_args = training_args
+        self.out_dir = out_dir
+        self.last_step = -1
+        self.probe_training_args = TrainingArguments(
+            output_dir=str(out_dir / "denoise-probes"),
+            num_train_epochs=training_args.denoise_epochs,
+            per_device_train_batch_size=1,
+            per_device_eval_batch_size=1,
+            learning_rate=training_args.denoise_learning_rate,
+            weight_decay=training_args.denoise_weight_decay,
+            eval_strategy="no",
+            save_strategy="no",
+            logging_strategy="no",
+            remove_unused_columns=False,
+            label_names=["labels"],
+            dataloader_num_workers=training_args.denoise_num_workers,
+            bf16=training_args.bf16,
+            fp16=training_args.fp16,
+            seed=training_args.denoise_seed,
+            data_seed=training_args.denoise_seed,
+            report_to=[],
+            ddp_find_unused_parameters=False,
+        )
+
+    @property
+    def device(self) -> torch.device:
+        return next(self.module.parameters()).device
+
+    def on_step_end(self, args, state, control, **kwargs):
+        step = state.global_step
+        if not self.every or step <= 0 or step % self.every or step == self.last_step:
+            return
+        self.last_step = step
+        if self.device.type == "cuda":
+            torch.cuda.empty_cache()
+        destination = self.out_dir / "denoise-probes" / f"step-{step}"
+        accelerator_state = AcceleratorState()
+        use_named_plugins = (
+            accelerator_state.distributed_type == DistributedType.DEEPSPEED
+            and isinstance(accelerator_state.deepspeed_plugins, dict)
+            and "denoise" in accelerator_state.deepspeed_plugins
+        )
+        if use_named_plugins:
+            accelerator_state.select_deepspeed_plugin("denoise")
+        try:
+            metrics = run_denoising_probe(
+                self.module,
+                self.datasets["train"],
+                self.datasets["validation"],
+                output_dir=destination,
+                processor=self.pp,
+                peak_pair_budget=self.training_args.denoise_peak_pair_budget,
+                hidden_size=self.training_args.denoise_head_hidden_size,
+                dropout=self.training_args.denoise_head_dropout,
+                training_args=self.probe_training_args,
+            )
+        finally:
+            if use_named_plugins:
+                accelerator_state.select_deepspeed_plugin("pretrain")
+        if state.is_world_process_zero:
+            if wandb.run is not None:
+                wandb.log({**metrics, "train/global_step": step})
+            tqdm.write(
+                f"denoise: AUROC={metrics['denoise/auroc']:.3f} "
+                f"AUPRC={metrics['denoise/auprc']:.3f} "
+                f"F1={metrics['denoise/f1']:.3f} model={destination}"
+            )
+        if torch.distributed.is_available() and torch.distributed.is_initialized():
+            torch.distributed.barrier()
+
+
+def build_callbacks(
+    module,
+    val_dataset,
+    pp,
+    training_args,
+    out_dir,
+    denoising_datasets=None,
+    denoising_processor=None,
+):
     """Create the callbacks enabled in the configuration."""
     cbs: list[TrainerCallback] = []
     if training_args.bias_curve_steps:
@@ -174,4 +265,19 @@ def build_callbacks(module, val_dataset, pp, training_args, out_dir):
                     training_args.replicate_retrieval_repo,
                 )
             )
+    if training_args.denoise_steps:
+        if denoising_datasets is None:
+            raise ValueError("denoising datasets are required when denoise_steps is enabled")
+        if denoising_processor is None:
+            raise ValueError("denoising processor is required when denoise_steps is enabled")
+        cbs.append(
+            DenoisingProbeCallback(
+                module,
+                training_args.denoise_steps,
+                denoising_datasets,
+                denoising_processor,
+                training_args,
+                out_dir,
+            )
+        )
     return cbs
