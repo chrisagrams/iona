@@ -1,5 +1,4 @@
 Is the model cheating? Precursors are an easily learned signal: Gao is working on this
-Architecture changes: regularization, residual layers, bias insertion
 Dataset: on huggingface
 Ablation studies: tanh vs sigmoid, Hadamard for position, 
 Embedding retrieval 

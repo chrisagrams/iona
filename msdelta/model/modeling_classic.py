@@ -11,13 +11,21 @@ from transformers import PreTrainedModel
 from transformers.modeling_outputs import BaseModelOutput
 from transformers.utils.generic import ModelOutput
 
-from .configuration import MSDeltaConfig
+from .configuration import MSDeltaConfig, MSDeltaDenoisingConfig
 from .fourier import FourierFeatures
 
 
 @dataclass
 class MSDeltaForPreTrainingOutput(ModelOutput):
     """Output of masked-intensity pretraining."""
+
+    loss: Tensor | None = None
+    logits: Tensor | None = None
+
+
+@dataclass
+class MSDeltaForDenoisingOutput(ModelOutput):
+    """Output of peak-level signal/noise classification."""
 
     loss: Tensor | None = None
     logits: Tensor | None = None
@@ -62,7 +70,6 @@ class DeltaMZBias(nn.Module):
             learnable=config.delta_bias_learnable,
         )
         self.n_heads = config.num_attention_heads
-        self.scale = config.delta_bias_scale
         self.head_mlps = nn.ModuleList(
             [
                 nn.Sequential(
@@ -76,8 +83,7 @@ class DeltaMZBias(nn.Module):
 
     def _curve(self, feats: Tensor) -> Tensor:
         feats = feats.to(next(self.head_mlps.parameters()).dtype)
-        out = torch.cat([mlp(feats) for mlp in self.head_mlps], dim=-1)
-        return self.scale * torch.tanh(out / self.scale)
+        return torch.cat([mlp(feats) for mlp in self.head_mlps], dim=-1)
 
     def forward(self, mz: Tensor) -> Tensor:
         delta_mz = mz.unsqueeze(-1) - mz.unsqueeze(-2)
@@ -223,62 +229,28 @@ class MSDeltaModel(MSDeltaPreTrainedModel):
         return BaseModelOutput(last_hidden_state=hidden_states)
 
 
-class MSDeltaModel_2(MSDeltaPreTrainedModel):
-    """Encode mass-spectrum peaks with continuous relative-mass attention."""
-
-    def __init__(self, config: MSDeltaConfig):
-        super().__init__(config)
-        self.embed = PeakEmbed(config)
-        self.bias_module = DeltaMZBias(config)
-        self.blocks = nn.ModuleList([EncoderBlock(config) for _ in range(config.num_hidden_layers)])
-        self.norm = nn.LayerNorm(config.hidden_size, eps=config.layer_norm_eps)
-        self.gradient_checkpointing = False
-        self.post_init()
-
-    def forward(
-        self,
-        mz: Tensor,
-        log_intensity: Tensor,
-        attention_mask: Tensor | None = None,
-        mask_positions: Tensor | None = None,
-        return_dict: bool | None = None,
-    ) -> BaseModelOutput | tuple[Tensor, ...]:
-        if return_dict is None:
-            return_dict = self.config.return_dict
-
-        if mz.ndim != 2 or log_intensity.shape != mz.shape:
-            raise ValueError("mz and log_intensity must have the same two-dimensional shape")
-        if attention_mask is None:
-            attention_mask = torch.ones_like(mz, dtype=torch.bool)
-        elif attention_mask.shape != mz.shape:
-            raise ValueError("attention_mask must have the same shape as mz")
-        if mask_positions is not None and mask_positions.shape != mz.shape:
-            raise ValueError("mask_positions must have the same shape as mz")
-        padding_mask = ~attention_mask.bool()
-
-        hidden_states = self.embed(log_intensity, mask_positions)
-        bias = self.bias_module(mz)
-
-        for block in self.blocks:
-            if self.gradient_checkpointing and self.training:
-                hidden_states_residual = self._gradient_checkpointing_func(
-                    block.__call__, hidden_states, bias, padding_mask
-                )
-            else:
-                hidden_states_residual = block(hidden_states, bias, padding_mask)
-        hidden_states = self.norm(hidden_states + hidden_states_residual)
-
-        if not return_dict:
-            return (hidden_states,)
-        return BaseModelOutput(last_hidden_state=hidden_states)
-
-
 class IntensityHead(nn.Module):
     """Predict one masked-intensity logit per peak."""
 
     def __init__(self, hidden_size: int):
         super().__init__()
         self.projection = nn.Linear(hidden_size, 1)
+
+    def forward(self, hidden_states: Tensor) -> Tensor:
+        return self.projection(hidden_states).squeeze(-1).float()
+
+
+class PeakDenoisingHead(nn.Module):
+    """Predict one noise logit per encoded peak."""
+
+    def __init__(self, config: MSDeltaDenoisingConfig):
+        super().__init__()
+        self.projection = nn.Sequential(
+            nn.Linear(config.encoder.hidden_size, config.head_hidden_size),
+            nn.GELU(),
+            nn.Dropout(config.head_dropout),
+            nn.Linear(config.head_hidden_size, 1),
+        )
 
     def forward(self, hidden_states: Tensor) -> Tensor:
         return self.projection(hidden_states).squeeze(-1).float()
@@ -338,5 +310,85 @@ class MSDeltaForPreTraining(MSDeltaPreTrainedModel):
         )
 
 
+class MSDeltaForDenoising(MSDeltaPreTrainedModel):
+    """MSDelta encoder with a peak-level noise classifier."""
+
+    config_class = MSDeltaDenoisingConfig
+
+    def __init__(
+        self,
+        config: MSDeltaDenoisingConfig,
+        encoder: MSDeltaModel | None = None,
+        freeze_encoder: bool = False,
+    ):
+        super().__init__(config)
+        self.msdelta = encoder if encoder is not None else MSDeltaModel(config.encoder)
+        self.denoising_head = PeakDenoisingHead(config)
+        self._encoder_is_frozen = False
+        if encoder is None:
+            self.post_init()
+        else:
+            self.denoising_head.apply(self._init_weights)
+        if freeze_encoder:
+            self.freeze_encoder()
+
+    def freeze_encoder(self) -> None:
+        """Freeze the encoder and keep its stochastic layers disabled."""
+        self._encoder_is_frozen = True
+        self.msdelta.requires_grad_(False)
+        self.msdelta.eval()
+
+    def train(self, mode: bool = True):
+        super().train(mode)
+        if self._encoder_is_frozen:
+            self.msdelta.eval()
+        return self
+
+    def forward(
+        self,
+        mz: Tensor,
+        log_intensity: Tensor,
+        attention_mask: Tensor | None = None,
+        labels: Tensor | None = None,
+        return_dict: bool | None = None,
+    ) -> MSDeltaForDenoisingOutput | tuple[Tensor, ...]:
+        if return_dict is None:
+            return_dict = self.config.return_dict
+        if self._encoder_is_frozen:
+            with torch.no_grad():
+                outputs = self.msdelta(
+                    mz=mz,
+                    log_intensity=log_intensity,
+                    attention_mask=attention_mask,
+                    return_dict=True,
+                )
+        else:
+            outputs = self.msdelta(
+                mz=mz,
+                log_intensity=log_intensity,
+                attention_mask=attention_mask,
+                return_dict=True,
+            )
+        logits = self.denoising_head(outputs.last_hidden_state)
+        loss = None
+        if labels is not None:
+            if labels.shape != logits.shape:
+                raise ValueError("labels must have the same shape as mz")
+            valid = labels != -100
+            if attention_mask is not None:
+                valid = valid & attention_mask.bool()
+            loss = (
+                F.binary_cross_entropy_with_logits(logits[valid], labels[valid].float())
+                if valid.any()
+                else logits.sum() * 0.0
+            )
+
+        if not return_dict:
+            result = (logits,)
+            return ((loss,) + result) if loss is not None else result
+        return MSDeltaForDenoisingOutput(loss=loss, logits=logits)
+
+
 MSDeltaModel.register_for_auto_class("AutoModel")
 MSDeltaForPreTraining.register_for_auto_class("AutoModelForPreTraining")
+MSDeltaForDenoising.register_for_auto_class("AutoModelForTokenClassification")

@@ -139,6 +139,12 @@ TRAIN_ARGS=(
 if [[ -n ${RESUME_FROM_CHECKPOINT:-} ]]; then
     TRAIN_ARGS+=(--resume_from_checkpoint "$RESUME_FROM_CHECKPOINT")
 fi
+# Optional whitespace-separated overrides appended last, so they win over the args file.
+# Example: EXTRA_ARGS="--max_steps 200 --torch_compile false"
+if [[ -n ${EXTRA_ARGS:-} ]]; then
+    read -r -a EXTRA_ARGS_ARRAY <<<"$EXTRA_ARGS"
+    TRAIN_ARGS+=("${EXTRA_ARGS_ARRAY[@]}")
+fi
 
 exec mpiexec \
     --verbose \

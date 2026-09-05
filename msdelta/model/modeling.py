@@ -14,7 +14,7 @@ from transformers.utils.generic import ModelOutput
 from .configuration import MSDeltaConfig, MSDeltaDenoisingConfig
 from .fourier import FourierFeatures
 
-
+# Outputs
 @dataclass
 class MSDeltaForPreTrainingOutput(ModelOutput):
     """Output of masked-intensity pretraining."""
@@ -30,7 +30,8 @@ class MSDeltaForDenoisingOutput(ModelOutput):
     loss: Tensor | None = None
     logits: Tensor | None = None
 
-
+# Inputs
+## Embedding inputs peaks
 class PeakEmbed(nn.Module):
     """Create m/z-free tokens from normalized log intensity."""
 
@@ -56,7 +57,7 @@ class PeakEmbed(nn.Module):
             tokens = torch.where(mask_positions.unsqueeze(-1), self.mask_token, tokens)
         return tokens
 
-
+## Embedding inputs m/z
 class DeltaMZBias(nn.Module):
     """Create a learned attention bias from signed delta m/z."""
 
@@ -94,7 +95,8 @@ class DeltaMZBias(nn.Module):
         """Evaluate every attention-head bias curve on a delta m/z grid."""
         return self._curve(self.ff(delta_mz_grid)).float()
 
-
+# Layers
+## Custom ttention implementation
 class BiasedMHA(nn.Module):
     """Apply multi-head attention with a learned per-head bias."""
 
@@ -131,7 +133,7 @@ class BiasedMHA(nn.Module):
         context = context.transpose(1, 2).reshape(batch_size, n_peaks, -1)
         return self.proj_dropout(self.out(context))
 
-
+## Stack if MHA
 class EncoderBlock(nn.Module):
     def __init__(self, config: MSDeltaConfig):
         super().__init__()
@@ -157,7 +159,8 @@ class EncoderBlock(nn.Module):
         hidden_states = hidden_states + self.ffn(self.norm2(hidden_states))
         return hidden_states
 
-
+# Full models
+## HF compliant wrapper
 class MSDeltaPreTrainedModel(PreTrainedModel):
     """Shared Hugging Face behavior for MSDelta model classes."""
 
@@ -178,7 +181,7 @@ class MSDeltaPreTrainedModel(PreTrainedModel):
         elif isinstance(module, PeakEmbed):
             module.mask_token.data.normal_(mean=0.0, std=self.config.initializer_range)
 
-
+## Model definition
 class MSDeltaModel(MSDeltaPreTrainedModel):
     """Encode mass-spectrum peaks with continuous relative-mass attention."""
 
@@ -228,7 +231,7 @@ class MSDeltaModel(MSDeltaPreTrainedModel):
             return (hidden_states,)
         return BaseModelOutput(last_hidden_state=hidden_states)
 
-
+# Output heads
 class IntensityHead(nn.Module):
     """Predict one masked-intensity logit per peak."""
 
@@ -255,7 +258,7 @@ class PeakDenoisingHead(nn.Module):
     def forward(self, hidden_states: Tensor) -> Tensor:
         return self.projection(hidden_states).squeeze(-1).float()
 
-
+# Complete models+heads
 class MSDeltaForPreTraining(MSDeltaPreTrainedModel):
     """MSDelta with the masked-intensity pretraining objective."""
 

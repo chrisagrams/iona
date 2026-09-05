@@ -1,0 +1,93 @@
+#!/bin/bash
+# Self-contained launcher for the pair-stream architecture experiment.
+#
+#   cd /path/to/msdelta && qsub pbs/pairstream-50m.pbs
+#
+# Everything below is set here rather than on the qsub command line. Edit the two
+# ==== EDIT ME ==== values once, then submit with no flags.
+#
+# Defaults to a SHORT SMOKE RUN (debug queue, 2 nodes, 1 hour, 200 steps, probes off)
+# because the first thing you want from a new architecture is proof that it starts.
+# See "FULL RUN" at the bottom for the switch.
+
+#PBS -N msdelta-pairstream-50m
+#PBS -A UIC-HPC
+#PBS -q debug
+#PBS -l select=2:system=polaris
+#PBS -l place=scatter
+#PBS -l walltime=01:00:00
+#PBS -l filesystems=home:eagle
+#PBS -j oe
+#PBS -o pbs/logs/
+
+set -euo pipefail
+
+# ==== EDIT ME ====================================================================
+# Also set `#PBS -A` above to the same project name.
+PROJECT_NAME=UIC-HPC
+CHECKPOINT_ROOT=/eagle/${PROJECT_NAME}/${USER}/msdelta
+# =================================================================================
+
+REPO_DIR=${PBS_O_WORKDIR:-$PWD}
+
+export ARGS_FILE=configs/msdelta-pairstream-50m/training.args
+export CHECKPOINT_DIR=${CHECKPOINT_ROOT}/checkpoints
+export HF_HOME=${CHECKPOINT_ROOT}/huggingface
+export GLOBAL_BATCH_SIZE=512
+
+# Smoke run: a few hundred steps, all the expensive probes off, no torch.compile.
+# torch.compile is disabled because peak count K varies per batch and the pair stream
+# adds shape-dependent ops -- get the architecture working before adding that variable.
+export EXTRA_ARGS="--max_steps 200 --torch_compile false --probe_steps 50 --bias_curve_steps 100 --denoise_steps 0 --eval_steps 50 --save_steps 200 --logging_steps 10 --run_name msdelta-pairstream-50m-smoke"
+
+cd "$REPO_DIR"
+
+# Validate BEFORE creating anything, so a misconfigured project gives a clear message
+# rather than a permission error from mkdir.
+if [[ $PROJECT_NAME == PROJECT ]]; then
+    echo "ERROR: set PROJECT_NAME and '#PBS -A' to your ALCF project." >&2
+    exit 2
+fi
+if [[ ! -f $REPO_DIR/$ARGS_FILE ]]; then
+    echo "ERROR: args file not found: $REPO_DIR/$ARGS_FILE" >&2
+    exit 2
+fi
+if [[ ! -x $REPO_DIR/.venv/bin/python ]]; then
+    echo "ERROR: no venv at $REPO_DIR/.venv -- run pbs/setup_venv.sh on a login node." >&2
+    exit 2
+fi
+"$REPO_DIR/.venv/bin/python" -c \
+    "from msdelta.model.experiments.pair_stream import MSDeltaPairStreamForPreTraining" \
+    || { echo "ERROR: variant not importable -- re-run 'uv sync' on a login node." >&2; exit 2; }
+
+mkdir -p "$REPO_DIR/pbs/logs" "$CHECKPOINT_DIR" "$HF_HOME"
+
+echo "=== msdelta pair-stream experiment ==="
+echo "repo        : $REPO_DIR"
+echo "args file   : $ARGS_FILE"
+echo "checkpoints : $CHECKPOINT_DIR"
+echo "extra args  : ${EXTRA_ARGS:-<none>}"
+echo
+
+exec bash "$REPO_DIR/pbs/polaris-pretrain.pbs"
+
+# ---------------------------------------------------------------------------------
+# FULL RUN
+#   1. Change the directives above to a queue that allows your node count and walltime:
+#        #PBS -q preemptable          (1-10 nodes, long walltime)
+#        #PBS -l select=2:system=polaris
+#        #PBS -l walltime=12:00:00
+#      Polaris queue policies change -- check the current ALCF docs for node-count and
+#      walltime limits before submitting, since `prod` has a node-count floor.
+#   2. Drop EXTRA_ARGS entirely (or keep only --run_name) so the args file's
+#      --max_steps 56250 and the full probe schedule are used.
+#   3. Re-enable --torch_compile true in the args file once the smoke run is clean.
+#
+# RESUMING
+#   export RESUME_FROM_CHECKPOINT=/eagle/.../checkpoint-10000   (read by the inner script)
+#
+# BASELINE CONTROL
+#   Copy this file, set ARGS_FILE=configs/msdelta-base-50m/training.args and a distinct
+#   --run_name. The two models are parameter-matched to 0.03%, so differences in
+#   eval/loss and align/* are attributable to the architecture.
+# ---------------------------------------------------------------------------------

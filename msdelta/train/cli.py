@@ -17,8 +17,7 @@ from msdelta.data.loading import (
 )
 from msdelta.data.processing import MSDeltaDataCollatorForPreTraining, MSDeltaProcessor
 from msdelta.eval.viz import render_bias_panels
-from msdelta.model.configuration import MSDeltaConfig
-from msdelta.model.modeling import MSDeltaForPreTraining
+from msdelta.model.factory import load_model_class
 from msdelta.train.args import DataArguments, ModelArguments, MSDeltaTrainingArguments
 from msdelta.train.callbacks import build_callbacks
 from msdelta.train.wandb_distributed import init_wandb_run
@@ -49,7 +48,8 @@ def main(argv: list[str] | None = None) -> int:
         os.environ.setdefault("WANDB_DIR", str(out_dir))
 
     set_seed(training_args.seed)
-    model_config = MSDeltaConfig.from_pretrained(model_args.config_name)
+    model_cls = load_model_class(model_args.model_class)
+    model_config = model_cls.config_class.from_pretrained(model_args.config_name)
     if model_args.config_overrides is not None:
         model_config.update_from_string(model_args.config_overrides)
         model_config._validate()
@@ -62,7 +62,7 @@ def main(argv: list[str] | None = None) -> int:
         data_args.processor_name_or_path,
         **processor_overrides,
     )
-    model = MSDeltaForPreTraining(model_config)
+    model = model_cls(model_config)
     resolved = {
         "model": model_config.to_dict(),
         "processor": processor.to_dict(),

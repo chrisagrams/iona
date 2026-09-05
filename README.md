@@ -26,9 +26,11 @@ bumps in these bias curves — and the repo ships diagnostics that measure exact
 | [configs/README.md](configs/README.md) | Model-size tiers and the full training-argument reference |
 | [msdelta/README.md](msdelta/README.md) | Package layout, import conventions, old→new file map |
 | [msdelta/model/README.md](msdelta/model/README.md) | The architecture package |
+| [msdelta/model/MODULES.md](msdelta/model/MODULES.md) | **Every module in `modeling.py`, one by one** |
 | [msdelta/data/README.md](msdelta/data/README.md) | Preprocessing contract and masking |
 | [msdelta/train/README.md](msdelta/train/README.md) | Running a job, callbacks, distributed setup |
 | [msdelta/eval/README.md](msdelta/eval/README.md) | The diagnostics and what each one proves |
+| [TODO.md](TODO.md) | **Observed defects and infrastructure gaps**, by severity |
 
 ---
 
@@ -236,20 +238,16 @@ peak↔chemistry hit rate survives a Bonferroni correction.
 
 ## Known rough edges
 
-* The root `README.md` was empty until these docs were added; this is the first prose in the repo.
+Full list, with reproductions and severities, in **[TODO.md](TODO.md)**. The three that will cost
+you the most time if you hit them unaware:
+
 * **There are no tests.** No `tests/`, no CI. Nothing verifies the processor invariants, the KL
   loss, or the collator's masking.
-* `configs/msdelta-base-400m/config.json` still carries `"zero_bias_diagonal": true`, but that
-  option was deleted from the code in commit `22c0a14`. `PretrainedConfig` silently absorbs it as
-  an unused attribute, so the 400M tier is **not** doing what its config implies.
-* `msdelta/model/experimental.py` is imported by nothing and deliberately not re-exported from
-  `msdelta/model/__init__.py`. It references a
-`config.delta_bias_scale` field that no longer exists on `MSDeltaConfig`, so it
-  raises `AttributeError` on construction, and its `MSDeltaModel_2` residual loop has a bug. Details and fixes in
-  [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md#7-the-scratch-variant-modelexperimentalpy).
-* Because the attention bias is a dense float `attn_mask`, `scaled_dot_product_attention` cannot
-  use the FlashAttention kernel — the `(B, heads, K, K)` bias tensor is materialized in memory
-  and dominates activation cost. See the memory section in the architecture doc.
+* `configs/msdelta-base-400m/config.json` still carries `"zero_bias_diagonal": true`, an option
+  deleted from the code in `22c0a14`. `PretrainedConfig` absorbs it silently, so the 400M tier is
+  **not** doing what its config implies.
+* `msdelta/model/experimental.py` does not run: it reads a `config.delta_bias_scale` field that no
+  longer exists, and its `MSDeltaModel_2` residual loop silently collapses the model to one layer.
 
 `TODO.txt` tracks the open research questions (precursor leakage, regularization, ablations,
 scaling laws, SAE interpretability).

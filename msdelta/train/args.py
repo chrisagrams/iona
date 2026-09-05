@@ -14,6 +14,17 @@ class ModelArguments:
     config_name: str = field(
         metadata={"help": "Path to a pretrained MSDelta configuration directory."}
     )
+    model_class: str | None = field(
+        default=None,
+        metadata={
+            "help": (
+                "Dotted path to the model class to train, for example "
+                "'msdelta.model.experiments.pair_stream.MSDeltaPairStreamForPreTraining'. "
+                "Its `config_class` is used to load the configuration. "
+                "Defaults to MSDeltaForPreTraining."
+            )
+        },
+    )
     config_overrides: str | None = field(
         default=None,
         metadata={

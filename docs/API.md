@@ -22,6 +22,9 @@ Both call `register_for_auto_class()` at import.
 
 ### `model/modeling.py` — the model
 
+> Signatures only, below. For diagrams, tensor shapes, measured parameter counts, and the
+> change-impact table, see [../msdelta/model/MODULES.md](../msdelta/model/MODULES.md).
+
 | Symbol | Signature | What it does |
 | --- | --- | --- |
 | `MSDeltaForPreTrainingOutput` | `ModelOutput(loss, logits)` | |

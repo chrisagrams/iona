@@ -4,12 +4,15 @@ Everything that defines what MSDelta *is*. **This package imports nothing from `
 `train/`, or `eval/`** — keep it that way, it is what makes the model loadable standalone from a
 checkpoint.
 
-Full illustrated walkthrough: [../../docs/ARCHITECTURE.md](../../docs/ARCHITECTURE.md).
+* **[MODULES.md](MODULES.md) — every module in `modeling.py`**, one by one: diagrams, tensor
+  shapes, measured parameter counts, and the change-impact table. Start here to read the code.
+* [../../docs/ARCHITECTURE.md](../../docs/ARCHITECTURE.md) — the design rationale and the
+  experiment recipes.
 
 | file | contents |
 | --- | --- |
 | `configuration.py` | `MSDeltaConfig` (15 architecture fields + `_validate()`), `MSDeltaDenoisingConfig` (composes an encoder config with a head) |
-| `modeling.py` | `PeakEmbed`, `DeltaMZBias`, `BiasedMHA`, `EncoderBlock`, `MSDeltaModel`, `IntensityHead`, `PeakDenoisingHead`, `MSDeltaForPreTraining`, `MSDeltaForDenoising` |
+| `modeling.py` | `PeakEmbed`, `DeltaMZBias`, `BiasedMHA`, `EncoderBlock`, `MSDeltaModel`, `IntensityHead`, `PeakDenoisingHead`, `MSDeltaForPreTraining`, `MSDeltaForDenoising` — walked through in [MODULES.md](MODULES.md) |
 | `fourier.py` | `FourierFeatures` plus the frequency-health metrics `interp_mae`, `dead_freqs`, `freq_drift` |
 | `experimental.py` | ⚠ untracked scratch variant — **does not run as written**, see below |
 
