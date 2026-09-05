@@ -9,9 +9,11 @@ from typing import Any
 import matplotlib.pyplot as plt
 import torch
 import wandb
+from accelerate.state import AcceleratorState
+from accelerate.utils import DistributedType
 from torch import nn
 from tqdm.auto import tqdm
-from transformers import TrainerCallback
+from transformers import TrainerCallback, TrainingArguments
 
 from msdelta.alignment import alignment_metrics
 from msdelta.denoising import run_denoising_probe
@@ -248,6 +250,26 @@ class DenoisingProbeCallback(TrainerCallback):
         self.training_args = training_args
         self.out_dir = out_dir
         self.last_step = -1
+        self.probe_training_args = TrainingArguments(
+            output_dir=str(out_dir / "denoise-probes"),
+            num_train_epochs=training_args.denoise_epochs,
+            per_device_train_batch_size=1,
+            per_device_eval_batch_size=1,
+            learning_rate=training_args.denoise_learning_rate,
+            weight_decay=training_args.denoise_weight_decay,
+            eval_strategy="no",
+            save_strategy="no",
+            logging_strategy="no",
+            remove_unused_columns=False,
+            label_names=["labels"],
+            dataloader_num_workers=training_args.denoise_num_workers,
+            bf16=training_args.bf16,
+            fp16=training_args.fp16,
+            seed=training_args.denoise_seed,
+            data_seed=training_args.denoise_seed,
+            report_to=[],
+            ddp_find_unused_parameters=False,
+        )
 
     @property
     def device(self) -> torch.device:
@@ -261,23 +283,29 @@ class DenoisingProbeCallback(TrainerCallback):
         if self.device.type == "cuda":
             torch.cuda.empty_cache()
         destination = self.out_dir / "denoise-probes" / f"step-{step}"
-        metrics = run_denoising_probe(
-            self.module,
-            self.datasets["train"],
-            self.datasets["validation"],
-            output_dir=destination,
-            processor=self.pp,
-            peak_pair_budget=self.training_args.denoise_peak_pair_budget,
-            epochs=self.training_args.denoise_epochs,
-            learning_rate=self.training_args.denoise_learning_rate,
-            weight_decay=self.training_args.denoise_weight_decay,
-            hidden_size=self.training_args.denoise_head_hidden_size,
-            dropout=self.training_args.denoise_head_dropout,
-            num_workers=self.training_args.denoise_num_workers,
-            seed=self.training_args.denoise_seed,
-            bf16=self.training_args.bf16,
-            fp16=self.training_args.fp16,
+        accelerator_state = AcceleratorState()
+        use_named_plugins = (
+            accelerator_state.distributed_type == DistributedType.DEEPSPEED
+            and isinstance(accelerator_state.deepspeed_plugins, dict)
+            and "denoise" in accelerator_state.deepspeed_plugins
         )
+        if use_named_plugins:
+            accelerator_state.select_deepspeed_plugin("denoise")
+        try:
+            metrics = run_denoising_probe(
+                self.module,
+                self.datasets["train"],
+                self.datasets["validation"],
+                output_dir=destination,
+                processor=self.pp,
+                peak_pair_budget=self.training_args.denoise_peak_pair_budget,
+                hidden_size=self.training_args.denoise_head_hidden_size,
+                dropout=self.training_args.denoise_head_dropout,
+                training_args=self.probe_training_args,
+            )
+        finally:
+            if use_named_plugins:
+                accelerator_state.select_deepspeed_plugin("pretrain")
         if state.is_world_process_zero:
             if wandb.run is not None:
                 wandb.log({**metrics, "train/global_step": step})

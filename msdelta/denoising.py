@@ -29,8 +29,8 @@ from transformers import (
     TrainingArguments,
 )
 
-from msdelta.configuration_msdelta import MSDeltaDenoisingConfig
-from msdelta.modeling_msdelta import MSDeltaForDenoising
+from msdelta.configuration_msdelta import MSDeltaConfig, MSDeltaDenoisingConfig
+from msdelta.modeling_msdelta import MSDeltaForDenoising, MSDeltaForPreTraining
 
 
 class PeakBudgetBatchSampler(BatchSampler):
@@ -137,31 +137,23 @@ def denoising_metrics(prediction: EvalPrediction) -> dict[str, float]:
 
 
 def run_denoising_probe(
-    module,
-    train_dataset,
-    validation_dataset,
+    module: MSDeltaForPreTraining,
+    train_dataset: Dataset,
+    validation_dataset: Dataset,
     *,
     output_dir: Path,
     processor,
     peak_pair_budget: int,
-    epochs: int,
-    learning_rate: float,
-    weight_decay: float,
     hidden_size: int,
     dropout: float,
-    num_workers: int,
-    seed: int,
-    bf16: bool,
-    fp16: bool,
+    training_args: TrainingArguments,
 ) -> dict[str, float]:
     """Post-train a fresh denoising head using Hugging Face Trainer."""
     config = MSDeltaDenoisingConfig(
-        encoder=copy.deepcopy(module.config),
+        encoder=copy.deepcopy(cast(MSDeltaConfig, module.config)),
         head_hidden_size=hidden_size,
         head_dropout=dropout,
     )
-    requires_grad = [parameter.requires_grad for parameter in module.msdelta.parameters()]
-    was_training = module.training
     python_rng = random.getstate()
     numpy_rng = np.random.get_state()
     device = next(module.parameters()).device
@@ -169,31 +161,14 @@ def run_denoising_probe(
 
     try:
         with torch.random.fork_rng(devices=cuda_devices):
+            probe_encoder = copy.deepcopy(module.msdelta)
             model = MSDeltaForDenoising(
                 config,
-                encoder=module.msdelta,
+                encoder=probe_encoder,
                 freeze_encoder=True,
             )
-            args = TrainingArguments(
-                output_dir=str(output_dir),
-                num_train_epochs=epochs,
-                per_device_train_batch_size=1,
-                per_device_eval_batch_size=1,
-                learning_rate=learning_rate,
-                weight_decay=weight_decay,
-                eval_strategy="no",
-                save_strategy="no",
-                logging_strategy="no",
-                remove_unused_columns=False,
-                label_names=["labels"],
-                dataloader_num_workers=num_workers,
-                bf16=bf16,
-                fp16=fp16,
-                seed=seed,
-                data_seed=seed,
-                report_to=[],
-                ddp_find_unused_parameters=False,
-            )
+            args = copy.deepcopy(training_args)
+            args.output_dir = str(output_dir)
             trainer = DenoisingTrainer(
                 model=model,
                 args=args,
@@ -226,8 +201,5 @@ def run_denoising_probe(
             trainer.save_metrics("denoise", metrics)
             return metrics
     finally:
-        for parameter, trainable in zip(module.msdelta.parameters(), requires_grad):
-            parameter.requires_grad_(trainable)
-        module.train(was_training)
         random.setstate(python_rng)
         np.random.set_state(numpy_rng)

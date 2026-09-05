@@ -8,6 +8,7 @@ from dataclasses import asdict
 from pathlib import Path
 
 import matplotlib.pyplot as plt
+from accelerate.utils import DeepSpeedPlugin
 from transformers import HfArgumentParser, Trainer, set_seed
 
 from msdelta.callbacks import build_callbacks
@@ -26,6 +27,20 @@ from msdelta.wandb_distributed import init_wandb_run
 
 class MSDeltaTrainer(Trainer):
     """Exclude Fourier frequencies from weight decay."""
+
+    def __init__(self, *args, use_denoising_probe: bool = False, **kwargs):
+        self.use_denoising_probe = use_denoising_probe
+        super().__init__(*args, **kwargs)
+
+    def _build_accelerator_args(self, **kwargs):
+        args = super()._build_accelerator_args(**kwargs)
+        pretrain_plugin = args.get("deepspeed_plugin")
+        if self.use_denoising_probe and pretrain_plugin is not None:
+            args["deepspeed_plugin"] = {
+                "pretrain": pretrain_plugin,
+                "denoise": DeepSpeedPlugin(hf_ds_config=self.args.deepspeed),
+            }
+        return args
 
     def get_decay_parameter_names(self, model):
         return [n for n in super().get_decay_parameter_names(model) if not n.endswith(".freqs")]
@@ -120,17 +135,7 @@ def main(argv: list[str] | None = None) -> int:
                     num_proc=data_args.preprocessing_num_workers or None,
                 )
 
-        trainer = MSDeltaTrainer(
-            model=model,
-            args=training_args,
-            train_dataset=train_ds,
-            eval_dataset=eval_ds,
-            data_collator=MSDeltaDataCollatorForPreTraining(mask_ratio=training_args.mask_ratio),
-            processing_class=processor,
-        )
-        # Force Trainer to report the validation loss.
-        trainer.can_return_loss = True
-        for cb in build_callbacks(
+        callbacks = build_callbacks(
             model,
             val_ds,
             processor,
@@ -138,8 +143,20 @@ def main(argv: list[str] | None = None) -> int:
             out_dir,
             denoising_datasets=denoising_datasets,
             denoising_processor=denoising_processor,
-        ):
-            trainer.add_callback(cb)
+        )
+        trainer = MSDeltaTrainer(
+            model=model,
+            args=training_args,
+            train_dataset=train_ds,
+            eval_dataset=eval_ds,
+            data_collator=MSDeltaDataCollatorForPreTraining(mask_ratio=training_args.mask_ratio),
+            processing_class=processor,
+            use_denoising_probe=bool(training_args.denoise_steps),
+        )
+        # Force Trainer to report the validation loss.
+        trainer.can_return_loss = True
+        for callback in callbacks:
+            trainer.add_callback(callback)
 
         trainer.train(resume_from_checkpoint=training_args.resume_from_checkpoint)
 
