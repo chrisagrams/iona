@@ -125,19 +125,21 @@ class FourierProbeCallback(_InlineCallback):
         return {"int": _cat(li_pool), "dm": _cat(dm_pool)}
 
     def _featurizer_metrics(self, name: str, ff, vals: torch.Tensor) -> dict:
-        freqs = ff.freqs
-        if not isinstance(freqs, nn.Parameter):
+        if not isinstance(ff.freqs, nn.Parameter):
             return {}
+        # `ff.freqs` holds log-frequencies under `log_parameterized`, so always read the
+        # actual frequencies through frequencies(); reporting the raw parameter would
+        # silently mislabel every metric below.
+        f = ff.frequencies().detach().cpu()
         if name not in self._init_freqs:
-            self._init_freqs[name] = freqs.detach().abs().cpu().clone()
+            self._init_freqs[name] = f.clone()
         if vals.numel() < 8:
             return {}
         span = float(vals.max() - vals.min())
-        f = freqs.detach().abs().float().cpu()
         m = {
-            f"fourier/{name}_mae": interp_mae(freqs, vals),
-            f"fourier/{name}_dead": dead_freqs(freqs, span),
-            f"fourier/{name}_drift_log10": freq_drift(freqs, self._init_freqs[name]),
+            f"fourier/{name}_mae": interp_mae(f, vals),
+            f"fourier/{name}_dead": dead_freqs(f, span),
+            f"fourier/{name}_drift_log10": freq_drift(f, self._init_freqs[name]),
             f"fourier/{name}_f_min": float(f.min()),
             f"fourier/{name}_f_max": float(f.max()),
         }

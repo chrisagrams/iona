@@ -87,6 +87,7 @@ class PairStream(nn.Module):
             config.delta_bias_f_max,
             log_spaced=True,
             learnable=config.delta_bias_learnable,
+            log_parameterized=config.fourier_log_parameterized,
         )
         self.proj_in = nn.Linear(self.ff.out_dim, channels)
         self.norms = nn.ModuleList(

@@ -20,6 +20,7 @@ class FourierFeatures(nn.Module):
         log_spaced: bool = True,
         learnable: bool = False,
         clamp_abs: float = 2000.0,
+        log_parameterized: bool = False,
     ):
         super().__init__()
         if log_spaced:
@@ -27,19 +28,35 @@ class FourierFeatures(nn.Module):
         else:
             freqs = torch.linspace(f_min, f_max, n_freqs)
 
+        # Adam's update is roughly `lr` in absolute parameter units regardless of gradient
+        # scale, so on a log-spaced grid a raw-frequency parameter lets the low end move
+        # decades while the high end is effectively frozen (measured drift over a full
+        # 56k-step run: 5.8e-4 decades). Storing log(f) instead makes one fixed absolute
+        # step a fixed RELATIVE change at every scale.
+        self.log_parameterized = bool(learnable and log_parameterized)
+        stored = freqs.log() if self.log_parameterized else freqs
+
         if learnable:
-            self.freqs = nn.Parameter(freqs)
+            self.freqs = nn.Parameter(stored)
         else:
-            self.register_buffer("freqs", freqs, persistent=True)
+            self.register_buffer("freqs", stored, persistent=True)
 
         self.n_freqs = n_freqs
         self.out_dim = 2 * n_freqs
         self.clamp_abs = clamp_abs
 
+    def frequencies(self) -> Tensor:
+        """Return the actual positive frequencies, whichever parameterization is in use.
+
+        ``self.freqs`` holds log-frequencies when ``log_parameterized`` is set, so read
+        frequencies through this method rather than the raw parameter.
+        """
+        return self.freqs.float().exp() if self.log_parameterized else self.freqs.float().abs()
+
     def forward(self, x: Tensor) -> Tensor:
         """Return float32 features with shape ``(..., 2 * n_freqs)``."""
         x = x.float().clamp(-self.clamp_abs, self.clamp_abs)
-        phase = 2.0 * math.pi * x.unsqueeze(-1) * self.freqs.float().abs()
+        phase = 2.0 * math.pi * x.unsqueeze(-1) * self.frequencies()
         return torch.cat([phase.sin(), phase.cos()], dim=-1)
 
 

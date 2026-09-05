@@ -42,6 +42,7 @@ class PeakEmbed(nn.Module):
             config.fourier_int_f_min,
             config.fourier_int_f_max,
             learnable=config.fourier_int_learnable,
+            log_parameterized=config.fourier_log_parameterized,
         )
         self.mlp = nn.Sequential(
             nn.Linear(self.ff_int.out_dim, config.hidden_size),
@@ -69,6 +70,7 @@ class DeltaMZBias(nn.Module):
             config.delta_bias_f_max,
             log_spaced=True,
             learnable=config.delta_bias_learnable,
+            log_parameterized=config.fourier_log_parameterized,
         )
         self.n_heads = config.num_attention_heads
         self.head_mlps = nn.ModuleList(

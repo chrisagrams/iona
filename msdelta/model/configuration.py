@@ -29,6 +29,7 @@ class MSDeltaConfig(PretrainedConfig):
         delta_bias_f_min: float = 1e-2,
         delta_bias_f_max: float = 1e3,
         delta_bias_learnable: bool = True,
+        fourier_log_parameterized: bool = False,
         **kwargs,
     ):
         super().__init__(**kwargs)
@@ -49,6 +50,9 @@ class MSDeltaConfig(PretrainedConfig):
         self.delta_bias_f_min = delta_bias_f_min
         self.delta_bias_f_max = delta_bias_f_max
         self.delta_bias_learnable = delta_bias_learnable
+        # Store log(f) instead of f for learnable frequencies, so Adam's fixed
+        # absolute step becomes a fixed relative change at every scale.
+        self.fourier_log_parameterized = fourier_log_parameterized
         self._validate()
 
     def _validate(self) -> None:
