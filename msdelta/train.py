@@ -26,7 +26,7 @@ from msdelta.wandb_distributed import init_wandb_run
 
 
 class MSDeltaTrainer(Trainer):
-    """Exclude Fourier frequencies from weight decay."""
+    """Configure separate DeepSpeed plugins for pretraining and denoising."""
 
     def __init__(self, *args, use_denoising_probe: bool = False, **kwargs):
         self.use_denoising_probe = use_denoising_probe
@@ -41,10 +41,6 @@ class MSDeltaTrainer(Trainer):
                 "denoise": DeepSpeedPlugin(hf_ds_config=self.args.deepspeed),
             }
         return args
-
-    def get_decay_parameter_names(self, model):
-        return [n for n in super().get_decay_parameter_names(model) if not n.endswith(".freqs")]
-
 
 def main(argv: list[str] | None = None) -> int:
     parser = HfArgumentParser(
