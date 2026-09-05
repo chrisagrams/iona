@@ -35,7 +35,7 @@ CHECKPOINT_ROOT=/eagle/${PROJECT_NAME}/${USER}/msdelta
 
 REPO_DIR=${PBS_O_WORKDIR:-$PWD}
 
-export ARGS_FILE=configs/msdelta-pairstream-50m/training.args
+export ARGS_FILE=${ARGS_FILE:-configs/msdelta-pairstream-50m/training.args}
 export CHECKPOINT_DIR=${CHECKPOINT_ROOT}/checkpoints
 export HF_HOME=${CHECKPOINT_ROOT}/huggingface
 export GLOBAL_BATCH_SIZE=512
