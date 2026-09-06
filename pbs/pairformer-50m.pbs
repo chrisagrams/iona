@@ -1,0 +1,157 @@
+#!/bin/bash
+# Self-contained launcher for the AF3-style Pairformer architecture experiment.
+#
+#   cd /path/to/msdelta && qsub pbs/pairformer-50m.pbs
+#
+# Everything below is set here rather than on the qsub command line. Edit the two
+# ==== EDIT ME ==== values once, then submit with no flags.
+#
+# Defaults to a SHORT SMOKE RUN (debug queue, 2 nodes, 1 hour, 200 steps, probes off)
+# because the first thing you want from a new architecture is proof that it starts.
+# See "FULL RUN" and "ABLATION LADDER" at the bottom for the switches.
+
+#PBS -N msdelta-pairformer-50m
+#PBS -A UIC-HPC
+#PBS -q debug
+#PBS -l select=2:system=polaris
+#PBS -l place=scatter
+#PBS -l walltime=01:00:00
+#PBS -l filesystems=home:eagle
+#PBS -j oe
+#PBS -o pbs/logs/
+
+set -euo pipefail
+
+
+export http_proxy="http://proxy.alcf.anl.gov:3128"
+export https_proxy="http://proxy.alcf.anl.gov:3128"
+export ftp_proxy="http://proxy.alcf.anl.gov:3128"
+
+# ==== EDIT ME ====================================================================
+# Also set `#PBS -A` above to the same project name.
+PROJECT_NAME=UIC-HPC
+CHECKPOINT_ROOT=/eagle/${PROJECT_NAME}/${USER}/msdelta
+# =================================================================================
+
+REPO_DIR=${PBS_O_WORKDIR:-$PWD}
+
+export ARGS_FILE=${ARGS_FILE:-configs/msdelta-pairformer-50m/training.args}
+export CHECKPOINT_DIR=${CHECKPOINT_ROOT}/checkpoints
+export HF_HOME=${CHECKPOINT_ROOT}/huggingface
+export GLOBAL_BATCH_SIZE=512
+
+# ---- smoke | full -------------------------------------------------------------
+# NOTE: this only controls the training arguments. The queue and walltime are #PBS
+# directives, read by qsub before this script runs, so they must be edited above:
+#   smoke -> #PBS -q debug        #PBS -l walltime=01:00:00
+#   full  -> #PBS -q preemptable  #PBS -l walltime=12:00:00
+RUN_MODE=${RUN_MODE:-full}
+
+if [[ $RUN_MODE == smoke ]]; then
+    # A few hundred steps with the expensive probes off and no torch.compile.
+    # torch.compile stays off for the full run too: K varies per batch and the pair
+    # branch adds shape-dependent triangle einsums (and a chunked loop when triangle
+    # attention is on), which recompile every new shape.
+    # Uses the small LOCAL dataset in data/smoke (build it with bash pbs/make_smoke_data.sh)
+    # to avoid spending the walltime downloading the ~80 GB Hub dataset.
+    export EXTRA_ARGS="--dataset_root data/smoke --dataset_repo_id= --num_validation_files 1 --preprocessing_num_workers 8 --max_steps 200 --torch_compile false --probe_steps 50 --probe_num_spectra 500 --bias_curve_steps 100 --denoise_steps 0 --eval_steps 50 --save_steps 100 --logging_steps 10 --validation_batches 5 --replicate_retrieval_repo= --run_name msdelta-pairformer-50m-smoke"
+elif [[ $RUN_MODE == full ]]; then
+    # Everything comes from the args file: 56250 steps, full probe schedule.
+    # Only the run name is pinned here.
+    export EXTRA_ARGS="--run_name msdelta-pairformer-50m"
+else
+    echo "ERROR: RUN_MODE must be 'smoke' or 'full', got '$RUN_MODE'" >&2
+    exit 2
+fi
+
+# ---- ablation ladder (spec section 10) ----------------------------------------
+# Select an AF3 build phase without editing the args file. Each phase is a
+# config override appended after EXTRA_ARGS, so it wins over config.json.
+#   B1  static pair bias (DreaMS/Graphormer baseline)
+#   B2  + z evolves via a transition only
+#   B3  + triangle multiplication      <- config.json default (the hypothesis)
+#   B4  + triangle attention           <- EXPENSIVE, see the memory note below
+#   B5  + single->pair write-back      <- config.json default is B3+B5
+# Usage: PHASE=B4 qsub pbs/pairformer-50m.pbs
+PHASE=${PHASE:-}
+case "$PHASE" in
+    B1) PHASE_ARGS="--config_overrides pair_update=static,use_triangle_attention=False,use_writeback=False" ;;
+    B2) PHASE_ARGS="--config_overrides pair_update=transition,use_triangle_attention=False,use_writeback=False" ;;
+    B3) PHASE_ARGS="--config_overrides pair_update=triangle,use_triangle_attention=False,use_writeback=False" ;;
+    B4) # Triangle attention builds a (batch, chunk, N, N, heads) logit tensor -- the memory-
+        # dominant op (spec section 12). Drop the micro-batch and cap peaks so it fits; the
+        # launcher recomputes gradient accumulation from GLOBAL_BATCH_SIZE.
+        PHASE_ARGS="--config_overrides pair_update=triangle,use_triangle_attention=True,use_writeback=True,tri_attn_chunk=16 --per_device_train_batch_size 8 --per_device_eval_batch_size 8 --max_peaks 96" ;;
+    B5|"") PHASE_ARGS="" ;;  # default: config.json (B3 + write-back)
+    *) echo "ERROR: PHASE must be B1..B5, got '$PHASE'" >&2; exit 2 ;;
+esac
+if [[ -n $PHASE_ARGS ]]; then
+    EXTRA_ARGS="$EXTRA_ARGS $PHASE_ARGS --run_name msdelta-pairformer-50m-${PHASE,,}"
+fi
+
+cd "$REPO_DIR"
+
+# Validate BEFORE creating anything, so a misconfigured project gives a clear message.
+if [[ $PROJECT_NAME == PROJECT ]]; then
+    echo "ERROR: set PROJECT_NAME and '#PBS -A' to your ALCF project." >&2
+    exit 2
+fi
+if [[ ! -f $REPO_DIR/$ARGS_FILE ]]; then
+    echo "ERROR: args file not found: $REPO_DIR/$ARGS_FILE" >&2
+    exit 2
+fi
+if [[ ! -x $REPO_DIR/.venv/bin/python ]]; then
+    echo "ERROR: no venv at $REPO_DIR/.venv -- run pbs/setup_venv.sh on a login node." >&2
+    exit 2
+fi
+"$REPO_DIR/.venv/bin/python" -c \
+    "from msdelta.model.experiments.pairformer import MSDeltaPairformerForPreTraining" \
+    || { echo "ERROR: variant not importable -- re-run 'uv sync' on a login node." >&2; exit 2; }
+
+# Chained-run support (see pbs/chain_debug.sh). Pin the output dir so resume works.
+if [[ -n ${CHAIN_OUTPUT_DIR:-} ]]; then
+    EXTRA_ARGS="${EXTRA_ARGS:-} --output_dir $CHAIN_OUTPUT_DIR"
+    EXTRA_ARGS="$EXTRA_ARGS --save_steps ${CHAIN_SAVE_STEPS:-500} --save_total_limit 3"
+    EXTRA_ARGS="$EXTRA_ARGS --preprocessing_num_workers ${CHAIN_PREPROC_WORKERS:-24}"
+    EXTRA_ARGS="$EXTRA_ARGS --torch_compile ${CHAIN_TORCH_COMPILE:-false}"
+    export EXTRA_ARGS
+    echo "chained run  : output_dir=$CHAIN_OUTPUT_DIR resume=${RESUME_FROM_CHECKPOINT:-<none>}"
+fi
+
+mkdir -p "$REPO_DIR/pbs/logs" "$CHECKPOINT_DIR" "$HF_HOME"
+
+echo "=== msdelta pairformer experiment ==="
+echo "repo        : $REPO_DIR"
+echo "args file   : $ARGS_FILE"
+echo "phase       : ${PHASE:-<config default (B3+writeback)>}"
+echo "checkpoints : $CHECKPOINT_DIR"
+echo "extra args  : ${EXTRA_ARGS:-<none>}"
+echo
+
+exec bash "$REPO_DIR/pbs/polaris-pretrain.pbs"
+
+# ---------------------------------------------------------------------------------
+# FULL RUN
+#   1. Change the directives above to a queue that allows your node count and walltime:
+#        #PBS -q preemptable          (1-10 nodes, long walltime)
+#        #PBS -l walltime=12:00:00
+#      Polaris queue policies change -- check current ALCF docs before submitting.
+#   2. Keep EXTRA_ARGS to just --run_name so the args file drives the run.
+#
+# ABLATION LADDER
+#   Run the same data/optimizer with each phase for a clean, publishable ablation:
+#        for P in B1 B2 B3 B5; do PHASE=$P qsub pbs/pairformer-50m.pbs; done
+#   B1..B3 and B5 are parameter-comparable to each other. B4 (triangle attention) is the
+#   expensive arm and is memory-bound, not FLOP-bound: it needs the smaller micro-batch
+#   and peak cap set above. If it still OOMs, lower --per_device_train_batch_size before
+#   lowering --max_peaks (trap #1: aggressive top-K removes the intermediate peaks the
+#   triangle op routes through).
+#
+# RESUMING
+#   export RESUME_FROM_CHECKPOINT=/eagle/.../checkpoint-10000
+#
+# BASELINE CONTROL
+#   ARGS_FILE=configs/msdelta-base-50m/training.args with a distinct --run_name gives the
+#   distance-only baseline. Note the Pairformer is ~49M vs the baseline ~50M; the cleanest
+#   controlled comparison is across the B1..B5 ladder, which shares single-stream dims.
+# ---------------------------------------------------------------------------------

@@ -178,8 +178,11 @@ class MSDeltaPreTrainedModel(PreTrainedModel):
             if module.bias is not None:
                 module.bias.data.zero_()
         elif isinstance(module, nn.LayerNorm):
-            module.bias.data.zero_()
-            module.weight.data.fill_(1.0)
+            # Affine-free LayerNorm (elementwise_affine=False, as in the Pairformer's
+            # AdaLayerNorm) has weight/bias set to None -- nothing to initialise.
+            if module.weight is not None:
+                module.bias.data.zero_()
+                module.weight.data.fill_(1.0)
         elif isinstance(module, PeakEmbed):
             module.mask_token.data.normal_(mean=0.0, std=self.config.initializer_range)
 
@@ -270,6 +273,31 @@ class MSDeltaForPreTraining(MSDeltaPreTrainedModel):
         self.intensity_head = IntensityHead(config.hidden_size)
         self.post_init()
 
+    @staticmethod
+    def _masked_intensity_loss(
+        logits: Tensor, labels: Tensor | None, mask_positions: Tensor | None
+    ) -> Tensor | None:
+        """KL divergence of the predicted vs. true intensity distribution over masked peaks.
+
+        Extracted so architecture experiments can reuse the exact objective while overriding
+        ``forward`` to thread extra encoder inputs (e.g. global conditioning).
+        """
+        if labels is None:
+            return None
+        if labels.shape != logits.shape:
+            raise ValueError("labels must have the same shape as mz")
+        if mask_positions is None:
+            raise ValueError("mask_positions must be provided with labels")
+        selected = mask_positions.bool()
+        if not selected.any():
+            return logits.new_zeros(())
+        log_prob = F.log_softmax(
+            logits.masked_fill(~selected, float("-inf")), dim=-1
+        ).masked_fill(~selected, 0.0)
+        target = labels.float().masked_fill(~selected, 0.0)
+        target = target / target.sum(dim=-1, keepdim=True).clamp_min(1e-12)
+        return F.kl_div(log_prob, target, reduction="batchmean")
+
     def forward(
         self,
         mz: Tensor,
@@ -278,7 +306,10 @@ class MSDeltaForPreTraining(MSDeltaPreTrainedModel):
         mask_positions: Tensor | None = None,
         labels: Tensor | None = None,
         return_dict: bool | None = None,
+        **conditioning: Tensor,
     ) -> MSDeltaForPreTrainingOutput | tuple[Tensor, ...]:
+        # ``conditioning`` (e.g. precursor_mz, charge) is emitted by the shared pretraining
+        # collator for the Pairformer variant; the baseline encoder does not use it.
         if return_dict is None:
             return_dict = self.config.return_dict
         outputs = self.msdelta(
@@ -289,22 +320,7 @@ class MSDeltaForPreTraining(MSDeltaPreTrainedModel):
             return_dict=True,
         )
         logits = self.intensity_head(outputs.last_hidden_state)
-        loss = None
-        if labels is not None:
-            if labels.shape != logits.shape:
-                raise ValueError("labels must have the same shape as mz")
-            if mask_positions is None:
-                raise ValueError("mask_positions must be provided with labels")
-            selected = mask_positions.bool()
-            if selected.any():
-                log_prob = F.log_softmax(
-                    logits.masked_fill(~selected, float("-inf")), dim=-1
-                ).masked_fill(~selected, 0.0)
-                target = labels.float().masked_fill(~selected, 0.0)
-                target = target / target.sum(dim=-1, keepdim=True).clamp_min(1e-12)
-                loss = F.kl_div(log_prob, target, reduction="batchmean")
-            else:
-                loss = logits.new_zeros(())
+        loss = self._masked_intensity_loss(logits, labels, mask_positions)
 
         if not return_dict:
             result = (logits,)

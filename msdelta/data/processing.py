@@ -230,7 +230,14 @@ class MSDeltaDataCollatorForPreTraining:
         labels = torch.zeros_like(mz)
         attention_mask = torch.zeros(batch_size, max_length, dtype=torch.long)
         mask_positions = torch.zeros(batch_size, max_length, dtype=torch.bool)
+        # Per-spectrum global conditioning, when the preprocessed rows carry it. Emitted for
+        # every run; the baseline model ignores it (see MSDeltaForPreTraining.forward), while
+        # the Pairformer variant feeds it through AdaLayerNorm.
+        charge = torch.zeros(batch_size, dtype=torch.long)
+        precursor_mz = torch.zeros(batch_size, dtype=torch.float32)
         for row, (feature, length) in enumerate(zip(features, lengths)):
+            charge[row] = int(feature.get("charge", 0))
+            precursor_mz[row] = float(feature.get("precursor_mz", 0.0))
             if length == 0:
                 continue
             mz[row, :length] = torch.as_tensor(feature["mz"], dtype=torch.float32)
@@ -254,6 +261,8 @@ class MSDeltaDataCollatorForPreTraining:
             "attention_mask": attention_mask,
             "mask_positions": mask_positions,
             "labels": labels,
+            "charge": charge,
+            "precursor_mz": precursor_mz,
         }
 
 
