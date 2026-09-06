@@ -142,9 +142,7 @@ class MSDeltaProcessor(FeatureExtractionMixin):
         for example, length in zip(encoded_inputs, lengths):
             pad = target_length - length
             data["mz"].append(example["mz"] + [self.padding_value] * pad)
-            data["log_intensity"].append(
-                example["log_intensity"] + [self.padding_value] * pad
-            )
+            data["log_intensity"].append(example["log_intensity"] + [self.padding_value] * pad)
             data["attention_mask"].append([1] * length + [0] * pad)
             data["labels"].append(example["labels"] + [-100.0] * pad)
         return BatchFeature(data=data, tensor_type=return_tensors)

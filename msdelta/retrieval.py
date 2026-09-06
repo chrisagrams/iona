@@ -181,9 +181,7 @@ class RetrievalProgressCallback(ProgressCallback):
             self.training_bar.set_description("Retrieval train")
 
     def on_prediction_step(self, args, state, control, eval_dataloader=None, **kwargs):
-        super().on_prediction_step(
-            args, state, control, eval_dataloader=eval_dataloader, **kwargs
-        )
+        super().on_prediction_step(args, state, control, eval_dataloader=eval_dataloader, **kwargs)
         if self.prediction_bar is not None:
             self.prediction_bar.set_description("Retrieval eval")
 
@@ -196,19 +194,12 @@ def run_retrieval_probe(
     output_dir: Path,
     processor,
     replicate_repo_id: str | None,
-    per_device_batch_size: int,
-    epochs: int,
-    learning_rate: float,
-    weight_decay: float,
     projection_hidden_size: int,
     embedding_size: int,
     dropout: float,
     temperature: float,
     validation_analytes: int,
-    num_workers: int,
-    seed: int,
-    bf16: bool,
-    fp16: bool,
+    training_args: TrainingArguments,
 ) -> dict[str, float]:
     """Post-train a fresh retrieval head on an isolated, frozen encoder copy."""
     config = MSDeltaRetrievalConfig(
@@ -231,28 +222,8 @@ def run_retrieval_probe(
                 encoder=probe_encoder,
                 freeze_encoder=True,
             )
-            args = TrainingArguments(
-                output_dir=str(output_dir),
-                num_train_epochs=epochs,
-                per_device_train_batch_size=per_device_batch_size,
-                per_device_eval_batch_size=per_device_batch_size,
-                learning_rate=learning_rate,
-                weight_decay=weight_decay,
-                eval_strategy="no",
-                save_strategy="no",
-                logging_strategy="no",
-                remove_unused_columns=False,
-                label_names=["group_ids"],
-                dataloader_num_workers=num_workers,
-                dataloader_drop_last=True,
-                prediction_loss_only=True,
-                bf16=bf16,
-                fp16=fp16,
-                seed=seed,
-                data_seed=seed,
-                report_to=[],
-                ddp_find_unused_parameters=False,
-            )
+            args = copy.deepcopy(training_args)
+            args.output_dir = str(output_dir)
             trainer = Trainer(
                 model=model,
                 args=args,
