@@ -88,6 +88,7 @@ while :; do
 
     vars="RUN_MODE=full,CHAIN_OUTPUT_DIR=$CHAIN_OUTPUT_DIR,CHAIN_SAVE_STEPS=$CHAIN_SAVE_STEPS"
     [[ -n ${ARGS_FILE:-} ]] && vars="$vars,ARGS_FILE=$ARGS_FILE"
+    [[ -n ${PHASE:-} ]] && vars="$vars,PHASE=$PHASE"
     vars="$vars,WANDB_RUN_ID=$CHAIN_NAME,WANDB_RESUME=allow"
     if [[ -n $ckpt ]]; then
         vars="$vars,RESUME_FROM_CHECKPOINT=$ckpt"
