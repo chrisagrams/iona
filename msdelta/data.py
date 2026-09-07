@@ -192,9 +192,6 @@ def build_retrieval_datasets(
 ) -> DatasetDict:
     """Load and preprocess grouped consensus/experimental retrieval spectra."""
     datasets = load_dataset(repo_id)
-    required = {"train", "validation"}
-    if missing := required.difference(datasets):
-        raise ValueError(f"retrieval dataset is missing splits: {sorted(missing)}")
     datasets = DatasetDict({split: datasets[split] for split in ("train", "validation")})
 
     processed = datasets.map(
