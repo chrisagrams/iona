@@ -7,7 +7,7 @@ from functools import partial
 from pathlib import Path
 
 import torch
-from datasets import DatasetDict, load_dataset
+from datasets import Dataset, DatasetDict, load_dataset
 from huggingface_hub import snapshot_download
 
 from msdelta.chemistry import PROTON_MASS, RESIDUE_MASSES, WATER_MASS
@@ -207,3 +207,42 @@ def build_retrieval_datasets(
         num_proc=num_proc,
         desc="drop invalid retrieval groups",
     )
+
+
+def build_retrieval_evaluation_datasets(
+    validation_dataset: Dataset,
+    processor: MSDeltaProcessor,
+    *,
+    max_analytes: int = 1000,
+    replicate_repo_id: str | None = None,
+    num_proc: int | None = None,
+) -> dict[str, Dataset]:
+    """Prepare named retrieval galleries with one spectrum and global label per row."""
+    subset = validation_dataset.select(range(min(len(validation_dataset), max_analytes)))
+    evaluation_datasets = {
+        "retrieval": Dataset.from_list(
+            [
+                {"mz": mz, "log_intensity": intensity, "retrieval_labels": group_id}
+                for group_id, row in enumerate(subset)
+                for mz, intensity in zip(row["mz"], row["log_intensity"])
+            ]
+        ),
+    }
+    if replicate_repo_id:
+        dataset = load_dataset(replicate_repo_id, split="test")
+        analytes = {}
+        labels = [
+            analytes.setdefault((peptide, charge), len(analytes))
+            for peptide, charge in zip(dataset["peptide"], dataset["charge"])
+        ]
+        processed = dataset.map(
+            lambda row: processor(row["mz"], row["intensity"], padding=False),
+            remove_columns=dataset.column_names,
+            num_proc=num_proc,
+            desc="preprocess replicate retrieval spectra",
+        )
+        evaluation_datasets["replicate_retrieval"] = processed.add_column(
+            "retrieval_labels",
+            labels,
+        )
+    return evaluation_datasets

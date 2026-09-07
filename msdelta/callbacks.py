@@ -195,10 +195,21 @@ class DenoisingProbeCallback(TrainerCallback):
 class RetrievalProbeCallback(TrainerCallback):
     """Post-train a fresh distributed retrieval head at fixed intervals."""
 
-    def __init__(self, module, every, datasets, pp, training_args, out_dir):
+    def __init__(
+        self,
+        module,
+        every,
+        datasets,
+        pp,
+        training_args,
+        out_dir,
+        *,
+        evaluation_datasets,
+    ):
         self.module = module
         self.every = every
         self.datasets = datasets
+        self.evaluation_datasets = evaluation_datasets
         self.pp = pp
         self.training_args = training_args
         self.out_dir = out_dir
@@ -253,12 +264,11 @@ class RetrievalProbeCallback(TrainerCallback):
                 self.datasets["validation"],
                 output_dir=destination,
                 processor=self.pp,
-                replicate_repo_id=self.training_args.replicate_retrieval_repo,
+                evaluation_datasets=self.evaluation_datasets,
                 projection_hidden_size=self.training_args.retrieval_projection_hidden_size,
                 embedding_size=self.training_args.retrieval_embedding_size,
                 dropout=self.training_args.retrieval_head_dropout,
                 temperature=self.training_args.retrieval_temperature,
-                validation_analytes=self.training_args.retrieval_validation_analytes,
                 training_args=self.probe_training_args,
             )
         finally:
@@ -270,7 +280,7 @@ class RetrievalProbeCallback(TrainerCallback):
             tqdm.write(
                 f"retrieval: loss={metrics['retrieval/loss']:.3f} "
                 f"Hit@1={metrics['retrieval/Hit@1']:.3f} "
-                f"MAP={metrics['retrieval/MAP']:.3f} "
+                f"MAP@100={metrics['retrieval/MAP@100']:.3f} "
                 f"R@5={metrics['retrieval/R@5']:.3f} model={destination}"
             )
         if torch.distributed.is_available() and torch.distributed.is_initialized():
@@ -286,6 +296,7 @@ def build_callbacks(
     denoising_datasets=None,
     denoising_processor=None,
     retrieval_datasets=None,
+    retrieval_evaluation_datasets=None,
 ):
     """Create the callbacks enabled in the configuration."""
     cbs: list[TrainerCallback] = []
@@ -312,6 +323,7 @@ def build_callbacks(
                 pp,
                 training_args,
                 out_dir,
+                evaluation_datasets=retrieval_evaluation_datasets,
             )
         )
     if training_args.denoise_steps:

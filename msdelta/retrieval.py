@@ -3,15 +3,20 @@
 from __future__ import annotations
 
 import copy
+import os
 import random
 from pathlib import Path
 from typing import cast
 
+import faiss
 import numpy as np
 import torch
-from datasets import Dataset, load_dataset
+from accelerate.utils import broadcast_object_list
+from datasets import Dataset
+from pytorch_metric_learning.utils.accuracy_calculator import AccuracyCalculator
+from pytorch_metric_learning.utils.inference import FaissKNN
 from torch.nn.utils.rnn import pad_sequence
-from torchmetrics.retrieval import RetrievalHitRate, RetrievalMAP, RetrievalRecall
+from tqdm.auto import tqdm
 from transformers import ProgressCallback, Trainer, TrainingArguments
 
 from msdelta.configuration_msdelta import MSDeltaConfig, MSDeltaRetrievalConfig
@@ -22,158 +27,86 @@ from msdelta.modeling_msdelta import (
 from msdelta.processing_msdelta import MSDeltaDataCollatorForRetrieval
 
 
-def load_benchmark(repo_id: str, split: str = "test"):
-    """Load the replicate benchmark and create its label vector."""
-    dataset = load_dataset(repo_id, split=split)
-    labels = _label_index(
-        [f"{peptide}/{charge}" for peptide, charge in zip(dataset["peptide"], dataset["charge"])]
-    )
-    return dataset, labels
+class RetrievalEvaluationCollator:
+    """Pad individual spectra while preserving their global retrieval labels."""
+
+    def __call__(self, features):
+        mzs = [torch.tensor(row["mz"], dtype=torch.float32) for row in features]
+        intensities = [torch.tensor(row["log_intensity"], dtype=torch.float32) for row in features]
+        mz = pad_sequence(mzs, batch_first=True)
+        lengths = torch.tensor([mass.numel() for mass in mzs])
+        return {
+            "mz": mz,
+            "log_intensity": pad_sequence(intensities, batch_first=True),
+            "attention_mask": torch.arange(mz.shape[1])[None, :] < lengths[:, None],
+            "retrieval_labels": torch.tensor([row["retrieval_labels"] for row in features]),
+        }
 
 
-def _label_index(labels) -> np.ndarray:
-    """Create dense indices in first-seen order."""
-    seen: dict[str, int] = {}
-    return np.fromiter(
-        (seen.setdefault(label, len(seen)) for label in labels),
-        dtype=np.int64,
-        count=len(labels),
-    )
+class RetrievalTrainer(Trainer):
+    """Gather spectrum embeddings and labels without evaluating a batch-local loss."""
+
+    def prediction_step(self, model, inputs, prediction_loss_only, ignore_keys=None):
+        if "retrieval_labels" not in inputs:
+            return super().prediction_step(model, inputs, prediction_loss_only, ignore_keys)
+        inputs = dict(inputs)
+        labels = self._prepare_input(inputs.pop("retrieval_labels"))
+        loss, embeddings, _ = super().prediction_step(model, inputs, False, ignore_keys)
+        return loss, embeddings, labels
 
 
-def _collect_benchmark(dataset, processor, *, batch_size: int = 512):
-    """Preprocess each benchmark spectrum in bounded batches."""
-    spectra = []
-    for start in range(0, len(dataset), batch_size):
-        rows = dataset[start : min(start + batch_size, len(dataset))]
-        for mz, intensity in zip(rows["mz"], rows["intensity"]):
-            processed = processor(mz, intensity, padding=False)
-            spectra.append(
-                (
-                    torch.tensor(processed["mz"], dtype=torch.float32),
-                    torch.tensor(processed["log_intensity"], dtype=torch.float32),
-                )
-            )
-    return spectra
+class RetrievalAccuracyCalculator(AccuracyCalculator):
+    """Add recall at five to FAISS-backed accuracy calculation."""
 
+    def requires_knn(self):
+        return super().requires_knn() + ["recall_at_5"]
 
-@torch.no_grad()
-def embed_retrieval_spectra(
-    model: MSDeltaForRetrieval,
-    spectra,
-    device: torch.device,
-    *,
-    batch_size: int = 128,
-) -> np.ndarray:
-    """Encode preprocessed spectra with the trained retrieval head."""
-    was_training = model.training
-    model.to(device).eval()
-    chunks = []
-    try:
-        for start in range(0, len(spectra), batch_size):
-            batch = spectra[start : start + batch_size]
-            mzs = [mass for mass, _ in batch]
-            intensities = [intensity for _, intensity in batch]
-            mz = pad_sequence(mzs, batch_first=True).to(device)
-            log_intensity = pad_sequence(intensities, batch_first=True).to(device)
-            lengths = torch.tensor([mass.numel() for mass in mzs], device=device)
-            attention_mask = torch.arange(mz.shape[1], device=device)[None, :] < lengths[:, None]
-            output = model(
-                mz=mz,
-                log_intensity=log_intensity,
-                attention_mask=attention_mask,
-            )
-            chunks.append(output.embeddings.cpu())
-        if not chunks:
-            raise RuntimeError("no spectra were available for retrieval evaluation")
-        return torch.cat(chunks).numpy().astype(np.float32)
-    finally:
-        model.train(was_training)
+    def calculate_recall_at_5(
+        self,
+        knn_labels,
+        query_labels,
+        reference_labels,
+        ref_includes_query,
+        not_lone_query_mask,
+        **kwargs,
+    ):
+        classes, counts = reference_labels.unique(return_counts=True)
+        positives = counts[torch.searchsorted(classes, query_labels)] - int(ref_includes_query)
+        hits = (knn_labels[:, :5] == query_labels[:, None]).sum(dim=1)
+        recall = hits.float() / positives.clamp_min(1)
+        return recall[not_lone_query_mask].mean().item()
 
 
 @torch.no_grad()
-def retrieval_metrics(embeddings, labels, device, *, ks=(5,), chunk: int = 1024):
-    """Calculate leave-one-out metrics from normalized retrieval embeddings."""
+def retrieval_metrics(embeddings, labels, device, *, gpus=None):
+    """Search with FAISS and average metrics over queries with another matching spectrum.
+
+    MAP@100 uses all relevant gallery items as its per-query denominator, including
+    positives outside the retrieved top 100. FAISS excludes each query's own entry.
+    """
+    if device.type == "cuda" and faiss.get_num_gpus() == 0:
+        raise RuntimeError("CUDA retrieval requires a GPU-enabled FAISS installation")
     vectors = torch.as_tensor(embeddings, dtype=torch.float32, device=device)
     vectors = torch.nn.functional.normalize(vectors, dim=-1)
     targets = torch.as_tensor(labels, dtype=torch.long, device=device)
-    count = vectors.shape[0]
-    hit_rate = RetrievalHitRate(top_k=1, empty_target_action="neg", sync_on_compute=False)
-    mean_ap = RetrievalMAP(empty_target_action="neg", sync_on_compute=False)
-    recalls = {
-        k: RetrievalRecall(top_k=k, empty_target_action="neg", sync_on_compute=False) for k in ks
+    calculator = RetrievalAccuracyCalculator(
+        include=("precision_at_1", "mean_average_precision", "recall_at_5"),
+        k=min(100, len(vectors) - 1),
+        device=device,
+        knn_func=FaissKNN(index_init_fn=faiss.IndexFlatIP, gpus=gpus),
+    )
+    scores = calculator.get_accuracy(vectors, targets)
+    return {
+        "Hit@1": scores["precision_at_1"],
+        "MAP@100": scores["mean_average_precision"],
+        "R@5": scores["recall_at_5"],
     }
-    transpose = vectors.t().contiguous()
-    for start in range(0, count, chunk):
-        end = min(start + chunk, count)
-        rows = torch.arange(end - start, device=device)
-        columns = torch.arange(start, end, device=device)
-        similarities = vectors[start:end] @ transpose
-        relevant = targets[start:end, None] == targets[None, :]
-        relevant[rows, columns] = False
-        similarities[rows, columns] = float("-inf")
-        indexes = columns[:, None].expand(-1, count)
-        predictions = similarities.reshape(-1).cpu()
-        flattened_targets = relevant.reshape(-1).cpu()
-        flattened_indexes = indexes.reshape(-1).cpu()
-        hit_rate.update(predictions, flattened_targets, flattened_indexes)
-        mean_ap.update(predictions, flattened_targets, flattened_indexes)
-        for metric in recalls.values():
-            metric.update(predictions, flattened_targets, flattened_indexes)
-    result = {"Hit@1": hit_rate.compute().item(), "MAP": mean_ap.compute().item()}
-    result.update({f"R@{k}": metric.compute().item() for k, metric in recalls.items()})
-    return result
-
-
-@torch.no_grad()
-def retrieval_dataset_metrics(
-    model: MSDeltaForRetrieval,
-    dataset,
-    device: torch.device,
-    *,
-    max_analytes: int = 1000,
-    batch_size: int = 128,
-) -> dict[str, float]:
-    """Evaluate grouped validation spectra with leave-one-out retrieval."""
-    spectra = []
-    labels = []
-    subset = dataset.select(range(min(len(dataset), max_analytes)))
-    for group_id, row in enumerate(subset):
-        for mz, log_intensity in zip(row["mz"], row["log_intensity"]):
-            spectra.append(
-                (
-                    torch.tensor(mz, dtype=torch.float32),
-                    torch.tensor(log_intensity, dtype=torch.float32),
-                )
-            )
-            labels.append(group_id)
-    embeddings = embed_retrieval_spectra(model, spectra, device, batch_size=batch_size)
-    metrics = retrieval_metrics(embeddings, labels, device, ks=(5,))
-    return {f"retrieval/{name}": value for name, value in metrics.items()}
-
-
-@torch.no_grad()
-def replicate_retrieval_inline_metrics(
-    model: MSDeltaForRetrieval,
-    repo_id: str | None,
-    device: torch.device,
-    processor,
-    *,
-    split: str = "test",
-    batch_size: int = 128,
-) -> dict[str, float]:
-    """Evaluate trained retrieval embeddings on the external replicate benchmark."""
-    if not repo_id:
-        return {}
-    dataset, labels = load_benchmark(repo_id, split=split)
-    spectra = _collect_benchmark(dataset, processor)
-    embeddings = embed_retrieval_spectra(model, spectra, device, batch_size=batch_size)
-    metrics = retrieval_metrics(embeddings, labels, device, ks=(5,))
-    return {f"replicate_retrieval/{name}": value for name, value in metrics.items()}
 
 
 class RetrievalProgressCallback(ProgressCallback):
     """Label the nested Trainer's progress bars."""
+
+    evaluation_description = "Retrieval loss"
 
     def on_train_begin(self, args, state, control, **kwargs):
         super().on_train_begin(args, state, control, **kwargs)
@@ -183,7 +116,7 @@ class RetrievalProgressCallback(ProgressCallback):
     def on_prediction_step(self, args, state, control, eval_dataloader=None, **kwargs):
         super().on_prediction_step(args, state, control, eval_dataloader=eval_dataloader, **kwargs)
         if self.prediction_bar is not None:
-            self.prediction_bar.set_description("Retrieval eval")
+            self.prediction_bar.set_description(self.evaluation_description)
 
 
 def run_retrieval_probe(
@@ -193,12 +126,11 @@ def run_retrieval_probe(
     *,
     output_dir: Path,
     processor,
-    replicate_repo_id: str | None,
+    evaluation_datasets: dict[str, Dataset],
     projection_hidden_size: int,
     embedding_size: int,
     dropout: float,
     temperature: float,
-    validation_analytes: int,
     training_args: TrainingArguments,
 ) -> dict[str, float]:
     """Post-train a fresh retrieval head on an isolated, frozen encoder copy."""
@@ -224,7 +156,7 @@ def run_retrieval_probe(
             )
             args = copy.deepcopy(training_args)
             args.output_dir = str(output_dir)
-            trainer = Trainer(
+            trainer = RetrievalTrainer(
                 model=model,
                 args=args,
                 train_dataset=train_dataset,
@@ -233,27 +165,51 @@ def run_retrieval_probe(
                 processing_class=processor,
             )
             trainer.remove_callback(ProgressCallback)
-            trainer.add_callback(RetrievalProgressCallback())
+            progress = RetrievalProgressCallback()
+            trainer.add_callback(progress)
             trainer.train()
             evaluated = trainer.evaluate()
             metrics = {"retrieval/loss": evaluated["eval_loss"]}
-            if trainer.is_world_process_zero():
-                metrics.update(
-                    retrieval_dataset_metrics(
-                        model,
-                        validation_dataset,
-                        device,
-                        max_analytes=validation_analytes,
-                    )
-                )
-                metrics.update(
-                    replicate_retrieval_inline_metrics(
-                        model,
-                        replicate_repo_id,
-                        device,
-                        processor,
-                    )
-                )
+            # Use the same distributed evaluation loop for both spectrum datasets.
+            trainer.data_collator = RetrievalEvaluationCollator()
+            trainer.args.prediction_loss_only = False
+            trainer.args.dataloader_drop_last = False
+            trainer.eval_dataset = evaluation_datasets
+            # Rank 0 owns the FAISS indexes on this node's allocated GPUs.
+            gpus = (
+                list(range(int(os.environ.get("LOCAL_WORLD_SIZE", "1"))))
+                if device.type == "cuda"
+                else None
+            )
+
+            def compute_metrics(prediction):
+                if device.type == "cuda":
+                    torch.cuda.empty_cache()
+                trainer.accelerator.wait_for_everyone()
+                result = {}
+                if trainer.is_world_process_zero():
+                    with tqdm(
+                        total=1,
+                        desc=f"{name} FAISS ranking",
+                        unit="search",
+                        disable=bool(args.disable_tqdm),
+                        leave=False,
+                    ) as bar:
+                        result = retrieval_metrics(
+                            prediction.predictions,
+                            prediction.label_ids,
+                            device,
+                            gpus=gpus,
+                        )
+                        bar.update(1)
+                return broadcast_object_list([result])[0]
+
+            trainer.compute_metrics = compute_metrics
+            for name in evaluation_datasets:
+                progress.evaluation_description = f"{name} embeddings"
+                evaluated = trainer.evaluate(name, metric_key_prefix=name)
+                for metric in ("Hit@1", "MAP@100", "R@5"):
+                    metrics[f"{name}/{metric}"] = evaluated[f"{name}_{metric}"]
             trainer.save_model()
             trainer.save_metrics("retrieval", metrics)
             return metrics
