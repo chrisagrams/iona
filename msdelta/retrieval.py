@@ -84,8 +84,6 @@ def retrieval_metrics(embeddings, labels, device, *, gpus=None):
     MAP@100 uses all relevant gallery items as its per-query denominator, including
     positives outside the retrieved top 100. FAISS excludes each query's own entry.
     """
-    if device.type == "cuda" and faiss.get_num_gpus() == 0:
-        raise RuntimeError("CUDA retrieval requires a GPU-enabled FAISS installation")
     vectors = torch.as_tensor(embeddings, dtype=torch.float32, device=device)
     vectors = torch.nn.functional.normalize(vectors, dim=-1)
     targets = torch.as_tensor(labels, dtype=torch.long, device=device)
