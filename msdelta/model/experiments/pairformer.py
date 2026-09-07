@@ -433,7 +433,9 @@ class TriangleAttention(nn.Module):
             qc = q[:, s:e]  # (B, C, N(j), H, d)
             logits = torch.einsum("bcjhd,bckhd->bcjkh", qc, k[:, s:e]) * scale
             logits = logits + bias[:, None, :, :, :] + key_mask
-            attn = torch.softmax(logits, dim=3)
+            # softmax upcasts to fp32 under autocast; cast back so the einsum operands
+            # share a dtype (einsum is not autocast-managed and rejects fp32 x bf16).
+            attn = torch.softmax(logits.float(), dim=3).to(v.dtype)
             out[:, s:e] = torch.einsum("bcjkh,bckhd->bcjhd", attn, v[:, s:e])
 
         out = out.reshape(b, n, n, self.h * self.d)
