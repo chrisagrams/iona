@@ -21,6 +21,8 @@ dependencies = [
     "accelerate>=1.0.0",
     "deepspeed>=0.15.0; sys_platform == 'linux'",
     "torchmetrics>=1.9.0",
+    "pytorch-metric-learning>=2.9.0",
+    "sentence-transformers>=6.0.0",
 ]
 
 [project.scripts]

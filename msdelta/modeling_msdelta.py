@@ -6,9 +6,11 @@ from dataclasses import dataclass
 
 import torch
 import torch.nn.functional as F
+from pytorch_metric_learning.losses import SupConLoss
+from sentence_transformers.sentence_transformer.modules import Pooling
 from torch import Tensor, nn
 from torch.distributed.nn.functional import all_gather as distributed_all_gather
-from transformers import PreTrainedModel
+from transformers import PretrainedConfig, PreTrainedModel
 from transformers.modeling_outputs import BaseModelOutput
 from transformers.utils.generic import ModelOutput
 
@@ -170,7 +172,7 @@ class EncoderBlock(nn.Module):
 class MSDeltaPreTrainedModel(PreTrainedModel):
     """Shared Hugging Face behavior for MSDelta model classes."""
 
-    config_class = MSDeltaConfig
+    config_class: type[PretrainedConfig] | None = MSDeltaConfig
     base_model_prefix = "msdelta"
     main_input_name = "mz"
     supports_gradient_checkpointing = True
@@ -272,6 +274,7 @@ class SpectrumRetrievalHead(nn.Module):
 
     def __init__(self, config: MSDeltaRetrievalConfig):
         super().__init__()
+        self.pooling = Pooling(config.encoder.hidden_size, pooling_mode=("mean", "max"))
         self.projection = nn.Sequential(
             nn.Linear(2 * config.encoder.hidden_size, config.projection_hidden_size),
             nn.GELU(),
@@ -280,50 +283,19 @@ class SpectrumRetrievalHead(nn.Module):
         )
 
     def forward(self, hidden_states: Tensor, attention_mask: Tensor) -> Tensor:
-        mask = attention_mask.bool().unsqueeze(-1)
-        mean = (hidden_states * mask).sum(dim=1) / mask.sum(dim=1).clamp_min(1)
-        maximum = hidden_states.masked_fill(~mask, float("-inf")).max(dim=1).values
-        maximum = torch.nan_to_num(maximum, neginf=0.0)
-        embeddings = self.projection(torch.cat([mean, maximum], dim=-1))
+        mask = attention_mask.bool()
+        pooled = self.pooling(
+            {
+                "token_embeddings": hidden_states,
+                "attention_mask": mask,
+                # Keep empty-spectrum mean pooling finite, including in float16.
+                "token_weights_sum": mask.sum(dim=1).clamp_min(1).to(hidden_states.dtype),
+            }
+        )["sentence_embedding"]
+        # Max pooling yields -inf when a spectrum has no valid peaks.
+        pooled = torch.nan_to_num(pooled, neginf=0.0)
+        embeddings = self.projection(pooled)
         return F.normalize(embeddings.float(), dim=-1)
-
-
-def _supervised_contrastive_loss(
-    embeddings: Tensor,
-    group_ids: Tensor,
-    temperature: float,
-) -> Tensor:
-    """Contrast local anchors against all candidates, including other ranks."""
-    candidates = embeddings
-    candidate_ids = group_ids.long()
-    rank = 0
-    if torch.distributed.is_available() and torch.distributed.is_initialized():
-        rank = torch.distributed.get_rank()
-        stride = int(group_ids.max().item()) + 1
-        anchor_ids = group_ids.long() + rank * stride
-        candidates = torch.cat(distributed_all_gather(embeddings), dim=0)
-        gathered_ids = [torch.empty_like(anchor_ids) for _ in range(torch.distributed.get_world_size())]
-        torch.distributed.all_gather(gathered_ids, anchor_ids)
-        candidate_ids = torch.cat(gathered_ids, dim=0)
-    else:
-        anchor_ids = group_ids.long()
-
-    logits = embeddings.float() @ candidates.float().transpose(0, 1)
-    logits = logits / temperature
-    self_mask = torch.zeros_like(logits, dtype=torch.bool)
-    local_positions = rank * embeddings.shape[0] + torch.arange(
-        embeddings.shape[0], device=embeddings.device
-    )
-    self_mask[torch.arange(embeddings.shape[0], device=embeddings.device), local_positions] = True
-    positives = anchor_ids[:, None].eq(candidate_ids[None, :]) & ~self_mask
-    valid = positives.any(dim=1)
-    if not valid.any():
-        return embeddings.sum() * 0.0
-    denominator = torch.logsumexp(logits.masked_fill(self_mask, float("-inf")), dim=1)
-    log_prob = logits - denominator[:, None]
-    positive_log_prob = log_prob.masked_fill(~positives, 0.0).sum(dim=1)
-    positive_log_prob = positive_log_prob / positives.sum(dim=1).clamp_min(1)
-    return -positive_log_prob[valid].mean()
 
 
 class MSDeltaForPreTraining(MSDeltaPreTrainedModel):
@@ -383,7 +355,7 @@ class MSDeltaForPreTraining(MSDeltaPreTrainedModel):
 class MSDeltaForDenoising(MSDeltaPreTrainedModel):
     """MSDelta encoder with a peak-level noise classifier."""
 
-    config_class = MSDeltaDenoisingConfig
+    config_class: type[PretrainedConfig] | None = MSDeltaDenoisingConfig
 
     def __init__(
         self,
@@ -462,7 +434,7 @@ class MSDeltaForDenoising(MSDeltaPreTrainedModel):
 class MSDeltaForRetrieval(MSDeltaPreTrainedModel):
     """MSDelta encoder with a spectrum-level contrastive retrieval head."""
 
-    config_class = MSDeltaRetrievalConfig
+    config_class: type[PretrainedConfig] | None = MSDeltaRetrievalConfig
 
     def __init__(
         self,
@@ -473,6 +445,7 @@ class MSDeltaForRetrieval(MSDeltaPreTrainedModel):
         super().__init__(config)
         self.msdelta = encoder if encoder is not None else MSDeltaModel(config.encoder)
         self.retrieval_head = SpectrumRetrievalHead(config)
+        self.contrastive_loss = SupConLoss(temperature=config.temperature)
         self._encoder_is_frozen = False
         if encoder is None:
             self.post_init()
@@ -525,11 +498,19 @@ class MSDeltaForRetrieval(MSDeltaPreTrainedModel):
         if group_ids is not None:
             if group_ids.ndim != 1 or group_ids.shape[0] != embeddings.shape[0]:
                 raise ValueError("group_ids must contain one value per spectrum")
-            loss = _supervised_contrastive_loss(
-                embeddings,
-                group_ids,
-                self.config.temperature,
-            )
+            loss_embeddings = embeddings
+            labels = group_ids.long()
+            if torch.distributed.is_available() and torch.distributed.is_initialized():
+                world_size = torch.distributed.get_world_size()
+                rank = torch.distributed.get_rank()
+                # Each rank's collator assigns its own batch-local group IDs.
+                labels = labels * world_size + rank
+                # Gather with autograd so remote candidates receive gradients.
+                loss_embeddings = torch.cat(distributed_all_gather(embeddings), dim=0)
+                gathered_labels = [torch.empty_like(labels) for _ in range(world_size)]
+                torch.distributed.all_gather(gathered_labels, labels)
+                labels = torch.cat(gathered_labels)
+            loss = self.contrastive_loss(loss_embeddings, labels)
 
         if not return_dict:
             result = (embeddings,)
