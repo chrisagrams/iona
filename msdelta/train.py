@@ -26,6 +26,7 @@ from msdelta.processing_msdelta import MSDeltaDataCollatorForPreTraining, MSDelt
 from msdelta.training_args import DataArguments, ModelArguments, MSDeltaTrainingArguments
 from msdelta.viz import render_bias_panels
 from msdelta.wandb_distributed import init_wandb_run
+from msdelta.xpu_metrics import XpuSmiWandbMonitor
 
 
 class MSDeltaTrainer(Trainer):
@@ -95,12 +96,19 @@ def main(argv: list[str] | None = None) -> int:
     }
 
     wandb_run = None
+    xpu_monitor = None
     if training_args.wandb_project:
         wandb_run = init_wandb_run(
             project=training_args.wandb_project,
             run_name=training_args.run_name,
             config=resolved,
         )
+        if wandb_run is not None and torch.xpu.is_available():
+            xpu_monitor = XpuSmiWandbMonitor(
+                wandb_run,
+                range(torch.xpu.device_count()),
+            )
+            xpu_monitor.start()
 
     try:
         if training_args.process_index == 0:
@@ -196,6 +204,8 @@ def main(argv: list[str] | None = None) -> int:
                 plt.close(fig)
         return 0
     finally:
+        if xpu_monitor is not None:
+            xpu_monitor.stop()
         if wandb_run is not None:
             wandb_run.finish()
 
