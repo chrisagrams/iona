@@ -11,6 +11,7 @@
 # https://docs.alcf.anl.gov/aurora/data-science/frameworks/pytorch/
 
 module load frameworks
+module load xpu-smi
 
 set -euo pipefail
 
