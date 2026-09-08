@@ -11,6 +11,7 @@ from transformers import (
 from msdelta.configuration_msdelta import (
     MSDeltaConfig,
     MSDeltaDenoisingConfig,
+    MSDeltaRerankingConfig,
     MSDeltaRetrievalConfig,
 )
 from msdelta.modeling_msdelta import (
@@ -18,6 +19,8 @@ from msdelta.modeling_msdelta import (
     MSDeltaForDenoisingOutput,
     MSDeltaForPreTraining,
     MSDeltaForPreTrainingOutput,
+    MSDeltaForReranking,
+    MSDeltaForRerankingOutput,
     MSDeltaForRetrieval,
     MSDeltaForRetrievalOutput,
     MSDeltaModel,
@@ -25,8 +28,10 @@ from msdelta.modeling_msdelta import (
 )
 from msdelta.processing_msdelta import (
     MSDeltaDataCollatorForPreTraining,
+    MSDeltaDataCollatorForReranking,
     MSDeltaDataCollatorForRetrieval,
     MSDeltaProcessor,
+    MSDeltaRerankingProcessor,
 )
 
 __version__ = "0.1.0"
@@ -54,7 +59,16 @@ AutoProcessor.register(MSDeltaConfig, MSDeltaProcessor, exist_ok=True)
 AutoProcessor.register(MSDeltaDenoisingConfig, MSDeltaProcessor, exist_ok=True)
 AutoProcessor.register(MSDeltaRetrievalConfig, MSDeltaProcessor, exist_ok=True)
 
+AutoConfig.register(MSDeltaRerankingConfig.model_type, MSDeltaRerankingConfig, exist_ok=True)
+AutoModel.register(MSDeltaRerankingConfig, MSDeltaForReranking, exist_ok=True)
+AutoProcessor.register(MSDeltaRerankingConfig, MSDeltaRerankingProcessor, exist_ok=True)
+
 __all__ = [
+    "MSDeltaRerankingConfig",
+    "MSDeltaForReranking",
+    "MSDeltaForRerankingOutput",
+    "MSDeltaDataCollatorForReranking",
+    "MSDeltaRerankingProcessor",
     "MSDeltaConfig",
     "MSDeltaDenoisingConfig",
     "MSDeltaRetrievalConfig",

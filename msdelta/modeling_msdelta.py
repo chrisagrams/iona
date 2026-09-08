@@ -17,6 +17,7 @@ from transformers.utils.generic import ModelOutput
 from .configuration_msdelta import (
     MSDeltaConfig,
     MSDeltaDenoisingConfig,
+    MSDeltaRerankingConfig,
     MSDeltaRetrievalConfig,
 )
 from .fourier import FourierFeatures
@@ -522,3 +523,181 @@ MSDeltaModel.register_for_auto_class("AutoModel")
 MSDeltaForPreTraining.register_for_auto_class("AutoModelForPreTraining")
 MSDeltaForDenoising.register_for_auto_class("AutoModelForTokenClassification")
 MSDeltaForRetrieval.register_for_auto_class("AutoModel")
+
+
+@dataclass
+class MSDeltaForRerankingOutput(ModelOutput):
+    """Normalized embeddings for either modality and optional cross-modal loss."""
+
+    loss: Tensor | None = None
+    spectrum_embeddings: Tensor | None = None
+    peptide_embeddings: Tensor | None = None
+
+
+class PeptideEncoder(nn.Module):
+    """Encode localized modified residues with a small positional transformer."""
+
+    def __init__(self, config: MSDeltaRerankingConfig):
+        super().__init__()
+        width = config.peptide_hidden_size
+        self.residues = nn.Embedding(len(config.peptide_vocab), width, padding_idx=0)
+        self.positions = nn.Embedding(config.peptide_max_length, width)
+        self.layers = nn.ModuleList(
+            [
+                nn.TransformerEncoderLayer(
+                    width,
+                    config.peptide_num_attention_heads,
+                    config.peptide_intermediate_size,
+                    dropout=config.head_dropout,
+                    activation="gelu",
+                    batch_first=True,
+                    norm_first=True,
+                )
+                for _ in range(config.peptide_num_hidden_layers)
+            ]
+        )
+        self.norm = nn.LayerNorm(width)
+        self.projection = nn.Linear(width, config.embedding_size)
+
+    def forward(self, input_ids: Tensor, attention_mask: Tensor | None = None) -> Tensor:
+        if input_ids.ndim != 2 or not 0 < input_ids.shape[1] <= self.positions.num_embeddings:
+            raise ValueError("peptide_input_ids must be a nonempty batch within peptide_max_length")
+        mask = input_ids != 0 if attention_mask is None else attention_mask.bool()
+        if mask.shape != input_ids.shape or not mask.any(dim=1).all():
+            raise ValueError("each peptide must have at least one unmasked residue")
+        hidden = self.residues(input_ids) + self.positions(
+            torch.arange(input_ids.shape[1], device=input_ids.device)
+        )
+        for layer in self.layers:
+            hidden = layer(hidden, src_key_padding_mask=~mask)
+        hidden = self.norm(hidden)
+        pooled = (hidden * mask.unsqueeze(-1)).sum(1) / mask.sum(1, keepdim=True)
+        return F.normalize(self.projection(pooled).float(), dim=-1)
+
+
+def _gather_reranking_embeddings(embeddings: Tensor, labels: Tensor) -> tuple[Tensor, Tensor]:
+    """Gather global candidates with gradients, allowing unequal local batch sizes."""
+    if not (torch.distributed.is_available() and torch.distributed.is_initialized()):
+        return embeddings, labels
+    world_size = torch.distributed.get_world_size()
+    size = torch.tensor([len(labels)], device=embeddings.device)
+    sizes = [torch.empty_like(size) for _ in range(world_size)]
+    torch.distributed.all_gather(sizes, size)
+    counts = [int(n.item()) for n in sizes]
+    padding = max(counts) - len(labels)
+    gathered = distributed_all_gather(F.pad(embeddings, (0, 0, 0, padding)))
+    padded_labels = F.pad(labels, (0, padding), value=-1)
+    gathered_labels = [torch.empty_like(padded_labels) for _ in counts]
+    torch.distributed.all_gather(gathered_labels, padded_labels)
+    return (
+        torch.cat([value[:n] for value, n in zip(gathered, counts)]),
+        torch.cat([value[:n] for value, n in zip(gathered_labels, counts)]),
+    )
+
+
+def reranking_contrastive_loss(
+    spectra: Tensor,
+    peptides: Tensor,
+    spectrum_labels: Tensor,
+    peptide_labels: Tensor,
+    temperature: float,
+) -> Tensor:
+    """Symmetric cross entropy with uniform targets over all cross-modal positives."""
+    for embeddings, labels in ((spectra, spectrum_labels), (peptides, peptide_labels)):
+        if labels.ndim != 1 or len(labels) != len(embeddings):
+            raise ValueError("labels must contain one stable peptide ID per embedding")
+    spectra, spectrum_labels = _gather_reranking_embeddings(spectra, spectrum_labels)
+    peptides, peptide_labels = _gather_reranking_embeddings(peptides, peptide_labels)
+    positives = spectrum_labels[:, None] == peptide_labels[None, :]
+    if not positives.any(1).all() or not positives.any(0).all():
+        raise ValueError("every spectrum and peptide must have a cross-modal positive")
+    # Disable autocast for the similarity matrix and log-softmax as well as the reduction.
+    with torch.autocast(device_type=spectra.device.type, enabled=False):
+        logits = spectra.float() @ peptides.float().T / temperature
+        targets = positives.float()
+        spectrum_loss = -(targets * F.log_softmax(logits, dim=1)).sum(1) / targets.sum(1)
+        peptide_loss = -(targets * F.log_softmax(logits, dim=0)).sum(0) / targets.sum(0)
+        return (spectrum_loss.mean() + peptide_loss.mean()) / 2
+
+
+class MSDeltaForReranking(MSDeltaPreTrainedModel):
+    """Train a peptide encoder and spectrum projection against frozen MSDelta tokens."""
+
+    config_class = MSDeltaRerankingConfig
+
+    def __init__(self, config: MSDeltaRerankingConfig, encoder: MSDeltaModel | None = None):
+        super().__init__(config)
+        self.msdelta = encoder if encoder is not None else MSDeltaModel(config.encoder)
+        self.spectrum_head = SpectrumRetrievalHead(config)
+        self.peptide_encoder = PeptideEncoder(config)
+        if encoder is None:
+            self.post_init()
+        else:
+            self.spectrum_head.apply(self._init_weights)
+            self.peptide_encoder.apply(self._init_weights)
+        self.msdelta.requires_grad_(False)
+        self.msdelta.eval()
+
+    def train(self, mode: bool = True):
+        super().train(mode)
+        # Checkpoint loading may replace Parameters and reset their requires_grad flags.
+        self.msdelta.requires_grad_(False)
+        self.msdelta.eval()
+        return self
+
+    def encode_spectra(self, mz, log_intensity, attention_mask=None) -> Tensor:
+        if attention_mask is None:
+            attention_mask = torch.ones_like(mz, dtype=torch.bool)
+        if not attention_mask.bool().any(dim=1).all():
+            raise ValueError("each spectrum must have at least one unmasked peak")
+        with torch.no_grad():
+            outputs = self.msdelta(mz, log_intensity, attention_mask, return_dict=True)
+        return self.spectrum_head(outputs.last_hidden_state, attention_mask)
+
+    def encode_peptides(self, peptide_input_ids, peptide_attention_mask=None) -> Tensor:
+        return self.peptide_encoder(peptide_input_ids, peptide_attention_mask)
+
+    @staticmethod
+    def score_pairs(spectrum_embeddings: Tensor, peptide_embeddings: Tensor) -> Tensor:
+        """Score aligned PSMs, or broadcast one spectrum against many candidates."""
+        return F.cosine_similarity(spectrum_embeddings.float(), peptide_embeddings.float(), dim=-1)
+
+    def forward(
+        self,
+        mz: Tensor | None = None,
+        log_intensity: Tensor | None = None,
+        attention_mask: Tensor | None = None,
+        peptide_input_ids: Tensor | None = None,
+        peptide_attention_mask: Tensor | None = None,
+        spectrum_labels: Tensor | None = None,
+        peptide_labels: Tensor | None = None,
+        return_dict: bool | None = None,
+    ) -> MSDeltaForRerankingOutput | tuple[Tensor, ...]:
+        if (mz is None) != (log_intensity is None):
+            raise ValueError("mz and log_intensity must be supplied together")
+        spectra = self.encode_spectra(mz, log_intensity, attention_mask) if mz is not None else None
+        peptides = (
+            self.encode_peptides(peptide_input_ids, peptide_attention_mask)
+            if (peptide_input_ids is not None)
+            else None
+        )
+        if spectra is None and peptides is None:
+            raise ValueError("provide spectra, peptides, or both")
+        loss = None
+        if spectrum_labels is not None or peptide_labels is not None:
+            if any(x is None for x in (spectra, peptides, spectrum_labels, peptide_labels)):
+                raise ValueError("contrastive training requires both modalities and both labels")
+            loss = reranking_contrastive_loss(
+                spectra, peptides, spectrum_labels, peptide_labels, self.config.temperature
+            )
+        output = MSDeltaForRerankingOutput(
+            loss=loss, spectrum_embeddings=spectra, peptide_embeddings=peptides
+        )
+        return (
+            output
+            if (self.config.return_dict if return_dict is None else return_dict)
+            else (output.to_tuple())
+        )
+
+
+MSDeltaForReranking.register_for_auto_class("AutoModel")

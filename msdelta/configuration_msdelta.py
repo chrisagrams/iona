@@ -121,6 +121,51 @@ class MSDeltaRetrievalConfig(PretrainedConfig):
         return self.encoder.initializer_range
 
 
+class MSDeltaRerankingConfig(MSDeltaRetrievalConfig):
+    """Compose a frozen spectrum encoder with a small peptide transformer."""
+
+    model_type = "msdelta-reranking"
+
+    def __init__(
+        self,
+        peptide_hidden_size: int = 256,
+        peptide_num_hidden_layers: int = 3,
+        peptide_num_attention_heads: int = 8,
+        peptide_intermediate_size: int = 1024,
+        peptide_max_length: int = 25,
+        peptide_vocab: list[str] | None = None,
+        **kwargs,
+    ):
+        super().__init__(**kwargs)
+        self.peptide_hidden_size = peptide_hidden_size
+        self.peptide_num_hidden_layers = peptide_num_hidden_layers
+        self.peptide_num_attention_heads = peptide_num_attention_heads
+        self.peptide_intermediate_size = peptide_intermediate_size
+        self.peptide_max_length = peptide_max_length
+        self.peptide_vocab = peptide_vocab or [
+            "[PAD]",
+            *list("ACDEFGHIKLMNPQRSTVWY"),
+            "C[57.0215]",
+            "M[15.9949]",
+        ]
+        for value in (
+            peptide_hidden_size,
+            peptide_num_hidden_layers,
+            peptide_num_attention_heads,
+            peptide_intermediate_size,
+            peptide_max_length,
+        ):
+            if value <= 0:
+                raise ValueError("peptide dimensions must be positive")
+        if peptide_hidden_size % peptide_num_attention_heads:
+            raise ValueError("peptide_hidden_size must be divisible by peptide_num_attention_heads")
+        if self.peptide_vocab[0] != "[PAD]" or len(set(self.peptide_vocab)) != len(
+            self.peptide_vocab
+        ):
+            raise ValueError("peptide_vocab must be unique with [PAD] at index zero")
+
+
 MSDeltaConfig.register_for_auto_class()
 MSDeltaDenoisingConfig.register_for_auto_class()
 MSDeltaRetrievalConfig.register_for_auto_class()
+MSDeltaRerankingConfig.register_for_auto_class()

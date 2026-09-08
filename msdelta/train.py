@@ -16,12 +16,18 @@ from msdelta.configuration_msdelta import MSDeltaConfig
 from msdelta.data import (
     build_denoising_datasets,
     build_pretraining_datasets,
+    build_reranking_datasets,
+    build_reranking_evaluation_datasets,
     build_retrieval_datasets,
     build_retrieval_evaluation_datasets,
     resolve_dataset_paths,
 )
 from msdelta.modeling_msdelta import MSDeltaForPreTraining
-from msdelta.processing_msdelta import MSDeltaDataCollatorForPreTraining, MSDeltaProcessor
+from msdelta.processing_msdelta import (
+    MSDeltaDataCollatorForPreTraining,
+    MSDeltaProcessor,
+    MSDeltaRerankingProcessor,
+)
 from msdelta.training_args import DataArguments, ModelArguments, MSDeltaTrainingArguments
 from msdelta.viz import render_bias_panels
 from msdelta.wandb_distributed import init_wandb_run
@@ -31,21 +37,31 @@ class MSDeltaTrainer(Trainer):
     """Configure separate DeepSpeed plugins for pretraining and frozen-encoder probes."""
 
     def __init__(
-        self, *args, use_denoising_probe: bool = False, use_retrieval_probe: bool = False, **kwargs
+        self,
+        *args,
+        use_denoising_probe: bool = False,
+        use_retrieval_probe: bool = False,
+        use_reranking_probe: bool = False,
+        **kwargs,
     ):
         self.use_denoising_probe = use_denoising_probe
         self.use_retrieval_probe = use_retrieval_probe
+        self.use_reranking_probe = use_reranking_probe
         super().__init__(*args, **kwargs)
 
     def _build_accelerator_args(self, **kwargs):
         args = super()._build_accelerator_args(**kwargs)
         pretrain_plugin = args.get("deepspeed_plugin")
-        if pretrain_plugin is not None and (self.use_denoising_probe or self.use_retrieval_probe):
+        if pretrain_plugin is not None and (
+            self.use_denoising_probe or self.use_retrieval_probe or self.use_reranking_probe
+        ):
             plugins = {"pretrain": pretrain_plugin}
             if self.use_denoising_probe:
                 plugins["denoise"] = DeepSpeedPlugin(hf_ds_config=self.args.deepspeed)
             if self.use_retrieval_probe:
                 plugins["retrieval"] = DeepSpeedPlugin(hf_ds_config=self.args.deepspeed)
+            if self.use_reranking_probe:
+                plugins["reranking"] = DeepSpeedPlugin(hf_ds_config=self.args.deepspeed)
             args["deepspeed_plugin"] = plugins
         return args
 
@@ -155,6 +171,29 @@ def main(argv: list[str] | None = None) -> int:
                     num_proc=data_args.preprocessing_num_workers or None,
                 )
 
+        reranking_datasets = None
+        reranking_processor = None
+        reranking_evaluation_datasets = None
+        if training_args.reranking_steps:
+            reranking_processor = MSDeltaRerankingProcessor(
+                **processor.to_dict(),
+                peptide_max_length=training_args.reranking_peptide_max_length,
+            )
+            with training_args.main_process_first(local=False, desc="reranking preprocessing"):
+                reranking_datasets = build_reranking_datasets(
+                    training_args.reranking_dataset_repo,
+                    reranking_processor,
+                    num_proc=data_args.preprocessing_num_workers or None,
+                    revision=training_args.reranking_dataset_revision,
+                    include_consensus=training_args.reranking_include_consensus,
+                )
+                reranking_evaluation_datasets = {
+                    "reranking": build_reranking_evaluation_datasets(
+                        reranking_datasets["validation"],
+                        max_analytes=training_args.reranking_validation_analytes,
+                    )
+                }
+
         callbacks = build_callbacks(
             model,
             val_ds,
@@ -165,6 +204,9 @@ def main(argv: list[str] | None = None) -> int:
             denoising_processor=denoising_processor,
             retrieval_datasets=retrieval_datasets,
             retrieval_evaluation_datasets=retrieval_evaluation_datasets,
+            reranking_datasets=reranking_datasets,
+            reranking_processor=reranking_processor,
+            reranking_evaluation_datasets=reranking_evaluation_datasets,
         )
         trainer = MSDeltaTrainer(
             model=model,
@@ -175,6 +217,7 @@ def main(argv: list[str] | None = None) -> int:
             processing_class=processor,
             use_denoising_probe=bool(training_args.denoise_steps),
             use_retrieval_probe=bool(training_args.retrieval_steps),
+            use_reranking_probe=bool(training_args.reranking_steps),
         )
         # Force Trainer to report the validation loss.
         trainer.can_return_loss = True

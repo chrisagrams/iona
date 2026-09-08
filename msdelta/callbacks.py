@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import copy
 from pathlib import Path
 from typing import Any
 
@@ -15,8 +16,10 @@ from tqdm.auto import tqdm
 from transformers import TrainerCallback, TrainingArguments
 
 from msdelta.alignment import alignment_metrics
+from msdelta.configuration_msdelta import MSDeltaRerankingConfig
 from msdelta.denoising import run_denoising_probe
 from msdelta.probe import run_all_probes
+from msdelta.reranking import run_reranking_probe
 from msdelta.retrieval import run_retrieval_probe
 from msdelta.viz import render_bias_panels
 
@@ -287,6 +290,115 @@ class RetrievalProbeCallback(TrainerCallback):
             torch.distributed.barrier()
 
 
+class RerankingProbeCallback(TrainerCallback):
+    """Post-train a fresh distributed reranking head at fixed intervals."""
+
+    def __init__(
+        self,
+        module,
+        every,
+        datasets,
+        pp,
+        training_args,
+        out_dir,
+        *,
+        evaluation_datasets,
+    ):
+        self.module = module
+        self.every = every
+        self.datasets = datasets
+        self.evaluation_datasets = evaluation_datasets
+        self.pp = pp
+        self.training_args = training_args
+        self.out_dir = out_dir
+        self.last_step = -1
+        self.probe_training_args = TrainingArguments(
+            output_dir=str(out_dir / "reranking-probes"),
+            num_train_epochs=training_args.reranking_epochs,
+            per_device_train_batch_size=training_args.reranking_per_device_batch_size,
+            per_device_eval_batch_size=training_args.reranking_per_device_batch_size,
+            learning_rate=training_args.reranking_learning_rate,
+            weight_decay=training_args.reranking_weight_decay,
+            eval_strategy="no",
+            save_strategy="no",
+            logging_strategy="no",
+            remove_unused_columns=False,
+            label_names=["spectrum_labels", "peptide_labels"],
+            dataloader_num_workers=training_args.reranking_num_workers,
+            dataloader_drop_last=True,
+            prediction_loss_only=True,
+            bf16=training_args.bf16,
+            fp16=training_args.fp16,
+            seed=training_args.reranking_seed,
+            data_seed=training_args.reranking_seed,
+            report_to=[],
+            ddp_find_unused_parameters=False,
+        )
+
+    @property
+    def device(self) -> torch.device:
+        return next(self.module.parameters()).device
+
+    def on_step_end(self, args, state, control, **kwargs):
+        step = state.global_step
+        if not self.every or step <= 0 or step % self.every or step == self.last_step:
+            return
+        self.last_step = step
+        if self.device.type == "cuda":
+            torch.cuda.empty_cache()
+        destination = self.out_dir / "reranking-probes" / f"step-{step}"
+        accelerator_state = AcceleratorState()
+        use_named_plugins = (
+            accelerator_state.distributed_type == DistributedType.DEEPSPEED
+            and isinstance(accelerator_state.deepspeed_plugins, dict)
+            and "reranking" in accelerator_state.deepspeed_plugins
+        )
+        if use_named_plugins:
+            accelerator_state.select_deepspeed_plugin("reranking")
+        try:
+            metrics = run_reranking_probe(
+                self.module,
+                self.datasets["train"],
+                self.datasets["validation"],
+                output_dir=destination,
+                processor=self.pp,
+                evaluation_datasets=self.evaluation_datasets,
+                config=MSDeltaRerankingConfig(
+                    encoder=copy.deepcopy(self.module.config),
+                    peptide_vocab=self.pp.peptide_vocab,
+                    **{
+                        key: getattr(self.training_args, f"reranking_{key}")
+                        for key in (
+                            "projection_hidden_size",
+                            "embedding_size",
+                            "head_dropout",
+                            "temperature",
+                            "peptide_hidden_size",
+                            "peptide_num_hidden_layers",
+                            "peptide_num_attention_heads",
+                            "peptide_intermediate_size",
+                            "peptide_max_length",
+                        )
+                    },
+                ),
+                training_args=self.probe_training_args,
+            )
+        finally:
+            if use_named_plugins:
+                accelerator_state.select_deepspeed_plugin("pretrain")
+        if state.is_world_process_zero:
+            if wandb.run is not None:
+                wandb.log({**metrics, "train/global_step": step})
+            tqdm.write(
+                f"reranking: loss={metrics['reranking/loss']:.3f} "
+                f"Hit@1={metrics['reranking/Hit@1']:.3f} "
+                f"MRR={metrics['reranking/MRR']:.3f} "
+                f"Hit@5={metrics['reranking/Hit@5']:.3f} model={destination}"
+            )
+        if torch.distributed.is_available() and torch.distributed.is_initialized():
+            torch.distributed.barrier()
+
+
 def build_callbacks(
     module,
     val_dataset,
@@ -297,6 +409,9 @@ def build_callbacks(
     denoising_processor=None,
     retrieval_datasets=None,
     retrieval_evaluation_datasets=None,
+    reranking_datasets=None,
+    reranking_processor=None,
+    reranking_evaluation_datasets=None,
 ):
     """Create the callbacks enabled in the configuration."""
     cbs: list[TrainerCallback] = []
@@ -324,6 +439,20 @@ def build_callbacks(
                 training_args,
                 out_dir,
                 evaluation_datasets=retrieval_evaluation_datasets,
+            )
+        )
+    if training_args.reranking_steps:
+        if reranking_datasets is None or reranking_processor is None:
+            raise ValueError("reranking datasets and processor are required")
+        cbs.append(
+            RerankingProbeCallback(
+                module,
+                training_args.reranking_steps,
+                reranking_datasets,
+                reranking_processor,
+                training_args,
+                out_dir,
+                evaluation_datasets=reranking_evaluation_datasets,
             )
         )
     if training_args.denoise_steps:

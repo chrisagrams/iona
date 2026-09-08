@@ -246,3 +246,81 @@ def build_retrieval_evaluation_datasets(
             labels,
         )
     return evaluation_datasets
+
+
+def build_reranking_datasets(
+    repo_id: str,
+    processor,
+    num_proc: int | None = None,
+    *,
+    revision: str | None = None,
+    include_consensus: bool = False,
+    include_test: bool = False,
+) -> DatasetDict:
+    """Preserve modified-peptide identities across charges and distributed batches."""
+    splits = ["train", "validation"] + (["test"] if include_test else [])
+    raw = DatasetDict(
+        {split: load_dataset(repo_id, split=split, revision=revision) for split in splits}
+    )
+    identities = sorted({peptide for dataset in raw.values() for peptide in dataset["peptide"]})
+    peptide_ids = {peptide: index for index, peptide in enumerate(identities)}
+    # The supplied splits are disjoint by modified peptide, though not by bare sequence.
+    seen = set()
+    for split, dataset in raw.items():
+        peptides = set(dataset["peptide"])
+        if seen & peptides:
+            raise ValueError(f"modified peptides overlap between {split} and earlier splits")
+        seen.update(peptides)
+
+    def process(row):
+        if row["analyte_id"] != f"{row['peptide']}_{row['charge']}":
+            raise ValueError("analyte_id must agree with peptide and charge")
+        if len(row["experimental"]) != 3:
+            raise ValueError("reranking examples must contain three experimental spectra")
+        spectra = row["experimental"]
+        if include_consensus:
+            spectra = [*spectra, row["consensus"]]
+        values = [processor(s["mz"], s["intensity"], padding=False) for s in spectra]
+        return {
+            "mz": [v["mz"] for v in values],
+            "log_intensity": [v["log_intensity"] for v in values],
+            "peptide_input_ids": processor.tokenize_peptide(row["peptide"]),
+            "peptide_id": peptide_ids[row["peptide"]],
+        }
+
+    return raw.map(
+        process,
+        remove_columns=raw["train"].column_names,
+        num_proc=num_proc,
+        desc="preprocess reranking PSMs",
+    )
+
+
+def build_reranking_evaluation_datasets(
+    dataset: Dataset,
+    *,
+    max_analytes: int | None = 1000,
+) -> dict[str, Dataset]:
+    """Pair experimental spectrum queries with a deduplicated modified-peptide gallery."""
+    if max_analytes is not None:
+        if max_analytes <= 0:
+            raise ValueError("max_analytes must be positive or None")
+        dataset = dataset.select(range(min(len(dataset), max_analytes)))
+    peptides = {}
+    spectra = []
+    for row in dataset:
+        label = row["peptide_id"]
+        peptides.setdefault(
+            label, {"peptide_input_ids": row["peptide_input_ids"], "evaluation_labels": label}
+        )
+        # Consensus, when requested for training, is appended after the three experiments.
+        spectra.extend(
+            {"mz": mz, "log_intensity": intensity, "evaluation_labels": label}
+            for mz, intensity in zip(row["mz"][:3], row["log_intensity"][:3])
+        )
+    if not spectra:
+        raise ValueError("reranking evaluation requires at least one analyte")
+    return {
+        "spectra": Dataset.from_list(spectra),
+        "peptides": Dataset.from_list(list(peptides.values())),
+    }

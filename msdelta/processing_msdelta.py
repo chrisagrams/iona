@@ -107,8 +107,7 @@ class MSDeltaProcessor(FeatureExtractionMixin):
             raise ValueError("retrieval examples must contain exactly three experimental spectra")
         spectra = [consensus, *experimental]
         processed = [
-            self(spectrum["mz"], spectrum["intensity"], padding=False)
-            for spectrum in spectra
+            self(spectrum["mz"], spectrum["intensity"], padding=False) for spectrum in spectra
         ]
         return {
             "mz": [values["mz"] for values in processed],
@@ -309,3 +308,115 @@ class MSDeltaDataCollatorForRetrieval:
 
 
 MSDeltaProcessor.register_for_auto_class("AutoProcessor")
+
+
+class MSDeltaRerankingProcessor(MSDeltaProcessor):
+    """Process spectra and tokenize the dataset's localized modified residues."""
+
+    model_input_names = [
+        "mz",
+        "log_intensity",
+        "attention_mask",
+        "peptide_input_ids",
+        "peptide_attention_mask",
+    ]
+
+    def __init__(self, peptide_vocab=None, peptide_max_length=25, **kwargs):
+        super().__init__(**kwargs)
+        self.peptide_vocab = peptide_vocab or [
+            "[PAD]",
+            *list("ACDEFGHIKLMNPQRSTVWY"),
+            "C[57.0215]",
+            "M[15.9949]",
+        ]
+        self.peptide_max_length = peptide_max_length
+        if peptide_max_length <= 0:
+            raise ValueError("peptide_max_length must be positive")
+        if self.peptide_vocab[0] != "[PAD]" or len(set(self.peptide_vocab)) != len(
+            self.peptide_vocab
+        ):
+            raise ValueError("peptide_vocab must be unique with [PAD] at index zero")
+
+    def tokenize_peptide(self, peptide: str) -> list[int]:
+        """Consume every character; never discard unknown or misplaced modifications."""
+        vocab = {token: index for index, token in enumerate(self.peptide_vocab)}
+        ids = []
+        position = 0
+        while position < len(peptide):
+            end = position + 1
+            if end < len(peptide) and peptide[end] == "[":
+                closing = peptide.find("]", end)
+                if closing == -1:
+                    raise ValueError(f"unterminated modification in {peptide!r}")
+                end = closing + 1
+            token = peptide[position:end]
+            if token not in vocab or vocab[token] == 0:
+                raise ValueError(f"unsupported peptide residue {token!r} in {peptide!r}")
+            ids.append(vocab[token])
+            position = end
+        if not ids or len(ids) > self.peptide_max_length:
+            raise ValueError(f"peptides must contain 1–{self.peptide_max_length} residues")
+        return ids
+
+    def encode_peptides(self, peptides: list[str]) -> BatchFeature:
+        ids = [self.tokenize_peptide(peptide) for peptide in peptides]
+        if not ids:
+            raise ValueError("peptides must not be empty")
+        length = max(map(len, ids))
+        return BatchFeature(
+            data={
+                "peptide_input_ids": [row + [0] * (length - len(row)) for row in ids],
+                "peptide_attention_mask": [
+                    [1] * len(row) + [0] * (length - len(row)) for row in ids
+                ],
+            },
+            tensor_type="pt",
+        )
+
+
+@dataclass
+class MSDeltaDataCollatorForReranking:
+    """Pad grouped training rows or individual spectrum/peptide evaluation rows."""
+
+    def __call__(self, features: list[dict]) -> dict[str, torch.Tensor]:
+        if not features:
+            raise ValueError("features must not be empty")
+        batch = {}
+        grouped = "peptide_id" in features[0]
+        if "mz" in features[0]:
+            spectra = [
+                (mz, intensity)
+                for row in features
+                for mz, intensity in (
+                    zip(row["mz"], row["log_intensity"])
+                    if grouped
+                    else [(row["mz"], row["log_intensity"])]
+                )
+            ]
+            lengths = torch.tensor([len(mz) for mz, _ in spectra])
+            if not len(lengths) or (lengths == 0).any():
+                raise ValueError("spectra must contain at least one peak")
+            batch["mz"] = torch.nn.utils.rnn.pad_sequence(
+                [torch.tensor(mz, dtype=torch.float32) for mz, _ in spectra], batch_first=True
+            )
+            batch["log_intensity"] = torch.nn.utils.rnn.pad_sequence(
+                [torch.tensor(i, dtype=torch.float32) for _, i in spectra], batch_first=True
+            )
+            batch["attention_mask"] = torch.arange(int(lengths.max()))[None, :] < lengths[:, None]
+        if "peptide_input_ids" in features[0]:
+            batch["peptide_input_ids"] = torch.nn.utils.rnn.pad_sequence(
+                [torch.tensor(row["peptide_input_ids"], dtype=torch.long) for row in features],
+                batch_first=True,
+            )
+            batch["peptide_attention_mask"] = batch["peptide_input_ids"] != 0
+        if grouped:
+            batch["peptide_labels"] = torch.tensor([row["peptide_id"] for row in features])
+            batch["spectrum_labels"] = torch.tensor(
+                [row["peptide_id"] for row in features for _ in row["mz"]]
+            )
+        if "evaluation_labels" in features[0]:
+            batch["evaluation_labels"] = torch.tensor([r["evaluation_labels"] for r in features])
+        return batch
+
+
+MSDeltaRerankingProcessor.register_for_auto_class("AutoProcessor")
