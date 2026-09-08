@@ -121,6 +121,7 @@ def main(argv: list[str] | None = None) -> int:
                 val_paths,
                 processor,
                 num_proc=data_args.preprocessing_num_workers or None,
+                max_train_samples=data_args.max_train_samples,
             )
         eval_size = training_args.validation_batches * training_args.per_device_eval_batch_size
         eval_ds = val_ds.select(range(min(len(val_ds), eval_size)))

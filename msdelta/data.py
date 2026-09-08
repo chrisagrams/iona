@@ -143,17 +143,25 @@ def collate_preprocessed(features: list[dict]) -> dict[str, torch.Tensor]:
 
 
 def build_preprocessed_dataset(
-    paths: list[Path], processor: MSDeltaProcessor, num_proc: int | None = None
+    paths: list[Path],
+    processor: MSDeltaProcessor,
+    num_proc: int | None = None,
+    max_samples: int | None = None,
 ):
     """Load and preprocess Parquet shards."""
     ds = load_dataset("parquet", data_files=[str(p) for p in paths], split="train")
+    if max_samples is not None and max_samples < 1:
+        raise ValueError("max_samples must be a positive integer")
     ds = ds.map(
         partial(_preprocess_example, processor=processor),
         remove_columns=ds.column_names,
         num_proc=num_proc,
         desc="preprocess spectra",
     )
-    return ds.filter(lambda ex: len(ex["mz"]) > 0, num_proc=num_proc, desc="drop empty spectra")
+    ds = ds.filter(lambda ex: len(ex["mz"]) > 0, num_proc=num_proc, desc="drop empty spectra")
+    if max_samples is not None:
+        ds = ds.select(range(min(len(ds), max_samples)))
+    return ds
 
 
 def build_pretraining_datasets(
@@ -161,9 +169,15 @@ def build_pretraining_datasets(
     val_paths: list[Path],
     processor: MSDeltaProcessor,
     num_proc: int | None = None,
+    max_train_samples: int | None = None,
 ):
     """Build the training and validation datasets."""
-    train = build_preprocessed_dataset(train_paths, processor, num_proc=num_proc)
+    train = build_preprocessed_dataset(
+        train_paths,
+        processor,
+        num_proc=num_proc,
+        max_samples=max_train_samples,
+    )
     val = build_preprocessed_dataset(val_paths, processor, num_proc=num_proc)
     return train, val
 

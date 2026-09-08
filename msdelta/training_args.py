@@ -38,6 +38,7 @@ class DataArguments:
     dataset_validation_split: str = "val"
     num_validation_files: int = 2
     preprocessing_num_workers: int = 24
+    max_train_samples: int | None = None
     intensity_threshold_frac: float | None = None
     max_peaks: int | None = None
 

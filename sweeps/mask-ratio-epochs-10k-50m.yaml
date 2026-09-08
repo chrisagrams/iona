@@ -1,0 +1,39 @@
+program: msdelta/train.py
+
+project: msdelta-pretrain
+name: 50m-mask-ratio-epochs-10k-grid
+
+method: grid
+metric:
+  name: eval/loss
+  goal: minimize
+
+parameters:
+  mask_ratio:
+    values: [0.15, 0.25, 0.50, 0.75]
+  num_train_epochs:
+    values: [1, 2, 3]
+  seed:
+    value: 0
+
+command:
+  - bash
+  - -lc
+  - >-
+    exec uv run torchrun --standalone --nproc_per_node=2 -m msdelta.train
+    --args_file configs/msdelta-base-50m/training.args
+    --run_name="$WANDB_RUN_ID"
+    --output_dir="./runs/mask-ratio-epochs/$WANDB_RUN_ID"
+    --wandb_project=msdelta-pretrain
+    --max_train_samples=5120000
+    --max_steps=-1
+    --warmup_steps=400
+    --eval_steps=500
+    --save_strategy=no
+    --probe_steps=5000
+    --bias_curve_steps=5000
+    --retrieval_steps=5000
+    --denoise_steps=5000
+    "$@"
+  - wandb-sweep
+  - ${args}
