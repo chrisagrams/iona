@@ -146,6 +146,7 @@ class DenoisingProbeCallback(TrainerCallback):
             data_seed=training_args.denoise_seed,
             report_to=[],
             ddp_find_unused_parameters=False,
+            accelerator_config={"even_batches": False},
         )
 
     @property
