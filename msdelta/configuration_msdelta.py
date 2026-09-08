@@ -86,5 +86,41 @@ class MSDeltaDenoisingConfig(PretrainedConfig):
         return self.encoder.initializer_range
 
 
+class MSDeltaRetrievalConfig(PretrainedConfig):
+    """Compose an MSDelta encoder configuration with a retrieval head."""
+
+    model_type = "msdelta-retrieval"
+    sub_configs = {"encoder": MSDeltaConfig}
+
+    def __init__(
+        self,
+        encoder: MSDeltaConfig | dict | None = None,
+        projection_hidden_size: int = 512,
+        embedding_size: int = 256,
+        head_dropout: float = 0.1,
+        temperature: float = 0.07,
+        **kwargs,
+    ):
+        super().__init__(**kwargs)
+        self.encoder = (
+            encoder if isinstance(encoder, MSDeltaConfig) else MSDeltaConfig(**(encoder or {}))
+        )
+        self.projection_hidden_size = projection_hidden_size
+        self.embedding_size = embedding_size
+        self.head_dropout = head_dropout
+        self.temperature = temperature
+        if projection_hidden_size <= 0 or embedding_size <= 0:
+            raise ValueError("retrieval projection dimensions must be positive")
+        if not 0.0 <= head_dropout < 1.0:
+            raise ValueError("head_dropout must be in [0, 1)")
+        if temperature <= 0.0:
+            raise ValueError("temperature must be positive")
+
+    @property
+    def initializer_range(self) -> float:
+        return self.encoder.initializer_range
+
+
 MSDeltaConfig.register_for_auto_class()
 MSDeltaDenoisingConfig.register_for_auto_class()
+MSDeltaRetrievalConfig.register_for_auto_class()

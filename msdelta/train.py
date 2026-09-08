@@ -16,6 +16,8 @@ from msdelta.configuration_msdelta import MSDeltaConfig
 from msdelta.data import (
     build_denoising_datasets,
     build_pretraining_datasets,
+    build_retrieval_datasets,
+    build_retrieval_evaluation_datasets,
     resolve_dataset_paths,
 )
 from msdelta.modeling_msdelta import MSDeltaForPreTraining
@@ -26,20 +28,25 @@ from msdelta.wandb_distributed import init_wandb_run
 
 
 class MSDeltaTrainer(Trainer):
-    """Configure separate DeepSpeed plugins for pretraining and denoising."""
+    """Configure separate DeepSpeed plugins for pretraining and frozen-encoder probes."""
 
-    def __init__(self, *args, use_denoising_probe: bool = False, **kwargs):
+    def __init__(
+        self, *args, use_denoising_probe: bool = False, use_retrieval_probe: bool = False, **kwargs
+    ):
         self.use_denoising_probe = use_denoising_probe
+        self.use_retrieval_probe = use_retrieval_probe
         super().__init__(*args, **kwargs)
 
     def _build_accelerator_args(self, **kwargs):
         args = super()._build_accelerator_args(**kwargs)
         pretrain_plugin = args.get("deepspeed_plugin")
-        if self.use_denoising_probe and pretrain_plugin is not None:
-            args["deepspeed_plugin"] = {
-                "pretrain": pretrain_plugin,
-                "denoise": DeepSpeedPlugin(hf_ds_config=self.args.deepspeed),
-            }
+        if pretrain_plugin is not None and (self.use_denoising_probe or self.use_retrieval_probe):
+            plugins = {"pretrain": pretrain_plugin}
+            if self.use_denoising_probe:
+                plugins["denoise"] = DeepSpeedPlugin(hf_ds_config=self.args.deepspeed)
+            if self.use_retrieval_probe:
+                plugins["retrieval"] = DeepSpeedPlugin(hf_ds_config=self.args.deepspeed)
+            args["deepspeed_plugin"] = plugins
         return args
 
 
@@ -131,6 +138,22 @@ def main(argv: list[str] | None = None) -> int:
                     denoising_processor,
                     num_proc=data_args.preprocessing_num_workers or None,
                 )
+        retrieval_datasets = None
+        retrieval_evaluation_datasets = None
+        if training_args.retrieval_steps:
+            with training_args.main_process_first(local=False, desc="retrieval preprocessing"):
+                retrieval_datasets = build_retrieval_datasets(
+                    training_args.retrieval_dataset_repo,
+                    processor,
+                    num_proc=data_args.preprocessing_num_workers or None,
+                )
+                retrieval_evaluation_datasets = build_retrieval_evaluation_datasets(
+                    retrieval_datasets["validation"],
+                    processor,
+                    max_analytes=training_args.retrieval_validation_analytes,
+                    replicate_repo_id=training_args.replicate_retrieval_repo,
+                    num_proc=data_args.preprocessing_num_workers or None,
+                )
 
         callbacks = build_callbacks(
             model,
@@ -140,6 +163,8 @@ def main(argv: list[str] | None = None) -> int:
             out_dir,
             denoising_datasets=denoising_datasets,
             denoising_processor=denoising_processor,
+            retrieval_datasets=retrieval_datasets,
+            retrieval_evaluation_datasets=retrieval_evaluation_datasets,
         )
         trainer = MSDeltaTrainer(
             model=model,
@@ -149,6 +174,7 @@ def main(argv: list[str] | None = None) -> int:
             data_collator=MSDeltaDataCollatorForPreTraining(mask_ratio=training_args.mask_ratio),
             processing_class=processor,
             use_denoising_probe=bool(training_args.denoise_steps),
+            use_retrieval_probe=bool(training_args.retrieval_steps),
         )
         # Force Trainer to report the validation loss.
         trainer.can_return_loss = True

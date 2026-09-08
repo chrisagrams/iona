@@ -101,6 +101,20 @@ class MSDeltaProcessor(FeatureExtractionMixin):
             "labels": noise[selected].float().tolist(),
         }
 
+    def process_retrieval_example(self, consensus, experimental) -> dict[str, list]:
+        """Process one consensus spectrum and its three experimental replicates."""
+        if len(experimental) != 3:
+            raise ValueError("retrieval examples must contain exactly three experimental spectra")
+        spectra = [consensus, *experimental]
+        processed = [
+            self(spectrum["mz"], spectrum["intensity"], padding=False)
+            for spectrum in spectra
+        ]
+        return {
+            "mz": [values["mz"] for values in processed],
+            "log_intensity": [values["log_intensity"] for values in processed],
+        }
+
     def pad(
         self,
         encoded_inputs: list[dict[str, Any]],
@@ -252,6 +266,45 @@ class MSDeltaDataCollatorForPreTraining:
             "attention_mask": attention_mask,
             "mask_positions": mask_positions,
             "labels": labels,
+        }
+
+
+@dataclass
+class MSDeltaDataCollatorForRetrieval:
+    """Flatten and pad four-spectrum analyte groups for contrastive training."""
+
+    def __call__(self, features: list[dict]) -> dict[str, torch.Tensor]:
+        if not features:
+            raise ValueError("features must not be empty")
+        mzs: list[list[float]] = []
+        log_intensities: list[list[float]] = []
+        group_ids: list[int] = []
+        for group_id, feature in enumerate(features):
+            group_mz = feature["mz"]
+            group_intensity = feature["log_intensity"]
+            if len(group_mz) != 4 or len(group_intensity) != 4:
+                raise ValueError("each retrieval example must contain four spectra")
+            mzs.extend(group_mz)
+            log_intensities.extend(group_intensity)
+            group_ids.extend([group_id] * 4)
+
+        target_length = max(max((len(mz) for mz in mzs), default=0), 1)
+        batch_size = len(mzs)
+        mz = torch.zeros(batch_size, target_length, dtype=torch.float32)
+        log_intensity = torch.zeros_like(mz)
+        attention_mask = torch.zeros(batch_size, target_length, dtype=torch.long)
+        for index, (mass, intensity) in enumerate(zip(mzs, log_intensities)):
+            length = len(mass)
+            if length == 0:
+                continue
+            mz[index, :length] = torch.as_tensor(mass, dtype=torch.float32)
+            log_intensity[index, :length] = torch.as_tensor(intensity, dtype=torch.float32)
+            attention_mask[index, :length] = 1
+        return {
+            "mz": mz,
+            "log_intensity": log_intensity,
+            "attention_mask": attention_mask,
+            "group_ids": torch.tensor(group_ids, dtype=torch.long),
         }
 
 
