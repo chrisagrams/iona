@@ -6,12 +6,19 @@ from dataclasses import dataclass
 
 import torch
 import torch.nn.functional as F
+from pytorch_metric_learning.losses import SupConLoss
+from sentence_transformers.sentence_transformer.modules import Pooling
 from torch import Tensor, nn
-from transformers import PreTrainedModel
+from torch.distributed.nn.functional import all_gather as distributed_all_gather
+from transformers import PretrainedConfig, PreTrainedModel
 from transformers.modeling_outputs import BaseModelOutput
 from transformers.utils.generic import ModelOutput
 
-from .configuration_msdelta import MSDeltaConfig
+from .configuration_msdelta import (
+    MSDeltaConfig,
+    MSDeltaDenoisingConfig,
+    MSDeltaRetrievalConfig,
+)
 from .fourier import FourierFeatures
 
 
@@ -23,27 +30,41 @@ class MSDeltaForPreTrainingOutput(ModelOutput):
     logits: Tensor | None = None
 
 
+class ScalarInputLinear(nn.Linear):
+    """Linear layer that retains PyTorch's fan-in-aware initialization."""
+
+
+@dataclass
+class MSDeltaForDenoisingOutput(ModelOutput):
+    """Output of peak-level signal/noise classification."""
+
+    loss: Tensor | None = None
+    logits: Tensor | None = None
+
+
+@dataclass
+class MSDeltaForRetrievalOutput(ModelOutput):
+    """Output of spectrum-level contrastive retrieval."""
+
+    loss: Tensor | None = None
+    embeddings: Tensor | None = None
+
+
 class PeakEmbed(nn.Module):
     """Create m/z-free tokens from normalized log intensity."""
 
     def __init__(self, config: MSDeltaConfig):
         super().__init__()
-        self.ff_int = FourierFeatures(
-            config.fourier_int_n_freqs,
-            config.fourier_int_f_min,
-            config.fourier_int_f_max,
-            learnable=config.fourier_int_learnable,
-        )
         self.mlp = nn.Sequential(
-            nn.Linear(self.ff_int.out_dim, config.hidden_size),
+            ScalarInputLinear(1, config.hidden_size),
             nn.GELU(),
             nn.Linear(config.hidden_size, config.hidden_size),
         )
         self.mask_token = nn.Parameter(torch.empty(config.hidden_size))
 
     def forward(self, log_intensity: Tensor, mask_positions: Tensor | None = None) -> Tensor:
-        feats = self.ff_int(log_intensity)
-        tokens = self.mlp(feats.to(self.mlp[0].weight.dtype))
+        intensity = log_intensity.unsqueeze(-1).to(dtype=self.mask_token.dtype)
+        tokens = self.mlp(intensity)
         if mask_positions is not None:
             tokens = torch.where(mask_positions.unsqueeze(-1), self.mask_token, tokens)
         return tokens
@@ -58,11 +79,8 @@ class DeltaMZBias(nn.Module):
             config.delta_bias_n_freqs,
             config.delta_bias_f_min,
             config.delta_bias_f_max,
-            log_spaced=True,
-            learnable=config.delta_bias_learnable,
         )
         self.n_heads = config.num_attention_heads
-        self.scale = config.delta_bias_scale
         self.head_mlps = nn.ModuleList(
             [
                 nn.Sequential(
@@ -76,8 +94,7 @@ class DeltaMZBias(nn.Module):
 
     def _curve(self, feats: Tensor) -> Tensor:
         feats = feats.to(next(self.head_mlps.parameters()).dtype)
-        out = torch.cat([mlp(feats) for mlp in self.head_mlps], dim=-1)
-        return self.scale * torch.tanh(out / self.scale)
+        return torch.cat([mlp(feats) for mlp in self.head_mlps], dim=-1)
 
     def forward(self, mz: Tensor) -> Tensor:
         delta_mz = mz.unsqueeze(-1) - mz.unsqueeze(-2)
@@ -155,13 +172,15 @@ class EncoderBlock(nn.Module):
 class MSDeltaPreTrainedModel(PreTrainedModel):
     """Shared Hugging Face behavior for MSDelta model classes."""
 
-    config_class = MSDeltaConfig
+    config_class: type[PretrainedConfig] | None = MSDeltaConfig
     base_model_prefix = "msdelta"
     main_input_name = "mz"
     supports_gradient_checkpointing = True
     _no_split_modules = ["EncoderBlock"]
 
     def _init_weights(self, module: nn.Module) -> None:
+        if isinstance(module, ScalarInputLinear):
+            return
         if isinstance(module, nn.Linear):
             module.weight.data.normal_(mean=0.0, std=self.config.initializer_range)
             if module.bias is not None:
@@ -234,6 +253,51 @@ class IntensityHead(nn.Module):
         return self.projection(hidden_states).squeeze(-1).float()
 
 
+class PeakDenoisingHead(nn.Module):
+    """Predict one noise logit per encoded peak."""
+
+    def __init__(self, config: MSDeltaDenoisingConfig):
+        super().__init__()
+        self.projection = nn.Sequential(
+            nn.Linear(config.encoder.hidden_size, config.head_hidden_size),
+            nn.GELU(),
+            nn.Dropout(config.head_dropout),
+            nn.Linear(config.head_hidden_size, 1),
+        )
+
+    def forward(self, hidden_states: Tensor) -> Tensor:
+        return self.projection(hidden_states).squeeze(-1).float()
+
+
+class SpectrumRetrievalHead(nn.Module):
+    """Pool peak tokens and project them into a normalized retrieval space."""
+
+    def __init__(self, config: MSDeltaRetrievalConfig):
+        super().__init__()
+        self.pooling = Pooling(config.encoder.hidden_size, pooling_mode=("mean", "max"))
+        self.projection = nn.Sequential(
+            nn.Linear(2 * config.encoder.hidden_size, config.projection_hidden_size),
+            nn.GELU(),
+            nn.Dropout(config.head_dropout),
+            nn.Linear(config.projection_hidden_size, config.embedding_size),
+        )
+
+    def forward(self, hidden_states: Tensor, attention_mask: Tensor) -> Tensor:
+        mask = attention_mask.bool()
+        pooled = self.pooling(
+            {
+                "token_embeddings": hidden_states,
+                "attention_mask": mask,
+                # Keep empty-spectrum mean pooling finite, including in float16.
+                "token_weights_sum": mask.sum(dim=1).clamp_min(1).to(hidden_states.dtype),
+            }
+        )["sentence_embedding"]
+        # Max pooling yields -inf when a spectrum has no valid peaks.
+        pooled = torch.nan_to_num(pooled, neginf=0.0)
+        embeddings = self.projection(pooled)
+        return F.normalize(embeddings.float(), dim=-1)
+
+
 class MSDeltaForPreTraining(MSDeltaPreTrainedModel):
     """MSDelta with the masked-intensity pretraining objective."""
 
@@ -288,5 +352,173 @@ class MSDeltaForPreTraining(MSDeltaPreTrainedModel):
         )
 
 
+class MSDeltaForDenoising(MSDeltaPreTrainedModel):
+    """MSDelta encoder with a peak-level noise classifier."""
+
+    config_class: type[PretrainedConfig] | None = MSDeltaDenoisingConfig
+
+    def __init__(
+        self,
+        config: MSDeltaDenoisingConfig,
+        encoder: MSDeltaModel | None = None,
+        freeze_encoder: bool = False,
+    ):
+        super().__init__(config)
+        self.msdelta = encoder if encoder is not None else MSDeltaModel(config.encoder)
+        self.denoising_head = PeakDenoisingHead(config)
+        self._encoder_is_frozen = False
+        if encoder is None:
+            self.post_init()
+        else:
+            self.denoising_head.apply(self._init_weights)
+        if freeze_encoder:
+            self.freeze_encoder()
+
+    def freeze_encoder(self) -> None:
+        """Freeze the encoder and keep its stochastic layers disabled."""
+        self._encoder_is_frozen = True
+        self.msdelta.requires_grad_(False)
+        self.msdelta.eval()
+
+    def train(self, mode: bool = True):
+        super().train(mode)
+        if self._encoder_is_frozen:
+            self.msdelta.eval()
+        return self
+
+    def forward(
+        self,
+        mz: Tensor,
+        log_intensity: Tensor,
+        attention_mask: Tensor | None = None,
+        labels: Tensor | None = None,
+        return_dict: bool | None = None,
+    ) -> MSDeltaForDenoisingOutput | tuple[Tensor, ...]:
+        if return_dict is None:
+            return_dict = self.config.return_dict
+        if self._encoder_is_frozen:
+            with torch.no_grad():
+                outputs = self.msdelta(
+                    mz=mz,
+                    log_intensity=log_intensity,
+                    attention_mask=attention_mask,
+                    return_dict=True,
+                )
+        else:
+            outputs = self.msdelta(
+                mz=mz,
+                log_intensity=log_intensity,
+                attention_mask=attention_mask,
+                return_dict=True,
+            )
+        logits = self.denoising_head(outputs.last_hidden_state)
+        loss = None
+        if labels is not None:
+            if labels.shape != logits.shape:
+                raise ValueError("labels must have the same shape as mz")
+            valid = labels != -100
+            if attention_mask is not None:
+                valid = valid & attention_mask.bool()
+            loss = (
+                F.binary_cross_entropy_with_logits(logits[valid], labels[valid].float())
+                if valid.any()
+                else logits.sum() * 0.0
+            )
+
+        if not return_dict:
+            result = (logits,)
+            return ((loss,) + result) if loss is not None else result
+        return MSDeltaForDenoisingOutput(loss=loss, logits=logits)
+
+
+class MSDeltaForRetrieval(MSDeltaPreTrainedModel):
+    """MSDelta encoder with a spectrum-level contrastive retrieval head."""
+
+    config_class: type[PretrainedConfig] | None = MSDeltaRetrievalConfig
+
+    def __init__(
+        self,
+        config: MSDeltaRetrievalConfig,
+        encoder: MSDeltaModel | None = None,
+        freeze_encoder: bool = False,
+    ):
+        super().__init__(config)
+        self.msdelta = encoder if encoder is not None else MSDeltaModel(config.encoder)
+        self.retrieval_head = SpectrumRetrievalHead(config)
+        self.contrastive_loss = SupConLoss(temperature=config.temperature)
+        self._encoder_is_frozen = False
+        if encoder is None:
+            self.post_init()
+        else:
+            self.retrieval_head.apply(self._init_weights)
+        if freeze_encoder:
+            self.freeze_encoder()
+
+    def freeze_encoder(self) -> None:
+        """Freeze the encoder and keep its stochastic layers disabled."""
+        self._encoder_is_frozen = True
+        self.msdelta.requires_grad_(False)
+        self.msdelta.eval()
+
+    def train(self, mode: bool = True):
+        super().train(mode)
+        if self._encoder_is_frozen:
+            self.msdelta.eval()
+        return self
+
+    def forward(
+        self,
+        mz: Tensor,
+        log_intensity: Tensor,
+        attention_mask: Tensor | None = None,
+        group_ids: Tensor | None = None,
+        return_dict: bool | None = None,
+    ) -> MSDeltaForRetrievalOutput | tuple[Tensor, ...]:
+        if return_dict is None:
+            return_dict = self.config.return_dict
+        if attention_mask is None:
+            attention_mask = torch.ones_like(mz, dtype=torch.long)
+        if self._encoder_is_frozen:
+            with torch.no_grad():
+                outputs = self.msdelta(
+                    mz=mz,
+                    log_intensity=log_intensity,
+                    attention_mask=attention_mask,
+                    return_dict=True,
+                )
+        else:
+            outputs = self.msdelta(
+                mz=mz,
+                log_intensity=log_intensity,
+                attention_mask=attention_mask,
+                return_dict=True,
+            )
+        embeddings = self.retrieval_head(outputs.last_hidden_state, attention_mask)
+        loss = None
+        if group_ids is not None:
+            if group_ids.ndim != 1 or group_ids.shape[0] != embeddings.shape[0]:
+                raise ValueError("group_ids must contain one value per spectrum")
+            loss_embeddings = embeddings
+            labels = group_ids.long()
+            if torch.distributed.is_available() and torch.distributed.is_initialized():
+                world_size = torch.distributed.get_world_size()
+                rank = torch.distributed.get_rank()
+                # Each rank's collator assigns its own batch-local group IDs.
+                labels = labels * world_size + rank
+                # Gather with autograd so remote candidates receive gradients.
+                loss_embeddings = torch.cat(distributed_all_gather(embeddings), dim=0)
+                gathered_labels = [torch.empty_like(labels) for _ in range(world_size)]
+                torch.distributed.all_gather(gathered_labels, labels)
+                labels = torch.cat(gathered_labels)
+            loss = self.contrastive_loss(loss_embeddings, labels)
+
+        if not return_dict:
+            result = (embeddings,)
+            return ((loss,) + result) if loss is not None else result
+        return MSDeltaForRetrievalOutput(loss=loss, embeddings=embeddings)
+
+
 MSDeltaModel.register_for_auto_class("AutoModel")
 MSDeltaForPreTraining.register_for_auto_class("AutoModelForPreTraining")
+MSDeltaForDenoising.register_for_auto_class("AutoModelForTokenClassification")
+MSDeltaForRetrieval.register_for_auto_class("AutoModel")

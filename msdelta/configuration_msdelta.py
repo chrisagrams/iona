@@ -20,25 +20,13 @@ class MSDeltaConfig(PretrainedConfig):
         attention_probs_dropout_prob: float = 0.1,
         layer_norm_eps: float = 1e-5,
         initializer_range: float = 0.02,
-        fourier_int_n_freqs: int = 16,
-        fourier_int_f_min: float = 1e-2,
-        fourier_int_f_max: float = 1e2,
-        fourier_int_learnable: bool = True,
         delta_bias_n_freqs: int = 64,
         delta_bias_per_head_hidden: int = 32,
         delta_bias_f_min: float = 1e-2,
         delta_bias_f_max: float = 1e3,
-        delta_bias_scale: float = 3.0,
-        delta_bias_learnable: bool = True,
         **kwargs,
     ):
         super().__init__(**kwargs)
-        if not getattr(self, "auto_map", None):
-            self.auto_map = {
-                "AutoConfig": "configuration_msdelta.MSDeltaConfig",
-                "AutoModel": "modeling_msdelta.MSDeltaModel",
-                "AutoModelForPreTraining": "modeling_msdelta.MSDeltaForPreTraining",
-            }
         self.hidden_size = hidden_size
         self.num_attention_heads = num_attention_heads
         self.num_hidden_layers = num_hidden_layers
@@ -47,16 +35,10 @@ class MSDeltaConfig(PretrainedConfig):
         self.attention_probs_dropout_prob = attention_probs_dropout_prob
         self.layer_norm_eps = layer_norm_eps
         self.initializer_range = initializer_range
-        self.fourier_int_n_freqs = fourier_int_n_freqs
-        self.fourier_int_f_min = fourier_int_f_min
-        self.fourier_int_f_max = fourier_int_f_max
-        self.fourier_int_learnable = fourier_int_learnable
         self.delta_bias_n_freqs = delta_bias_n_freqs
         self.delta_bias_per_head_hidden = delta_bias_per_head_hidden
         self.delta_bias_f_min = delta_bias_f_min
         self.delta_bias_f_max = delta_bias_f_max
-        self.delta_bias_scale = delta_bias_scale
-        self.delta_bias_learnable = delta_bias_learnable
         self._validate()
 
     def _validate(self) -> None:
@@ -72,16 +54,73 @@ class MSDeltaConfig(PretrainedConfig):
             raise ValueError("hidden_dropout_prob must be in [0, 1)")
         if not 0.0 <= self.attention_probs_dropout_prob < 1.0:
             raise ValueError("attention_probs_dropout_prob must be in [0, 1)")
-        for name in ("fourier_int_n_freqs", "delta_bias_n_freqs", "delta_bias_per_head_hidden"):
+        for name in ("delta_bias_n_freqs", "delta_bias_per_head_hidden"):
             if getattr(self, name) <= 0:
                 raise ValueError(f"{name} must be positive")
-        for prefix in ("fourier_int", "delta_bias"):
-            lo = getattr(self, f"{prefix}_f_min")
-            hi = getattr(self, f"{prefix}_f_max")
-            if not 0 < lo < hi:
-                raise ValueError(f"{prefix}_f_min and {prefix}_f_max must satisfy 0 < min < max")
-        if self.delta_bias_scale <= 0:
-            raise ValueError("delta_bias_scale must be positive")
+        if not 0 < self.delta_bias_f_min < self.delta_bias_f_max:
+            raise ValueError("delta_bias_f_min and delta_bias_f_max must satisfy 0 < min < max")
+
+
+class MSDeltaDenoisingConfig(PretrainedConfig):
+    """Compose an MSDelta encoder configuration with a denoising head."""
+
+    model_type = "msdelta-denoising"
+    sub_configs = {"encoder": MSDeltaConfig}
+
+    def __init__(
+        self,
+        encoder: MSDeltaConfig | dict | None = None,
+        head_hidden_size: int = 128,
+        head_dropout: float = 0.1,
+        **kwargs,
+    ):
+        super().__init__(**kwargs)
+        self.encoder = (
+            encoder if isinstance(encoder, MSDeltaConfig) else MSDeltaConfig(**(encoder or {}))
+        )
+        self.head_hidden_size = head_hidden_size
+        self.head_dropout = head_dropout
+
+    @property
+    def initializer_range(self) -> float:
+        return self.encoder.initializer_range
+
+
+class MSDeltaRetrievalConfig(PretrainedConfig):
+    """Compose an MSDelta encoder configuration with a retrieval head."""
+
+    model_type = "msdelta-retrieval"
+    sub_configs = {"encoder": MSDeltaConfig}
+
+    def __init__(
+        self,
+        encoder: MSDeltaConfig | dict | None = None,
+        projection_hidden_size: int = 512,
+        embedding_size: int = 256,
+        head_dropout: float = 0.1,
+        temperature: float = 0.07,
+        **kwargs,
+    ):
+        super().__init__(**kwargs)
+        self.encoder = (
+            encoder if isinstance(encoder, MSDeltaConfig) else MSDeltaConfig(**(encoder or {}))
+        )
+        self.projection_hidden_size = projection_hidden_size
+        self.embedding_size = embedding_size
+        self.head_dropout = head_dropout
+        self.temperature = temperature
+        if projection_hidden_size <= 0 or embedding_size <= 0:
+            raise ValueError("retrieval projection dimensions must be positive")
+        if not 0.0 <= head_dropout < 1.0:
+            raise ValueError("head_dropout must be in [0, 1)")
+        if temperature <= 0.0:
+            raise ValueError("temperature must be positive")
+
+    @property
+    def initializer_range(self) -> float:
+        return self.encoder.initializer_range
 
 
 MSDeltaConfig.register_for_auto_class()
+MSDeltaDenoisingConfig.register_for_auto_class()
+MSDeltaRetrievalConfig.register_for_auto_class()
