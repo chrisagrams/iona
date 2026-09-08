@@ -156,11 +156,7 @@ def run_denoising_probe(
     numpy_rng = np.random.get_state()
     device = next(module.parameters()).device
     accelerator_type = device.type if device.type in {"cuda", "xpu"} else "cuda"
-    accelerator_devices = (
-        [device.index if device.index is not None else getattr(torch, device.type).current_device()]
-        if device.type in {"cuda", "xpu"}
-        else []
-    )
+    accelerator_devices = [device.index] if device.type in {"cuda", "xpu"} else []
 
     try:
         with torch.random.fork_rng(devices=accelerator_devices, device_type=accelerator_type):
