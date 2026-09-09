@@ -39,4 +39,8 @@ while IFS= read -r probe_variable; do
     esac
 done < <(compgen -e)
 
+# Use an independent W&B service while logging to the same shared run.
+# Inheriting the parent service can collide with its already initialized run.
+unset WANDB_SERVICE
+
 exec "$probe_python" -m msdelta.posttraining "$@"
