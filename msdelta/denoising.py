@@ -121,7 +121,12 @@ class DenoisingTrainer(Trainer):
             num_workers=self.args.dataloader_num_workers,
             pin_memory=self.args.dataloader_pin_memory,
         )
+        self.accelerator.even_batches = False
         return self.accelerator.prepare(dataloader)
+
+    def get_eval_dataloader(self, eval_dataset=None) -> DataLoader:
+        self.accelerator.even_batches = True
+        return super().get_eval_dataloader(eval_dataset)
 
 
 def denoising_metrics(prediction: EvalPrediction) -> dict[str, float]:
