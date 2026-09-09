@@ -34,6 +34,11 @@ if [[ ! -x $VENV_DIR/bin/python ]]; then
     echo "Python interpreter not found: $VENV_DIR/bin/python" >&2
     exit 2
 fi
+XPU_TELEGRAF_CONFIG=${MSDELTA_XPU_TELEGRAF_CONFIG:-$REPO_DIR/pbs/xpu-telegraf.conf}
+if [[ ! -f $XPU_TELEGRAF_CONFIG ]]; then
+    echo "XPU Telegraf configuration not found: $XPU_TELEGRAF_CONFIG" >&2
+    exit 2
+fi
 if ! command -v mpiexec >/dev/null 2>&1; then
     echo "mpiexec is required for an Aurora launch" >&2
     exit 2
@@ -142,6 +147,9 @@ export MASTER_ADDR=${MASTER_ADDR:-$(head -n 1 "$NODE_LIST")}
 export MASTER_PORT=${MASTER_PORT:-29500}
 export MSDELTA_XPUS_PER_HOST=$XPUS_PER_HOST
 export MSDELTA_WORLD_SIZE=$TOTAL_XPUS
+export MSDELTA_XPU_TELEGRAF_CONFIG=$XPU_TELEGRAF_CONFIG
+export MSDELTA_XPU_METRICS_PORT=${MSDELTA_XPU_METRICS_PORT:-9274}
+export LOG_DIR
 
 ALCF_PROXY=${ALCF_PROXY:-http://proxy.alcf.anl.gov:3128}
 export HTTP_PROXY=${HTTP_PROXY:-$ALCF_PROXY}
@@ -181,6 +189,7 @@ exec mpiexec \
     --hostfile="$PBS_NODEFILE" \
     /usr/bin/env \
     bash -c '
+        set -euo pipefail
         export RANK="${PMIX_RANK:-${PALS_RANKID:-${PMI_RANK:-}}}"
         if [[ -z $RANK ]]; then
             echo "Aurora launcher did not provide PMIX_RANK, PALS_RANKID, or PMI_RANK" >&2
@@ -189,6 +198,33 @@ exec mpiexec \
         export WORLD_SIZE="$MSDELTA_WORLD_SIZE"
         export LOCAL_RANK="${PALS_LOCAL_RANKID:-${MPI_LOCALRANKID:-$((RANK % MSDELTA_XPUS_PER_HOST))}}"
         export LOCAL_WORLD_SIZE="$MSDELTA_XPUS_PER_HOST"
+        if [[ $LOCAL_RANK == 0 ]]; then
+            if ! command -v telegraf >/dev/null 2>&1; then
+                echo "telegraf is required for Aurora XPU metrics" >&2
+                exit 2
+            fi
+            telegraf --config "$MSDELTA_XPU_TELEGRAF_CONFIG" \
+                >"$LOG_DIR/xpu-telegraf-${HOSTNAME}.log" 2>&1 &
+            telegraf_pid=$!
+            trap '\''kill "$telegraf_pid" 2>/dev/null || true; wait "$telegraf_pid" 2>/dev/null || true'\'' EXIT
+            export MSDELTA_XPU_METRICS_URL="http://127.0.0.1:${MSDELTA_XPU_METRICS_PORT}/metrics"
+            for _ in {1..20}; do
+                if curl --fail --silent "$MSDELTA_XPU_METRICS_URL" | grep '^xpu_' >/dev/null; then
+                    exec_ready=1
+                    break
+                fi
+                if ! kill -0 "$telegraf_pid" 2>/dev/null; then
+                    break
+                fi
+                sleep 0.5
+            done
+            if [[ ${exec_ready:-0} != 1 ]]; then
+                echo "XPU metrics endpoint failed to start; see $LOG_DIR/xpu-telegraf-${HOSTNAME}.log" >&2
+                exit 2
+            fi
+            "$@"
+            exit $?
+        fi
         exec "$@"
     ' bash \
     "$VENV_DIR/bin/python" \
