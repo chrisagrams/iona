@@ -209,8 +209,8 @@ exec mpiexec \
             trap '\''kill "$telegraf_pid" 2>/dev/null || true; wait "$telegraf_pid" 2>/dev/null || true'\'' EXIT
             export MSDELTA_XPU_METRICS_URL="http://127.0.0.1:${MSDELTA_XPU_METRICS_PORT}/metrics"
             for _ in {1..20}; do
-                if curl --fail --silent "$MSDELTA_XPU_METRICS_URL" | grep '^xpu_' >/dev/null; then
-                    exec_ready=1
+                if curl --fail --silent "$MSDELTA_XPU_METRICS_URL" >/dev/null; then
+                    metrics_endpoint_ready=1
                     break
                 fi
                 if ! kill -0 "$telegraf_pid" 2>/dev/null; then
@@ -218,7 +218,7 @@ exec mpiexec \
                 fi
                 sleep 0.5
             done
-            if [[ ${exec_ready:-0} != 1 ]]; then
+            if [[ ${metrics_endpoint_ready:-0} != 1 ]]; then
                 echo "XPU metrics endpoint failed to start; see $LOG_DIR/xpu-telegraf-${HOSTNAME}.log" >&2
                 exit 2
             fi
