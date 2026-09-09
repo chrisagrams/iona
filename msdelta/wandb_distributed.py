@@ -31,6 +31,7 @@ def init_wandb_run(
 
     is_multinode = world_size > local_world_size
     is_primary = rank == 0 and role == "pretrain"
+    xpu_metrics_url = os.environ.get("MSDELTA_XPU_METRICS_URL")
     run_config = (
         {
             **config,
@@ -45,12 +46,14 @@ def init_wandb_run(
         else None
     )
 
-    settings = None
+    settings_kwargs: dict[str, Any] = {}
+    if xpu_metrics_url:
+        settings_kwargs["x_stats_open_metrics_endpoints"] = {"xpu": xpu_metrics_url}
     if is_multinode or shared or role != "pretrain":
         run_id = run_id or os.environ.get("WANDB_RUN_ID")
         if not run_id:
             raise RuntimeError("WANDB_RUN_ID is required for shared W&B logging")
-        settings = wandb.Settings(
+        settings_kwargs.update(
             mode="shared",
             x_label=f"{socket.gethostname()}-{role}"
             if shared or role != "pretrain"
@@ -59,6 +62,7 @@ def init_wandb_run(
             x_update_finish_state=is_primary,
             x_stats_gpu_device_ids=list(range(local_world_size)),
         )
+    settings = wandb.Settings(**settings_kwargs) if settings_kwargs else None
 
     return wandb.init(
         project=project,
