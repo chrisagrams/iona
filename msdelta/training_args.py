@@ -46,6 +46,18 @@ class DataArguments:
 class MSDeltaTrainingArguments(TrainingArguments):
     """TrainingArguments extended with MSDelta callback settings."""
 
+    probe_execution: str = field(
+        default="inline",
+        metadata={
+            "choices": ["inline", "sidecar", "off"],
+            "help": "Execution of denoising/retrieval heads; diagnostics remain inline.",
+        },
+    )
+    sidecar_launcher: str | None = field(
+        default=None, metadata={"help": "Shell launcher for independent probe processes."}
+    )
+    sidecar_denoise_device: str | None = None
+    sidecar_retrieval_device: str | None = None
     mask_ratio: float = 0.15
     validation_batches: int = 50
     bias_curve_steps: int = 5000
@@ -78,3 +90,35 @@ class MSDeltaTrainingArguments(TrainingArguments):
     denoise_num_workers: int = 4
     denoise_seed: int = 0
     wandb_project: str | None = None
+
+    def __post_init__(self):
+        if self.probe_execution not in {"inline", "sidecar", "off"}:
+            raise ValueError("probe_execution must be inline, sidecar, or off")
+        if self.probe_execution == "sidecar":
+            devices = []
+            probes = (
+                ("denoise", self.denoise_steps, self.sidecar_denoise_device),
+                ("retrieval", self.retrieval_steps, self.sidecar_retrieval_device),
+            )
+            for kind, every, device in probes:
+                if not every:
+                    continue
+                parts = (device or "").split(":")
+                if len(parts) != 2 or parts[0] not in {"xpu", "cuda"} or not parts[1].isdigit():
+                    raise ValueError(f"sidecar_{kind}_device must be xpu:<tile> or cuda:<index>")
+                devices.append((parts[0], int(parts[1])))
+            if len(devices) != len(set(devices)):
+                raise ValueError("Sidecar probes must use distinct devices")
+            intervals = [self.denoise_steps, self.retrieval_steps]
+            if any(interval < 0 for interval in intervals):
+                raise ValueError("posttraining intervals must be nonnegative")
+            if any(intervals):
+                if not self.sidecar_launcher:
+                    raise ValueError("sidecar_launcher is required for sidecar probes")
+                if self.save_strategy != "steps" or self.save_steps < 1:
+                    raise ValueError("sidecars require checkpoint saves at integer step intervals")
+                if any(interval and interval % self.save_steps for interval in intervals):
+                    raise ValueError("posttraining intervals must be multiples of save_steps")
+            if self.deepspeed or self.fsdp:
+                raise ValueError("sidecars currently support unsharded DDP checkpoints")
+        super().__post_init__()

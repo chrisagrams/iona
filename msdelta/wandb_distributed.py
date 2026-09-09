@@ -10,7 +10,14 @@ import wandb
 
 
 def init_wandb_run(
-    *, project: str, run_name: str, config: dict[str, Any]
+    *,
+    project: str,
+    run_name: str,
+    config: dict[str, Any],
+    shared: bool = False,
+    role: str = "pretrain",
+    run_id: str | None = None,
+    entity: str | None = None,
 ) -> wandb.Run | None:
     """Create one W&B client per node, sharing a run across multiple nodes."""
     rank = int(os.environ.get("RANK", "0"))
@@ -23,7 +30,7 @@ def init_wandb_run(
         return None
 
     is_multinode = world_size > local_world_size
-    is_primary = rank == 0
+    is_primary = rank == 0 and role == "pretrain"
     run_config = (
         {
             **config,
@@ -39,12 +46,15 @@ def init_wandb_run(
     )
 
     settings = None
-    if is_multinode:
-        if not os.environ.get("WANDB_RUN_ID"):
-            raise RuntimeError("WANDB_RUN_ID must be set before launching a multi-node job")
+    if is_multinode or shared or role != "pretrain":
+        run_id = run_id or os.environ.get("WANDB_RUN_ID")
+        if not run_id:
+            raise RuntimeError("WANDB_RUN_ID is required for shared W&B logging")
         settings = wandb.Settings(
             mode="shared",
-            x_label=socket.gethostname(),
+            x_label=f"{socket.gethostname()}-{role}"
+            if shared or role != "pretrain"
+            else socket.gethostname(),
             x_primary=is_primary,
             x_update_finish_state=is_primary,
             x_stats_gpu_device_ids=list(range(local_world_size)),
@@ -52,6 +62,8 @@ def init_wandb_run(
 
     return wandb.init(
         project=project,
+        id=run_id,
+        entity=entity,
         name=run_name if is_primary else None,
         config=run_config,
         settings=settings,

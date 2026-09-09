@@ -7,6 +7,9 @@
 #   -v ARGS_FILE=configs/msdelta-base-200m/training.args,CHECKPOINT_DIR=/flare/PROJECT/checkpoints,HF_HOME=/flare/PROJECT/hf,XPUS_PER_HOST=8,GLOBAL_BATCH_SIZE=512 \
 #   pbs/aurora-pretrain.pbs
 #
+# Posttraining defaults to asynchronous sidecars on the global-rank-zero host.
+# DENOISE_XPU_TILE=8 and RETRIEVAL_XPU_TILE=10 select one tile per spare card.
+# Set PROBE_EXECUTION=inline to retain synchronous probes, or off to disable heads.
 # The launch follows the ALCF Aurora PyTorch DDP guidance:
 # https://docs.alcf.anl.gov/aurora/data-science/frameworks/pytorch/
 
@@ -62,11 +65,17 @@ run_name = argument("--run_name", path.parent.name)
 wandb_project = argument("--wandb_project", "")
 print(run_name)
 print(wandb_project)
+print(argument("--probe_execution", "sidecar"))
+print(argument("--denoise_steps", "0"))
+print(argument("--retrieval_steps", "0"))
 PY
 )
 CONFIG_RUN_NAME=${CONFIG_VALUES[0]}
 MICRO_BATCH_SIZE=${MICRO_BATCH_SIZE:-64}
 CONFIG_WANDB_PROJECT=${CONFIG_VALUES[1]}
+PROBE_EXECUTION=${PROBE_EXECUTION:-${CONFIG_VALUES[2]}}
+DENOISE_STEPS=${CONFIG_VALUES[3]}
+RETRIEVAL_STEPS=${CONFIG_VALUES[4]}
 RUN_NAME=${RUN_NAME:-${CONFIG_RUN_NAME}-${JOB_ID}}
 RUN_DIR=$CHECKPOINT_DIR/$RUN_NAME
 LOG_DIR=${LOG_DIR:-$RUN_DIR/logs}
@@ -93,6 +102,27 @@ if ((XPUS_PER_HOST < 1 || XPUS_PER_HOST > 12)); then
     exit 2
 fi
 TOTAL_XPUS=$((NUM_HOSTS * XPUS_PER_HOST))
+# One tile on each spare card when pretraining uses tiles 0-7.
+DENOISE_XPU_TILE=${DENOISE_XPU_TILE:-8}
+RETRIEVAL_XPU_TILE=${RETRIEVAL_XPU_TILE:-10}
+if [[ $PROBE_EXECUTION == sidecar ]]; then
+    if [[ ${ZE_FLAT_DEVICE_HIERARCHY:-FLAT} != FLAT ]]; then
+        echo "sidecars require ZE_FLAT_DEVICE_HIERARCHY=FLAT" >&2
+        exit 2
+    fi
+    for spec in "$DENOISE_STEPS:$DENOISE_XPU_TILE" "$RETRIEVAL_STEPS:$RETRIEVAL_XPU_TILE"; do
+        steps=${spec%%:*}
+        tile=${spec#*:}
+        if ((steps > 0)) && { [[ ! $tile =~ ^[0-9]+$ ]] || ((tile < XPUS_PER_HOST || tile > 11)); }; then
+            echo "sidecar tile $tile must be outside pretraining tiles 0-$((XPUS_PER_HOST - 1)) and below 12" >&2
+            exit 2
+        fi
+    done
+    if ((DENOISE_STEPS > 0 && RETRIEVAL_STEPS > 0 && DENOISE_XPU_TILE == RETRIEVAL_XPU_TILE)); then
+        echo "denoising and retrieval sidecars must use different tiles" >&2
+        exit 2
+    fi
+fi
 
 GLOBAL_BATCH_SIZE=${GLOBAL_BATCH_SIZE:-512}
 DENOMINATOR=$((MICRO_BATCH_SIZE * TOTAL_XPUS))
@@ -165,7 +195,15 @@ TRAIN_ARGS=(
     --ddp_backend xccl
     --torch_compile false
     --logging_nan_inf_filter false
+    --probe_execution "$PROBE_EXECUTION"
 )
+if [[ $PROBE_EXECUTION == sidecar ]]; then
+    TRAIN_ARGS+=(
+        --sidecar_launcher "$REPO_DIR/pbs/aurora-probe.sh"
+        --sidecar_denoise_device "xpu:$DENOISE_XPU_TILE"
+        --sidecar_retrieval_device "xpu:$RETRIEVAL_XPU_TILE"
+    )
+fi
 if [[ -n ${RESUME_FROM_CHECKPOINT:-} ]]; then
     TRAIN_ARGS+=(--resume_from_checkpoint "$RESUME_FROM_CHECKPOINT")
 fi
