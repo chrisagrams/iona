@@ -9,13 +9,15 @@ import threading
 from collections.abc import Iterable
 from typing import Any, TextIO
 
+from wandb.sdk.interface.interface_shared import InterfaceShared
+
 import wandb
 
 _METRICS = {
-    "GPU Utilization (%)": "gpu_utilization_percent",
-    "GPU Power (W)": "gpu_power_watts",
-    "GPU Frequency (MHz)": "gpu_frequency_mhz",
-    "GPU Memory Utilization (%)": "gpu_memory_utilization_percent",
+    "GPU Utilization (%)": "gpu",
+    "GPU Power (W)": "powerWatts",
+    "GPU Frequency (MHz)": "smClock",
+    "GPU Memory Utilization (%)": "memory",
 }
 
 
@@ -40,7 +42,7 @@ def _parse_row(row: dict[str, str]) -> tuple[str, dict[str, float]] | None:
     for column, metric in _METRICS.items():
         value = _parse_value(row.get(column, ""))
         if value is not None:
-            payload[f"xpu/device_{device_id}/{metric}"] = value
+            payload[f"gpu.{device_id}.{metric}"] = value
     return timestamp, payload
 
 
@@ -140,10 +142,15 @@ class XpuSmiWandbMonitor:
             self._log_sample(sample)
 
     def _log_sample(self, sample: dict[str, Any]) -> None:
-        self.run.log(sample)
+        interface = self.run._interface
+        if interface is None:
+            raise RuntimeError("W&B run has no active interface")
+        if not isinstance(interface, InterfaceShared):
+            raise TypeError(f"unsupported W&B interface: {type(interface).__name__}")
+        interface.publish_stats(sample)
         if not self._logged_sample:
             self._logged_sample = True
-            print("[xpu-metrics] first sample logged to W&B under xpu/", flush=True)
+            print("[xpu-metrics] first sample logged to W&B System metrics", flush=True)
 
     def stop(self) -> None:
         """Stop collection before the associated W&B run is finished."""

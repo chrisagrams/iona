@@ -22,11 +22,11 @@ from msdelta.data import (
     resolve_dataset_paths,
 )
 from msdelta.modeling_msdelta import MSDeltaForPreTraining
+from msdelta.monitor import XpuSmiWandbMonitor
 from msdelta.processing_msdelta import MSDeltaDataCollatorForPreTraining, MSDeltaProcessor
 from msdelta.training_args import DataArguments, ModelArguments, MSDeltaTrainingArguments
 from msdelta.viz import render_bias_panels
 from msdelta.wandb_distributed import init_wandb_run
-from msdelta.xpu_metrics import XpuSmiWandbMonitor
 
 
 class MSDeltaTrainer(Trainer):
