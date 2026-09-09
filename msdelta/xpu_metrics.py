@@ -47,12 +47,14 @@ def _parse_row(row: dict[str, str]) -> tuple[str, dict[str, float]] | None:
 class XpuSmiWandbMonitor:
     """Manage a background ``xpu-smi dump`` process for one physical node."""
 
-    def __init__(self, run: wandb.Run, device_ids: Iterable[int]):
+    def __init__(self, run: wandb.Run, device_ids: Iterable[int] | None = None):
         self.run = run
-        self.device_ids = list(device_ids)
+        # xpu-smi uses physical device IDs, not PyTorch's flattened tile IDs.
+        self.device_ids = list(device_ids) if device_ids is not None else [-1]
         self._process: subprocess.Popen[str] | None = None
         self._thread: threading.Thread | None = None
         self._stop = threading.Event()
+        self._logged_sample = False
 
     def start(self) -> bool:
         """Start collection, returning false when xpu-smi cannot be used."""
@@ -78,7 +80,8 @@ class XpuSmiWandbMonitor:
             self._process = subprocess.Popen(
                 command,
                 stdout=subprocess.PIPE,
-                stderr=subprocess.DEVNULL,
+                # Keep CLI diagnostics in the job log, outside the CSV stream.
+                stderr=None,
                 text=True,
                 bufsize=1,
             )
@@ -87,8 +90,8 @@ class XpuSmiWandbMonitor:
             return False
 
         self._thread = threading.Thread(target=self._collect, name="xpu-smi-wandb", daemon=True)
+        print(f"[xpu-metrics] starting: {' '.join(command)}", flush=True)
         self._thread.start()
-        print(f"[xpu-metrics] monitoring devices {self.device_ids}", flush=True)
         return True
 
     def _collect(self) -> None:
@@ -97,12 +100,26 @@ class XpuSmiWandbMonitor:
             return
         try:
             self._read_samples(process.stdout)
+            if not self._stop.is_set():
+                returncode = process.wait(timeout=5)
+                print(
+                    f"[xpu-metrics] xpu-smi exited with code {returncode}; "
+                    f"logged samples: {self._logged_sample}",
+                    flush=True,
+                )
         except Exception as error:
             if not self._stop.is_set():
                 print(f"[xpu-metrics] collector stopped: {error}", flush=True)
 
     def _read_samples(self, stream: TextIO) -> None:
         reader = csv.DictReader(stream, skipinitialspace=True)
+        if reader.fieldnames is None:
+            return
+        reader.fieldnames = [column.strip() for column in reader.fieldnames]
+        if not {"Timestamp", "DeviceId"}.issubset(reader.fieldnames) or not any(
+            column in reader.fieldnames for column in _METRICS
+        ):
+            raise ValueError(f"unexpected xpu-smi CSV header: {reader.fieldnames!r}")
         sample_timestamp: str | None = None
         sample: dict[str, Any] = {}
 
@@ -114,13 +131,19 @@ class XpuSmiWandbMonitor:
                 continue
             timestamp, metrics = parsed
             if sample_timestamp is not None and timestamp != sample_timestamp and sample:
-                self.run.log(sample)
+                self._log_sample(sample)
                 sample = {}
             sample_timestamp = timestamp
             sample.update(metrics)
 
         if sample and not self._stop.is_set():
-            self.run.log(sample)
+            self._log_sample(sample)
+
+    def _log_sample(self, sample: dict[str, Any]) -> None:
+        self.run.log(sample)
+        if not self._logged_sample:
+            self._logged_sample = True
+            print("[xpu-metrics] first sample logged to W&B under xpu/", flush=True)
 
     def stop(self) -> None:
         """Stop collection before the associated W&B run is finished."""

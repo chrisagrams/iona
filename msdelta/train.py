@@ -104,10 +104,7 @@ def main(argv: list[str] | None = None) -> int:
             config=resolved,
         )
         if wandb_run is not None and torch.xpu.is_available():
-            xpu_monitor = XpuSmiWandbMonitor(
-                wandb_run,
-                range(torch.xpu.device_count()),
-            )
+            xpu_monitor = XpuSmiWandbMonitor(wandb_run)
             xpu_monitor.start()
 
     try:
