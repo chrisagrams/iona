@@ -165,11 +165,10 @@ def main(argv: list[str] | None = None) -> int:
                 training_args=retrieval_training_args(args, out_dir),
             )
         if run is not None:
-            axis = f"posttrain/{cli.probe}_step"
-            run.define_metric(axis)
+            run.define_metric("train/global_step")
             for name in metrics:
-                run.define_metric(name, step_metric=axis, step_sync=False)
-            run.log({axis: cli.step, **metrics})
+                run.define_metric(name, step_metric="train/global_step", step_sync=False)
+            run.log({**metrics, "train/global_step": cli.step})
         return 0
     finally:
         if run is not None:
