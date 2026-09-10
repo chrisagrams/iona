@@ -104,9 +104,15 @@ class MSDeltaTrainingArguments(TrainingArguments):
                 if not every:
                     continue
                 parts = (device or "").split(":")
-                if len(parts) != 2 or parts[0] not in {"xpu", "cuda"} or not parts[1].isdigit():
-                    raise ValueError(f"sidecar_{kind}_device must be xpu:<tile> or cuda:<index>")
-                devices.append((parts[0], int(parts[1])))
+                if (
+                    len(parts) != 2
+                    or parts[0] not in {"xpu", "cuda"}
+                    or not all(index.isascii() and index.isdigit() for index in parts[1].split(","))
+                ):
+                    raise ValueError(
+                        f"sidecar_{kind}_device must be xpu:<tile>[,<tile>...] or cuda:<index>[,<index>...]"
+                    )
+                devices.extend((parts[0], int(index)) for index in parts[1].split(","))
             if len(devices) != len(set(devices)):
                 raise ValueError("Sidecar probes must use distinct devices")
             intervals = [self.denoise_steps, self.retrieval_steps]

@@ -2,6 +2,7 @@
 
 import argparse
 import json
+import os
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -20,7 +21,7 @@ from msdelta.retrieval import run_retrieval_probe
 from msdelta.wandb_distributed import init_wandb_run
 
 
-def denoise_training_args(training_args, out_dir):
+def denoise_training_args(training_args, out_dir, *, ddp_backend=None):
     return TrainingArguments(
         output_dir=str(out_dir / "denoise-probes"),
         num_train_epochs=training_args.denoise_epochs,
@@ -40,10 +41,11 @@ def denoise_training_args(training_args, out_dir):
         data_seed=training_args.denoise_seed,
         report_to=[],
         ddp_find_unused_parameters=False,
+        ddp_backend=ddp_backend,
     )
 
 
-def retrieval_training_args(training_args, out_dir):
+def retrieval_training_args(training_args, out_dir, *, ddp_backend=None):
     return TrainingArguments(
         output_dir=str(out_dir / "retrieval-probes"),
         num_train_epochs=training_args.retrieval_epochs,
@@ -65,6 +67,7 @@ def retrieval_training_args(training_args, out_dir):
         data_seed=training_args.retrieval_seed,
         report_to=[],
         ddp_find_unused_parameters=False,
+        ddp_backend=ddp_backend,
     )
 
 
@@ -115,15 +118,16 @@ def main(argv: list[str] | None = None) -> int:
     args = SimpleNamespace(**resolved["training"])
     data_args = SimpleNamespace(**resolved["data"])
     out_dir = Path(args.output_dir)
+    local_rank = int(os.environ.get("LOCAL_RANK", "0"))
     if cli.device != "cpu":
         backend = torch.xpu if cli.device == "xpu" else torch.cuda
-        if backend.device_count() != 1:
-            raise ValueError("Posttraining requires exactly one visible accelerator")
-        backend.set_device(0)
-    device = torch.device(cli.device if cli.device == "cpu" else f"{cli.device}:0")
+        if backend.device_count() != int(os.environ.get("LOCAL_WORLD_SIZE", "1")):
+            raise ValueError("Posttraining requires one visible accelerator per local worker")
+        backend.set_device(local_rank)
+    device = torch.device(cli.device if cli.device == "cpu" else f"{cli.device}:{local_rank}")
     set_seed(args.denoise_seed if cli.probe == "denoise" else args.retrieval_seed)
     run = None
-    if cli.wandb:
+    if cli.wandb and int(os.environ.get("RANK", "0")) == 0:
         run = init_wandb_run(
             project=cli.wandb_project,
             run_name="",
@@ -134,8 +138,17 @@ def main(argv: list[str] | None = None) -> int:
             entity=cli.wandb_entity,
         )
     try:
+        ddp_backend = "xccl" if cli.device == "xpu" else None
+        probe_args = (
+            denoise_training_args(args, out_dir, ddp_backend=ddp_backend)
+            if cli.probe == "denoise"
+            else retrieval_training_args(args, out_dir, ddp_backend=ddp_backend)
+        )
         processor = MSDeltaProcessor(**resolved["processor"])
-        datasets, processor, evaluation = build_probe_data(cli.probe, data_args, args, processor)
+        with probe_args.main_process_first(desc="probe dataset preparation"):
+            datasets, processor, evaluation = build_probe_data(
+                cli.probe, data_args, args, processor
+            )
         module = MSDeltaForPreTraining.from_pretrained(cli.checkpoint).to(device)
         destination = out_dir / f"{cli.probe}-probes" / f"step-{cli.step}"
         if cli.probe == "denoise":
@@ -148,7 +161,7 @@ def main(argv: list[str] | None = None) -> int:
                 peak_pair_budget=args.denoise_peak_pair_budget,
                 hidden_size=args.denoise_head_hidden_size,
                 dropout=args.denoise_head_dropout,
-                training_args=denoise_training_args(args, out_dir),
+                training_args=probe_args,
             )
         else:
             metrics = run_retrieval_probe(
@@ -162,7 +175,7 @@ def main(argv: list[str] | None = None) -> int:
                 embedding_size=args.retrieval_embedding_size,
                 dropout=args.retrieval_head_dropout,
                 temperature=args.retrieval_temperature,
-                training_args=retrieval_training_args(args, out_dir),
+                training_args=probe_args,
             )
         if run is not None:
             run.define_metric("train/global_step")
@@ -173,6 +186,8 @@ def main(argv: list[str] | None = None) -> int:
     finally:
         if run is not None:
             run.finish()
+        if torch.distributed.is_available() and torch.distributed.is_initialized():
+            torch.distributed.destroy_process_group()
 
 
 if __name__ == "__main__":
