@@ -47,7 +47,9 @@ def init_wandb_run(
     )
 
     settings_kwargs: dict[str, Any] = {}
-    if xpu_metrics_url:
+    # Pretraining monitors all host XPUs, including the sidecar devices. Sidecars
+    # inherit this endpoint but would duplicate its metrics on their own timelines.
+    if xpu_metrics_url and role == "pretrain":
         settings_kwargs["x_stats_open_metrics_endpoints"] = {"xpu": xpu_metrics_url}
     if is_multinode or shared or role != "pretrain":
         run_id = run_id or os.environ.get("WANDB_RUN_ID")
