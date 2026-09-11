@@ -175,6 +175,11 @@ def build_denoising_datasets(
 ) -> DatasetDict:
     """Load and preprocess the labeled signal/noise dataset."""
     datasets = load_dataset(repo_id)
+    datasets = datasets.filter(
+        lambda example: 0 < len(example["mz"]) <= processor.max_peaks,
+        num_proc=num_proc,
+        desc="drop invalid or oversized denoising spectra",
+    )
     return datasets.map(
         lambda example: processor.process_denoising_example(
             example["mz"], example["intensity"], example["noise"]
@@ -193,6 +198,14 @@ def build_retrieval_datasets(
     """Load and preprocess grouped consensus/experimental retrieval spectra."""
     datasets = load_dataset(repo_id)
     datasets = DatasetDict({split: datasets[split] for split in ("train", "validation")})
+    datasets = datasets.filter(
+        lambda example: all(
+            0 < len(spectrum["mz"]) <= processor.max_peaks
+            for spectrum in (example["consensus"], *example["experimental"])
+        ),
+        num_proc=num_proc,
+        desc="drop invalid or oversized retrieval groups",
+    )
 
     processed = datasets.map(
         lambda example: processor.process_retrieval_example(
@@ -230,6 +243,11 @@ def build_retrieval_evaluation_datasets(
     }
     if replicate_repo_id:
         dataset = load_dataset(replicate_repo_id, split="test")
+        dataset = dataset.filter(
+            lambda row: 0 < len(row["mz"]) <= processor.max_peaks,
+            num_proc=num_proc,
+            desc="drop invalid or oversized replicate spectra",
+        )
         analytes = {}
         labels = [
             analytes.setdefault((peptide, charge), len(analytes))

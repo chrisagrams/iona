@@ -76,8 +76,6 @@ def main(argv: list[str] | None = None) -> int:
         model_config.update_from_string(model_args.config_overrides)
         model_config._validate()
     processor_overrides = {}
-    if data_args.intensity_threshold_frac is not None:
-        processor_overrides["intensity_threshold_frac"] = data_args.intensity_threshold_frac
     if data_args.max_peaks is not None:
         processor_overrides["max_peaks"] = data_args.max_peaks
     processor = MSDeltaProcessor.from_pretrained(
