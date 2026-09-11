@@ -142,10 +142,11 @@ def run_retrieval_probe(
     python_rng = random.getstate()
     numpy_rng = np.random.get_state()
     device = next(module.parameters()).device
-    cuda_devices = [device.index] if device.type == "cuda" and device.index is not None else []
+    accelerator_type = device.type if device.type in {"cuda", "xpu"} else "cuda"
+    accelerator_devices = [device.index] if device.type in {"cuda", "xpu"} else []
 
     try:
-        with torch.random.fork_rng(devices=cuda_devices):
+        with torch.random.fork_rng(devices=accelerator_devices, device_type=accelerator_type):
             probe_encoder = copy.deepcopy(module.msdelta)
             model = MSDeltaForRetrieval(
                 config,
@@ -183,6 +184,8 @@ def run_retrieval_probe(
             def compute_metrics(prediction):
                 if device.type == "cuda":
                     torch.cuda.empty_cache()
+                elif device.type == "xpu":
+                    torch.xpu.empty_cache()
                 trainer.accelerator.wait_for_everyone()
                 result = {}
                 if trainer.is_world_process_zero():
