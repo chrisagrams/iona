@@ -49,12 +49,14 @@ def precursor_mz(peptide_charge: str | None) -> float:
 
 def _preprocess_example(example: dict, processor: MSDeltaProcessor) -> dict:
     """Convert one raw dataset row to preprocessed values."""
-    intensity = torch.tensor(example["int"], dtype=torch.float32)
+    intensity = torch.tensor(example["intensity"], dtype=torch.float32)
     try:
-        values = processor(example["m/z"], example["int"], padding=False, return_labels=True)
+        values = processor(
+            example["mz"], example["intensity"], padding=False, return_labels=True
+        )
     except ValueError:
         values = {"mz": [], "log_intensity": [], "labels": []}
-    pc = example.get("peptide_charge")
+    pc = f'{example["peptide"]}_{example["charge"]}'
     return {
         "mz": values["mz"],
         "log_intensity": values["log_intensity"],
