@@ -20,10 +20,10 @@ class MSDeltaConfig(PretrainedConfig):
         attention_probs_dropout_prob: float = 0.1,
         layer_norm_eps: float = 1e-5,
         initializer_range: float = 0.02,
-        delta_bias_n_freqs: int = 64,
+        delta_bias_n_freqs: int = 256,
         delta_bias_per_head_hidden: int = 32,
-        delta_bias_f_min: float = 1e-2,
-        delta_bias_f_max: float = 1e3,
+        delta_bias_f_min: float = 1e-3,
+        delta_bias_f_max: float = 190.0,
         **kwargs,
     ):
         super().__init__(**kwargs)
