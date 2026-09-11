@@ -38,7 +38,6 @@ class DataArguments:
     dataset_validation_split: str = "val"
     num_validation_files: int = 2
     preprocessing_num_workers: int = 24
-    intensity_threshold_frac: float | None = None
     max_peaks: int | None = None
 
 
@@ -69,7 +68,6 @@ class MSDeltaTrainingArguments(TrainingArguments):
     denoise_dataset_repo: str = "chrisagrams/ms-denoise-100k"
     denoise_max_peaks: int = 1024
     denoise_peak_pair_budget: int = 4_194_304
-    denoise_intensity_threshold_frac: float = 0.0
     denoise_head_hidden_size: int = 128
     denoise_head_dropout: float = 0.1
     denoise_epochs: int = 1

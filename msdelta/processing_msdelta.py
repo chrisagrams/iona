@@ -34,22 +34,17 @@ class MSDeltaProcessor(FeatureExtractionMixin):
 
     def __init__(
         self,
-        intensity_threshold_frac: float = 0.01,
-        max_peaks: int = 150,
+        max_peaks: int = 512,
         padding_value: float = 0.0,
         **kwargs,
     ):
-        if not 0.0 <= intensity_threshold_frac <= 1.0:
-            raise ValueError("intensity_threshold_frac must be in [0, 1]")
         if max_peaks <= 0:
             raise ValueError("max_peaks must be positive")
         super().__init__(
-            intensity_threshold_frac=intensity_threshold_frac,
             max_peaks=max_peaks,
             padding_value=padding_value,
             **kwargs,
         )
-        self.intensity_threshold_frac = intensity_threshold_frac
         self.max_peaks = max_peaks
         self.padding_value = padding_value
 
@@ -64,6 +59,8 @@ class MSDeltaProcessor(FeatureExtractionMixin):
             raise ValueError("each mz and intensity spectrum must have equal lengths")
         if mz.numel() == 0:
             raise ValueError("spectra must contain at least one peak")
+        if mz.numel() > self.max_peaks:
+            raise ValueError(f"spectra must contain at most {self.max_peaks} peaks")
         if not torch.isfinite(mz).all() or not torch.isfinite(intensity).all():
             raise ValueError("mz and intensity values must be finite")
         if (intensity < 0).any():
@@ -72,16 +69,7 @@ class MSDeltaProcessor(FeatureExtractionMixin):
         if base_peak <= 0:
             raise ValueError("spectra must contain at least one positive intensity")
 
-        selected = torch.nonzero(
-            intensity >= self.intensity_threshold_frac * base_peak, as_tuple=False
-        ).squeeze(-1)
-        mz = mz[selected]
-        intensity = intensity[selected]
-        if mz.numel() > self.max_peaks:
-            top = torch.topk(intensity, self.max_peaks, sorted=False).indices.sort().values
-            mz = mz[top]
-            intensity = intensity[top]
-            selected = selected[top]
+        selected = torch.arange(mz.numel(), device=mz.device)
         log_intensity = torch.log1p(intensity)
         log_intensity = log_intensity / log_intensity.max().clamp_min(1e-8)
         labels = intensity / intensity.sum().clamp_min(1e-12)

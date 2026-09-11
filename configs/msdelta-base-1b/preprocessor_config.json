@@ -1,6 +1,5 @@
 {
   "feature_extractor_type": "MSDeltaProcessor",
-  "intensity_threshold_frac": 0.01,
-  "max_peaks": 150,
+  "max_peaks": 512,
   "processor_class": "MSDeltaProcessor"
 }

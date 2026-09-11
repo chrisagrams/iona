@@ -73,8 +73,6 @@ def main(argv: list[str] | None = None) -> int:
         model_config.update_from_string(model_args.config_overrides)
         model_config._validate()
     processor_overrides = {}
-    if data_args.intensity_threshold_frac is not None:
-        processor_overrides["intensity_threshold_frac"] = data_args.intensity_threshold_frac
     if data_args.max_peaks is not None:
         processor_overrides["max_peaks"] = data_args.max_peaks
     processor = MSDeltaProcessor.from_pretrained(
@@ -130,7 +128,6 @@ def main(argv: list[str] | None = None) -> int:
             denoising_processor = MSDeltaProcessor.from_pretrained(
                 data_args.processor_name_or_path,
                 max_peaks=training_args.denoise_max_peaks,
-                intensity_threshold_frac=training_args.denoise_intensity_threshold_frac,
             )
             with training_args.main_process_first(local=False, desc="denoising preprocessing"):
                 denoising_datasets = build_denoising_datasets(

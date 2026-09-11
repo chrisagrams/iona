@@ -43,5 +43,4 @@
 --denoise_dataset_repo chrisagrams/ms-denoise-100k
 --denoise_max_peaks 1024
 --denoise_peak_pair_budget 4194304
---denoise_intensity_threshold_frac 0.0
 --deepspeed configs/deepspeed-zero2.json
