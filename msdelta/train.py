@@ -14,10 +14,7 @@ from transformers import HfArgumentParser, Trainer, set_seed
 
 from msdelta.callbacks import SidecarCallback, build_callbacks
 from msdelta.configuration_msdelta import MSDeltaConfig
-from msdelta.data import (
-    build_pretraining_datasets,
-    resolve_dataset_paths,
-)
+from msdelta.data import build_pretraining_datasets
 from msdelta.modeling_msdelta import MSDeltaForPreTraining
 from msdelta.posttraining import build_probe_data
 from msdelta.processing_msdelta import MSDeltaDataCollatorForPreTraining, MSDeltaProcessor
@@ -112,17 +109,11 @@ def main(argv: list[str] | None = None) -> int:
                     f"[data] preprocessing with {data_args.preprocessing_num_workers} CPU workers",
                     flush=True,
                 )
-            train_paths, val_paths = resolve_dataset_paths(
-                root=data_args.dataset_root,
-                repo_id=data_args.dataset_repo_id,
+            train_ds, val_ds = build_pretraining_datasets(
+                data_args.dataset_repo_id,
+                processor,
                 train_split=data_args.dataset_train_split,
                 validation_split=data_args.dataset_validation_split,
-                num_validation_files=data_args.num_validation_files,
-            )
-            train_ds, val_ds = build_pretraining_datasets(
-                train_paths,
-                val_paths,
-                processor,
                 num_proc=data_args.preprocessing_num_workers or None,
             )
         eval_size = training_args.validation_batches * training_args.per_device_eval_batch_size

@@ -4,11 +4,9 @@ from __future__ import annotations
 
 import re
 from functools import partial
-from pathlib import Path
 
 import torch
 from datasets import Dataset, DatasetDict, load_dataset
-from huggingface_hub import snapshot_download
 
 from msdelta.chemistry import PROTON_MASS, RESIDUE_MASSES, WATER_MASS
 from msdelta.processing_msdelta import MSDeltaProcessor
@@ -47,56 +45,6 @@ def precursor_mz(peptide_charge: str | None) -> float:
             return 0.0
         mass += m
     return (mass + z * PROTON_MASS) / z
-
-
-def split_paths(root: str | Path, n_val: int) -> tuple[list[Path], list[Path]]:
-    """Use the last sorted shards as validation data."""
-    root = Path(root)
-    shards = sorted(root.glob("*.parquet"))
-    if len(shards) <= n_val:
-        raise ValueError(f"only {len(shards)} shards; need > {n_val} for a split")
-    return shards[:-n_val], shards[-n_val:]
-
-
-def hf_split_paths(
-    repo_id: str,
-    train_split: str = "train",
-    val_split: str = "val",
-) -> tuple[list[Path], list[Path]]:
-    """Get training and validation Parquet paths from Hugging Face."""
-    local_dir = snapshot_download(
-        repo_id,
-        repo_type="dataset",
-        allow_patterns=[f"{train_split}/*.parquet", f"{val_split}/*.parquet"],
-    )
-    root = Path(local_dir)
-    train_paths = sorted((root / train_split).glob("*.parquet"))
-    val_paths = sorted((root / val_split).glob("*.parquet"))
-    if not train_paths:
-        raise ValueError(f"no parquet shards under '{train_split}/' in {repo_id}")
-    if not val_paths:
-        raise ValueError(f"no parquet shards under '{val_split}/' in {repo_id}")
-    return train_paths, val_paths
-
-
-def resolve_dataset_paths(
-    *,
-    root: str | None,
-    repo_id: str | None,
-    train_split: str,
-    validation_split: str,
-    num_validation_files: int,
-) -> tuple[list[Path], list[Path]]:
-    """Get dataset paths from a local directory or Hugging Face."""
-    if repo_id:
-        return hf_split_paths(
-            repo_id,
-            train_split=train_split,
-            val_split=validation_split,
-        )
-    if root is None:
-        raise ValueError("root is required when repo_id is not set")
-    return split_paths(root, num_validation_files)
 
 
 def _preprocess_example(example: dict, processor: MSDeltaProcessor) -> dict:
@@ -143,29 +91,32 @@ def collate_preprocessed(features: list[dict]) -> dict[str, torch.Tensor]:
 
 
 def build_preprocessed_dataset(
-    paths: list[Path], processor: MSDeltaProcessor, num_proc: int | None = None
-):
-    """Load and preprocess Parquet shards."""
-    ds = load_dataset("parquet", data_files=[str(p) for p in paths], split="train")
-    ds = ds.map(
+    dataset: Dataset, processor: MSDeltaProcessor, num_proc: int | None = None
+) -> Dataset:
+    """Preprocess a mass-spectrum dataset."""
+    dataset = dataset.map(
         partial(_preprocess_example, processor=processor),
-        remove_columns=ds.column_names,
+        remove_columns=dataset.column_names,
         num_proc=num_proc,
         desc="preprocess spectra",
     )
-    return ds.filter(lambda ex: len(ex["mz"]) > 0, num_proc=num_proc, desc="drop empty spectra")
+    return dataset.filter(
+        lambda ex: len(ex["mz"]) > 0, num_proc=num_proc, desc="drop empty spectra"
+    )
 
 
 def build_pretraining_datasets(
-    train_paths: list[Path],
-    val_paths: list[Path],
+    repo_id: str,
     processor: MSDeltaProcessor,
+    train_split: str = "train",
+    validation_split: str = "validation",
     num_proc: int | None = None,
-):
-    """Build the training and validation datasets."""
-    train = build_preprocessed_dataset(train_paths, processor, num_proc=num_proc)
-    val = build_preprocessed_dataset(val_paths, processor, num_proc=num_proc)
-    return train, val
+) -> tuple[Dataset, Dataset]:
+    """Load and preprocess training and validation splits from Hugging Face."""
+    train, validation = load_dataset(repo_id, split=[train_split, validation_split])
+    train = build_preprocessed_dataset(train, processor, num_proc=num_proc)
+    validation = build_preprocessed_dataset(validation, processor, num_proc=num_proc)
+    return train, validation
 
 
 def build_denoising_datasets(

@@ -32,11 +32,9 @@ class DataArguments:
     processor_name_or_path: str = field(
         metadata={"help": "Path to a pretrained MSDelta processor directory."}
     )
-    dataset_root: str | None = None
-    dataset_repo_id: str | None = None
+    dataset_repo_id: str = field(metadata={"help": "Hugging Face dataset repository ID."})
     dataset_train_split: str = "train"
-    dataset_validation_split: str = "val"
-    num_validation_files: int = 2
+    dataset_validation_split: str = "validation"
     preprocessing_num_workers: int = 24
     max_peaks: int | None = None
 

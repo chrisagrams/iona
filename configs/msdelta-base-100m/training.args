@@ -4,7 +4,7 @@
 --run_name msdelta-base-100m
 --dataset_repo_id chrisagrams/MSConsensus-100M
 --dataset_train_split train
---dataset_validation_split val
+--dataset_validation_split validation
 --preprocessing_num_workers 24
 --mask_ratio 0.50
 --per_device_train_batch_size 64
