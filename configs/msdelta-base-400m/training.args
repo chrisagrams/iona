@@ -2,7 +2,7 @@
 --processor_name_or_path configs/msdelta-base-400m
 --output_dir ./runs/msdelta-base-400m
 --run_name msdelta-base-400m
---dataset_repo_id chrisagrams/massive_kb_v1_shuffled
+--dataset_repo_id chrisagrams/MSConsensus-100M
 --dataset_train_split train
 --dataset_validation_split val
 --preprocessing_num_workers 24
