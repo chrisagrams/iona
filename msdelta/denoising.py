@@ -39,10 +39,11 @@ class PeakBudgetBatchSampler(BatchSampler):
     batch_size = None  # type: ignore[assignment]
     drop_last = False
 
-    def __init__(self, lengths, peak_pair_budget: int, seed: int):
+    def __init__(self, lengths, peak_pair_budget: int, seed: int, num_processes: int = 1):
         self.lengths = lengths
         self.peak_pair_budget = peak_pair_budget
         self.seed = seed
+        self.num_processes = num_processes
         self.epoch = 0
 
     def set_epoch(self, epoch: int) -> None:
@@ -67,7 +68,15 @@ class PeakBudgetBatchSampler(BatchSampler):
 
         generator = torch.Generator().manual_seed(self.seed + self.epoch)
         order = torch.randperm(len(batches), generator=generator).tolist()
-        return [batches[index] for index in order]
+        batches = [batches[index] for index in order]
+
+        # Variable-sized batches require Accelerate's even_batches=False. Pad
+        # with complete batches here so every distributed rank still performs
+        # the same number of optimizer steps.
+        if batches:
+            padding = (-len(batches)) % self.num_processes
+            batches.extend([list(batches[index % len(batches)]) for index in range(padding)])
+        return batches
 
     def __iter__(self):
         return iter(self._batches())
@@ -103,6 +112,7 @@ class DenoisingTrainer(Trainer):
             lengths=[len(mz) for mz in train_dataset["mz"]],
             peak_pair_budget=self.peak_pair_budget,
             seed=self.args.data_seed or self.args.seed,
+            num_processes=self.accelerator.num_processes,
         )
         dataloader = DataLoader(
             train_dataset,  # pyright: ignore[reportArgumentType]
@@ -111,7 +121,12 @@ class DenoisingTrainer(Trainer):
             num_workers=self.args.dataloader_num_workers,
             pin_memory=self.args.dataloader_pin_memory,
         )
+        self.accelerator.even_batches = False
         return self.accelerator.prepare(dataloader)
+
+    def get_eval_dataloader(self, eval_dataset=None) -> DataLoader:
+        self.accelerator.even_batches = True
+        return super().get_eval_dataloader(eval_dataset)
 
 
 def denoising_metrics(prediction: EvalPrediction) -> dict[str, float]:
@@ -155,10 +170,11 @@ def run_denoising_probe(
     python_rng = random.getstate()
     numpy_rng = np.random.get_state()
     device = next(module.parameters()).device
-    cuda_devices = [device.index] if device.type == "cuda" and device.index is not None else []
+    accelerator_type = device.type if device.type in {"cuda", "xpu"} else "cuda"
+    accelerator_devices = [device.index] if device.type in {"cuda", "xpu"} else []
 
     try:
-        with torch.random.fork_rng(devices=cuda_devices):
+        with torch.random.fork_rng(devices=accelerator_devices, device_type=accelerator_type):
             probe_encoder = copy.deepcopy(module.msdelta)
             model = MSDeltaForDenoising(
                 config,

@@ -8,19 +8,18 @@ from dataclasses import asdict
 from pathlib import Path
 
 import matplotlib.pyplot as plt
+import torch
 from accelerate.utils import DeepSpeedPlugin
 from transformers import HfArgumentParser, Trainer, set_seed
 
-from msdelta.callbacks import build_callbacks
+from msdelta.callbacks import SidecarCallback, build_callbacks
 from msdelta.configuration_msdelta import MSDeltaConfig
 from msdelta.data import (
-    build_denoising_datasets,
     build_pretraining_datasets,
-    build_retrieval_datasets,
-    build_retrieval_evaluation_datasets,
     resolve_dataset_paths,
 )
 from msdelta.modeling_msdelta import MSDeltaForPreTraining
+from msdelta.posttraining import build_probe_data
 from msdelta.processing_msdelta import MSDeltaDataCollatorForPreTraining, MSDeltaProcessor
 from msdelta.training_args import DataArguments, ModelArguments, MSDeltaTrainingArguments
 from msdelta.viz import render_bias_panels
@@ -51,6 +50,10 @@ class MSDeltaTrainer(Trainer):
 
 
 def main(argv: list[str] | None = None) -> int:
+    local_rank = int(os.environ.get("LOCAL_RANK", "-1"))
+    if local_rank >= 0 and torch.xpu.is_available():
+        torch.xpu.set_device(local_rank)
+
     parser = HfArgumentParser(
         (ModelArguments, DataArguments, MSDeltaTrainingArguments)  # pyright: ignore[reportArgumentType]
     )
@@ -89,12 +92,14 @@ def main(argv: list[str] | None = None) -> int:
         "training": training_args.to_dict(),
     }
 
+    sidecar_callback = None
     wandb_run = None
     if training_args.wandb_project:
         wandb_run = init_wandb_run(
             project=training_args.wandb_project,
             run_name=training_args.run_name,
             config=resolved,
+            shared=training_args.probe_execution == "sidecar",
         )
 
     try:
@@ -124,35 +129,18 @@ def main(argv: list[str] | None = None) -> int:
             )
         eval_size = training_args.validation_batches * training_args.per_device_eval_batch_size
         eval_ds = val_ds.select(range(min(len(val_ds), eval_size)))
-        denoising_datasets = None
-        denoising_processor = None
-        if training_args.denoise_steps:
-            denoising_processor = MSDeltaProcessor.from_pretrained(
-                data_args.processor_name_or_path,
-                max_peaks=training_args.denoise_max_peaks,
-                intensity_threshold_frac=training_args.denoise_intensity_threshold_frac,
-            )
+        include_probes = training_args.probe_execution == "inline"
+        denoising_datasets = denoising_processor = None
+        retrieval_datasets = retrieval_evaluation_datasets = None
+        if include_probes and training_args.denoise_steps:
             with training_args.main_process_first(local=False, desc="denoising preprocessing"):
-                denoising_datasets = build_denoising_datasets(
-                    training_args.denoise_dataset_repo,
-                    denoising_processor,
-                    num_proc=data_args.preprocessing_num_workers or None,
+                denoising_datasets, denoising_processor, _ = build_probe_data(
+                    "denoise", data_args, training_args, processor
                 )
-        retrieval_datasets = None
-        retrieval_evaluation_datasets = None
-        if training_args.retrieval_steps:
+        if include_probes and training_args.retrieval_steps:
             with training_args.main_process_first(local=False, desc="retrieval preprocessing"):
-                retrieval_datasets = build_retrieval_datasets(
-                    training_args.retrieval_dataset_repo,
-                    processor,
-                    num_proc=data_args.preprocessing_num_workers or None,
-                )
-                retrieval_evaluation_datasets = build_retrieval_evaluation_datasets(
-                    retrieval_datasets["validation"],
-                    processor,
-                    max_analytes=training_args.retrieval_validation_analytes,
-                    replicate_repo_id=training_args.replicate_retrieval_repo,
-                    num_proc=data_args.preprocessing_num_workers or None,
+                retrieval_datasets, _, retrieval_evaluation_datasets = build_probe_data(
+                    "retrieval", data_args, training_args, processor
                 )
 
         callbacks = build_callbacks(
@@ -165,7 +153,11 @@ def main(argv: list[str] | None = None) -> int:
             denoising_processor=denoising_processor,
             retrieval_datasets=retrieval_datasets,
             retrieval_evaluation_datasets=retrieval_evaluation_datasets,
+            include_probes=include_probes,
         )
+        if training_args.probe_execution == "sidecar":
+            sidecar_callback = SidecarCallback(out_dir, resolved)
+            callbacks.append(sidecar_callback)
         trainer = MSDeltaTrainer(
             model=model,
             args=training_args,
@@ -173,8 +165,8 @@ def main(argv: list[str] | None = None) -> int:
             eval_dataset=eval_ds,
             data_collator=MSDeltaDataCollatorForPreTraining(mask_ratio=training_args.mask_ratio),
             processing_class=processor,
-            use_denoising_probe=bool(training_args.denoise_steps),
-            use_retrieval_probe=bool(training_args.retrieval_steps),
+            use_denoising_probe=include_probes and bool(training_args.denoise_steps),
+            use_retrieval_probe=include_probes and bool(training_args.retrieval_steps),
         )
         # Force Trainer to report the validation loss.
         trainer.can_return_loss = True
@@ -191,6 +183,8 @@ def main(argv: list[str] | None = None) -> int:
                 plt.close(fig)
         return 0
     finally:
+        if sidecar_callback is not None:
+            sidecar_callback.close()
         if wandb_run is not None:
             wandb_run.finish()
 

@@ -6,7 +6,6 @@ readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
     "mscompress>=1.0.16",
-    "torch>=2.10,<2.12",
     "numpy",
     "scipy",
     "wandb",
@@ -24,6 +23,15 @@ dependencies = [
     "sentence-transformers>=6.0.0",
     "faiss-gpu-cu12>=1.14.1; sys_platform == 'linux' and platform_machine == 'x86_64' and python_version < '3.14'",
     "faiss-cpu>=1.14.1; sys_platform != 'linux' or platform_machine != 'x86_64' or python_version >= '3.14'",
+]
+
+[project.optional-dependencies]
+cuda = [
+    "torch>=2.10,<2.12",
+]
+xpu = [
+    "torch>=2.10,<2.12",
+    "triton-xpu",
 ]
 
 [project.scripts]
@@ -55,12 +63,29 @@ ban-relative-imports = "all"
 [tool.ruff.lint.per-file-ignores]
 "msdelta/modeling_msdelta.py" = ["TID252"]
 
+[tool.uv]
+conflicts = [
+    [
+        { extra = "cuda" },
+        { extra = "xpu" },
+    ],
+]
+
 [tool.uv.sources]
 torch = [
-    { index = "pytorch-cu128", marker = "sys_platform == 'linux' or sys_platform == 'win32'" },
+    { index = "pytorch-cu128", extra = "cuda" },
+    { index = "pytorch-xpu", extra = "xpu" },
+]
+triton-xpu = [
+    { index = "pytorch-xpu", extra = "xpu" },
 ]
 
 [[tool.uv.index]]
 name = "pytorch-cu128"
 url = "https://download.pytorch.org/whl/cu128"
+explicit = true
+
+[[tool.uv.index]]
+name = "pytorch-xpu"
+url = "https://download.pytorch.org/whl/xpu"
 explicit = true

@@ -2,23 +2,31 @@
 
 from __future__ import annotations
 
+import json
+import logging
+import subprocess
+import sys
 from pathlib import Path
 from typing import Any
 
 import matplotlib.pyplot as plt
 import torch
-import wandb
 from accelerate.state import AcceleratorState
 from accelerate.utils import DistributedType
 from torch import nn
 from tqdm.auto import tqdm
-from transformers import TrainerCallback, TrainingArguments
+from transformers import TrainerCallback, TrainerControl, TrainerState, TrainingArguments
 
+import wandb
 from msdelta.alignment import alignment_metrics
 from msdelta.denoising import run_denoising_probe
+from msdelta.posttraining import denoise_training_args, retrieval_training_args
 from msdelta.probe import run_all_probes
 from msdelta.retrieval import run_retrieval_probe
+from msdelta.training_args import MSDeltaTrainingArguments
 from msdelta.viz import render_bias_panels
+
+logger = logging.getLogger(__name__)
 
 
 class _InlineCallback(TrainerCallback):
@@ -50,8 +58,11 @@ class _InlineCallback(TrainerCallback):
         step = state.global_step
         if step <= 0 or step % self.every != 0:
             return
-        if self.empty_cache_before and self.device.type == "cuda":
-            torch.cuda.empty_cache()
+        if self.empty_cache_before:
+            if self.device.type == "cuda":
+                torch.cuda.empty_cache()
+            elif self.device.type == "xpu":
+                torch.xpu.empty_cache()
         self.run(step)
 
     def run(self, step: int) -> None:
@@ -124,26 +135,7 @@ class DenoisingProbeCallback(TrainerCallback):
         self.training_args = training_args
         self.out_dir = out_dir
         self.last_step = -1
-        self.probe_training_args = TrainingArguments(
-            output_dir=str(out_dir / "denoise-probes"),
-            num_train_epochs=training_args.denoise_epochs,
-            per_device_train_batch_size=1,
-            per_device_eval_batch_size=1,
-            learning_rate=training_args.denoise_learning_rate,
-            weight_decay=training_args.denoise_weight_decay,
-            eval_strategy="no",
-            save_strategy="no",
-            logging_strategy="no",
-            remove_unused_columns=False,
-            label_names=["labels"],
-            dataloader_num_workers=training_args.denoise_num_workers,
-            bf16=training_args.bf16,
-            fp16=training_args.fp16,
-            seed=training_args.denoise_seed,
-            data_seed=training_args.denoise_seed,
-            report_to=[],
-            ddp_find_unused_parameters=False,
-        )
+        self.probe_training_args = denoise_training_args(training_args, out_dir)
 
     @property
     def device(self) -> torch.device:
@@ -156,6 +148,8 @@ class DenoisingProbeCallback(TrainerCallback):
         self.last_step = step
         if self.device.type == "cuda":
             torch.cuda.empty_cache()
+        elif self.device.type == "xpu":
+            torch.xpu.empty_cache()
         destination = self.out_dir / "denoise-probes" / f"step-{step}"
         accelerator_state = AcceleratorState()
         use_named_plugins = (
@@ -214,28 +208,7 @@ class RetrievalProbeCallback(TrainerCallback):
         self.training_args = training_args
         self.out_dir = out_dir
         self.last_step = -1
-        self.probe_training_args = TrainingArguments(
-            output_dir=str(out_dir / "retrieval-probes"),
-            num_train_epochs=training_args.retrieval_epochs,
-            per_device_train_batch_size=training_args.retrieval_per_device_batch_size,
-            per_device_eval_batch_size=training_args.retrieval_per_device_batch_size,
-            learning_rate=training_args.retrieval_learning_rate,
-            weight_decay=training_args.retrieval_weight_decay,
-            eval_strategy="no",
-            save_strategy="no",
-            logging_strategy="no",
-            remove_unused_columns=False,
-            label_names=["group_ids"],
-            dataloader_num_workers=training_args.retrieval_num_workers,
-            dataloader_drop_last=True,
-            prediction_loss_only=True,
-            bf16=training_args.bf16,
-            fp16=training_args.fp16,
-            seed=training_args.retrieval_seed,
-            data_seed=training_args.retrieval_seed,
-            report_to=[],
-            ddp_find_unused_parameters=False,
-        )
+        self.probe_training_args = retrieval_training_args(training_args, out_dir)
 
     @property
     def device(self) -> torch.device:
@@ -248,6 +221,8 @@ class RetrievalProbeCallback(TrainerCallback):
         self.last_step = step
         if self.device.type == "cuda":
             torch.cuda.empty_cache()
+        elif self.device.type == "xpu":
+            torch.xpu.empty_cache()
         destination = self.out_dir / "retrieval-probes" / f"step-{step}"
         accelerator_state = AcceleratorState()
         use_named_plugins = (
@@ -287,6 +262,90 @@ class RetrievalProbeCallback(TrainerCallback):
             torch.distributed.barrier()
 
 
+class SidecarCallback(TrainerCallback):
+    """Launch independent probes at each configured checkpoint interval."""
+
+    def __init__(self, out_dir: Path, resolved: dict):
+        self.out_dir = out_dir
+        self.resolved = resolved
+        self.processes: list[tuple[str, subprocess.Popen]] = []
+
+    def on_save(
+        self,
+        args: TrainingArguments,
+        state: TrainerState,
+        control: TrainerControl,
+        **kwargs,
+    ) -> None:
+        if not state.is_world_process_zero:
+            return
+        if not isinstance(args, MSDeltaTrainingArguments):
+            raise TypeError("SidecarCallback requires MSDeltaTrainingArguments")
+        step = state.global_step
+        probes = (
+            ("denoise", args.denoise_steps, args.sidecar_denoise_device),
+            ("retrieval", args.retrieval_steps, args.sidecar_retrieval_device),
+        )
+        for kind, every, device in probes:
+            if not every or step <= 0 or step % every:
+                continue
+            try:
+                checkpoint = self.out_dir / f"checkpoint-{step}"
+                log_dir = self.out_dir / f"{kind}-probes"
+                log_dir.mkdir(parents=True, exist_ok=True)
+                if device is None or args.sidecar_launcher is None:
+                    raise ValueError("Sidecar probes require a device and launcher")
+                command = [
+                    "bash",
+                    args.sidecar_launcher,
+                    device,
+                    sys.executable,
+                    "--checkpoint",
+                    str(checkpoint),
+                    "--probe",
+                    kind,
+                    "--step",
+                    str(step),
+                    "--settings-json",
+                    json.dumps(self.resolved),
+                    "--device",
+                    device.split(":")[0],
+                ]
+                if wandb.run is not None:
+                    command.extend(
+                        [
+                            "--wandb",
+                            "--wandb-run-id",
+                            wandb.run.id,
+                            "--wandb-project",
+                            wandb.run.project,
+                            "--wandb-entity",
+                            wandb.run.entity,
+                        ]
+                    )
+                with (log_dir / f"step-{step}.log").open("a") as log:
+                    process = subprocess.Popen(
+                        command,
+                        stdout=log,
+                        stderr=subprocess.STDOUT,
+                        start_new_session=True,
+                    )
+                self.processes.append((kind, process))
+                logger.info("Started %s probe for checkpoint %s", kind, step)
+            except Exception:
+                logger.exception(
+                    "Could not launch %s probe at step %s; pretraining continues", kind, step
+                )
+
+    def close(self) -> None:
+        """Wait for active probes to finish before closing the primary W&B run."""
+        for kind, process in self.processes:
+            status = process.wait()
+            if status:
+                logger.warning("%s probe exited with status %s", kind, status)
+        self.processes.clear()
+
+
 def build_callbacks(
     module,
     val_dataset,
@@ -297,6 +356,8 @@ def build_callbacks(
     denoising_processor=None,
     retrieval_datasets=None,
     retrieval_evaluation_datasets=None,
+    *,
+    include_probes: bool = True,
 ):
     """Create the callbacks enabled in the configuration."""
     cbs: list[TrainerCallback] = []
@@ -312,7 +373,7 @@ def build_callbacks(
             )
         )
         cbs.append(AlignmentCallback(module, training_args.probe_steps))
-    if training_args.retrieval_steps:
+    if include_probes and training_args.retrieval_steps:
         if retrieval_datasets is None:
             raise ValueError("retrieval datasets are required when retrieval_steps is enabled")
         cbs.append(
@@ -326,7 +387,7 @@ def build_callbacks(
                 evaluation_datasets=retrieval_evaluation_datasets,
             )
         )
-    if training_args.denoise_steps:
+    if include_probes and training_args.denoise_steps:
         if denoising_datasets is None:
             raise ValueError("denoising datasets are required when denoise_steps is enabled")
         if denoising_processor is None:
