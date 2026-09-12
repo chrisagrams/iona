@@ -93,17 +93,24 @@ def collate_preprocessed(features: list[dict]) -> dict[str, torch.Tensor]:
 
 
 def build_preprocessed_dataset(
-    dataset: Dataset, processor: MSDeltaProcessor, num_proc: int | None = None
+    dataset: Dataset,
+    processor: MSDeltaProcessor,
+    num_proc: int | None = None,
+    load_from_cache_file: bool | None = None,
 ) -> Dataset:
     """Preprocess a mass-spectrum dataset."""
     dataset = dataset.map(
         partial(_preprocess_example, processor=processor),
         remove_columns=dataset.column_names,
         num_proc=num_proc,
+        load_from_cache_file=load_from_cache_file,
         desc="preprocess spectra",
     )
     return dataset.filter(
-        lambda ex: len(ex["mz"]) > 0, num_proc=num_proc, desc="drop empty spectra"
+        lambda ex: len(ex["mz"]) > 0,
+        num_proc=num_proc,
+        load_from_cache_file=load_from_cache_file,
+        desc="drop empty spectra",
     )
 
 
@@ -114,6 +121,7 @@ def build_pretraining_datasets(
     validation_split: str = "validation",
     num_proc: int | None = None,
     cache_dir: str | None = None,
+    load_from_cache_file: bool | None = None,
 ) -> tuple[Dataset, Dataset]:
     """Load and preprocess training and validation splits from Hugging Face."""
     train, validation = load_dataset(
@@ -121,8 +129,18 @@ def build_pretraining_datasets(
         split=[train_split, validation_split],
         cache_dir=cache_dir,
     )
-    train = build_preprocessed_dataset(train, processor, num_proc=num_proc)
-    validation = build_preprocessed_dataset(validation, processor, num_proc=num_proc)
+    train = build_preprocessed_dataset(
+        train,
+        processor,
+        num_proc=num_proc,
+        load_from_cache_file=load_from_cache_file,
+    )
+    validation = build_preprocessed_dataset(
+        validation,
+        processor,
+        num_proc=num_proc,
+        load_from_cache_file=load_from_cache_file,
+    )
     return train, validation
 
 
