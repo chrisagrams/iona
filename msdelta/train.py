@@ -115,6 +115,7 @@ def main(argv: list[str] | None = None) -> int:
                 train_split=data_args.dataset_train_split,
                 validation_split=data_args.dataset_validation_split,
                 num_proc=data_args.preprocessing_num_workers or None,
+                cache_dir=data_args.dataset_cache_dir,
             )
         eval_size = training_args.validation_batches * training_args.per_device_eval_batch_size
         eval_ds = val_ds.select(range(min(len(val_ds), eval_size)))
