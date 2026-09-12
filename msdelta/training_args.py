@@ -35,6 +35,10 @@ class DataArguments:
     dataset_repo_id: str = field(metadata={"help": "Hugging Face dataset repository ID."})
     dataset_train_split: str = "train"
     dataset_validation_split: str = "validation"
+    dataset_cache_dir: str | None = field(
+        default=None,
+        metadata={"help": "Optional Hugging Face datasets cache directory."},
+    )
     preprocessing_num_workers: int = 24
     max_peaks: int | None = None
 

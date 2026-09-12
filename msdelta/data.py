@@ -111,9 +111,14 @@ def build_pretraining_datasets(
     train_split: str = "train",
     validation_split: str = "validation",
     num_proc: int | None = None,
+    cache_dir: str | None = None,
 ) -> tuple[Dataset, Dataset]:
     """Load and preprocess training and validation splits from Hugging Face."""
-    train, validation = load_dataset(repo_id, split=[train_split, validation_split])
+    train, validation = load_dataset(
+        repo_id,
+        split=[train_split, validation_split],
+        cache_dir=cache_dir,
+    )
     train = build_preprocessed_dataset(train, processor, num_proc=num_proc)
     validation = build_preprocessed_dataset(validation, processor, num_proc=num_proc)
     return train, validation

@@ -87,7 +87,8 @@ RUN_NAME=${RUN_NAME:-${CONFIG_RUN_NAME}-${JOB_ID}}
 RUN_DIR=$CHECKPOINT_DIR/$RUN_NAME
 LOG_DIR=${LOG_DIR:-$RUN_DIR/logs}
 HF_HOME=${HF_HOME:-$CHECKPOINT_DIR/huggingface}
-mkdir -p "$RUN_DIR" "$LOG_DIR" "$HF_HOME"
+DATASET_CACHE_DIR=${DATASET_CACHE_DIR:-$HF_HOME/datasets}
+mkdir -p "$RUN_DIR" "$LOG_DIR" "$HF_HOME" "$DATASET_CACHE_DIR"
 DDP_ARGS_FILE=$RUN_DIR/training-ddp.args
 awk '
     $1 != "--deepspeed" &&
@@ -213,6 +214,7 @@ export WANDB_PROJECT=${WANDB_PROJECT:-$CONFIG_WANDB_PROJECT}
 
 TRAIN_ARGS=(
     --args_file "$DDP_ARGS_FILE"
+    --dataset_cache_dir "$DATASET_CACHE_DIR"
     --run_name "$RUN_NAME"
     --output_dir "$RUN_DIR"
     --per_device_train_batch_size "$MICRO_BATCH_SIZE"
