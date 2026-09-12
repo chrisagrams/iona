@@ -14,7 +14,7 @@ from transformers import HfArgumentParser, Trainer, set_seed
 
 from msdelta.callbacks import SidecarCallback, build_callbacks
 from msdelta.configuration_msdelta import MSDeltaConfig
-from msdelta.data import build_pretraining_datasets
+from msdelta.data import load_pretraining_datasets_from_cache
 from msdelta.modeling_msdelta import MSDeltaForPreTraining
 from msdelta.posttraining import build_probe_data
 from msdelta.processing_msdelta import MSDeltaDataCollatorForPreTraining, MSDeltaProcessor
@@ -109,7 +109,7 @@ def main(argv: list[str] | None = None) -> int:
                     f"[data] preprocessing with {data_args.preprocessing_num_workers} CPU workers",
                     flush=True,
                 )
-            train_ds, val_ds = build_pretraining_datasets(
+            train_ds, val_ds = load_pretraining_datasets_from_cache(
                 data_args.dataset_repo_id,
                 processor,
                 train_split=data_args.dataset_train_split,

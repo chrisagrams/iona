@@ -6,7 +6,7 @@ import re
 from functools import partial
 
 import torch
-from datasets import Dataset, DatasetDict, load_dataset
+from datasets import Dataset, DatasetDict, load_dataset, load_dataset_builder
 
 from msdelta.chemistry import PROTON_MASS, RESIDUE_MASSES, WATER_MASS
 from msdelta.processing_msdelta import MSDeltaProcessor
@@ -121,6 +121,22 @@ def build_pretraining_datasets(
         split=[train_split, validation_split],
         cache_dir=cache_dir,
     )
+    train = build_preprocessed_dataset(train, processor, num_proc=num_proc)
+    validation = build_preprocessed_dataset(validation, processor, num_proc=num_proc)
+    return train, validation
+
+
+def load_pretraining_datasets_from_cache(
+    repo_id: str,
+    processor: MSDeltaProcessor,
+    train_split: str = "train",
+    validation_split: str = "validation",
+    num_proc: int | None = None,
+    cache_dir: str | None = None,
+) -> tuple[Dataset, Dataset]:
+    """Load prepared splits directly, bypassing download and preparation."""
+    builder = load_dataset_builder(repo_id, cache_dir=cache_dir)
+    train, validation = builder.as_dataset(split=[train_split, validation_split])
     train = build_preprocessed_dataset(train, processor, num_proc=num_proc)
     validation = build_preprocessed_dataset(validation, processor, num_proc=num_proc)
     return train, validation
