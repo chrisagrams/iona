@@ -15,6 +15,7 @@ REPO_DIR=${REPO_DIR:-${PBS_O_WORKDIR:-$PWD}}
 VENV_DIR=${VENV_DIR:-$REPO_DIR/.venv}
 ARGS_FILE=${ARGS_FILE:?set ARGS_FILE to an MSDelta training args file}
 DATASET_CACHE_DIR=${DATASET_CACHE_DIR:?set DATASET_CACHE_DIR to a shared filesystem path}
+PREPROCESSED_DATASET_DIR=${PREPROCESSED_DATASET_DIR:-$DATASET_CACHE_DIR/msdelta-preprocessed}
 
 if [[ $ARGS_FILE != /* ]]; then
     ARGS_FILE=$REPO_DIR/$ARGS_FILE
@@ -55,4 +56,5 @@ export NO_PROXY=${NO_PROXY:-$no_proxy}
 echo "$(date -Is) preprocessing cache=$DATASET_CACHE_DIR args=$ARGS_FILE"
 exec "$VENV_DIR/bin/python" -m msdelta.preprocess \
     --args_file "$ARGS_FILE" \
-    --dataset_cache_dir "$DATASET_CACHE_DIR"
+    --dataset_cache_dir "$DATASET_CACHE_DIR" \
+    --preprocessed_dataset_dir "$PREPROCESSED_DATASET_DIR"

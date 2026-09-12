@@ -39,6 +39,10 @@ class DataArguments:
         default=None,
         metadata={"help": "Optional Hugging Face datasets cache directory."},
     )
+    preprocessed_dataset_dir: str | None = field(
+        default=None,
+        metadata={"help": "Optional finalized dataset directory created by msdelta-preprocess."},
+    )
     preprocessing_num_workers: int = 24
     max_peaks: int | None = None
 

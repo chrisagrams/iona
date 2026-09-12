@@ -6,7 +6,7 @@ import re
 from functools import partial
 
 import torch
-from datasets import Dataset, DatasetDict, load_dataset, load_dataset_builder
+from datasets import Dataset, DatasetDict, load_dataset, load_from_disk
 
 from msdelta.chemistry import PROTON_MASS, RESIDUE_MASSES, WATER_MASS
 from msdelta.processing_msdelta import MSDeltaProcessor
@@ -126,20 +126,16 @@ def build_pretraining_datasets(
     return train, validation
 
 
-def load_pretraining_datasets_from_cache(
-    repo_id: str,
-    processor: MSDeltaProcessor,
+def load_pretraining_datasets_from_disk(
+    dataset_path: str,
     train_split: str = "train",
     validation_split: str = "validation",
-    num_proc: int | None = None,
-    cache_dir: str | None = None,
 ) -> tuple[Dataset, Dataset]:
-    """Load prepared splits directly, bypassing download and preparation."""
-    builder = load_dataset_builder(repo_id, cache_dir=cache_dir)
-    train, validation = builder.as_dataset(split=[train_split, validation_split])
-    train = build_preprocessed_dataset(train, processor, num_proc=num_proc)
-    validation = build_preprocessed_dataset(validation, processor, num_proc=num_proc)
-    return train, validation
+    """Load finalized preprocessed splits from disk."""
+    datasets = load_from_disk(dataset_path)
+    if not isinstance(datasets, DatasetDict):
+        raise TypeError(f"Expected a DatasetDict at {dataset_path}")
+    return datasets[train_split], datasets[validation_split]
 
 
 def build_denoising_datasets(
