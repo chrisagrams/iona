@@ -43,8 +43,6 @@ def main(argv: list[str] | None = None) -> int:
         validation_split=data_args.dataset_validation_split,
         num_proc=workers,
         cache_dir=data_args.dataset_cache_dir,
-        # Loading a multiprocessing map cache is serial in Hugging Face Datasets.
-        # Recompute in parallel when building the finalized on-disk artifact.
         load_from_cache_file=False if data_args.preprocessed_dataset_dir else None,
     )
     print(
