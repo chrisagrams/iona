@@ -78,7 +78,6 @@ def build_probe_data(kind, data_args, training_args, processor):
         processor = MSDeltaProcessor.from_pretrained(
             data_args.processor_name_or_path,
             max_peaks=training_args.denoise_max_peaks,
-            intensity_threshold_frac=training_args.denoise_intensity_threshold_frac,
         )
         datasets = build_denoising_datasets(
             training_args.denoise_dataset_repo, processor, num_proc=num_proc

@@ -33,10 +33,13 @@ export ZE_FLAT_DEVICE_HIERARCHY=FLAT
 export ZE_AFFINITY_MASK="$probe_mask"
 
 # This is a standalone Trainer, not another member of pretraining's DDP group.
+# Preserve oneCCL installation variables such as CCL_ROOT so the framework's
+# Level Zero kernels remain discoverable.
 while IFS= read -r probe_variable; do
     case "$probe_variable" in
         RANK|WORLD_SIZE|LOCAL_RANK|LOCAL_WORLD_SIZE|MASTER_ADDR|MASTER_PORT|\
-        PMI_*|PMIX_*|PALS_*|OMPI_*|MV2_*|MPI_*|CCL_*|ACCELERATE_*|TORCHELASTIC_*)
+        PMI_*|PMIX_*|PALS_*|OMPI_*|MV2_*|MPI_*|ACCELERATE_*|TORCHELASTIC_*|\
+        CCL_PROCESS_LAUNCHER|CCL_ATL_TRANSPORT|CCL_KVS_MODE|CCL_ZE_IPC|CCL_ZE_IPC_EXCHANGE)
             unset "$probe_variable"
             ;;
     esac

@@ -8,7 +8,7 @@
 #   pbs/aurora-pretrain.pbs
 #
 # Posttraining defaults to asynchronous sidecars on the global-rank-zero host.
-# DENOISE_XPU_TILES=8,9 and RETRIEVAL_XPU_TILES=10,11 use both tiles per spare card.
+# DENOISE_XPU_TILES=4,5 and RETRIEVAL_XPU_TILES=10,11 use both tiles per spare card.
 # Export comma-separated lists before qsub; commas also delimit qsub -v entries.
 # Set PROBE_EXECUTION=inline to retain synchronous probes, or off to disable heads.
 # The launch follows the ALCF Aurora PyTorch DDP guidance:
@@ -88,6 +88,7 @@ RUN_DIR=$CHECKPOINT_DIR/$RUN_NAME
 LOG_DIR=${LOG_DIR:-$RUN_DIR/logs}
 HF_HOME=${HF_HOME:-$CHECKPOINT_DIR/huggingface}
 DATASET_CACHE_DIR=${DATASET_CACHE_DIR:-$HF_HOME/datasets}
+PREPROCESSED_DATASET_DIR=${PREPROCESSED_DATASET_DIR:-$DATASET_CACHE_DIR/msdelta-preprocessed}
 mkdir -p "$RUN_DIR" "$LOG_DIR" "$HF_HOME" "$DATASET_CACHE_DIR"
 DDP_ARGS_FILE=$RUN_DIR/training-ddp.args
 awk '
@@ -110,7 +111,14 @@ if ((XPUS_PER_HOST < 1 || XPUS_PER_HOST > 12)); then
     exit 2
 fi
 TOTAL_XPUS=$((NUM_HOSTS * XPUS_PER_HOST))
-DENOISE_XPU_TILES=${DENOISE_XPU_TILES:-8,9}
+if [[ $XPUS_PER_HOST == 8 ]]; then
+    PRETRAIN_XPU_TILES=${ZE_AFFINITY_MASK:-0,1,2,3,6,7,8,9}
+elif [[ $XPUS_PER_HOST == 12 ]]; then
+    PRETRAIN_XPU_TILES=${ZE_AFFINITY_MASK:-0,1,2,3,4,5,6,7,8,9,10,11}
+else
+    PRETRAIN_XPU_TILES=${ZE_AFFINITY_MASK:-$(seq -s, 0 $((XPUS_PER_HOST - 1)))}
+fi
+DENOISE_XPU_TILES=${DENOISE_XPU_TILES:-4,5}
 RETRIEVAL_XPU_TILES=${RETRIEVAL_XPU_TILES:-10,11}
 if [[ $PROBE_EXECUTION == sidecar ]]; then
     if [[ ${ZE_FLAT_DEVICE_HIERARCHY:-FLAT} != FLAT ]]; then
@@ -128,7 +136,7 @@ if [[ $PROBE_EXECUTION == sidecar ]]; then
         fi
         IFS=, read -r -a probe_tiles <<<"$tiles"
         for tile in "${probe_tiles[@]}"; do
-            if ((tile < XPUS_PER_HOST)) || [[ $used_tiles == *",$tile,"* ]]; then
+            if [[ ,$PRETRAIN_XPU_TILES, == *",$tile,"* || $used_tiles == *",$tile,"* ]]; then
                 echo "sidecar tile $tile overlaps pretraining or another probe assignment" >&2
                 exit 2
             fi
@@ -151,13 +159,13 @@ if ((GRADIENT_ACCUMULATION_STEPS < 1)); then
 fi
 
 if [[ $XPUS_PER_HOST == 8 ]]; then
-    export ZE_AFFINITY_MASK=${ZE_AFFINITY_MASK:-0,1,2,3,6,7,8,9}
+    export ZE_AFFINITY_MASK=$PRETRAIN_XPU_TILES
     export CPU_BIND=${CPU_BIND:-verbose,list:4-7:8-11:12-15:16-19:56-59:60-63:64-67:68-71}
 elif [[ $XPUS_PER_HOST == 12 ]]; then
-    export ZE_AFFINITY_MASK=${ZE_AFFINITY_MASK:-0,1,2,3,4,5,6,7,8,9,10,11}
+    export ZE_AFFINITY_MASK=$PRETRAIN_XPU_TILES
     export CPU_BIND=${CPU_BIND:-verbose,list:4-7:8-11:12-15:16-19:20-23:24-27:56-59:60-63:64-67:68-71:72-75:76-79}
 else
-    ZE_AFFINITY_MASK=${ZE_AFFINITY_MASK:-$(seq -s, 0 $((XPUS_PER_HOST - 1)))}
+    ZE_AFFINITY_MASK=$PRETRAIN_XPU_TILES
     export ZE_AFFINITY_MASK
     export CPU_BIND=${CPU_BIND:-none}
 fi
@@ -215,6 +223,7 @@ export WANDB_PROJECT=${WANDB_PROJECT:-$CONFIG_WANDB_PROJECT}
 TRAIN_ARGS=(
     --args_file "$DDP_ARGS_FILE"
     --dataset_cache_dir "$DATASET_CACHE_DIR"
+    --preprocessed_dataset_dir "$PREPROCESSED_DATASET_DIR"
     --run_name "$RUN_NAME"
     --output_dir "$RUN_DIR"
     --per_device_train_batch_size "$MICRO_BATCH_SIZE"

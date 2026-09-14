@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import sys
 
+from datasets import DatasetDict
 from transformers import HfArgumentParser
 
 from msdelta.data import build_pretraining_datasets
@@ -42,11 +43,24 @@ def main(argv: list[str] | None = None) -> int:
         validation_split=data_args.dataset_validation_split,
         num_proc=workers,
         cache_dir=data_args.dataset_cache_dir,
+        load_from_cache_file=False if data_args.preprocessed_dataset_dir else None,
     )
     print(
         f"[data] cache ready: train={len(train_ds):,}, validation={len(validation_ds):,}",
         flush=True,
     )
+    if data_args.preprocessed_dataset_dir:
+        print(
+            f"[data] saving finalized dataset to {data_args.preprocessed_dataset_dir}",
+            flush=True,
+        )
+        DatasetDict(
+            {
+                data_args.dataset_train_split: train_ds,
+                data_args.dataset_validation_split: validation_ds,
+            }
+        ).save_to_disk(data_args.preprocessed_dataset_dir, num_proc=workers)
+        print("[data] finalized dataset ready", flush=True)
     return 0
 
 

@@ -14,7 +14,7 @@ from transformers import HfArgumentParser, Trainer, set_seed
 
 from msdelta.callbacks import SidecarCallback, build_callbacks
 from msdelta.configuration_msdelta import MSDeltaConfig
-from msdelta.data import build_pretraining_datasets
+from msdelta.data import build_pretraining_datasets, load_pretraining_datasets_from_disk
 from msdelta.modeling_msdelta import MSDeltaForPreTraining
 from msdelta.posttraining import build_probe_data
 from msdelta.processing_msdelta import MSDeltaDataCollatorForPreTraining, MSDeltaProcessor
@@ -102,21 +102,34 @@ def main(argv: list[str] | None = None) -> int:
             n_params = sum(p.numel() for p in model.parameters())
             print(f"[model] {n_params / 1e6:.2f}M params", flush=True)
 
-        # Create the shared dataset cache on rank 0.
-        with training_args.main_process_first(local=False, desc="dataset preprocessing"):
+        if data_args.preprocessed_dataset_dir:
             if training_args.process_index == 0:
                 print(
-                    f"[data] preprocessing with {data_args.preprocessing_num_workers} CPU workers",
+                    f"[data] loading finalized dataset from {data_args.preprocessed_dataset_dir}",
                     flush=True,
                 )
-            train_ds, val_ds = build_pretraining_datasets(
-                data_args.dataset_repo_id,
-                processor,
+            train_ds, val_ds = load_pretraining_datasets_from_disk(
+                data_args.preprocessed_dataset_dir,
                 train_split=data_args.dataset_train_split,
                 validation_split=data_args.dataset_validation_split,
-                num_proc=data_args.preprocessing_num_workers or None,
-                cache_dir=data_args.dataset_cache_dir,
             )
+        else:
+            # Create the shared dataset cache on rank 0.
+            with training_args.main_process_first(local=False, desc="dataset preprocessing"):
+                if training_args.process_index == 0:
+                    print(
+                        f"[data] preprocessing with {data_args.preprocessing_num_workers} "
+                        "CPU workers",
+                        flush=True,
+                    )
+                train_ds, val_ds = build_pretraining_datasets(
+                    data_args.dataset_repo_id,
+                    processor,
+                    train_split=data_args.dataset_train_split,
+                    validation_split=data_args.dataset_validation_split,
+                    num_proc=data_args.preprocessing_num_workers or None,
+                    cache_dir=data_args.dataset_cache_dir,
+                )
         eval_size = training_args.validation_batches * training_args.per_device_eval_batch_size
         eval_ds = val_ds.select(range(min(len(val_ds), eval_size)))
         include_probes = training_args.probe_execution == "inline"
