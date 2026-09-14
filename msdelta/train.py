@@ -130,8 +130,6 @@ def main(argv: list[str] | None = None) -> int:
                     num_proc=data_args.preprocessing_num_workers or None,
                     cache_dir=data_args.dataset_cache_dir,
                 )
-        eval_size = training_args.validation_batches * training_args.per_device_eval_batch_size
-        eval_ds = val_ds.select(range(min(len(val_ds), eval_size)))
         include_probes = training_args.probe_execution == "inline"
         denoising_datasets = denoising_processor = None
         retrieval_datasets = retrieval_evaluation_datasets = None
@@ -165,7 +163,7 @@ def main(argv: list[str] | None = None) -> int:
             model=model,
             args=training_args,
             train_dataset=train_ds,
-            eval_dataset=eval_ds,
+            eval_dataset=val_ds,
             data_collator=MSDeltaDataCollatorForPreTraining(mask_ratio=training_args.mask_ratio),
             processing_class=processor,
             use_denoising_probe=include_probes and bool(training_args.denoise_steps),
