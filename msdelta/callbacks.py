@@ -29,6 +29,27 @@ from msdelta.viz import render_bias_panels
 logger = logging.getLogger(__name__)
 
 
+def is_logarithmic_eval_step(step: int, start_step: int) -> bool:
+    """Return whether ``step`` lies on a 1-2-5 logarithmic schedule."""
+    if step < start_step:
+        return False
+    scale = 10 ** (len(str(step)) - 1)
+    return step in (scale, 2 * scale, 5 * scale)
+
+
+class LogarithmicEvalCallback(TrainerCallback):
+    """Request evaluation at 1-2-5 steps per decade and at the final step."""
+
+    def __init__(self, start_step: int):
+        self.start_step = start_step
+
+    def on_step_end(self, args, state, control, **kwargs):
+        step = state.global_step
+        if is_logarithmic_eval_step(step, self.start_step) or step == state.max_steps:
+            control.should_evaluate = True
+        return control
+
+
 class _InlineCallback(TrainerCallback):
     """Run a diagnostic at a specified interval on the main process."""
 
@@ -368,6 +389,8 @@ def build_callbacks(
 ):
     """Create the callbacks enabled in the configuration."""
     cbs: list[TrainerCallback] = []
+    if training_args.logarithmic_eval_start_step is not None:
+        cbs.append(LogarithmicEvalCallback(training_args.logarithmic_eval_start_step))
     if training_args.bias_curve_steps:
         cbs.append(BiasPanelCallback(module, training_args.bias_curve_steps, out_dir=out_dir))
     if training_args.probe_steps:

@@ -64,7 +64,7 @@ class MSDeltaTrainingArguments(TrainingArguments):
     sidecar_denoise_device: str | None = None
     sidecar_retrieval_device: str | None = None
     mask_ratio: float = 0.15
-    validation_batches: int = 50
+    logarithmic_eval_start_step: int | None = None
     bias_curve_steps: int = 5000
     probe_steps: int = 0
     probe_num_spectra: int = 3000
@@ -97,6 +97,8 @@ class MSDeltaTrainingArguments(TrainingArguments):
     wandb_project: str | None = None
 
     def __post_init__(self):
+        if self.logarithmic_eval_start_step is not None and self.logarithmic_eval_start_step < 1:
+            raise ValueError("logarithmic_eval_start_step must be positive")
         if self.probe_batch_size < 1:
             raise ValueError("probe_batch_size must be positive")
         if self.probe_execution not in {"inline", "sidecar", "off"}:
