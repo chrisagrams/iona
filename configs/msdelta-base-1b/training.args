@@ -21,7 +21,7 @@
 --max_grad_norm 1.0
 --bf16 true
 --torch_compile true
---logarithmic_eval_start_step 10
+--logarithmic_eval_start_step 500
 --seed 0
 --logging_steps 50
 --logging_first_step true

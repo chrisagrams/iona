@@ -64,7 +64,7 @@ class MSDeltaTrainingArguments(TrainingArguments):
     sidecar_denoise_device: str | None = None
     sidecar_retrieval_device: str | None = None
     mask_ratio: float = 0.15
-    logarithmic_eval_start_step: int | None = None
+    logarithmic_eval_start_step: int | None = 500
     bias_curve_steps: int = 5000
     probe_steps: int = 0
     probe_num_spectra: int = 3000
