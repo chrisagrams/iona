@@ -74,12 +74,19 @@ class LinearProbeCallback(_InlineCallback):
 
     empty_cache_before = True
 
-    def __init__(self, module, every, dataset, n_spectra):
+    def __init__(self, module, every, dataset, n_spectra, batch_size):
         super().__init__(module, every, dataset=dataset)
         self.n_spectra = n_spectra
+        self.batch_size = batch_size
 
     def run(self, step):
-        m = run_all_probes(self.encoder, self.dataset, self.device, n_spectra=self.n_spectra)
+        m = run_all_probes(
+            self.encoder,
+            self.dataset,
+            self.device,
+            n_spectra=self.n_spectra,
+            batch_size=self.batch_size,
+        )
         self._wlog(m, step)
 
         def key(k):
@@ -370,6 +377,7 @@ def build_callbacks(
                 training_args.probe_steps,
                 val_dataset,
                 training_args.probe_num_spectra,
+                training_args.probe_batch_size,
             )
         )
         cbs.append(AlignmentCallback(module, training_args.probe_steps))

@@ -68,6 +68,7 @@ class MSDeltaTrainingArguments(TrainingArguments):
     bias_curve_steps: int = 5000
     probe_steps: int = 0
     probe_num_spectra: int = 3000
+    probe_batch_size: int = 1
     replicate_retrieval_repo: str | None = None
     retrieval_steps: int = 0
     retrieval_dataset_repo: str = "chrisagrams/ms-contrastive-100k"
@@ -96,6 +97,8 @@ class MSDeltaTrainingArguments(TrainingArguments):
     wandb_project: str | None = None
 
     def __post_init__(self):
+        if self.probe_batch_size < 1:
+            raise ValueError("probe_batch_size must be positive")
         if self.probe_execution not in {"inline", "sidecar", "off"}:
             raise ValueError("probe_execution must be inline, sidecar, or off")
         if self.probe_execution == "sidecar":
