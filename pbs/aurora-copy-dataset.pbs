@@ -1,0 +1,67 @@
+#!/bin/bash -l
+# Copy a finalized msdelta-preprocess dataset from Flare into an existing POSIX
+# DAOS container. Submit from the repository root, for example:
+# qsub -A PROJECT -q debug \
+#   -l select=1 -l place=scatter -l walltime=00:59:00 \
+#   -l filesystems=home:flare:daos_user_fs -j oe \
+#   -v SOURCE_DIR=/lus/flare/projects/PROJECT/hf/datasets/msdelta-preprocessed,DAOS_POOL=POOL,DAOS_CONT=msdelta-training \
+#   pbs/aurora-copy-dataset.pbs
+# The destination defaults to datasets/msdelta-preprocessed within the container,
+# matching aurora-pretrain.pbs. It must not already exist (no overwrite/resume).
+# DAOS_DATASET_PATH may override this container-relative destination.
+# Guidance: https://docs.alcf.anl.gov/aurora/data-management/moving_data_to_aurora/datamover/
+
+set -euo pipefail
+
+module use /soft/modulefiles
+module load daos
+module load mpifileutils
+
+SOURCE_DIR=${SOURCE_DIR:?set SOURCE_DIR to the finalized dataset directory on Flare}
+DAOS_POOL=${DAOS_POOL:?set DAOS_POOL to the project DAOS pool}
+DAOS_CONT=${DAOS_CONT:-msdelta-training}
+DAOS_DATASET_PATH=${DAOS_DATASET_PATH:-datasets/msdelta-preprocessed}
+
+if [[ $SOURCE_DIR != /* || ! -d $SOURCE_DIR ]]; then
+    echo "SOURCE_DIR must be an existing absolute directory: $SOURCE_DIR" >&2
+    exit 2
+fi
+if [[ -z $DAOS_DATASET_PATH || $DAOS_DATASET_PATH == /* || /$DAOS_DATASET_PATH/ == *'/../'* || /$DAOS_DATASET_PATH/ == *'/./'* ]]; then
+    echo "DAOS_DATASET_PATH must be a nonempty container-relative path without . or .. components" >&2
+    exit 2
+fi
+if [[ ! -f ${PBS_NODEFILE:-} ]]; then
+    echo "PBS_NODEFILE is required; submit this script with qsub" >&2
+    exit 2
+fi
+for tool in mpiexec dcp launch-dfuse-with-caching.sh; do
+    if ! command -v "$tool" >/dev/null 2>&1; then
+        echo "required command not found: $tool" >&2
+        exit 2
+    fi
+done
+
+# Use the mount only to prepare/check the destination. dcp transfers through DFS
+# directly, not through dfuse. PBS epilogue unmounts the compute-node mounts.
+launch-dfuse-with-caching.sh "${DAOS_POOL}:${DAOS_CONT}"
+DAOS_ROOT=/tmp/$DAOS_POOL/$DAOS_CONT
+if [[ ! -d $DAOS_ROOT ]]; then
+    echo "DAOS dfuse mount not found: $DAOS_ROOT" >&2
+    exit 2
+fi
+DEST_DIR=$DAOS_ROOT/$DAOS_DATASET_PATH
+if [[ -e $DEST_DIR || -L $DEST_DIR ]]; then
+    echo "destination already exists; choose a fresh DAOS_DATASET_PATH: $DEST_DIR" >&2
+    exit 2
+fi
+mkdir -p "$(dirname "$DEST_DIR")"
+
+NUM_HOSTS=$(awk '!seen[$0]++ {count++} END {print count}' "$PBS_NODEFILE")
+DEST_URI=daos://$DAOS_POOL/$DAOS_CONT/$DAOS_DATASET_PATH
+echo "$(date -Is) copying $SOURCE_DIR to $DEST_URI using $NUM_HOSTS nodes, 8 ranks/node"
+exec mpiexec \
+    --no-vni --envall \
+    -n "$((NUM_HOSTS * 8))" --ppn 8 \
+    --cpu-bind list:4:56:5:57:6:58:7:59 \
+    --hostfile="$PBS_NODEFILE" \
+    dcp "$SOURCE_DIR" "$DEST_URI"
