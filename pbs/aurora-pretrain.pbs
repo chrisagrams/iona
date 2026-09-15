@@ -4,11 +4,14 @@
 # qsub -A PROJECT -q QUEUE \
 #   -l select=2 -l place=scatter -l walltime=12:00:00 \
 #   -l filesystems=home:flare:daos_user_fs -j oe -o /path/to/pbs/logs \
-#   -v ARGS_FILE=configs/msdelta-base-200m/training.args,DAOS_POOL=POOL,DAOS_CONT=msdelta-training,XPUS_PER_HOST=8,GLOBAL_BATCH_SIZE=512 \
+#   -v ARGS_FILE=configs/msdelta-base-200m/training.args,DAOS_POOL=POOL,DAOS_CONT=msdelta-training,LOG_ROOT=/flare/PROJECT/msdelta-runs,XPUS_PER_HOST=8,GLOBAL_BATCH_SIZE=512 \
 #   pbs/aurora-pretrain.pbs
 # HF_HOME defaults to /tmp/$DAOS_POOL/$DAOS_CONT/hf-cache. Copy the entire
 # preprocessing HF_HOME there, including datasets/msdelta-preprocessed and
 # datasets/msdelta-probes. Override HF_HOME to use another mounted location.
+# Set LOG_ROOT to the Flare base directory. Logs and W&B files are created at
+# $LOG_ROOT/$RUN_NAME/logs; RUN_NAME defaults to the configured run name + job ID.
+# LOG_DIR may override the complete path. Checkpoints remain in DAOS.
 #
 # Posttraining defaults to asynchronous sidecars on the global-rank-zero host.
 # DENOISE_XPU_TILES=4,5 and RETRIEVAL_XPU_TILES=10,11 use both tiles per spare card.
@@ -126,7 +129,11 @@ if [[ $PROBE_EXECUTION != off ]]; then
 fi
 RUN_NAME=${RUN_NAME:-${CONFIG_RUN_NAME}-${JOB_ID}}
 RUN_DIR=$CHECKPOINT_DIR/$RUN_NAME
-LOG_DIR=${LOG_DIR:-$RUN_DIR/logs}
+LOG_DIR=${LOG_DIR:-${LOG_ROOT:?set LOG_ROOT to a Flare base directory for logs}/$RUN_NAME/logs}
+if [[ $LOG_DIR != /* ]]; then
+    echo "LOG_DIR (or LOG_ROOT) must be an absolute shared-filesystem path" >&2
+    exit 2
+fi
 mkdir -p "$RUN_DIR" "$LOG_DIR" "$HF_HOME" "$DATASET_CACHE_DIR"
 DDP_ARGS_FILE=$RUN_DIR/training-ddp.args
 awk '
