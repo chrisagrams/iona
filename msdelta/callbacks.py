@@ -50,6 +50,34 @@ class LogarithmicEvalCallback(TrainerCallback):
         return control
 
 
+class EvaluationCacheCallback(TrainerCallback):
+    """Release accelerator cache immediately before and after evaluation."""
+
+    def __init__(self, module: nn.Module):
+        self.module = module
+
+    @property
+    def device(self) -> torch.device:
+        return next(self.module.parameters()).device
+
+    def _clear_cache(self) -> None:
+        if self.device.type == "cuda":
+            torch.cuda.synchronize(self.device)
+            torch.cuda.empty_cache()
+        elif self.device.type == "xpu":
+            torch.xpu.synchronize(self.device)
+            torch.xpu.empty_cache()
+
+    def on_step_end(self, args, state, control, **kwargs):
+        if control.should_evaluate:
+            self._clear_cache()
+        return control
+
+    def on_evaluate(self, args, state, control, **kwargs):
+        self._clear_cache()
+        return control
+
+
 class _InlineCallback(TrainerCallback):
     """Run a diagnostic at a specified interval on the main process."""
 
@@ -391,6 +419,7 @@ def build_callbacks(
     cbs: list[TrainerCallback] = []
     if training_args.logarithmic_eval_start_step is not None:
         cbs.append(LogarithmicEvalCallback(training_args.logarithmic_eval_start_step))
+    cbs.append(EvaluationCacheCallback(module))
     if training_args.bias_curve_steps:
         cbs.append(BiasPanelCallback(module, training_args.bias_curve_steps, out_dir=out_dir))
     if training_args.probe_steps:
