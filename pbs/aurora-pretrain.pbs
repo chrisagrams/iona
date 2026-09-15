@@ -6,6 +6,9 @@
 #   -l filesystems=home:flare:daos_user_fs -j oe -o /path/to/pbs/logs \
 #   -v ARGS_FILE=configs/msdelta-base-200m/training.args,DAOS_POOL=POOL,DAOS_CONT=msdelta-training,XPUS_PER_HOST=8,GLOBAL_BATCH_SIZE=512 \
 #   pbs/aurora-pretrain.pbs
+# HF_HOME defaults to /tmp/$DAOS_POOL/$DAOS_CONT/hf-cache. Copy the entire
+# preprocessing HF_HOME there, including datasets/msdelta-preprocessed and
+# datasets/msdelta-probes. Override HF_HOME to use another mounted location.
 #
 # Posttraining defaults to asynchronous sidecars on the global-rank-zero host.
 # DENOISE_XPU_TILES=4,5 and RETRIEVAL_XPU_TILES=10,11 use both tiles per spare card.
@@ -41,9 +44,10 @@ fi
 CHECKPOINT_DIR=${CHECKPOINT_DIR:-$DAOS_ROOT/checkpoints}
 HF_HOME=${HF_HOME:-$DAOS_ROOT/hf-cache}
 DATASET_CACHE_DIR=${DATASET_CACHE_DIR:-$HF_HOME/datasets}
-PREPROCESSED_DATASET_DIR=${PREPROCESSED_DATASET_DIR:-$DAOS_ROOT/datasets/msdelta-preprocessed}
+PREPROCESSED_DATASET_DIR=${PREPROCESSED_DATASET_DIR:-$DATASET_CACHE_DIR/msdelta-preprocessed}
+PREPROCESSED_PROBE_DIR=${PREPROCESSED_PROBE_DIR:-$DATASET_CACHE_DIR/msdelta-probes}
 if [[ ! -d $PREPROCESSED_DATASET_DIR ]]; then
-    echo "preprocessed dataset not found in DAOS: $PREPROCESSED_DATASET_DIR" >&2
+    echo "preprocessed dataset not found: $PREPROCESSED_DATASET_DIR" >&2
     exit 2
 fi
 
@@ -106,6 +110,20 @@ CONFIG_WANDB_PROJECT=${CONFIG_VALUES[1]}
 PROBE_EXECUTION=${PROBE_EXECUTION:-${CONFIG_VALUES[2]}}
 DENOISE_STEPS=${CONFIG_VALUES[3]}
 RETRIEVAL_STEPS=${CONFIG_VALUES[4]}
+if [[ $PROBE_EXECUTION != off ]]; then
+    for spec in "$DENOISE_STEPS:denoise" "$RETRIEVAL_STEPS:retrieval"; do
+        steps=${spec%%:*}
+        kind=${spec#*:}
+        if ((steps > 0)) && [[ ! -f $PREPROCESSED_PROBE_DIR/$kind/dataset_dict.json ]]; then
+            echo "finalized $kind probes not found: $PREPROCESSED_PROBE_DIR/$kind; run aurora-preprocess.pbs" >&2
+            exit 2
+        fi
+    done
+    if ((RETRIEVAL_STEPS > 0)) && [[ ! -f $PREPROCESSED_PROBE_DIR/retrieval-evaluation/dataset_dict.json ]]; then
+        echo "finalized retrieval evaluation not found: $PREPROCESSED_PROBE_DIR/retrieval-evaluation" >&2
+        exit 2
+    fi
+fi
 RUN_NAME=${RUN_NAME:-${CONFIG_RUN_NAME}-${JOB_ID}}
 RUN_DIR=$CHECKPOINT_DIR/$RUN_NAME
 LOG_DIR=${LOG_DIR:-$RUN_DIR/logs}
@@ -216,6 +234,7 @@ unset CCL_ZE_IPC
 unset CCL_ZE_IPC_EXCHANGE
 export HF_HOME
 export HF_DATASETS_CACHE=$DATASET_CACHE_DIR
+export HF_HUB_CACHE=$HF_HOME/hub
 export HF_HUB_OFFLINE=${HF_HUB_OFFLINE:-1}
 export HF_DATASETS_OFFLINE=${HF_DATASETS_OFFLINE:-1}
 export PYTHONPATH=$REPO_DIR${PYTHONPATH:+:$PYTHONPATH}
@@ -246,6 +265,7 @@ TRAIN_ARGS=(
     --args_file "$DDP_ARGS_FILE"
     --dataset_cache_dir "$DATASET_CACHE_DIR"
     --preprocessed_dataset_dir "$PREPROCESSED_DATASET_DIR"
+    --preprocessed_probe_dir "$PREPROCESSED_PROBE_DIR"
     --run_name "$RUN_NAME"
     --output_dir "$RUN_DIR"
     --per_device_train_batch_size "$MICRO_BATCH_SIZE"

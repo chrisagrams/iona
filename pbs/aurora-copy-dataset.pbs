@@ -1,12 +1,12 @@
 #!/bin/bash -l
-# Copy a finalized msdelta-preprocess dataset from Flare into an existing POSIX
+# Copy the preprocessing HF_HOME from Flare into an existing POSIX
 # DAOS container. Submit from the repository root, for example:
 # qsub -A PROJECT -q debug \
 #   -l select=1 -l place=scatter -l walltime=00:59:00 \
 #   -l filesystems=home:flare:daos_user_fs -j oe \
-#   -v SOURCE_DIR=/lus/flare/projects/PROJECT/hf/datasets/msdelta-preprocessed,DAOS_POOL=POOL,DAOS_CONT=msdelta-training \
+#   -v SOURCE_DIR=/flare/UIC-HPC/homes/cgrams/hf,DAOS_POOL=POOL,DAOS_CONT=msdelta-training \
 #   pbs/aurora-copy-dataset.pbs
-# The destination defaults to datasets/msdelta-preprocessed within the container,
+# The destination defaults to hf-cache within the container,
 # matching aurora-pretrain.pbs. It must not already exist (no overwrite/resume).
 # DAOS_DATASET_PATH may override this container-relative destination.
 # Guidance: https://docs.alcf.anl.gov/aurora/data-management/moving_data_to_aurora/datamover/
@@ -20,7 +20,7 @@ module load mpifileutils
 SOURCE_DIR=${SOURCE_DIR:?set SOURCE_DIR to the finalized dataset directory on Flare}
 DAOS_POOL=${DAOS_POOL:?set DAOS_POOL to the project DAOS pool}
 DAOS_CONT=${DAOS_CONT:-msdelta-training}
-DAOS_DATASET_PATH=${DAOS_DATASET_PATH:-datasets/msdelta-preprocessed}
+DAOS_DATASET_PATH=${DAOS_DATASET_PATH:-hf-cache}
 
 if [[ $SOURCE_DIR != /* || ! -d $SOURCE_DIR ]]; then
     echo "SOURCE_DIR must be an existing absolute directory: $SOURCE_DIR" >&2
