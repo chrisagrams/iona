@@ -12,6 +12,9 @@
 # Set LOG_ROOT to the Flare base directory. Logs and W&B files are created at
 # $LOG_ROOT/$RUN_NAME/logs; RUN_NAME defaults to the configured run name + job ID.
 # LOG_DIR may override the complete path. Checkpoints remain in DAOS.
+# Set RESUME_FROM_CHECKPOINT=latest with a stable RUN_NAME to resume the highest
+# complete checkpoint-N directory. The job saves and exits cleanly before its
+# requested walltime; CHECKPOINT_MARGIN_SECONDS defaults to 15 minutes.
 #
 # Posttraining defaults to asynchronous sidecars on the global-rank-zero host.
 # DENOISE_XPU_TILES=4,5 and RETRIEVAL_XPU_TILES=10,11 use both tiles per spare card.
@@ -26,6 +29,40 @@ module load frameworks
 module load xpu-smi
 
 set -euo pipefail
+
+JOB_START_EPOCH=$(date +%s)
+CHECKPOINT_MARGIN_SECONDS=${CHECKPOINT_MARGIN_SECONDS:-900}
+if ! [[ $CHECKPOINT_MARGIN_SECONDS =~ ^[0-9]+$ ]]; then
+    echo "CHECKPOINT_MARGIN_SECONDS must be a nonnegative integer" >&2
+    exit 2
+fi
+
+if [[ -n ${JOB_WALLTIME_SECONDS:-} ]]; then
+    if ! [[ $JOB_WALLTIME_SECONDS =~ ^[0-9]+$ ]] || ((JOB_WALLTIME_SECONDS < 1)); then
+        echo "JOB_WALLTIME_SECONDS must be a positive integer" >&2
+        exit 2
+    fi
+else
+    PBS_WALLTIME=$(qstat -f "${PBS_JOBID:?PBS_JOBID is required}" | awk -F ' = ' \
+        '/^[[:space:]]*Resource_List.walltime = / {print $2; exit}')
+    IFS=: read -r -a WALLTIME_PARTS <<<"$PBS_WALLTIME"
+    if ((${#WALLTIME_PARTS[@]} != 3)) ||
+        ! [[ ${WALLTIME_PARTS[0]} =~ ^[0-9]+$ && ${WALLTIME_PARTS[1]} =~ ^[0-9]+$ && ${WALLTIME_PARTS[2]} =~ ^[0-9]+$ ]]; then
+        echo "could not parse PBS Resource_List.walltime: $PBS_WALLTIME" >&2
+        exit 2
+    fi
+    JOB_WALLTIME_SECONDS=$((
+        10#${WALLTIME_PARTS[0]} * 3600 +
+        10#${WALLTIME_PARTS[1]} * 60 +
+        10#${WALLTIME_PARTS[2]}
+    ))
+fi
+if ((CHECKPOINT_MARGIN_SECONDS >= JOB_WALLTIME_SECONDS)); then
+    echo "CHECKPOINT_MARGIN_SECONDS must be less than the requested walltime" >&2
+    exit 2
+fi
+export MSDELTA_JOB_DEADLINE_EPOCH=$((JOB_START_EPOCH + JOB_WALLTIME_SECONDS))
+export MSDELTA_CHECKPOINT_MARGIN_SECONDS=$CHECKPOINT_MARGIN_SECONDS
 
 REPO_DIR=${REPO_DIR:-${PBS_O_WORKDIR:-$PWD}}
 VENV_DIR=${VENV_DIR:-$REPO_DIR/.venv}
@@ -135,6 +172,25 @@ if [[ $LOG_DIR != /* ]]; then
     exit 2
 fi
 mkdir -p "$RUN_DIR" "$LOG_DIR" "$HF_HOME" "$DATASET_CACHE_DIR"
+if [[ ${RESUME_FROM_CHECKPOINT:-} == latest ]]; then
+    RESUME_FROM_CHECKPOINT=$("$VENV_DIR/bin/python" - "$RUN_DIR" <<'PY'
+import re
+import sys
+from pathlib import Path
+
+run_dir = Path(sys.argv[1])
+candidates = []
+for path in run_dir.glob("checkpoint-*"):
+    match = re.fullmatch(r"checkpoint-(\d+)", path.name)
+    if match and path.is_dir() and (path / "trainer_state.json").is_file():
+        candidates.append((int(match.group(1)), path))
+if not candidates:
+    raise SystemExit(f"no complete checkpoint-N directories found in {run_dir}")
+print(max(candidates)[1])
+PY
+    )
+    echo "resuming latest checkpoint: $RESUME_FROM_CHECKPOINT"
+fi
 DDP_ARGS_FILE=$RUN_DIR/training-ddp.args
 awk '
     $1 != "--deepspeed" &&
@@ -226,6 +282,7 @@ fi
 
 echo "$(date -Is) job=${PBS_JOBID:-local} hosts=$NUM_HOSTS xpus_per_host=$XPUS_PER_HOST total_xpus=$TOTAL_XPUS global_batch=$GLOBAL_BATCH_SIZE micro_batch=$MICRO_BATCH_SIZE accumulation=$GRADIENT_ACCUMULATION_STEPS run=$RUN_NAME"
 echo "daos=${DAOS_POOL}:${DAOS_CONT} dataset=$PREPROCESSED_DATASET_DIR checkpoints=$CHECKPOINT_DIR"
+echo "walltime=${JOB_WALLTIME_SECONDS}s checkpoint_margin=${CHECKPOINT_MARGIN_SECONDS}s deadline=$MSDELTA_JOB_DEADLINE_EPOCH"
 echo "nodes:"
 sed 's/^/  /' "$NODE_LIST"
 "$VENV_DIR/bin/python" -c 'import torch; print(f"torch={torch.__version__} xccl={torch.distributed.is_xccl_available()}")'

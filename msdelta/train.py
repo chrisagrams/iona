@@ -12,7 +12,7 @@ import torch
 from accelerate.utils import DeepSpeedPlugin
 from transformers import HfArgumentParser, Trainer, set_seed
 
-from msdelta.callbacks import SidecarCallback, build_callbacks
+from msdelta.callbacks import SidecarCallback, WalltimeCheckpointCallback, build_callbacks
 from msdelta.configuration_msdelta import MSDeltaConfig
 from msdelta.data import build_pretraining_datasets, load_pretraining_datasets_from_disk
 from msdelta.modeling_msdelta import MSDeltaForPreTraining
@@ -170,6 +170,9 @@ def main(argv: list[str] | None = None) -> int:
             retrieval_evaluation_datasets=retrieval_evaluation_datasets,
             include_probes=include_probes,
         )
+        if deadline := os.environ.get("MSDELTA_JOB_DEADLINE_EPOCH"):
+            margin = float(os.environ.get("MSDELTA_CHECKPOINT_MARGIN_SECONDS", "900"))
+            callbacks.append(WalltimeCheckpointCallback(float(deadline), margin))
         if training_args.probe_execution == "sidecar":
             sidecar_callback = SidecarCallback(out_dir, resolved)
             callbacks.append(sidecar_callback)
