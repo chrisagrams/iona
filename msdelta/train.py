@@ -45,6 +45,20 @@ class MSDeltaTrainer(Trainer):
             args["deepspeed_plugin"] = plugins
         return args
 
+    def _save_rng_state(self, output_dir: str) -> None:
+        """Create the checkpoint directory once before ranks write their RNG states.
+
+        Some distributed filesystems can report a spurious ``FileExistsError`` when
+        many ranks concurrently call ``os.makedirs(..., exist_ok=True)``.  Trainer
+        saves a distinct RNG state for every rank, so synchronize the directory
+        creation without suppressing any of those files.
+        """
+        if self.args.world_size > 1:
+            if self.args.process_index == 0:
+                os.makedirs(output_dir, exist_ok=True)
+            self.accelerator.wait_for_everyone()
+        super()._save_rng_state(output_dir)
+
 
 def main(argv: list[str] | None = None) -> int:
     local_rank = int(os.environ.get("LOCAL_RANK", "-1"))
