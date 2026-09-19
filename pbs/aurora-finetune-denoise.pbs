@@ -31,7 +31,10 @@ VENV_DIR=${VENV_DIR:-$REPO_DIR/.venv}
 PROJECT=${PROJECT:-UIC-HPC}
 SCRATCH_ROOT=${SCRATCH_ROOT:-/lus/flare/projects/$PROJECT/$USER/msdelta}
 ARGS_FILE=${ARGS_FILE:?set ARGS_FILE to a denoise finetune args file}
-XPUS_PER_HOST=${XPUS_PER_HOST:-8}
+# 12, not 8: Aurora is 6 Max 1550 GPUs x 2 tiles, and FLAT hierarchy exposes all twelve.
+# aurora-pretrain.pbs defaults to 8 because it reserves tiles 4,5 and 10,11 for the probe
+# sidecars; this job has none, so using 8 would idle a third of the node.
+XPUS_PER_HOST=${XPUS_PER_HOST:-12}
 [[ $ARGS_FILE == /* ]] || ARGS_FILE=$REPO_DIR/$ARGS_FILE
 [[ -f $ARGS_FILE ]]    || { echo "args file not found: $ARGS_FILE" >&2; exit 2; }
 [[ -x $VENV_DIR/bin/python ]] || { echo "no venv at $VENV_DIR" >&2; exit 2; }
@@ -104,8 +107,12 @@ sed 's/^/  node: /' "$PBS_NODEFILE"
 # hung step loop.
 "$VENV_DIR/bin/python" -c "import torch; print(f'  torch={torch.__version__} xpus={torch.xpu.device_count()} xccl={torch.distributed.is_xccl_available()}')"
 [[ -n ${WANDB_API_KEY:-} ]] || { echo "WANDB_API_KEY not loaded -- see pbs/load_keys.sh" >&2; exit 2; }
-curl --silent --show-error --fail --max-time 30 -o /dev/null https://api.wandb.ai \
+# Any HTTP response proves the proxy routed us; api.wandb.ai/ answers a bare GET with
+# 404, so --fail would reject a working route (it did, on job 8839139).
+wandb_code=$(curl --silent --show-error --max-time 30 -o /dev/null -w '%{http_code}' https://api.wandb.ai || echo 000)
+[[ $wandb_code != 000 ]] \
     || { echo "no outbound route to api.wandb.ai through $ALCF_PROXY" >&2; exit 2; }
+echo "  wandb      : reachable (HTTP $wandb_code)"
 echo "  preflight  : ok"
 
 EXTRA=()
