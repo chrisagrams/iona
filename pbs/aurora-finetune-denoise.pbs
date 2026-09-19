@@ -128,6 +128,11 @@ echo "  preflight  : ok"
 
 EXTRA=()
 [[ -n ${MAX_STEPS:-} ]] && EXTRA+=(--max_steps "$MAX_STEPS" --save_strategy no --load_best_model_at_end false)
+# SEED drives head initialisation, dropout masks and batch composition. data_seed is set
+# alongside it so batch composition actually changes -- Trainer falls back to `seed` only
+# when data_seed is unset, and leaving it pinned would make a "seed sweep" vary the head
+# init while every run saw identical batches.
+[[ -n ${SEED:-} ]] && EXTRA+=(--seed "$SEED" --data_seed "$SEED")
 
 exec mpiexec \
     --envall \
