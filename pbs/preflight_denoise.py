@@ -351,67 +351,66 @@ def _optimizer():
                 f"encoder trainable={all(p.requires_grad for p in encoder)}, mask_token frozen")
 
 
-@check("the freeze zeroes encoder gradients, and is refused under DDP")
+@check("the freeze is an LR gate, and the encoder/head rates follow it")
 def _freeze_mechanism():
-    """Run two real steps and confirm the encoder's gradient is dropped, then applied.
+    """Trace both groups' learning rates across a full run.
 
-    This is the behaviour that replaced requires_grad toggling; if it silently stopped
-    working the encoder would either never train or train during its warmup, and neither
-    shows up as an error.
+    The freeze is a per-group LambdaLR multiplier now, not a gradient edit. That matters
+    because the two mechanisms it replaces both fight DDP: toggling requires_grad breaks
+    the reducer (built once, at wrap time) and zeroing .grad writes into the flat
+    all-reduce bucket DDP owns -- GPU page faults on a write, jobs 8840007/8/10/11.
+    An LR multiplier touches only param_group["lr"], which DDP never reads.
     """
     import tempfile
-    import numpy as np
-    import torch
     from datasets import Dataset
     from transformers import DataCollatorWithPadding
     from msdelta.finetune_denoise import DenoiseFinetuneTrainer
     from msdelta.processing_msdelta import MSDeltaProcessor
 
     model_args, data_args, training_args = globals()["_parsed"]
+    if model_args.freeze_encoder_steps <= 0:
+        return "freeze disabled in this config; gate not exercised"
     processor = MSDeltaProcessor.from_pretrained(
         data_args.processor_name_or_path or model_args.pretrained_path,
         max_peaks=data_args.max_peaks,
     )
-    batch = globals()["_batch"]
-    rows = [{"mz": batch["mz"][i].tolist(),
-             "log_intensity": batch["log_intensity"][i].tolist(),
-             "labels": batch["labels"][i].tolist()} for i in range(len(batch["mz"]))]
-    tiny = Dataset.from_list(rows)
-    model = globals()["_model"]
-
+    tiny = Dataset.from_list([{"mz": [100.0, 200.0], "log_intensity": [1.0, 0.5],
+                               "labels": [1.0, 0.0]}])
+    steps = 2018
     with tempfile.TemporaryDirectory() as out:
         args = type(training_args)(**{**training_args.to_dict(), "output_dir": out,
                                       "report_to": [], "use_cpu": True, "bf16": False,
                                       "eval_strategy": "no", "save_strategy": "no"})
         trainer = DenoiseFinetuneTrainer(
-            model=model, args=args, train_dataset=tiny,
+            model=globals()["_model"], args=args, train_dataset=tiny,
             data_collator=DataCollatorWithPadding(tokenizer=processor, padding=True,
                                                   return_tensors="pt"),
             processing_class=processor,
             peak_pair_budget=training_args.peak_pair_budget,
             encoder_lr_scale=model_args.encoder_lr_scale,
-            freeze_encoder_steps=1,
+            freeze_encoder_steps=model_args.freeze_encoder_steps,
         )
-        trainer.create_optimizer()
-        # Normally set by Trainer inside train(); training_step reads it for loss scaling.
-        trainer.current_gradient_accumulation_steps = 1
-        probe = model.msdelta.embed.mlp[0].weight
-        inputs = trainer.data_collator([rows[0]])
+        optimizer = trainer.create_optimizer()
+        scheduler = trainer.create_scheduler(steps, optimizer)
+        gate = model_args.freeze_encoder_steps
+        trace = {}
+        for step in range(steps):
+            if step in (0, gate - 1, gate, gate + 200):
+                trace[step] = [g["lr"] for g in optimizer.param_groups]
+            scheduler.step()
 
-        # Clone: .grad is one tensor reused across steps and accumulated into in place,
-        # so holding the reference would show the SECOND step's value for both reads.
-        trainer.state.global_step = 0          # inside the freeze window
-        trainer.training_step(model, inputs, None)
-        during = None if probe.grad is None else probe.grad.detach().clone()
-        trainer.state.global_step = 5          # past it
-        trainer.training_step(model, inputs, None)
-        after = None if probe.grad is None else probe.grad.detach().clone()
-
-    if during is not None and float(during.abs().sum()) != 0.0:
-        raise ValueError("encoder gradient was not zeroed inside the freeze window")
-    if after is None or not torch.isfinite(after).all():
-        raise ValueError("encoder gradient missing after the freeze window")
-    return "gradient zeroed during freeze, nonzero after"
+    if trace[gate - 1][0] != 0.0:
+        raise ValueError(f"encoder rate nonzero inside the gate: {trace[gate-1][0]}")
+    if trace[gate][0] <= 0.0:
+        raise ValueError("encoder rate did not resume when the gate opened")
+    if trace[gate - 1][1] <= 0.0:
+        raise ValueError("head rate should be warming up during the encoder's gate")
+    for step in (gate, gate + 200):
+        encoder, head = trace[step]
+        if abs(encoder / head - model_args.encoder_lr_scale) > 1e-9:
+            raise ValueError(f"step {step}: ratio {encoder/head:g} != {model_args.encoder_lr_scale}")
+    return (f"encoder 0 until step {gate}, then {model_args.encoder_lr_scale:g}x the head "
+            f"on the same curve")
 
 
 @check("metrics survive a poisoned gather instead of killing the run")

@@ -4,7 +4,7 @@
 --preprocessing_num_workers 24
 --run_name denoise-ft-100m
 --output_dir ./runs/denoise-ft-100m
---freeze_encoder_steps 0
+--freeze_encoder_steps 500
 --encoder_lr_scale 0.1
 --head_hidden_size 128
 --head_dropout 0.1
