@@ -28,6 +28,7 @@ asking them to invent separate notions of the same physical quantity.
 
 from __future__ import annotations
 
+import os
 import re
 from dataclasses import dataclass
 
@@ -44,6 +45,57 @@ PAD, UNK = 0, 1
 RESIDUE_TO_ID = {residue: index + 2 for index, residue in enumerate(RESIDUES)}
 VOCAB_SIZE = len(RESIDUE_TO_ID) + 2
 _MOD = re.compile(r"\[([+-]?[0-9.]+)\]")
+
+
+
+# ---------------------------------------------------------------------------- probes
+
+# Off unless MSDELTA_PROBES is set, so a real training run pays one boolean per call site.
+# Turn them on for debug-queue runs: MSDELTA_PROBES=1.
+PROBES = os.environ.get("MSDELTA_PROBES", "") not in ("", "0", "false", "False")
+
+
+def probe(where: str, *, sync: Tensor | None = None, **tensors) -> None:
+    """Check tensors at a named point, and optionally make the device catch up first.
+
+    `sync` is the important argument. XPU kernels are asynchronous, so a GPU page fault
+    is reported wherever the host happens to be when the driver notices, which can be
+    dozens of steps past whatever caused it -- job 8840356 faulted "at step 56" and job
+    8840238 "at step 73", and neither number means anything without a synchronise. Pass
+    any tensor on the device and this blocks until the queue drains, so the fault is
+    attributed to the stage that actually caused it.
+
+    Everything else checked here is cheap and has already bitten once: dtype mismatches
+    (8840257, 8840336), indices past the end of an embedding table, and non-finite values.
+    """
+    if not PROBES:
+        return
+    if sync is not None and sync.device.type == "xpu":
+        torch.xpu.synchronize()
+    for name, value in tensors.items():
+        if not isinstance(value, Tensor):
+            continue
+        if value.dtype.is_floating_point and not torch.isfinite(value).all():
+            n = int((~torch.isfinite(value)).sum())
+            raise RuntimeError(f"[probe {where}] {name}: {n} non-finite of {value.numel()}")
+
+
+def probe_index(where: str, name: str, index: Tensor, limit: int) -> None:
+    """An out-of-range embedding index reads unmapped memory on GPU rather than raising.
+
+    On CPU nn.Embedding raises IndexError. On GPU the gather is unchecked, so the read
+    lands wherever the arithmetic points and surfaces as `type: 0 (NotPresent),
+    access: 0 (Read)` -- which is exactly the signature of FT9. Checking explicitly turns
+    a page fault into a sentence naming the tensor and the offending value.
+    """
+    if not PROBES or index.numel() == 0:
+        return
+    low, high = int(index.min()), int(index.max())
+    if low < 0 or high >= limit:
+        raise RuntimeError(
+            f"[probe {where}] {name} out of range for a table of {limit}: "
+            f"min {low}, max {high}"
+        )
 
 
 POOLING_MODES = ("mean", "mean+max")
@@ -194,10 +246,14 @@ class PeptideEncoder(nn.Module):
         )
 
     def forward(self, residues, modifications, sequence_mask, charge) -> Tensor:
+        probe_index("student.in", "residues", residues, self.residue.num_embeddings)
+        probe_index("student.in", "charge", charge, self.charge.num_embeddings)
+        probe("student.in", modifications=modifications)
         length = residues.shape[1]
         position = torch.arange(length, device=residues.device).clamp_max(
             self.position.num_embeddings - 1
         )
+        probe_index("student.pos", "position", position, self.position.num_embeddings)
         hidden = self.residue(residues) + self.position(position)[None]
         # Only modified residues get a mass contribution; an unmodified residue must not
         # be handed the Fourier encoding of zero as though it were a real modification.
@@ -232,15 +288,27 @@ class PeptideEncoder(nn.Module):
             hidden = self.norm(
                 self.encoder(hidden, src_key_padding_mask=~sequence_mask.bool())
             )
+        probe("student.encoded", sync=hidden, hidden=hidden)
         pooled = pool_sequence(hidden, sequence_mask, self.pooling)
-        return F.normalize(self.projection(pooled).float(), dim=-1)
+        out = F.normalize(self.projection(pooled).float(), dim=-1)
+        probe("student.out", sync=out, out=out)
+        return out
 
 
 class SequenceAlignmentModel(nn.Module):
     """Frozen spectrum teacher, trainable peptide student, L2 between them."""
 
-    def __init__(self, spectrum_model: nn.Module, sequence_encoder: PeptideEncoder,
+    def __init__(self, spectrum_model: nn.Module | None, sequence_encoder: PeptideEncoder,
                  pooling: str = "mean+max"):
+        """`spectrum_model=None` trains against PRECOMPUTED targets.
+
+        The teacher is frozen, so its embedding for a given spectrum is identical in every
+        epoch. Running it inside the training step spends ~92% of the parameters and all
+        of the 512-peak attention regenerating a constant -- and it is the one structural
+        difference between this model and the denoise model, which is the only one that
+        survives twelve tiles (FT9). Precomputing the targets removes it from the graph
+        entirely, so the wrapped module is the 4.11M student alone.
+        """
         super().__init__()
         self.spectrum_model = spectrum_model
         self.sequence_encoder = sequence_encoder
@@ -253,12 +321,14 @@ class SequenceAlignmentModel(nn.Module):
         # Frozen AND in eval mode. requires_grad_(False) alone leaves dropout active, so
         # the teacher would emit a different target for the same spectrum every epoch and
         # the student would be chasing noise.
-        self.spectrum_model.requires_grad_(False)
-        self.spectrum_model.eval()
+        if self.spectrum_model is not None:
+            self.spectrum_model.requires_grad_(False)
+            self.spectrum_model.eval()
 
     def train(self, mode: bool = True):
         super().train(mode)
-        self.spectrum_model.eval()
+        if self.spectrum_model is not None:
+            self.spectrum_model.eval()
         return self
 
     @torch.no_grad()
@@ -268,9 +338,9 @@ class SequenceAlignmentModel(nn.Module):
                          attention_mask=attention_mask).last_hidden_state
         return F.normalize(pool_sequence(hidden, attention_mask, self.pooling).float(), dim=-1)
 
-    def forward(self, mz, log_intensity, attention_mask, residues, modifications,
-                sequence_mask, charge, return_dict: bool = True,
-                return_loss: bool = True):
+    def forward(self, residues, modifications, sequence_mask, charge,
+                mz=None, log_intensity=None, attention_mask=None, target=None,
+                return_dict: bool = True, return_loss: bool = True):
         # return_loss is not read here; it exists so transformers' can_return_loss() finds
         # it in the signature (utils/generic.py looks for exactly this name defaulting to
         # True). This task is self-supervised against a frozen teacher, so there is no
@@ -278,14 +348,67 @@ class SequenceAlignmentModel(nn.Module):
         # two the Trainer decides evaluation cannot produce a loss: job 8840277 evaluated
         # fine and then died on `metric_for_best_model='eval_loss'` not existing, with only
         # eval_runtime and friends in the metrics.
-        target = self.embed_spectrum(mz, log_intensity, attention_mask)
+        if target is None:
+            if self.spectrum_model is None:
+                raise ValueError("no teacher and no precomputed target in the batch")
+            target = self.embed_spectrum(mz, log_intensity, attention_mask)
+            probe("teacher.out", sync=target, target=target)
+        else:
+            # Cached targets are stored normalised; renormalise anyway, since the loss
+            # below is only equal to 2-2cos on unit vectors and a silent drift there
+            # would change what is being optimised without changing anything visible.
+            target = F.normalize(target.float(), dim=-1)
         predicted = self.sequence_encoder(residues, modifications, sequence_mask, charge)
+        probe("loss.in", sync=predicted, predicted=predicted, target=target)
         # Mean squared L2. On unit vectors this equals 2 - 2*cos, so it is simultaneously
         # the requested L2 loss and alignment in the geometry the space is searched with.
         loss = ((predicted - target) ** 2).sum(dim=-1).mean()
         if not return_dict:
             return (loss, predicted, target)
         return {"loss": loss, "embeddings": predicted, "target": target}
+
+
+
+@torch.no_grad()
+def attach_teacher_embeddings(datasets: dict, spectrum_model: nn.Module, pooling: str,
+                              batch_size: int = 16, max_peptide_length: int = 64,
+                              device: str | torch.device | None = None) -> dict:
+    """Run the frozen teacher once and store its embedding as a `target` column.
+
+    The teacher never learns, so its output for a spectrum is the same in epoch 10 as in
+    epoch 1. Computing it inside the training step therefore spends ~92% of the model's
+    parameters, and all of the 512-peak attention, reproducing a constant -- and it is
+    the only structural difference between this model and the denoise model, which is the
+    one that survives twelve tiles (FT9).
+
+    Call this on ONE process before the Trainer is built, and let the other ranks pick the
+    result up from the datasets cache. The teacher is then not part of the wrapped module
+    at all, so neither DDP nor ZeRO-2 ever sees it.
+    """
+    model = SequenceAlignmentModel(spectrum_model, PeptideEncoder(
+        embedding_size=1, hidden_size=8, num_layers=1, num_heads=1, pooling=pooling),
+        pooling=pooling)
+    device = device or ("xpu" if torch.xpu.is_available() else "cpu")
+    model.spectrum_model.to(device).eval()
+    collator = AlignmentCollator(max_peptide_length=max_peptide_length)
+
+    def embed(batch: dict) -> dict:
+        rows = [{"mz": mz, "log_intensity": li, "peptide": pep, "charge": ch}
+                for mz, li, pep, ch in zip(batch["mz"], batch["log_intensity"],
+                                           batch["peptide"], batch["charge"])]
+        inputs = collator(rows)
+        target = model.embed_spectrum(
+            inputs["mz"].to(device), inputs["log_intensity"].to(device),
+            inputs["attention_mask"].to(device))
+        # Probed like any other stage. This path had none, and job 8840378 faulted inside
+        # it with nothing to say where -- the teacher forward is as capable of faulting as
+        # the training step, and running it outside the Trainer does not make it safe.
+        probe("precompute.target", sync=target, target=target)
+        return {"target": target.float().cpu().tolist()}
+
+    return {name: split.map(embed, batched=True, batch_size=batch_size,
+                            desc=f"teacher embeddings ({name})")
+            for name, split in datasets.items()}
 
 
 @torch.no_grad()
@@ -429,8 +552,14 @@ class AlignmentCollator:
             attention_mask[row, :length] = 1
         peptide_batch = self.peptides([f["peptide"] for f in features],
                                       [int(f.get("charge", 0)) for f in features])
-        return {"mz": mz, "log_intensity": log_intensity,
-                "attention_mask": attention_mask, **peptide_batch}
+        out = {"mz": mz, "log_intensity": log_intensity,
+               "attention_mask": attention_mask, **peptide_batch}
+        # A precomputed teacher embedding, if attach_teacher_embeddings has been run. The
+        # spectrum columns are still emitted: they cost little and evaluation reuses them.
+        if features[0].get("target") is not None:
+            out["target"] = torch.as_tensor(
+                [f["target"] for f in features], dtype=torch.float32)
+        return out
 
 
 @torch.no_grad()
