@@ -97,14 +97,31 @@ class SequenceAlignmentTrainer(Trainer):
     """Optimise the student alone, and score ranking rather than the loss."""
 
     def create_optimizer(self):
-        """The teacher carries no gradient, but including it would still allocate
-        optimiser state for tens of millions of frozen weights -- memory bought for
-        nothing."""
+        """Defer to the Trainer unless a teacher is actually present to exclude.
+
+        This used to always build a flat parameter list over the student. That was
+        needed when the frozen teacher was in the module -- optimiser state for tens of
+        millions of weights that carry no gradient is memory bought for nothing -- but
+        it had a cost that was not noticed: a flat list loses the Trainer's weight-decay
+        grouping, so `weight_decay 0.01` was being applied to biases and LayerNorm gains
+        as well, which the default deliberately exempts.
+
+        With precomputed targets `spectrum_model` is None and the student IS the whole
+        model, so there is nothing to exclude and the stock path is both correct and the
+        one the denoise fine-tune uses successfully on twelve tiles.
+        """
         if self.optimizer is not None:
             return self.optimizer
+        if getattr(self.model, "spectrum_model", None) is None:
+            return super().create_optimizer()
         cls, kwargs = Trainer.get_optimizer_cls_and_kwargs(self.args, self.model)
-        trainable = [p for p in self.model.sequence_encoder.parameters() if p.requires_grad]
-        self.optimizer = cls(trainable, **kwargs)
+        decay = [p for n, p in self.model.sequence_encoder.named_parameters()
+                 if p.requires_grad and p.ndim > 1]
+        no_decay = [p for n, p in self.model.sequence_encoder.named_parameters()
+                    if p.requires_grad and p.ndim <= 1]
+        kwargs.pop("weight_decay", None)
+        self.optimizer = cls([{"params": decay, "weight_decay": self.args.weight_decay},
+                              {"params": no_decay, "weight_decay": 0.0}], **kwargs)
         return self.optimizer
 
     @torch.no_grad()

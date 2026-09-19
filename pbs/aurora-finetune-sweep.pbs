@@ -132,6 +132,16 @@ export MKL_NUM_THREADS=${MKL_NUM_THREADS:-4}
 export OPENBLAS_NUM_THREADS=${OPENBLAS_NUM_THREADS:-4}
 export CCL_PROCESS_LAUNCHER=pmix CCL_ATL_TRANSPORT=mpi CCL_KVS_MODE=mpi
 export FI_MR_CACHE_MONITOR=${FI_MR_CACHE_MONITOR:-userfaultfd}
+# Recommended by the ALCF Aurora known-issues page for jobs at scale. They tune the
+# CXI completion queues and overflow buffers, which are undersized by default for
+# many-rank jobs, and TMPDIR keeps scratch off a shared filesystem.
+export FI_CXI_DEFAULT_CQ_SIZE=${FI_CXI_DEFAULT_CQ_SIZE:-131072}
+export FI_CXI_OFLOW_BUF_SIZE=${FI_CXI_OFLOW_BUF_SIZE:-8388608}
+export FI_CXI_CQ_FILL_PERCENT=${FI_CXI_CQ_FILL_PERCENT:-20}
+export ZES_ENABLE_SYSMAN=${ZES_ENABLE_SYSMAN:-1}
+export TMPDIR=${TMPDIR:-/tmp}
+# Diagnostic: force SDPA onto the unfused MATH backend. See reranking.py.
+export MSDELTA_SDPA_MATH=${MSDELTA_SDPA_MATH:-}
 # See aurora-finetune.pbs: required once the reducer holds the full encoder.
 unset CCL_ZE_IPC
 unset CCL_ZE_IPC_EXCHANGE
