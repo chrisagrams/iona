@@ -3,6 +3,40 @@
 Open work on `dev_finetune`. Items are ordered by what would change a decision, not by
 effort.
 
+## FT7. The GPU page fault is DDP, not the model — **Isolated, workaround in hand**
+
+Six jobs died with `Segmentation fault from GPU ... type: 0 (NotPresent), level: 2 (PDP),
+access: 1 (Write)` partway through training. Memory was ruled out empirically: the probe
+sat flat at 14.7 GB peak / 45.8 GB reserved of 68.7 GB right up to the fault.
+
+Two jobs, same branch, same args file, same fixed batching, same `max_peaks=512`, same
+`LambdaLR` freeze gate. The only difference is the rank count:
+
+| job | ranks | outcome |
+| --- | --- | --- |
+| 8840154 | 1 host x 12 tiles, DDP over `xccl` | 2 GPU faults, died at step 168/700 |
+| 8840190 | 1 host x 1 tile, no DDP | 700/700 clean, eval completed |
+
+So the fault needs the reducer. That also explains why it only started once the encoder
+was genuinely being all-reduced: the early runs accidentally excluded it (the DDP freeze
+desync), the reducer then held only the 0.082M-parameter head, and 0.082M parameters of
+gradient never tripped it. Nothing in the model, the data pipeline or the optimiser is
+implicated -- the identical code runs to completion on one tile.
+
+**Workaround, available now:** every sweep arm already runs on one tile
+(`TILES_PER_ARM=1` in `pbs/aurora-finetune-sweep.pbs`, twelve arms per node). That path is
+proven and is strictly better throughput for a grid search than twelve-way DDP on one arm,
+so the grid and the denoise re-runs are not blocked on this.
+
+**Still to do**, because a 200M-parameter pretrain cannot fall back to one tile: bisect
+the oneCCL environment. The launcher currently unsets `CCL_ZE_IPC`/`CCL_ZE_IPC_EXCHANGE`
+and keeps `CCL_ATL_TRANSPORT=mpi`. A write to an unmapped page from the compute command
+streamer is consistent with oneCCL holding a device pointer that the torch caching
+allocator has since freed and remapped, which would make the suspects, in order:
+`TORCH_XPU_ALLOC_CONF=expandable_segments`, CCL's own buffer cache, and the bucket rebuild
+DDP performs after the first iteration. `aurora-pretrain.pbs` all-reduces 200M+ parameters
+without this fault, so a diff against its exact environment is the cheapest first probe.
+
 ## FT1. Does the denoiser generalise beyond 1024 peaks? — **Open**
 
 `max_peaks=1024` and `build_denoising_datasets` DROPS anything above it rather than
@@ -119,7 +153,7 @@ to tell them apart.
 - [ ] Call `finish(exit_code=1)` when main() raises, and keep the bare finish() only on
       the success path.
 
-## FT4. 32 stray label values survive the distributed gather — **Open**
+## FT4. 32 stray label values survive the distributed gather — **Confirmed as the gather**
 
 `denoise_metrics` drops 32 labels per evaluation that are neither 0, 1 nor -100 —
 bf16-quantised floats in the 4.09-5.22 range, the same 32 every time. That is 0.0013% of
@@ -127,5 +161,12 @@ bf16-quantised floats in the 4.09-5.22 range, the same 32 every time. That is 0.
 a label buffer. A single-process eval and a two-rank gloo eval are both clean, so it
 appears only at twelve ranks with bf16.
 
+Job 8840190 closes the loop on the diagnosis: one tile, no distributed gather, a full
+700-step train plus eval plus test over 1.68M peaks, and `label_dropped` / `label_extra`
+are both exactly **0**. Single process clean, two-rank gloo clean, one-tile xpu clean,
+twelve-rank xccl dirty -- it is the gather, not the loss, the model or the data.
+
 - [ ] Find the source. Suspect the padding index used when gathering variable-length
-      label tensors across ranks.
+      label tensors across ranks. Shares a root with [FT7](#ft7-the-gpu-page-fault-is-ddp-not-the-model--isolated-workaround-in-hand):
+      both only appear once tensors cross ranks, so whichever is fixed first should be
+      re-checked against the other.

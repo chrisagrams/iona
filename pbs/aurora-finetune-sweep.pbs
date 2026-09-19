@@ -1,15 +1,16 @@
 #!/bin/bash -l
 # Run several denoise fine-tune arms back to back inside one allocation.
 #
-#   qsub -q capacity -l select=16 -l walltime=04:00:00 pbs/aurora-finetune-sweep.pbs
-#   qsub -q capacity -l select=8  -l walltime=04:00:00 -v ARMS_FILE=sweeps/subset.txt ...
+#   qsub -q capacity -l select=6 -l walltime=06:00:00 pbs/aurora-finetune-sweep.pbs
+#   qsub -q capacity -l select=3 -l walltime=06:00:00 -v ARMS_FILE=sweeps/subset.txt ...
 #
-# With no ARMS/ARMS_FILE it runs every arm under configs/sweep-denoise.
+# With no ARMS/ARMS_FILE it runs every arm under configs/sweep-denoise. At the default of
+# one tile per arm a node carries twelve arms, so 72 arms need 6 nodes, not 72.
 #
-# Each training uses 12 ranks, which is exactly one Aurora node, so an N-node allocation
-# runs N arms CONCURRENTLY -- one per node, each with its own single-node hostfile. At the
-# capacity maximum of 16 nodes that turns ~22 serial node-hours into under two hours of
-# wall clock in one allocation, instead of six allocations draining two at a time.
+# Each arm gets TILES_PER_ARM tiles, so a host carries XPUS_PER_HOST/TILES_PER_ARM arms
+# CONCURRENTLY, each pinned to a disjoint set of tiles with its own hostfile and its own
+# rendezvous port. At the default of one tile per arm that is twelve arms per node, which
+# turns ~22 serial node-hours into a single wave across 6 nodes.
 #
 # Arms are partitioned across nodes up front, balanced by an estimated cost read off the
 # arm name (4 epochs doubles it, a 512-wide head adds ~30%). A work-stealing queue would
@@ -50,7 +51,14 @@ XPUS_PER_HOST=${XPUS_PER_HOST:-12}
 # no reducer, no gather, no unused-parameter detection -- which is where every
 # correctness bug in this pipeline has come from. It also needs far fewer nodes: 72 arms
 # fit on 6 nodes in one wave rather than 16 nodes in five.
-TILES_PER_ARM=${TILES_PER_ARM:-$XPUS_PER_HOST}
+#
+# It is now the DEFAULT, not an option. Jobs 8840154 and 8840190 differ in nothing but
+# rank count -- same branch, same args, same batching -- and twelve-rank DDP took a GPU
+# page fault at step 168 while one tile ran 700 steps plus eval plus test clean. Until
+# FT7 is understood, twelve-way DDP is the configuration that does not work, so defaulting
+# to it would hand every sweep a known failure. Set TILES_PER_ARM=12 deliberately to
+# reproduce the fault; do not set it to get throughput.
+TILES_PER_ARM=${TILES_PER_ARM:-1}
 SLOTS_PER_NODE=$(( XPUS_PER_HOST / TILES_PER_ARM ))
 JOB_ID=${PBS_JOBID:-local}; JOB_ID=${JOB_ID%%.*}
 
@@ -59,6 +67,17 @@ for arm in "${ARM_LIST[@]}"; do
     [[ -f configs/sweep-denoise/$arm/training.args ]] \
         || { echo "unknown arm: $arm" >&2; exit 2; }
 done
+
+# The arms are GENERATED from configs/finetune-denoise-50m/training.args, so every edit to
+# that template silently invalidates them and nothing downstream notices. The grid sat at
+# `max_peaks 1024` with no per_device_train_batch_size for a while after the template
+# moved to 512 and a batch of 4 -- an 8x larger DeltaMZBias tensor, ~118 GB against a
+# 68.7 GB tile. That is 72 arms OOMing on a 6-node allocation, discovered an hour in.
+# Stdlib only, so this runs before the frameworks module is loaded.
+if [[ -z ${SKIP_GRID_CHECK:-} ]]; then
+    "$VENV_DIR/bin/python" sweeps/make_denoise_grid.py --stage full --check \
+        || { echo "sweep arms are stale against their template" >&2; exit 2; }
+fi
 
 mapfile -t HOSTS < <(sort -u "${PBS_NODEFILE:?PBS_NODEFILE is required}")
 # One "node" in the scheduling below is really one SLOT: a host contributes
@@ -89,7 +108,7 @@ export MKL_NUM_THREADS=${MKL_NUM_THREADS:-4}
 export OPENBLAS_NUM_THREADS=${OPENBLAS_NUM_THREADS:-4}
 export CCL_PROCESS_LAUNCHER=pmix CCL_ATL_TRANSPORT=mpi CCL_KVS_MODE=mpi
 export FI_MR_CACHE_MONITOR=${FI_MR_CACHE_MONITOR:-userfaultfd}
-# See aurora-finetune-denoise.pbs: required once the reducer holds the full encoder.
+# See aurora-finetune.pbs: required once the reducer holds the full encoder.
 unset CCL_ZE_IPC
 unset CCL_ZE_IPC_EXCHANGE
 export MASTER_ADDR=${MASTER_ADDR:-$(head -n 1 "$PBS_NODEFILE")}

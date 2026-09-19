@@ -3,11 +3,11 @@
 #
 #   qsub -q debug -l select=1 -l walltime=01:00:00 \
 #        -v ARGS_FILE=configs/finetune-denoise-50m/training.args,MAX_STEPS=60 \
-#        pbs/aurora-finetune-denoise.pbs
+#        pbs/aurora-finetune.pbs
 #
 #   qsub -q capacity -l select=1 -l walltime=06:00:00 \
 #        -v ARGS_FILE=configs/finetune-denoise-50m/training.args \
-#        pbs/aurora-finetune-denoise.pbs
+#        pbs/aurora-finetune.pbs
 #
 # Simpler than pbs/aurora-pretrain.pbs on purpose: no telegraf sidecar, no probe
 # subprocesses, no DeepSpeed. One model, one dataset, one Trainer.
@@ -35,11 +35,18 @@ ARGS_FILE=${ARGS_FILE:?set ARGS_FILE to a denoise finetune args file}
 # aurora-pretrain.pbs defaults to 8 because it reserves tiles 4,5 and 10,11 for the probe
 # sidecars; this job has none, so using 8 would idle a third of the node.
 XPUS_PER_HOST=${XPUS_PER_HOST:-12}
+# Which entry point to launch. The environment, proxy, credentials, preflight and rank
+# wiring are identical for every fine-tuning task, so they live here once rather than
+# being copied per task and drifting apart.
+MODULE=${MODULE:-msdelta.finetune_denoise}
 [[ $ARGS_FILE == /* ]] || ARGS_FILE=$REPO_DIR/$ARGS_FILE
 [[ -f $ARGS_FILE ]]    || { echo "args file not found: $ARGS_FILE" >&2; exit 2; }
 [[ -x $VENV_DIR/bin/python ]] || { echo "no venv at $VENV_DIR" >&2; exit 2; }
 
-RUN_NAME=${RUN_NAME:-denoise-ft-$(basename "$(dirname "$ARGS_FILE")")}
+# Name the run after the task, not after "denoise": this launcher is shared, and a
+# mislabelled run directory is the kind of thing that is only noticed weeks later.
+TASK=${TASK:-$(basename "${MODULE#*finetune_}")}
+RUN_NAME=${RUN_NAME:-$TASK-ft-$(basename "$(dirname "$ARGS_FILE")")}
 JOB_ID=${PBS_JOBID:-local}; JOB_ID=${JOB_ID%%.*}
 RUN_DIR=$SCRATCH_ROOT/runs/$RUN_NAME-$JOB_ID
 LOG_DIR=$RUN_DIR/logs
@@ -107,7 +114,7 @@ export WANDB_DIR=${WANDB_DIR:-$LOG_DIR}
 export WANDB_RESUME=${WANDB_RESUME:-allow}
 export WANDB_RUN_ID=${WANDB_RUN_ID:-$RUN_NAME-$JOB_ID}
 
-echo "=== msdelta denoise finetune ==="
+echo "=== msdelta finetune: $MODULE ==="
 echo "  job        : $JOB_ID"
 echo "  hosts      : $NUM_HOSTS x $XPUS_PER_HOST tiles = $TOTAL_XPUS ranks"
 echo "  args       : $ARGS_FILE"
@@ -157,7 +164,7 @@ exec mpiexec \
         export LOCAL_RANK="${PALS_LOCAL_RANKID:-${MPI_LOCALRANKID:-$((RANK % MSDELTA_XPUS_PER_HOST))}}"
         export LOCAL_WORLD_SIZE="$MSDELTA_XPUS_PER_HOST"
         exec "$@"
-    ' _ "$VENV_DIR/bin/python" -m msdelta.finetune_denoise \
+    ' _ "$VENV_DIR/bin/python" -m "$MODULE" \
         --args_file "$ARGS_FILE" \
         --run_name "$RUN_NAME" \
         --output_dir "$RUN_DIR" \

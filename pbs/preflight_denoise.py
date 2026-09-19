@@ -23,7 +23,7 @@ from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
 ARGS_FILE = os.environ.get("ARGS_FILE", "configs/finetune-denoise-50m/training.args")
-PBS_FILE = os.environ.get("PBS_FILE", "pbs/aurora-finetune-denoise.pbs")
+PBS_FILE = os.environ.get("PBS_FILE", "pbs/aurora-finetune.pbs")
 # All fine-tuning work reports here. The entity matters as much as the project: the key's
 # default entity is personal, and CS_Pharm has same-named projects, so an unset entity
 # produces a successful-looking run under the wrong owner (it did, for 8839683).

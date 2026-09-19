@@ -42,7 +42,8 @@ def arm_name(lr: str, scale: str, epochs: str, head: str) -> str:
             f"_ep{epochs}_h{head}")
 
 
-def write_arm(lr: str, scale: str, epochs: str, head: str, dry_run: bool) -> str:
+def render_arm(lr: str, scale: str, epochs: str, head: str) -> tuple[str, str]:
+    """The arm's name and exactly the bytes its training.args should contain."""
     name = arm_name(lr, scale, epochs, head)
     overrides = {
         "--learning_rate": lr,
@@ -66,11 +67,47 @@ def write_arm(lr: str, scale: str, epochs: str, head: str, dry_run: bool) -> str
         if flag not in seen:
             lines.append(f"{flag} {value}")
 
+    return name, "\n".join(lines) + "\n"
+
+
+def write_arm(lr: str, scale: str, epochs: str, head: str, dry_run: bool) -> str:
+    name, text = render_arm(lr, scale, epochs, head)
     if not dry_run:
         directory = OUT / name
         directory.mkdir(parents=True, exist_ok=True)
-        (directory / "training.args").write_text("\n".join(lines) + "\n")
+        (directory / "training.args").write_text(text)
     return name
+
+
+def check(combos: list[tuple[str, str, str, str]]) -> int:
+    """Fail if what is on disk is not what this generator would write today.
+
+    The arms are generated from configs/finetune-denoise-50m/training.args, so every edit
+    to that template silently invalidates them. That is not hypothetical: the grid sat at
+    `max_peaks 1024` with no `per_device_train_batch_size` long after the template moved
+    to 512 and a batch of 4, which is an 8x larger DeltaMZBias tensor -- roughly 118 GB
+    against a 68.7 GB tile. All 72 arms would have OOMed on a 6-node allocation.
+    """
+    stale, missing = [], []
+    for combo in combos:
+        name, text = render_arm(*combo)
+        path = OUT / name / "training.args"
+        if not path.exists():
+            missing.append(name)
+        elif path.read_text() != text:
+            stale.append(name)
+    extra = sorted(d.name for d in OUT.iterdir() if d.is_dir()) if OUT.exists() else []
+    expected = {render_arm(*c)[0] for c in combos}
+    extra = [e for e in extra if e not in expected]
+    for label, names in (("stale", stale), ("missing", missing), ("not in grid", extra)):
+        if names:
+            print(f"  {len(names)} {label}: {', '.join(names[:6])}"
+                  f"{' ...' if len(names) > 6 else ''}")
+    if stale or missing or extra:
+        print(f"\nregenerate: python {Path(__file__).name} --stage full --clean")
+        return 1
+    print(f"  {len(combos)} arms match {TEMPLATE.relative_to(REPO)}")
+    return 0
 
 
 def main() -> int:
@@ -80,6 +117,8 @@ def main() -> int:
     parser.add_argument("--base-scale", default="0.1", help="stage2: winning encoder scale")
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--clean", action="store_true", help="remove previously generated arms")
+    parser.add_argument("--check", action="store_true",
+                        help="verify the arms on disk match the template; write nothing")
     cli = parser.parse_args()
 
     if cli.clean and OUT.exists() and not cli.dry_run:
@@ -94,6 +133,9 @@ def main() -> int:
         combos = [c for c in combos if not (c[2] == "2" and c[3] == "128")]
     else:
         combos = list(itertools.product(LEARNING_RATES, ENCODER_SCALES, EPOCHS, HEAD_SIZES))
+
+    if cli.check:
+        return check(combos)
 
     names = [write_arm(*combo, dry_run=cli.dry_run) for combo in combos]
     # ~11 min at 2 epochs / head 128; epochs and head width both add to that.
