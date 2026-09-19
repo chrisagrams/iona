@@ -37,6 +37,8 @@ from msdelta.reranking import (
     build_alignment_datasets,
     build_alignment_model,
     cross_modal_metrics,
+    group_separation_metrics,
+    peptide_key,
 )
 from msdelta.wandb_distributed import init_wandb_run
 
@@ -137,7 +139,7 @@ class SequenceAlignmentTrainer(Trainer):
         device = next(model.sequence_encoder.parameters()).device
         rows = list(dataset.select(range(min(len(dataset), max_rows))))
         step = max(1, self.args.per_device_eval_batch_size)
-        spectra, sequences, peptides = [], [], []
+        spectra, sequences, peptides, charges = [], [], [], []
         try:
             for start in range(0, len(rows), step):
                 chunk = rows[start : start + step]
@@ -146,6 +148,7 @@ class SequenceAlignmentTrainer(Trainer):
                 spectra.append(out["target"].cpu())
                 sequences.append(out["embeddings"].cpu())
                 peptides.extend(f["peptide"] for f in chunk)
+                charges.extend(int(f.get("charge", 0)) for f in chunk)
         finally:
             model.train(was_training)
         if not spectra:
@@ -155,10 +158,20 @@ class SequenceAlignmentTrainer(Trainer):
             first.setdefault(peptide, index)
         keep = sorted(first.values())
         slot = {peptides[i]: n for n, i in enumerate(keep)}
-        return cross_modal_metrics(
-            torch.cat(sequences)[keep], torch.cat(spectra),
+        sequence_embeddings, spectrum_embeddings = torch.cat(sequences), torch.cat(spectra)
+        metrics = cross_modal_metrics(
+            sequence_embeddings[keep], spectrum_embeddings,
             np.array([slot[p] for p in peptides]), np.arange(len(keep)),
         )
+        # Geometry, on BOTH towers. hit@1 says whether ranking works; this says why.
+        # Replicates of one peptide at one charge should sit closer to each other than to
+        # anything else -- if the TEACHER's space does not have that property, no student
+        # trained to imitate it can, and the objective is not the thing to fix.
+        groups = np.array([peptide_key(p, c) for p, c in zip(peptides, charges)])
+        codes = np.unique(groups, return_inverse=True)[1]
+        metrics.update(group_separation_metrics(spectrum_embeddings, codes, "sep_spectrum"))
+        metrics.update(group_separation_metrics(sequence_embeddings, codes, "sep_sequence"))
+        return metrics
 
 
 def main(argv: list[str] | None = None) -> int:
