@@ -1,0 +1,76 @@
+#!/bin/bash -l
+# Bisect FT9: which part of the peptide student faults on twelve tiles?
+#
+#   qsub -q debug -l select=1 -l walltime=00:30:00 pbs/bisect_align.pbs
+#
+# Each variant runs as its own mpiexec, so a GPU fault kills that variant and nothing
+# else, and the script reports which ones survived. Variants are ordered smallest-first
+# and the last one that survives names the boundary.
+#
+# Denoise runs fine on twelve tiles and shares every module type here except
+# nn.TransformerEncoder, which is the standing suspect. If `linear` or `embeddings`
+# faults, that suspicion is wrong and the cause is something all of them share.
+
+#PBS -N msdelta-bisect
+#PBS -A UIC-HPC
+#PBS -l place=scatter
+#PBS -l filesystems=home:flare
+#PBS -j oe
+#PBS -o pbs/logs/
+
+set -uo pipefail
+REPO_DIR=${REPO_DIR:-${PBS_O_WORKDIR:-$PWD}}
+cd "$REPO_DIR"
+VENV_DIR=${VENV_DIR:-$REPO_DIR/.venv}
+XPUS_PER_HOST=${XPUS_PER_HOST:-12}
+STEPS=${STEPS:-20}
+VARIANTS=${VARIANTS:-linear embeddings fourier transformer1 transformer4 student}
+
+set +u
+source /usr/share/lmod/lmod/init/bash
+module load "${FRAMEWORKS_MODULE:-frameworks/2025.3.1}"
+set -u
+
+export ONEAPI_DEVICE_SELECTOR=level_zero:gpu
+export ZE_FLAT_DEVICE_HIERARCHY=FLAT
+export ZE_AFFINITY_MASK=${ZE_AFFINITY_MASK:-$(seq -s, 0 $((XPUS_PER_HOST - 1)))}
+export CCL_PROCESS_LAUNCHER=pmix CCL_ATL_TRANSPORT=mpi CCL_KVS_MODE=mpi
+export FI_MR_CACHE_MONITOR=${FI_MR_CACHE_MONITOR:-userfaultfd}
+unset CCL_ZE_IPC
+unset CCL_ZE_IPC_EXCHANGE
+export MASTER_ADDR=$(head -n 1 "$PBS_NODEFILE")
+export MASTER_PORT=${MASTER_PORT:-29700}
+export MSDELTA_XPUS_PER_HOST=$XPUS_PER_HOST
+export MSDELTA_WORLD_SIZE=$XPUS_PER_HOST
+export PYTHONPATH=$REPO_DIR${PYTHONPATH:+:$PYTHONPATH}
+export OMP_NUM_THREADS=4
+# No W&B, no datasets, no checkpoint: the smallest process that can reproduce the fault.
+export HF_HUB_OFFLINE=1 HF_DATASETS_OFFLINE=1
+
+echo "=== FT9 bisect: $XPUS_PER_HOST tiles, $STEPS steps per variant ==="
+sed 's/^/  node: /' "$PBS_NODEFILE"
+
+survived=(); faulted=()
+for variant in $VARIANTS; do
+    log=$REPO_DIR/pbs/logs/bisect-$variant-${PBS_JOBID%%.*}.log
+    mpiexec --envall --pmi=pmix -n "$XPUS_PER_HOST" --ppn "$XPUS_PER_HOST" \
+        --cpu-bind depth --depth 8 --hostfile="$PBS_NODEFILE" \
+        "$REPO_DIR/pbs/rank_wrapper.sh" \
+        "$VENV_DIR/bin/python" pbs/bisect_align.py \
+            --variant "$variant" --steps "$STEPS" >"$log" 2>&1
+    status=$?
+    if grep -q "SURVIVED" "$log" && [[ $status -eq 0 ]]; then
+        echo "  [ok    ] $variant"
+        survived+=("$variant")
+    else
+        fault=$(grep -oE "Segmentation fault from GPU at 0x[0-9a-f]+.*" "$log" | head -1)
+        echo "  [FAULT ] $variant  exit=$status  ${fault:-$(tail -2 "$log" | head -1)}"
+        faulted+=("$variant")
+    fi
+done
+
+echo
+echo "=== survived: ${survived[*]:-none}"
+echo "=== faulted : ${faulted[*]:-none}"
+[[ ${#faulted[@]} -eq 0 ]] && echo "=== nothing reproduced; the fault needs something these variants omit"
+exit 0
