@@ -1,0 +1,135 @@
+#!/bin/bash -l
+# Fine-tune a pretrained encoder for per-peak noise classification on Aurora.
+#
+#   qsub -q debug -l select=1 -l walltime=01:00:00 \
+#        -v ARGS_FILE=configs/finetune-denoise-50m/training.args,MAX_STEPS=60 \
+#        pbs/aurora-finetune-denoise.pbs
+#
+#   qsub -q capacity -l select=1 -l walltime=06:00:00 \
+#        -v ARGS_FILE=configs/finetune-denoise-50m/training.args \
+#        pbs/aurora-finetune-denoise.pbs
+#
+# Simpler than pbs/aurora-pretrain.pbs on purpose: no telegraf sidecar, no probe
+# subprocesses, no DeepSpeed. One model, one dataset, one Trainer.
+#
+# MAX_STEPS exists for the debug-queue timing pass. Debug caps at 1h, which is not enough
+# to finish, so a short capped run measures steps/second and the resulting number sizes
+# the capacity walltime instead of guessing it.
+
+#PBS -N msdelta-denoise-ft
+#PBS -A UIC-HPC
+#PBS -l place=scatter
+#PBS -l filesystems=home:flare
+#PBS -j oe
+#PBS -o pbs/logs/
+
+set -euo pipefail
+
+REPO_DIR=${REPO_DIR:-${PBS_O_WORKDIR:-$PWD}}
+cd "$REPO_DIR"
+VENV_DIR=${VENV_DIR:-$REPO_DIR/.venv}
+PROJECT=${PROJECT:-UIC-HPC}
+SCRATCH_ROOT=${SCRATCH_ROOT:-/lus/flare/projects/$PROJECT/$USER/msdelta}
+ARGS_FILE=${ARGS_FILE:?set ARGS_FILE to a denoise finetune args file}
+XPUS_PER_HOST=${XPUS_PER_HOST:-8}
+[[ $ARGS_FILE == /* ]] || ARGS_FILE=$REPO_DIR/$ARGS_FILE
+[[ -f $ARGS_FILE ]]    || { echo "args file not found: $ARGS_FILE" >&2; exit 2; }
+[[ -x $VENV_DIR/bin/python ]] || { echo "no venv at $VENV_DIR" >&2; exit 2; }
+
+RUN_NAME=${RUN_NAME:-denoise-ft-$(basename "$(dirname "$ARGS_FILE")")}
+JOB_ID=${PBS_JOBID:-local}; JOB_ID=${JOB_ID%%.*}
+RUN_DIR=$SCRATCH_ROOT/runs/$RUN_NAME-$JOB_ID
+LOG_DIR=$RUN_DIR/logs
+mkdir -p "$LOG_DIR" "$REPO_DIR/pbs/logs"
+
+NUM_HOSTS=$(wc -l < "${PBS_NODEFILE:?PBS_NODEFILE is required}")
+TOTAL_XPUS=$((NUM_HOSTS * XPUS_PER_HOST))
+
+set +u
+source /usr/share/lmod/lmod/init/bash
+module load "${FRAMEWORKS_MODULE:-frameworks/2025.3.1}"
+set -u
+
+# Level Zero only, flat hierarchy. The module now defaults ONEAPI_DEVICE_SELECTOR to
+# "opencl:gpu;level_zero:gpu", which double-counts every tile; forcing it back keeps the
+# device count equal to what the launcher assumes.
+export ONEAPI_DEVICE_SELECTOR=level_zero:gpu
+export ZE_FLAT_DEVICE_HIERARCHY=FLAT
+export OMP_NUM_THREADS=${OMP_NUM_THREADS:-4}
+export MKL_NUM_THREADS=${MKL_NUM_THREADS:-4}
+export OPENBLAS_NUM_THREADS=${OPENBLAS_NUM_THREADS:-4}
+export CCL_PROCESS_LAUNCHER=pmix CCL_ATL_TRANSPORT=mpi CCL_KVS_MODE=mpi
+export FI_MR_CACHE_MONITOR=${FI_MR_CACHE_MONITOR:-userfaultfd}
+export MASTER_ADDR=${MASTER_ADDR:-$(head -n 1 "$PBS_NODEFILE")}
+export MASTER_PORT=${MASTER_PORT:-29500}
+export MSDELTA_XPUS_PER_HOST=$XPUS_PER_HOST
+export MSDELTA_WORLD_SIZE=$TOTAL_XPUS
+export PYTHONPATH=$REPO_DIR${PYTHONPATH:+:$PYTHONPATH}
+
+# Datasets come from the populated cache; only W&B needs the network.
+export HF_HOME=${HF_HOME:-$SCRATCH_ROOT/huggingface}
+export HF_HUB_OFFLINE=${HF_HUB_OFFLINE:-1}
+export HF_DATASETS_OFFLINE=${HF_DATASETS_OFFLINE:-1}
+
+# Outbound internet. Compute nodes have no route without these, and W&B fails closed --
+# it retries, stalls the step loop, and the run dies with no metrics rather than loudly.
+ALCF_PROXY=${ALCF_PROXY:-http://proxy.alcf.anl.gov:3128}
+export HTTP_PROXY=${HTTP_PROXY:-$ALCF_PROXY}
+export HTTPS_PROXY=${HTTPS_PROXY:-$ALCF_PROXY}
+export http_proxy=${http_proxy:-$ALCF_PROXY}
+export https_proxy=${https_proxy:-$ALCF_PROXY}
+export ftp_proxy=${ftp_proxy:-$ALCF_PROXY}
+export no_proxy=${no_proxy:-admin,localhost,*.cm.aurora.alcf.anl.gov,aurora-*,*.aurora.alcf.anl.gov,*.alcf.anl.gov}
+export no_proxy="$no_proxy,127.0.0.1"
+export NO_PROXY="${NO_PROXY:-$no_proxy},127.0.0.1"
+
+# Credentials at runtime, never through `qsub -v`: a job's variable list is world-readable
+# through `qstat -f <jobid>`.
+source "$REPO_DIR/pbs/load_keys.sh"
+
+export WANDB_DIR=${WANDB_DIR:-$LOG_DIR}
+export WANDB_RESUME=${WANDB_RESUME:-allow}
+export WANDB_RUN_ID=${WANDB_RUN_ID:-$RUN_NAME-$JOB_ID}
+
+echo "=== msdelta denoise finetune ==="
+echo "  job        : $JOB_ID"
+echo "  hosts      : $NUM_HOSTS x $XPUS_PER_HOST tiles = $TOTAL_XPUS ranks"
+echo "  args       : $ARGS_FILE"
+echo "  run dir    : $RUN_DIR"
+echo "  wandb run  : $WANDB_RUN_ID"
+sed 's/^/  node: /' "$PBS_NODEFILE"
+
+# Preflight. Each of these has cost a job before: a missing W&B key fails only at the
+# first log call, and a proxy that cannot reach the outside world looks identical to a
+# hung step loop.
+"$VENV_DIR/bin/python" -c "import torch; print(f'  torch={torch.__version__} xpus={torch.xpu.device_count()} xccl={torch.distributed.is_xccl_available()}')"
+[[ -n ${WANDB_API_KEY:-} ]] || { echo "WANDB_API_KEY not loaded -- see pbs/load_keys.sh" >&2; exit 2; }
+curl --silent --show-error --fail --max-time 30 -o /dev/null https://api.wandb.ai \
+    || { echo "no outbound route to api.wandb.ai through $ALCF_PROXY" >&2; exit 2; }
+echo "  preflight  : ok"
+
+EXTRA=()
+[[ -n ${MAX_STEPS:-} ]] && EXTRA+=(--max_steps "$MAX_STEPS" --save_strategy no --load_best_model_at_end false)
+
+exec mpiexec \
+    --envall \
+    --pmi=pmix \
+    -n "$TOTAL_XPUS" \
+    --ppn "$XPUS_PER_HOST" \
+    --cpu-bind depth --depth "${CPU_DEPTH:-8}" \
+    --hostfile="$PBS_NODEFILE" \
+    /usr/bin/env bash -c '
+        set -euo pipefail
+        export RANK="${PMIX_RANK:-${PALS_RANKID:-${PMI_RANK:-}}}"
+        [[ -n $RANK ]] || { echo "launcher provided no rank" >&2; exit 2; }
+        export WORLD_SIZE="$MSDELTA_WORLD_SIZE"
+        export LOCAL_RANK="${PALS_LOCAL_RANKID:-${MPI_LOCALRANKID:-$((RANK % MSDELTA_XPUS_PER_HOST))}}"
+        export LOCAL_WORLD_SIZE="$MSDELTA_XPUS_PER_HOST"
+        export ZE_AFFINITY_MASK="$LOCAL_RANK"
+        exec "$@"
+    ' _ "$VENV_DIR/bin/python" -m msdelta.finetune_denoise \
+        --args_file "$ARGS_FILE" \
+        --run_name "$RUN_NAME" \
+        --output_dir "$RUN_DIR" \
+        "${EXTRA[@]}" \
+    2>&1 | tee "$LOG_DIR/train.log"
