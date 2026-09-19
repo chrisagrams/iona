@@ -327,23 +327,6 @@ class DenoiseFinetuneTrainer(DenoisingTrainer):
         super().__init__(*args, **kwargs)
         self.encoder_lr_scale = encoder_lr_scale
         self.freeze_encoder_steps = freeze_encoder_steps
-        self._unfrozen = freeze_encoder_steps <= 0
-        # Under DDP the freeze has nowhere safe to live. Toggling requires_grad breaks
-        # the reducer (it is built once, at wrap time), and writing to .grad between
-        # backward and the optimizer step touches memory DDP owns -- every one of jobs
-        # 8840007/8/10/11 took a GPU page fault on a WRITE with the gradient-zeroing
-        # version, at the same budget where the previous, reducer-excluded runs survived.
-        #
-        # warmup_steps already does what the freeze was for: it ramps the learning rate
-        # from zero, so the pretrained encoder is not hit by an untrained head's first
-        # gradients. Refuse rather than silently behave differently.
-        if freeze_encoder_steps > 0 and self.args.world_size > 1:
-            raise ValueError(
-                "freeze_encoder_steps>0 is not supported under DDP: the reducer is built "
-                "once at wrap time and post-backward gradient edits race it. Use "
-                "warmup_steps (already ramps from zero) and encoder_lr_scale instead."
-            )
-
     def create_optimizer(self):
         """Two parameter groups so the encoder can be nudged while the head moves."""
         if self.optimizer is not None:
@@ -362,36 +345,40 @@ class DenoiseFinetuneTrainer(DenoisingTrainer):
         )
         return self.optimizer
 
-    def training_step(self, model, inputs, num_items_in_batch=None):
-        """Freeze by discarding the encoder's gradient, never by toggling requires_grad.
+    def create_scheduler(self, num_training_steps: int, optimizer=None):
+        """Freeze the encoder with a per-group LR multiplier, not by touching gradients.
 
-        DDP builds its reducer once, when the model is wrapped, from the parameters that
-        require grad at that moment. A parameter frozen then is NOT added to the reducer
-        if it is later unfrozen, so its gradients are computed locally and never
-        all-reduced -- every rank trains a different encoder and only rank 0's is saved.
-        Verified directly with two gloo ranks: after an unfreeze the encoder's gradients
-        differ across ranks while the head's match.
+        `LambdaLR` accepts one lambda per parameter group and sets each group's rate to
+        `base_lr * lambda(step)`. It writes only `param_group["lr"]`, so unlike the two
+        mechanisms this replaces it cannot interfere with DDP: toggling `requires_grad`
+        breaks the reducer, which is built once at wrap time, and zeroing `.grad` after
+        backward writes into the flat all-reduce bucket DDP owns -- that took GPU page
+        faults on a write in jobs 8840007/8/10/11.
 
-        Keeping every parameter trainable from the start and dropping the encoder's
-        gradient during the freeze phase gives the same optimisation behaviour with
-        correct synchronisation. It wastes an all-reduce per frozen step, which is a
-        small price for the encoder actually being trained on all twelve shards.
+        The head keeps the schedule HF built. The encoder gets the same schedule gated to
+        zero for the first `freeze_encoder_steps`, so its rate rejoins the normal curve
+        the moment the gate opens rather than restarting a warmup of its own.
         """
-        loss = super().training_step(model, inputs, num_items_in_batch)
-        if not self._unfrozen:
-            if self.state.global_step >= self.freeze_encoder_steps:
-                self._unfrozen = True
-            else:
-                # zero_() rather than `= None`. With gradient_as_bucket_view the .grad
-                # tensor IS a view into DDP's flat all-reduce bucket; dropping the
-                # reference and letting the next iteration re-bind it invites the
-                # reducer and the allocator to disagree about that memory. Zeroing
-                # leaves the buffer exactly where DDP put it and still produces no
-                # update.
-                for parameter in self.model.msdelta.parameters():
-                    if parameter.grad is not None:
-                        parameter.grad.zero_()
-        return loss
+        scheduler = super().create_scheduler(num_training_steps, optimizer)
+        if self.freeze_encoder_steps <= 0:
+            return scheduler
+        if not isinstance(scheduler, torch.optim.lr_scheduler.LambdaLR):
+            raise TypeError(
+                f"encoder freezing needs a LambdaLR to gate per group, got {type(scheduler).__name__}"
+            )
+        groups = (optimizer or self.optimizer).param_groups
+        if len(groups) != 2:
+            raise ValueError(f"expected encoder and head groups, got {len(groups)}")
+
+        base = scheduler.lr_lambdas[1]          # the shape HF built, unmodified
+        freeze = self.freeze_encoder_steps
+        # Group 0 is the encoder; create_optimizer builds it first.
+        scheduler.lr_lambdas = [
+            lambda step, shape=base: 0.0 if step < freeze else shape(step),
+            base,
+        ]
+        return scheduler
+
 
 
 def main(argv: list[str] | None = None) -> int:
