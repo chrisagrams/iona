@@ -328,17 +328,34 @@ def _optimizer():
         return f"encoder lr {rates[0]:g}, head lr {rates[1]:g}, starts frozen={frozen}"
 
 
-@check("denoising_metrics returns the expected keys on a known input")
+@check("metrics survive a poisoned gather instead of killing the run")
 def _metrics():
+    """The three inputs that have to not crash: clean, a stray label value, one class.
+
+    Job 8839579 lost a four-hour allocation at the first evaluation because upstream's
+    denoising_metrics passed an unexpected label value straight to sklearn.
+    """
     import numpy as np
     from transformers import EvalPrediction
-    from msdelta.denoising import denoising_metrics
-    labels = np.array([[1.0, 0.0, 1.0, -100.0]])
-    logits = np.array([[3.0, -3.0, 2.0, 99.0]])   # padded slot deliberately absurd
-    out = denoising_metrics(EvalPrediction(predictions=logits, label_ids=labels))
-    if out["accuracy"] != 1.0 or out["auroc"] != 1.0:
-        raise ValueError(f"perfect input did not score perfectly: {out}")
-    return " ".join(sorted(out))
+    from msdelta.finetune_denoise import denoise_metrics
+
+    clean = denoise_metrics(EvalPrediction(
+        predictions=np.array([[3.0, -3.0, 2.0, 99.0]]),
+        label_ids=np.array([[1.0, 0.0, 1.0, -100.0]])))
+    if clean["accuracy"] != 1.0 or clean["auroc"] != 1.0:
+        raise ValueError(f"perfect input did not score perfectly: {clean}")
+
+    poisoned = denoise_metrics(EvalPrediction(
+        predictions=np.array([[3.0, -3.0, 2.0, 1.0]]),
+        label_ids=np.array([[1.0, 0.0, 1.0, 7.0]])))
+    if poisoned["label_dropped"] != 1.0 or poisoned["auroc"] != 1.0:
+        raise ValueError(f"a stray label was not dropped and reported: {poisoned}")
+
+    one_class = denoise_metrics(EvalPrediction(
+        predictions=np.array([[3.0, 2.0]]), label_ids=np.array([[1.0, 1.0]])))
+    if one_class["auroc"] != 0.5:
+        raise ValueError(f"single-class slice should be 0.5, got {one_class['auroc']}")
+    return "clean / stray label reported / single class survives"
 
 
 # ---------------------------------------------------------------- report
