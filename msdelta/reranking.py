@@ -181,7 +181,11 @@ class PeptideEncoder(nn.Module):
             d_model=hidden_size, nhead=num_heads, dim_feedforward=4 * hidden_size,
             dropout=dropout, batch_first=True, norm_first=True, activation="gelu",
         )
-        self.encoder = nn.TransformerEncoder(layer, num_layers=num_layers)
+        # Skip the NestedTensor conversion. The padding here is a few residues out of 64,
+        # so it buys nothing, and it is a second fast path to reason about. See forward()
+        # for the one that actually bites.
+        self.encoder = nn.TransformerEncoder(layer, num_layers=num_layers,
+                                             enable_nested_tensor=False)
         self.norm = nn.LayerNorm(hidden_size)
         width = pooled_width(hidden_size, pooling)
         self.projection = nn.Sequential(
@@ -201,7 +205,28 @@ class PeptideEncoder(nn.Module):
         mod = self.mod_projection(self.mod_features(modifications).to(hidden.dtype))
         hidden = hidden + mod * modified
         hidden = hidden + self.charge(charge.clamp(0, self.charge.num_embeddings - 1))[:, None]
-        hidden = self.norm(self.encoder(hidden, src_key_padding_mask=~sequence_mask.bool()))
+        # Run the stack in fp32 with autocast off. torch's TransformerEncoderLayer has a
+        # fused fast path (torch._transformer_encoder_layer_fwd) that it takes only when
+        # grad is disabled -- i.e. in eval, never in training -- and that kernel does not
+        # honour autocast. It is meant to be guarded by
+        #
+        #     elif torch.is_autocast_enabled():   # transformer.py:869
+        #
+        # but the no-argument form of that call reports CUDA's autocast state, so under
+        # torch.autocast("xpu") it returns False and the guard never fires. bf16
+        # activations then meet fp32 weights inside the kernel: "expected scalar type
+        # BFloat16 but found Float". Job 8840257 trained 200 steps and died on its first
+        # evaluation, which is the signature of a path that only exists in eval.
+        #
+        # Forcing fp32 rather than tripping the guard by some other means also makes
+        # training and evaluation numerically identical, and the student is 4.11M
+        # parameters over sequences of at most 64 -- next to the teacher's 512-peak
+        # attention the cost does not register.
+        with torch.autocast(device_type=hidden.device.type, enabled=False):
+            hidden = hidden.float()
+            hidden = self.norm(
+                self.encoder(hidden, src_key_padding_mask=~sequence_mask.bool())
+            )
         pooled = pool_sequence(hidden, sequence_mask, self.pooling)
         return F.normalize(self.projection(pooled).float(), dim=-1)
 
@@ -307,7 +332,20 @@ def build_alignment_datasets(repo_id, processor, num_proc=None, validation_fract
     raw = load_dataset(repo_id)
     split = "train" if "train" in raw else list(raw)[0]
 
+    # Spectra above max_peaks are DROPPED, not truncated, matching build_denoising_datasets.
+    # Truncating would hand the teacher a spectrum it never saw in pretraining -- the same
+    # label attached to a different object -- so the alignment target would be an embedding
+    # of something that does not exist, and the student would learn to predict it.
+    #
+    # Dropping is not free either: 3,030 of 15,649 (19.4%) go, and not at random, because
+    # peak count tracks precursor charge and peptide length. That is a real limit on what
+    # this corpus can say, so it is COUNTED AND PRINTED rather than silently swallowed by
+    # the except below, which is how it went unnoticed in the first place.
+    max_peaks = getattr(processor, "max_peaks", None)
+
     def prepare(example):
+        if max_peaks is not None and len(example["mz"]) > max_peaks:
+            return {"mz": [], "log_intensity": [], "peptide": "", "charge": 0}
         try:
             values = processor(
                 torch.as_tensor(example["mz"], dtype=torch.float32),
@@ -329,8 +367,16 @@ def build_alignment_datasets(repo_id, processor, num_proc=None, validation_fract
 
     rows = raw[split].map(prepare, remove_columns=raw[split].column_names,
                           num_proc=num_proc, desc="preprocess alignment pairs")
+    before = len(rows)
     rows = rows.filter(lambda e: len(e["mz"]) > 0 and bool(e["peptide"]),
                        num_proc=num_proc, desc="drop empty pairs")
+    dropped = before - len(rows)
+    if dropped:
+        oversized = sum(1 for n in raw[split]["mz"] if max_peaks and len(n) > max_peaks)
+        print(f"[alignment] dropped {dropped:,} of {before:,} pairs "
+              f"({100 * dropped / before:.1f}%); {oversized:,} were over max_peaks="
+              f"{max_peaks}. Peak count tracks charge and peptide length, so this is a "
+              f"biased loss, not a random one.", flush=True)
 
     peptides = sorted(set(rows["peptide"]))
     generator = np.random.default_rng(seed)
