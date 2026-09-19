@@ -56,10 +56,12 @@ done
 mapfile -t NODES < <(sort -u "${PBS_NODEFILE:?PBS_NODEFILE is required}")
 NUM_NODES=${#NODES[@]}
 
+if [[ -z ${DRY_RUN:-} ]]; then
 set +u
 source /usr/share/lmod/lmod/init/bash
 module load "${FRAMEWORKS_MODULE:-frameworks/2025.3.1}"
 set -u
+fi
 
 export ONEAPI_DEVICE_SELECTOR=level_zero:gpu
 export ZE_FLAT_DEVICE_HIERARCHY=FLAT
@@ -86,6 +88,7 @@ export ftp_proxy=${ftp_proxy:-$ALCF_PROXY}
 export no_proxy=${no_proxy:-admin,localhost,*.cm.aurora.alcf.anl.gov,aurora-*,*.aurora.alcf.anl.gov,*.alcf.anl.gov},127.0.0.1
 export NO_PROXY="$no_proxy"
 
+if [[ -z ${DRY_RUN:-} ]]; then
 source "$REPO_DIR/pbs/load_keys.sh"
 [[ -n ${WANDB_API_KEY:-} ]] || { echo "WANDB_API_KEY not loaded" >&2; exit 2; }
 wandb_code=$(curl --silent --max-time 30 -o /dev/null -w '%{http_code}' https://api.wandb.ai || echo 000)
@@ -96,6 +99,7 @@ n = torch.xpu.device_count()
 print(f'  torch={torch.__version__} xpus={n} xccl={torch.distributed.is_xccl_available()}')
 sys.exit('' if n == $XPUS_PER_HOST else f'  visible tiles {n} != $XPUS_PER_HOST')
 " || exit 2
+fi
 
 echo "=== denoise sweep: ${#ARM_LIST[@]} arms across $NUM_NODES nodes, job $JOB_ID ==="
 
@@ -125,6 +129,14 @@ for i in "${!NODES[@]}"; do
     echo "  ${NODES[$i]}  cost=${NODE_COST[$i]} :${NODE_ARMS[$i]}"
 done
 
+# DRY_RUN stops after the partition so the balance can be checked on a login node with a
+# fabricated PBS_NODEFILE. Everything above this point -- arm validation, node parsing,
+# the greedy assignment -- is the part most likely to be wrong, and none of it needs a GPU.
+if [[ -n ${DRY_RUN:-} ]]; then
+    echo "  (dry run: stopping before launch)"
+    exit 0
+fi
+
 run_node() {
     local index=$1 node=${NODES[$1]} arm status took start
     local hostfile=$SCRATCH_ROOT/runs/.hostfile-$JOB_ID-$index
@@ -148,7 +160,7 @@ run_node() {
                 exec "$@"
             '"'"' _ "$VENV_DIR/bin/python" -m msdelta.finetune_denoise \
                 --args_file "configs/sweep-denoise/$arm/training.args" \
-                --output_dir "$dir" \
+                --output_dir "$dir" "${SHORT[@]}" \
             >"$dir/logs/train.log" 2>&1
         status=$?
         took=$(( SECONDS - start ))
@@ -163,6 +175,14 @@ run_node() {
         fi
     done
 }
+
+# MAX_STEPS turns the sweep into a mechanics test: the point is to prove the partitioning,
+# the per-node hostfiles and the concurrent mpiexec launches work, which needs a few steps
+# per arm rather than a full fine-tune.
+SHORT=()
+[[ -n ${MAX_STEPS:-} ]] && SHORT=(--max_steps "$MAX_STEPS" --save_strategy no
+                                  --load_best_model_at_end false --eval_strategy no
+                                  --eval_test_split false)
 
 rm -f "$SCRATCH_ROOT/runs/.failed-$JOB_ID"
 for i in "${!NODES[@]}"; do run_node "$i" & done

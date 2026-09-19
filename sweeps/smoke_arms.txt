@@ -1,0 +1,4 @@
+lr5e5_es0_ep2_h128
+lr5e5_es10_ep2_h512
+lr1e5_es05_ep2_h256
+lr2e4_es01_ep4_h128
