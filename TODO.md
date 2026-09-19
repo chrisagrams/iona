@@ -92,22 +92,32 @@ is not optional:
 - [ ] Keep the existing baseline seed runs as the comparison point, so the two spreads
       can be read against each other.
 
-## FT2. Test metrics never reach W&B — **Open**
+## FT2. Test metrics never reach W&B — **NOT A BUG (closed)**
 
-Every run's W&B summary carries `eval/*` but `test_auroc` is `None`. The final test
-evaluation prints to the PBS log and goes through `trainer.log(...)`, but is not landing
-in the summary, so the headline number exists only in a job log. The comparison across
-seeds and model sizes is unreadable in W&B until this is fixed.
+They were always there. HuggingFace's WandbCallback groups metrics into sections, so
+`test_auroc` is logged as `test/auroc`. The original report queried the underscore form,
+got None, and concluded the metrics were missing.
 
-- [ ] Log the test metrics explicitly to the run summary, not only through `trainer.log`.
+    test/auroc = 0.9354279541485844   test/auprc = 0.96199889848495
 
-## FT3. A crashed job reports `finished` in W&B — **Open**
+- [x] Verified: every `test/*` key is present in the run summary. No change needed.
 
-`wandb_run.finish()` runs in a `finally` block, so a job that died mid-training is
-indistinguishable from one that completed. `denoise-ft-50m-8839579` died on the metrics
-error and shows `finished`.
+## FT3. A Python-level failure reports `finished` in W&B — **Open**
 
-- [ ] Mark the run failed when `main()` exits non-zero or raises.
+Narrower than first written. W&B marks a run `crashed` by missing heartbeat, i.e. only
+when the process dies WITHOUT calling finish(). A hard crash is therefore labelled
+correctly -- 8839166 and 8839203 both died on a GPU page fault and both show `crashed`.
+
+The mislabelled case is an exception that propagates through the `finally` block, which
+calls finish() on the way out and stamps the run `finished`. 8839579 died on the metrics
+ValueError and is indistinguishable from a completed run.
+
+It matters at sweep scale: with 72 arms the W&B run list is the index. An arm that died
+at step 500 sits beside a completed one, carrying plausible partial metrics, with nothing
+to tell them apart.
+
+- [ ] Call `finish(exit_code=1)` when main() raises, and keep the bare finish() only on
+      the success path.
 
 ## FT4. 32 stray label values survive the distributed gather — **Open**
 
