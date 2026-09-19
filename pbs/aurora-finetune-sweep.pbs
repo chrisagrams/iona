@@ -155,17 +155,11 @@ run_node() {
         WANDB_RUN_ID=dn50m-$arm-$JOB_ID \
         mpiexec --envall --pmi=pmix -n "$XPUS_PER_HOST" --ppn "$XPUS_PER_HOST" \
             --cpu-bind depth --depth "${CPU_DEPTH:-8}" --hostfile="$hostfile" \
-            /usr/bin/env bash -c '"'"'
-                set -euo pipefail
-                export RANK="${PMIX_RANK:-${PALS_RANKID:-${PMI_RANK:-}}}"
-                export WORLD_SIZE="$MSDELTA_WORLD_SIZE"
-                export LOCAL_RANK="${PALS_LOCAL_RANKID:-${MPI_LOCALRANKID:-$((RANK % MSDELTA_XPUS_PER_HOST))}}"
-                export LOCAL_WORLD_SIZE="$MSDELTA_XPUS_PER_HOST"
-                exec "$@"
-            '"'"' _ "$VENV_DIR/bin/python" -m msdelta.finetune_denoise \
+            "$REPO_DIR/pbs/rank_wrapper.sh" \
+            "$VENV_DIR/bin/python" -m msdelta.finetune_denoise \
                 --args_file "configs/sweep-denoise/$arm/training.args" \
                 --output_dir "$dir" "${SHORT[@]}" \
-            >"$dir/logs/train.log" 2>&1
+            >"$dir/logs/train.log" 2>&1 || true
         status=$?
         took=$(( SECONDS - start ))
         # One arm failing must not take the node or the sweep down; a grid exists to
@@ -189,11 +183,28 @@ SHORT=()
                                   --eval_test_split false)
 
 rm -f "$SCRATCH_ROOT/runs/.failed-$JOB_ID"
-for i in "${!NODES[@]}"; do run_node "$i" & done
-wait
+declare -A NODE_PID
+for i in "${!NODES[@]}"; do run_node "$i" & NODE_PID[$i]=$!; done
 
+# Wait per-PID rather than bare `wait`, so a node subshell that dies before it can write
+# anything is still counted. Job 8839937 reported "4/4 arms ok" having run none, because
+# the tally came only from a file the dead subshell never created.
+node_failures=0
+for i in "${!NODES[@]}"; do
+    if ! wait "${NODE_PID[$i]}"; then
+        echo "  [node ${NODES[$i]}] subshell exited non-zero -- its arms did not all run"
+        node_failures=$(( node_failures + 1 ))
+    fi
+done
+
+completed=$(ls -d "$SCRATCH_ROOT"/runs/sweep-*-"$JOB_ID" 2>/dev/null | wc -l)
 failed_count=$(wc -l < "$SCRATCH_ROOT/runs/.failed-$JOB_ID" 2>/dev/null || echo 0)
-echo; echo "=== done: $(( ${#ARM_LIST[@]} - failed_count ))/${#ARM_LIST[@]} arms ok ==="
+ok=$(( completed - failed_count ))
+echo; echo "=== done: $ok/${#ARM_LIST[@]} arms ok "\
+     "($failed_count failed, $(( ${#ARM_LIST[@]} - completed )) never started, "\
+     "$node_failures node subshells died) ==="
 [[ $failed_count -gt 0 ]] && sed 's/^/  failed: /' "$SCRATCH_ROOT/runs/.failed-$JOB_ID"
+# A sweep that ran nothing must not look like a success to whatever reads the exit code.
+[[ $ok -eq ${#ARM_LIST[@]} ]] || exit 1
 rm -f "$SCRATCH_ROOT/runs/.hostfile-$JOB_ID-"*
 exit 0
