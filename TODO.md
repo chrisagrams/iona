@@ -93,6 +93,26 @@ or it silently becomes a different experiment. `freeze_encoder_steps=500` is 1.1
 **Nothing currently queued depends on DDP.** The grid runs one tile per arm and the
 alignment validation was resubmitted as 8840238 on one tile.
 
+## FT8. Is a warm-up freeze on the encoder worth anything? — **Open, deferred**
+
+`freeze_encoder_steps` held the encoder still for the first N steps so the randomly
+initialised head could not push large gradients back through pretrained weights before it
+had learned anything itself. It is set to **0** everywhere now and the grid does not vary
+it, deliberately: it is a second mechanism doing roughly what `encoder_lr_scale` already
+does, the grid sweeps that over `0, 0.1, 0.5, 1.0`, and carrying both would confound them
+-- an arm at `encoder_lr_scale=0.1` with a 500-step freeze is not cleanly either.
+
+It also did not survive the move to twelve tiles unchanged: at an effective batch of 48
+the same 500 steps is 13.8% of a 2-epoch run rather than 1.1%, so the setting silently
+meant something different.
+
+- [ ] Once the grid names a winning `learning_rate` / `encoder_lr_scale`, run that arm
+      with a freeze of 0 / 1% / 5% of total steps and see whether it moves test AUROC.
+      Express it as a FRACTION of training, not a step count, so it survives a change of
+      batch size or tile count.
+- [ ] If it does help, check whether it still helps at `encoder_lr_scale=0.1`, where the
+      encoder is already moving slowly, or only at `1.0`.
+
 ## FT1. Does the denoiser generalise beyond 1024 peaks? — **Open**
 
 `max_peaks=1024` and `build_denoising_datasets` DROPS anything above it rather than

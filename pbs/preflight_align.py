@@ -247,6 +247,34 @@ def _eval_autocast():
     return f"loss {float(out['loss']):.4f}, student output {out['embeddings'].dtype}"
 
 
+@check("the Trainer can actually produce eval_loss")
+def _eval_loss_reachable():
+    """Job 8840277 evaluated cleanly and then died on metric_for_best_model.
+
+    Trainer only computes a loss during evaluation when the model either takes a `labels`
+    argument (find_labels) or a `return_loss=True` one (can_return_loss). This task is
+    self-supervised against a frozen teacher and has neither by nature, so evaluation
+    returned only eval_runtime and friends, and load_best_model_at_end then raised on a
+    missing 'eval_loss'. A stray --label_names made it worse by sending Trainer down the
+    has_labels path to look for a key the collator never emits.
+    """
+    from transformers.utils.generic import can_return_loss, find_labels
+    from msdelta.reranking import SequenceAlignmentModel
+    _, _, training_args = globals()["_parsed"]
+    labels = find_labels(SequenceAlignmentModel)
+    if not can_return_loss(SequenceAlignmentModel) and not labels:
+        raise ValueError("neither return_loss nor labels in forward(); eval_loss will "
+                         "never exist")
+    if training_args.label_names:
+        raise ValueError(f"label_names={training_args.label_names} but the collator emits "
+                         "none; leave it unset so Trainer takes the no-labels path")
+    metric = (training_args.metric_for_best_model or "").removeprefix("eval_")
+    if training_args.load_best_model_at_end and metric not in ("loss",):
+        raise ValueError(f"metric_for_best_model={training_args.metric_for_best_model!r} "
+                         "is not produced by this evaluation")
+    return f"can_return_loss=True, label_names={training_args.label_names}, best on eval_loss"
+
+
 @check("cross-modal metrics deduplicate candidates")
 def _metrics():
     import numpy as np

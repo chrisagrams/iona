@@ -52,12 +52,15 @@ XPUS_PER_HOST=${XPUS_PER_HOST:-12}
 # correctness bug in this pipeline has come from. It also needs far fewer nodes: 72 arms
 # fit on 6 nodes in one wave rather than 16 nodes in five.
 #
-# It is now the DEFAULT, not an option. Jobs 8840154 and 8840190 differ in nothing but
-# rank count -- same branch, same args, same batching -- and twelve-rank DDP took a GPU
-# page fault at step 168 while one tile ran 700 steps plus eval plus test clean. Until
-# FT7 is understood, twelve-way DDP is the configuration that does not work, so defaulting
-# to it would hand every sweep a known failure. Set TILES_PER_ARM=12 deliberately to
-# reproduce the fault; do not set it to get throughput.
+# It is the DEFAULT because twelve-way DDP does not work: jobs 8840154 and 8840190 differ
+# in nothing but rank count and DDP took a GPU page fault at step 168 while one tile ran
+# 700 steps plus eval plus test clean.
+#
+# TILES_PER_ARM=12 IS safe -- and 21.4x faster -- when the arms carry
+# `--deepspeed configs/deepspeed-zero2.json`, which replaces the DDP reducer entirely
+# (job 8840264: twelve tiles, 300 steps plus eval plus test, zero faults). That is how the
+# generated grid is built. Setting TILES_PER_ARM=12 with arms that do NOT name a deepspeed
+# config puts you back on the reducer and back on the fault, so the two move together.
 TILES_PER_ARM=${TILES_PER_ARM:-1}
 SLOTS_PER_NODE=$(( XPUS_PER_HOST / TILES_PER_ARM ))
 JOB_ID=${PBS_JOBID:-local}; JOB_ID=${JOB_ID%%.*}
@@ -77,6 +80,14 @@ done
 if [[ -z ${SKIP_GRID_CHECK:-} ]]; then
     "$VENV_DIR/bin/python" sweeps/make_denoise_grid.py --stage full --check \
         || { echo "sweep arms are stale against their template" >&2; exit 2; }
+fi
+
+# Multiple tiles per arm without DeepSpeed means the DDP reducer, which faults (FT7).
+if (( TILES_PER_ARM > 1 )) \
+   && ! grep -q -- "--deepspeed" "configs/sweep-denoise/${ARM_LIST[0]}/training.args"; then
+    echo "TILES_PER_ARM=$TILES_PER_ARM but the arms name no --deepspeed config:" >&2
+    echo "  that is the DDP reducer, which takes a GPU page fault. See TODO.md FT7." >&2
+    exit 2
 fi
 
 mapfile -t HOSTS < <(sort -u "${PBS_NODEFILE:?PBS_NODEFILE is required}")
