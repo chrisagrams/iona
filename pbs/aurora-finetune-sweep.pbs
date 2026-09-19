@@ -142,7 +142,7 @@ if [[ -n ${DRY_RUN:-} ]]; then
 fi
 
 run_node() {
-    local index=$1 node=${NODES[$1]} arm status took start
+    local index=$1 node=${NODES[$1]} arm status took start node_failed=0
     local hostfile=$SCRATCH_ROOT/runs/.hostfile-$JOB_ID-$index
     echo "$node" > "$hostfile"
     # Each node is its own single-rank-group world: MASTER_ADDR is that node, so the
@@ -173,8 +173,14 @@ run_node() {
         else
             echo "  [FAIL $arm] exit $status after ${took}s on $node -- $dir/logs/train.log"
             echo "$arm" >> "$SCRATCH_ROOT/runs/.failed-$JOB_ID"
+            node_failed=1
         fi
     done
+    # Explicit: a function inherits the status of its last command, and that was the
+    # `grep ... | tail | sed` printing an arm's test metrics. Under MAX_STEPS the test
+    # evaluation is disabled, so grep matches nothing, returns 1, pipefail propagates it,
+    # and both healthy nodes were reported as dead subshells in job 8839957.
+    return $node_failed
 }
 
 # MAX_STEPS turns the sweep into a mechanics test: the point is to prove the partitioning,
@@ -201,12 +207,16 @@ for i in "${!NODES[@]}"; do
 done
 
 completed=$(ls -d "$SCRATCH_ROOT"/runs/sweep-*-"$JOB_ID" 2>/dev/null | wc -l)
-failed_count=$(wc -l < "$SCRATCH_ROOT/runs/.failed-$JOB_ID" 2>/dev/null || echo 0)
+# `$(wc -l < missing 2>/dev/null || echo 0)` still prints a shell-level redirect error,
+# because the 2>/dev/null applies to wc and not to the redirect the shell performs first.
+failed_file=$SCRATCH_ROOT/runs/.failed-$JOB_ID
+failed_count=0
+[[ -f $failed_file ]] && failed_count=$(wc -l < "$failed_file")
 ok=$(( completed - failed_count ))
 echo; echo "=== done: $ok/${#ARM_LIST[@]} arms ok "\
      "($failed_count failed, $(( ${#ARM_LIST[@]} - completed )) never started, "\
      "$node_failures node subshells died) ==="
-[[ $failed_count -gt 0 ]] && sed 's/^/  failed: /' "$SCRATCH_ROOT/runs/.failed-$JOB_ID"
+[[ $failed_count -gt 0 ]] && sed 's/^/  failed: /' "$failed_file"
 # A sweep that ran nothing must not look like a success to whatever reads the exit code.
 [[ $ok -eq ${#ARM_LIST[@]} ]] || exit 1
 rm -f "$SCRATCH_ROOT/runs/.hostfile-$JOB_ID-"*
