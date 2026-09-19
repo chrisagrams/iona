@@ -351,7 +351,7 @@ def _optimizer():
                 f"encoder trainable={all(p.requires_grad for p in encoder)}, mask_token frozen")
 
 
-@check("the freeze discards encoder gradients rather than toggling requires_grad")
+@check("the freeze zeroes encoder gradients, and is refused under DDP")
 def _freeze_mechanism():
     """Run two real steps and confirm the encoder's gradient is dropped, then applied.
 
@@ -398,18 +398,20 @@ def _freeze_mechanism():
         probe = model.msdelta.embed.mlp[0].weight
         inputs = trainer.data_collator([rows[0]])
 
+        # Clone: .grad is one tensor reused across steps and accumulated into in place,
+        # so holding the reference would show the SECOND step's value for both reads.
         trainer.state.global_step = 0          # inside the freeze window
         trainer.training_step(model, inputs, None)
-        during = probe.grad
+        during = None if probe.grad is None else probe.grad.detach().clone()
         trainer.state.global_step = 5          # past it
         trainer.training_step(model, inputs, None)
-        after = probe.grad
+        after = None if probe.grad is None else probe.grad.detach().clone()
 
-    if during is not None:
-        raise ValueError("encoder gradient survived the freeze window")
+    if during is not None and float(during.abs().sum()) != 0.0:
+        raise ValueError("encoder gradient was not zeroed inside the freeze window")
     if after is None or not torch.isfinite(after).all():
         raise ValueError("encoder gradient missing after the freeze window")
-    return "gradient dropped during freeze, present after"
+    return "gradient zeroed during freeze, nonzero after"
 
 
 @check("metrics survive a poisoned gather instead of killing the run")
