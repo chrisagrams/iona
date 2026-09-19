@@ -42,7 +42,7 @@ from transformers import DataCollatorWithPadding, HfArgumentParser, TrainingArgu
 
 from msdelta.configuration_msdelta import MSDeltaConfig, MSDeltaDenoisingConfig
 from msdelta.data import build_denoising_datasets
-from msdelta.denoising import DenoisingTrainer, denoising_metrics
+from msdelta.denoising import DenoisingTrainer
 from msdelta.modeling_msdelta import MSDeltaForDenoising, MSDeltaForPreTraining
 from msdelta.processing_msdelta import MSDeltaProcessor
 from msdelta.wandb_distributed import init_wandb_run
@@ -128,6 +128,66 @@ class DenoiseFinetuneArguments(TrainingArguments):
         default=True,
         metadata={"help": "Score the held-out test split once training finishes."},
     )
+
+
+def denoise_metrics(prediction) -> dict[str, float]:
+    """Peak-level metrics with noise as the positive class, hardened against the gather.
+
+    Upstream's `denoising_metrics` filters only `labels != -100` and hands the rest
+    straight to sklearn. Job 8839579 died at the first in-training evaluation with
+    "multiclass format is not supported", meaning the gathered array held a third value.
+    A single-process eval and a two-rank gloo eval both produce a clean {-100, 0, 1}
+    here, so whatever introduces it only appears at 12 ranks with bf16 and a full split --
+    which is exactly the configuration that is expensive to reproduce.
+
+    Rather than keep guessing at it from the outside, this keeps only the rows that are
+    genuinely 0 or 1 and REPORTS what it dropped as `label_dropped` and `label_extra`.
+    A metric has no business terminating a four-hour fine-tune, and the next run tells us
+    the answer instead of costing another slot to ask the question again.
+    """
+    import numpy as np
+    from sklearn.metrics import (
+        accuracy_score, auc, balanced_accuracy_score, f1_score,
+        precision_recall_curve, precision_score, recall_score, roc_auc_score,
+    )
+
+    logits = np.asarray(prediction.predictions, dtype=np.float64).reshape(-1)
+    labels = np.asarray(prediction.label_ids, dtype=np.float64).reshape(-1)
+    binary = (labels == 0.0) | (labels == 1.0)
+    unexpected = ~binary & (labels != -100.0)
+
+    metrics = {
+        "label_dropped": float(unexpected.sum()),
+        # The distinct offending values, so one run identifies the cause.
+        "label_extra": float(len(np.unique(labels[unexpected]))) if unexpected.any() else 0.0,
+    }
+    if unexpected.any():
+        print(f"[denoise] dropped {int(unexpected.sum())} labels outside {{0,1,-100}}: "
+              f"{np.unique(labels[unexpected])[:8]}", flush=True)
+
+    logits, labels = logits[binary], labels[binary].astype(np.int64)
+    if labels.size == 0 or labels.min() == labels.max():
+        # A slice with one class is not scorable; returning zeros keeps the run alive and
+        # makes the degenerate eval obvious in the W&B curve.
+        metrics.update({"accuracy": 0.0, "balanced_accuracy": 0.0, "precision": 0.0,
+                        "recall": 0.0, "f1": 0.0, "auroc": 0.5, "auprc": 0.0,
+                        "n_peaks": float(labels.size)})
+        return metrics
+
+    predicted = logits >= 0
+    pr_precision, pr_recall, _ = precision_recall_curve(labels, logits)
+    metrics.update({
+        "accuracy": float(accuracy_score(labels, predicted)),
+        "balanced_accuracy": float(balanced_accuracy_score(labels, predicted)),
+        "precision": float(precision_score(labels, predicted, zero_division=0)),
+        "recall": float(recall_score(labels, predicted, zero_division=0)),
+        "f1": float(f1_score(labels, predicted, zero_division=0)),
+        "auroc": float(roc_auc_score(labels, logits)),
+        "auprc": float(auc(pr_recall, pr_precision)),
+        "n_peaks": float(labels.size),
+        "noise_fraction": float(labels.mean()),
+    })
+    return metrics
 
 
 def build_denoising_model(
@@ -262,7 +322,7 @@ def main(argv: list[str] | None = None) -> int:
                 tokenizer=processor, padding=True, return_tensors="pt"
             ),
             processing_class=processor,
-            compute_metrics=denoising_metrics,
+            compute_metrics=denoise_metrics,
             peak_pair_budget=training_args.peak_pair_budget,
             encoder_lr_scale=model_args.encoder_lr_scale,
             freeze_encoder_steps=model_args.freeze_encoder_steps,
