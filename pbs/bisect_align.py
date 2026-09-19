@@ -122,8 +122,13 @@ def main() -> int:
     model = build(cli.variant).to(device)
     if world > 1:
         import deepspeed
+        # An explicit optimizer, not just model_parameters: ZeRO-2 partitions optimizer
+        # STATE, so with only parameters it is handed a DummyOptim and asserts
+        # "zero stage 2 requires an optimizer". The real training path gets one from the
+        # Trainer, which is why this only showed up here.
         model, optimizer, _, _ = deepspeed.initialize(
             model=model, model_parameters=model.parameters(),
+            optimizer=torch.optim.AdamW(model.parameters(), lr=1e-3),
             config={"train_batch_size": cli.batch * world,
                     "train_micro_batch_size_per_gpu": cli.batch,
                     "gradient_accumulation_steps": 1,
