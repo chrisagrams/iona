@@ -39,6 +39,6 @@
 --eval_alignment_rows 2000
 --seed 0
 --report_to wandb
---wandb_project msdelta-finetune
+--wandb_project msdelta-finetune-align
 --wandb_entity CS_Pharm
 --deepspeed configs/deepspeed-zero2.json

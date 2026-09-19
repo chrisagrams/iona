@@ -20,7 +20,7 @@ REPO = Path(__file__).resolve().parent.parent
 ARGS_FILE = os.environ.get("ARGS_FILE", "configs/finetune-align-50m/training.args")
 PBS_FILE = os.environ.get("PBS_FILE", "pbs/aurora-finetune.pbs")
 WANDB_ENTITY = os.environ.get("EXPECT_WANDB_ENTITY", "CS_Pharm")
-WANDB_PROJECT = os.environ.get("EXPECT_WANDB_PROJECT", "msdelta-finetune")
+WANDB_PROJECT = os.environ.get("EXPECT_WANDB_PROJECT", "msdelta-finetune-align")
 
 results: list[tuple[str, bool, str]] = []
 

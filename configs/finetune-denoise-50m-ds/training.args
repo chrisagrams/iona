@@ -37,6 +37,6 @@
 --ddp_find_unused_parameters false
 --seed 0
 --report_to wandb
---wandb_project msdelta-finetune
+--wandb_project msdelta-finetune-denoise
 --wandb_entity CS_Pharm
 --deepspeed configs/deepspeed-zero2.json

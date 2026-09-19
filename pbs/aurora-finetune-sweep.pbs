@@ -141,6 +141,12 @@ export MSDELTA_XPUS_PER_HOST=$XPUS_PER_HOST
 # One node per arm, so the world is always a single node regardless of allocation size.
 export MSDELTA_WORLD_SIZE=$XPUS_PER_HOST
 export PYTHONPATH=$REPO_DIR${PYTHONPATH:+:$PYTHONPATH}
+# Probes: dtype, index-range and finiteness checks, and -- the useful part --
+# a device synchronise at each stage, so an asynchronous GPU fault is reported
+# where it was caused rather than dozens of steps later. Set MSDELTA_PROBES=1 on
+# debug runs. Leave it unset for real training: the synchronises serialise the
+# queue and cost throughput.
+export MSDELTA_PROBES=${MSDELTA_PROBES:-}
 export HF_HOME=${HF_HOME:-$SCRATCH_ROOT/huggingface}
 export HF_HUB_OFFLINE=${HF_HUB_OFFLINE:-1}
 export HF_DATASETS_OFFLINE=${HF_DATASETS_OFFLINE:-1}

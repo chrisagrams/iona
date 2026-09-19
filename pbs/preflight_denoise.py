@@ -28,7 +28,7 @@ PBS_FILE = os.environ.get("PBS_FILE", "pbs/aurora-finetune.pbs")
 # default entity is personal, and CS_Pharm has same-named projects, so an unset entity
 # produces a successful-looking run under the wrong owner (it did, for 8839683).
 WANDB_ENTITY = os.environ.get("EXPECT_WANDB_ENTITY", "CS_Pharm")
-WANDB_PROJECT = os.environ.get("EXPECT_WANDB_PROJECT", "msdelta-finetune")
+WANDB_PROJECT = os.environ.get("EXPECT_WANDB_PROJECT", "msdelta-finetune-denoise")
 
 results: list[tuple[str, bool, str]] = []
 

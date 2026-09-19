@@ -31,6 +31,7 @@ from msdelta.reranking import (
     POOLING_MODES,
     AlignmentCollator,
     REPLICATE_REPO,
+    attach_teacher_embeddings,
     build_alignment_datasets,
     build_alignment_model,
     cross_modal_metrics,
@@ -66,6 +67,11 @@ class AlignDataArguments:
     # runs real epochs and therefore still exercises saving, load_best_model_at_end, the
     # cross-modal evaluation and the final save.
     max_samples: int = 0
+    # Precompute the frozen teacher's embeddings and drop it from the training graph.
+    # Default ON: it is both faster and the only configuration that has any prospect of
+    # running on twelve tiles (FT9). --precompute_targets false keeps the old behaviour
+    # for comparison.
+    precompute_targets: bool = True
 
 
 @dataclass
@@ -200,6 +206,19 @@ def main(argv: list[str] | None = None) -> int:
             )
         datasets = subset_splits(datasets, data_args.max_samples,
                                  training_args.process_index)
+        if data_args.precompute_targets:
+            # Under main_process_first: datasets.map writes a cache file, and twelve ranks
+            # computing the same embeddings into the same file at once is a race at best
+            # and twelve times the work regardless. Rank 0 computes, the rest read.
+            with training_args.main_process_first(local=False, desc="teacher embeddings"):
+                datasets = attach_teacher_embeddings(
+                    datasets, model.spectrum_model, model_args.pooling,
+                    batch_size=training_args.per_device_eval_batch_size,
+                    max_peptide_length=model_args.max_peptide_length)
+            # The teacher has served its purpose; leaving it attached would hand the
+            # wrapped module 49.81M parameters that produce nothing and take gradients
+            # from nobody, which is the shape that faults on twelve tiles.
+            model.spectrum_model = None
         if training_args.process_index == 0:
             print("[align] " + " ".join(f"{k}={len(v):,}" for k, v in datasets.items()),
                   flush=True)
