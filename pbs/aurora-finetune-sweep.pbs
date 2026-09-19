@@ -45,6 +45,13 @@ VENV_DIR=${VENV_DIR:-$REPO_DIR/.venv}
 PROJECT=${PROJECT:-UIC-HPC}
 SCRATCH_ROOT=${SCRATCH_ROOT:-/lus/flare/projects/$PROJECT/$USER/msdelta}
 XPUS_PER_HOST=${XPUS_PER_HOST:-12}
+# TILES_PER_ARM=1 gives each arm a whole tile to itself and runs twelve arms per node
+# instead of one. It is slower per arm (no data parallelism) but removes DDP entirely --
+# no reducer, no gather, no unused-parameter detection -- which is where every
+# correctness bug in this pipeline has come from. It also needs far fewer nodes: 72 arms
+# fit on 6 nodes in one wave rather than 16 nodes in five.
+TILES_PER_ARM=${TILES_PER_ARM:-$XPUS_PER_HOST}
+SLOTS_PER_NODE=$(( XPUS_PER_HOST / TILES_PER_ARM ))
 JOB_ID=${PBS_JOBID:-local}; JOB_ID=${JOB_ID%%.*}
 
 IFS=',' read -r -a ARM_LIST <<< "$ARMS"
@@ -53,7 +60,17 @@ for arm in "${ARM_LIST[@]}"; do
         || { echo "unknown arm: $arm" >&2; exit 2; }
 done
 
-mapfile -t NODES < <(sort -u "${PBS_NODEFILE:?PBS_NODEFILE is required}")
+mapfile -t HOSTS < <(sort -u "${PBS_NODEFILE:?PBS_NODEFILE is required}")
+# One "node" in the scheduling below is really one SLOT: a host contributes
+# SLOTS_PER_NODE of them, each owning a disjoint set of tiles.
+NODES=()
+SLOT_TILES=()
+for host in "${HOSTS[@]}"; do
+    for (( slot = 0; slot < SLOTS_PER_NODE; slot++ )); do
+        NODES+=("$host")
+        SLOT_TILES+=("$(seq -s, $(( slot * TILES_PER_ARM )) $(( (slot + 1) * TILES_PER_ARM - 1 )))")
+    done
+done
 NUM_NODES=${#NODES[@]}
 
 if [[ -z ${DRY_RUN:-} ]]; then
@@ -65,6 +82,7 @@ fi
 
 export ONEAPI_DEVICE_SELECTOR=level_zero:gpu
 export ZE_FLAT_DEVICE_HIERARCHY=FLAT
+# Job-wide default; a one-tile-per-arm run overrides it per slot inside run_node.
 export ZE_AFFINITY_MASK=${ZE_AFFINITY_MASK:-$(seq -s, 0 $((XPUS_PER_HOST - 1)))}
 export OMP_NUM_THREADS=${OMP_NUM_THREADS:-4}
 export MKL_NUM_THREADS=${MKL_NUM_THREADS:-4}
@@ -105,7 +123,8 @@ if n != $XPUS_PER_HOST:
 " || exit 2
 fi
 
-echo "=== denoise sweep: ${#ARM_LIST[@]} arms across $NUM_NODES nodes, job $JOB_ID ==="
+echo "=== denoise sweep: ${#ARM_LIST[@]} arms, ${#HOSTS[@]} hosts x $SLOTS_PER_NODE slots"\
+     "= $NUM_NODES concurrent, $TILES_PER_ARM tile(s) each, job $JOB_ID ==="
 
 # Longest-processing-time-first onto the emptiest node: the standard greedy makespan
 # heuristic, and it matters because a 4-epoch 512-wide arm costs ~3x a baseline one, so
@@ -130,7 +149,7 @@ while read -r cost arm; do
 done < <(printf '%s\n' "${weighted[@]}" | sort -rn)
 
 for i in "${!NODES[@]}"; do
-    echo "  ${NODES[$i]}  cost=${NODE_COST[$i]} :${NODE_ARMS[$i]}"
+    echo "  slot $i ${NODES[$i]} tiles=${SLOT_TILES[$i]} cost=${NODE_COST[$i]} :${NODE_ARMS[$i]}"
 done
 
 # DRY_RUN stops after the partition so the balance can be checked on a login node with a
@@ -151,9 +170,14 @@ run_node() {
         local dir=$SCRATCH_ROOT/runs/sweep-$arm-$JOB_ID
         mkdir -p "$dir/logs"
         start=$SECONDS
-        MASTER_ADDR=$node WANDB_DIR=$dir/logs WANDB_RESUME=allow \
+        # Each slot pins its own tiles and its own port, so concurrent arms on one host
+        # never share a device or a rendezvous.
+        MASTER_ADDR=$node MASTER_PORT=$(( 29500 + index )) \
+        ZE_AFFINITY_MASK=${SLOT_TILES[$index]} \
+        MSDELTA_XPUS_PER_HOST=$TILES_PER_ARM MSDELTA_WORLD_SIZE=$TILES_PER_ARM \
+        WANDB_DIR=$dir/logs WANDB_RESUME=allow \
         WANDB_RUN_ID=dn50m-$arm-$JOB_ID \
-        mpiexec --envall --pmi=pmix -n "$XPUS_PER_HOST" --ppn "$XPUS_PER_HOST" \
+        mpiexec --envall --pmi=pmix -n "$TILES_PER_ARM" --ppn "$TILES_PER_ARM" \
             --cpu-bind depth --depth "${CPU_DEPTH:-8}" --hostfile="$hostfile" \
             "$REPO_DIR/pbs/rank_wrapper.sh" \
             "$VENV_DIR/bin/python" -m msdelta.finetune_denoise \
