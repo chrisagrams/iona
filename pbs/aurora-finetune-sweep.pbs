@@ -159,7 +159,10 @@ run_node() {
             "$VENV_DIR/bin/python" -m msdelta.finetune_denoise \
                 --args_file "configs/sweep-denoise/$arm/training.args" \
                 --output_dir "$dir" "${SHORT[@]}" \
-            >"$dir/logs/train.log" 2>&1 || true
+            >"$dir/logs/train.log" 2>&1
+        # No `|| true` here: the script runs under `set -uo pipefail`, not `set -e`, so a
+        # non-zero mpiexec does not abort the function -- and `|| true` would force
+        # status to 0 and silently defeat the failure detection below.
         status=$?
         took=$(( SECONDS - start ))
         # One arm failing must not take the node or the sweep down; a grid exists to
