@@ -328,6 +328,21 @@ class DenoiseFinetuneTrainer(DenoisingTrainer):
         self.encoder_lr_scale = encoder_lr_scale
         self.freeze_encoder_steps = freeze_encoder_steps
         self._unfrozen = freeze_encoder_steps <= 0
+        # Under DDP the freeze has nowhere safe to live. Toggling requires_grad breaks
+        # the reducer (it is built once, at wrap time), and writing to .grad between
+        # backward and the optimizer step touches memory DDP owns -- every one of jobs
+        # 8840007/8/10/11 took a GPU page fault on a WRITE with the gradient-zeroing
+        # version, at the same budget where the previous, reducer-excluded runs survived.
+        #
+        # warmup_steps already does what the freeze was for: it ramps the learning rate
+        # from zero, so the pretrained encoder is not hit by an untrained head's first
+        # gradients. Refuse rather than silently behave differently.
+        if freeze_encoder_steps > 0 and self.args.world_size > 1:
+            raise ValueError(
+                "freeze_encoder_steps>0 is not supported under DDP: the reducer is built "
+                "once at wrap time and post-backward gradient edits race it. Use "
+                "warmup_steps (already ramps from zero) and encoder_lr_scale instead."
+            )
 
     def create_optimizer(self):
         """Two parameter groups so the encoder can be nudged while the head moves."""
@@ -367,8 +382,15 @@ class DenoiseFinetuneTrainer(DenoisingTrainer):
             if self.state.global_step >= self.freeze_encoder_steps:
                 self._unfrozen = True
             else:
+                # zero_() rather than `= None`. With gradient_as_bucket_view the .grad
+                # tensor IS a view into DDP's flat all-reduce bucket; dropping the
+                # reference and letting the next iteration re-bind it invites the
+                # reducer and the allocator to disagree about that memory. Zeroing
+                # leaves the buffer exactly where DDP put it and still produces no
+                # update.
                 for parameter in self.model.msdelta.parameters():
-                    parameter.grad = None
+                    if parameter.grad is not None:
+                        parameter.grad.zero_()
         return loss
 
 
