@@ -264,7 +264,15 @@ class SequenceAlignmentModel(nn.Module):
         return F.normalize(pool_sequence(hidden, attention_mask, self.pooling).float(), dim=-1)
 
     def forward(self, mz, log_intensity, attention_mask, residues, modifications,
-                sequence_mask, charge, return_dict: bool = True):
+                sequence_mask, charge, return_dict: bool = True,
+                return_loss: bool = True):
+        # return_loss is not read here; it exists so transformers' can_return_loss() finds
+        # it in the signature (utils/generic.py looks for exactly this name defaulting to
+        # True). This task is self-supervised against a frozen teacher, so there is no
+        # `labels` argument for find_labels() to latch onto either, and without one of the
+        # two the Trainer decides evaluation cannot produce a loss: job 8840277 evaluated
+        # fine and then died on `metric_for_best_model='eval_loss'` not existing, with only
+        # eval_runtime and friends in the metrics.
         target = self.embed_spectrum(mz, log_intensity, attention_mask)
         predicted = self.sequence_encoder(residues, modifications, sequence_mask, charge)
         # Mean squared L2. On unit vectors this equals 2 - 2*cos, so it is simultaneously
