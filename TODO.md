@@ -42,6 +42,29 @@ expensive retrain buys nothing.
       currently discards whole spectra; truncating by m/z keeps them but silently removes
       the high-m/z tail, which is where the large fragment ions live.
 
+## FT5. Seed replication belongs on the winning config, not the baseline — **Open**
+
+Seeds 1-4 are running against the pre-sweep baseline (lr 5e-5, encoder_lr_scale 0.1,
+2 epochs, head 128), which was a guess rather than a tuned point. Those runs give a noise
+floor, but it is the noise floor of a configuration we are about to replace.
+
+Once the grid picks a winner, re-run the seed replication on THAT config. Two reasons it
+is not optional:
+
+  The grid ranks 72 arms on one seed each. If seed spread is comparable to the spread
+  between neighbouring arms, the ranking is largely noise and the "winner" is whichever
+  arm drew a good seed. The replication is what licenses calling it a winner at all.
+
+  Seed sensitivity is not constant across the space. A high learning rate or an unfrozen
+  encoder can be stable at one seed and divergent at another, so the baseline's spread
+  does not transfer to a more aggressive winning config.
+
+- [ ] After the grid, run >=5 seeds on the winning arm and report mean +/- sd.
+- [ ] Compare that spread against the gap between the top few arms. If they overlap, say
+      so plainly and treat the top group as tied rather than ranked.
+- [ ] Keep the existing baseline seed runs as the comparison point, so the two spreads
+      can be read against each other.
+
 ## FT2. Test metrics never reach W&B — **Open**
 
 Every run's W&B summary carries `eval/*` but `test_auroc` is `None`. The final test
