@@ -438,6 +438,70 @@ def attach_teacher_embeddings(datasets: dict, spectrum_model: nn.Module, pooling
             for name, split in datasets.items()}
 
 
+
+@torch.no_grad()
+def group_separation_metrics(embeddings: Tensor, groups: np.ndarray,
+                             prefix: str = "sep") -> dict[str, float]:
+    """Do replicates of one peptide sit closer together than to other peptides?
+
+    hit@1 answers "is the right candidate first", which is what retrieval needs, but it
+    says nothing about WHY a space fails. This asks the underlying geometric question:
+    for every group of spectra sharing a peptide and charge, how far apart are they, and
+    how far from everything else.
+
+    The one number to read first is `clean`, the fraction of groups whose farthest
+    in-group neighbour is nearer than its closest out-group one. That is separation with
+    no overlap at all, and it is the property a distance-ranked reranker actually needs.
+    `margin` is the softer version: mean out-group distance minus mean in-group distance,
+    which stays positive long after `clean` has collapsed to zero.
+
+    Distances are squared euclidean on unit vectors, so d = 2 - 2cos and the scale is
+    [0, 4] regardless of dimension.
+    """
+    embeddings = F.normalize(embeddings.float(), dim=-1)
+    distances = torch.cdist(embeddings, embeddings).pow(2)
+    groups = np.asarray(groups)
+    same = torch.as_tensor(groups[:, None] == groups[None, :])
+    self_mask = torch.eye(len(embeddings), dtype=torch.bool)
+
+    in_pairs = same & ~self_mask
+    out_pairs = ~same
+    if not in_pairs.any() or not out_pairs.any():
+        return {f"{prefix}/groups": float(len(set(groups.tolist())))}
+
+    inside, outside = distances[in_pairs], distances[out_pairs]
+    # Per-group extremes, then averaged, rather than the global extremes: one pathological
+    # group should not be able to hide behind 1,000 well-behaved ones, and the global min
+    # over all pairs is dominated by whichever two spectra happen to be near-duplicates.
+    clean, worst_in, best_out = 0, [], []
+    for group in np.unique(groups):
+        rows = torch.as_tensor(groups == group)
+        if rows.sum() < 2:
+            continue
+        block = distances[rows][:, rows]
+        far = block[~torch.eye(int(rows.sum()), dtype=torch.bool)].max()
+        near = distances[rows][:, ~rows].min()
+        worst_in.append(float(far))
+        best_out.append(float(near))
+        clean += int(far < near)
+
+    return {
+        f"{prefix}/in_mean": float(inside.mean()),
+        f"{prefix}/in_min": float(inside.min()),
+        f"{prefix}/in_max": float(inside.max()),
+        f"{prefix}/out_mean": float(outside.mean()),
+        f"{prefix}/out_min": float(outside.min()),
+        f"{prefix}/out_max": float(outside.max()),
+        # Positive means replicates are closer to each other than to other peptides.
+        f"{prefix}/margin": float(outside.mean() - inside.mean()),
+        # 1.0 would mean every group is perfectly separated from every other.
+        f"{prefix}/clean": clean / max(len(worst_in), 1),
+        f"{prefix}/worst_in_mean": float(np.mean(worst_in)) if worst_in else 0.0,
+        f"{prefix}/best_out_mean": float(np.mean(best_out)) if best_out else 0.0,
+        f"{prefix}/groups": float(len(worst_in)),
+    }
+
+
 @torch.no_grad()
 def cross_modal_metrics(sequence_embeddings, spectrum_embeddings, spectrum_groups,
                         sequence_groups=None) -> dict[str, float]:
