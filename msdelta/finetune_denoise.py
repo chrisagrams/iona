@@ -43,6 +43,7 @@ from transformers import (DataCollatorWithPadding, HfArgumentParser, TrainerCall
 
 from msdelta.configuration_msdelta import MSDeltaConfig, MSDeltaDenoisingConfig
 from msdelta.data import build_denoising_datasets
+from transformers import Trainer
 from msdelta.denoising import DenoisingTrainer
 from msdelta.modeling_msdelta import MSDeltaForDenoising, MSDeltaForPreTraining
 from msdelta.processing_msdelta import MSDeltaProcessor
@@ -125,6 +126,19 @@ class DenoiseDataArguments:
 class DenoiseFinetuneArguments(TrainingArguments):
     """TrainingArguments plus the batching and reporting this task needs."""
 
+    use_peak_budget_batching: bool = field(
+        default=False,
+        metadata={
+            "help": (
+                "Build batches to a padded-attention budget instead of a fixed count. "
+                "Off by default, matching pretraining, which uses a plain fixed batch "
+                "and is the only configuration on this codebase proven to all-reduce a "
+                "full encoder under DDP. Budget batching gives every rank a different "
+                "sequence length, so per-rank memory spikes differ -- untested territory "
+                "for the reducer."
+            )
+        },
+    )
     peak_pair_budget: int = field(
         default=4_194_304,
         metadata={
@@ -347,9 +361,11 @@ class MemoryProbe(TrainerCallback):
 
 
 class DenoiseFinetuneTrainer(DenoisingTrainer):
-    """Budget batching, plus split learning rates and a delayed encoder unfreeze."""
+    """Split learning rates and a gated encoder; batching follows pretraining by default."""
 
-    def __init__(self, *args, encoder_lr_scale: float = 1.0, freeze_encoder_steps: int = 0, **kwargs):
+    def __init__(self, *args, encoder_lr_scale: float = 1.0, freeze_encoder_steps: int = 0,
+                 use_peak_budget_batching: bool = False, **kwargs):
+        self.use_peak_budget_batching = use_peak_budget_batching
         super().__init__(*args, **kwargs)
         self.encoder_lr_scale = encoder_lr_scale
         self.freeze_encoder_steps = freeze_encoder_steps
@@ -370,6 +386,19 @@ class DenoiseFinetuneTrainer(DenoisingTrainer):
             **kwargs,
         )
         return self.optimizer
+
+    def get_train_dataloader(self):
+        """Plain fixed-size batches unless budget batching is asked for explicitly.
+
+        DenoisingTrainer's override builds variable-sized batches and sets
+        accelerator.even_batches=False. That is right for a frozen-encoder probe, where
+        no activations are retained and ranks cannot drift. With a trainable encoder it
+        gives each rank a different sequence length and therefore a different memory
+        profile, which is not how any working DDP run on this codebase is configured.
+        """
+        if self.use_peak_budget_batching:
+            return super().get_train_dataloader()
+        return Trainer.get_train_dataloader(self)
 
     def create_scheduler(self, num_training_steps: int, optimizer=None):
         """Freeze the encoder with a per-group LR multiplier, not by touching gradients.
@@ -500,6 +529,7 @@ def main(argv: list[str] | None = None) -> int:
             peak_pair_budget=training_args.peak_pair_budget,
             encoder_lr_scale=model_args.encoder_lr_scale,
             freeze_encoder_steps=model_args.freeze_encoder_steps,
+            use_peak_budget_batching=training_args.use_peak_budget_batching,
         )
         trainer.add_callback(MemoryProbe(every=10))
         trainer.train()
