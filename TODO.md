@@ -1,7 +1,8 @@
 # Fine-tuning TODO
 
 Open work on `dev_finetune`. Items are ordered by what would change a decision, not by
-effort.
+effort. This file is what is WRONG; [STATUS.md](STATUS.md) is the schedule and what is
+currently true. Read them together.
 
 ## FT7. The GPU page fault is DDP, not the model — **Isolated, workaround in hand**
 
