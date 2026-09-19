@@ -125,10 +125,15 @@ def _wandb_cfg():
     _, _, training_args = globals()["_parsed"]
     if training_args.wandb_project != "msdelta-denoise":
         raise ValueError(f"project is {training_args.wandb_project!r}")
+    # The key's default entity is the personal one, so an unset entity silently lands the
+    # run beside a same-named project under the wrong owner -- which is what happened to
+    # run denoise-ft-50m-8839683.
+    if training_args.wandb_entity != "CS_Pharm":
+        raise ValueError(f"entity is {training_args.wandb_entity!r}, expected CS_Pharm")
     original = (REPO / ARGS_FILE).read_text()
     if "--report_to wandb" not in original:
         raise ValueError("--report_to wandb missing from the args file")
-    return "msdelta-denoise"
+    return "CS_Pharm/msdelta-denoise"
 
 
 @check("credentials load (length only, never the value)")
