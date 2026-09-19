@@ -228,10 +228,12 @@ def _polarity():
     return f"label==noise for all {len(encoded['labels'])} peaks"
 
 
-@check("batch sampler respects the attention budget at the 1024 cap")
+@check("batch sampler respects the attention budget (only if budget batching is on)")
 def _sampler():
     from msdelta.denoising import PeakBudgetBatchSampler
     _, _, training_args = globals()["_parsed"]
+    if not training_args.use_peak_budget_batching:
+        return "budget batching off; fixed batches, as pretraining uses"
     lengths = [1024] * 8 + [195] * 200 + [20] * 50
     sampler = PeakBudgetBatchSampler(
         lengths=lengths, peak_pair_budget=training_args.peak_pair_budget, seed=0
@@ -275,25 +277,30 @@ def _budget():
     checkpoints quadrupled that from 64 to 256. Job 8839166 trained 19 steps on the
     inherited budget and then took a GPU page fault.
     """
-    model_args, _, training_args = globals()["_parsed"]
+    model_args, data_args, training_args = globals()["_parsed"]
     model = globals()["_model"]
     n_freqs = model.config.encoder.delta_bias_n_freqs
-    gigabytes = training_args.peak_pair_budget * 2 * n_freqs * 4 / 1e9
+    cap = data_args.max_peaks
+    # The bias branch materialises (B, L, L, 2*n_freqs); with a TRAINABLE encoder every
+    # intermediate is retained for backward, so the forward figure is a floor.
+    area = (training_args.peak_pair_budget if training_args.use_peak_budget_batching
+            else training_args.per_device_train_batch_size * cap * cap)
+    gigabytes = area * 2 * n_freqs * 4 / 1e9
     if gigabytes > 4.0:
         raise ValueError(
-            f"n_freqs={n_freqs} and budget={training_args.peak_pair_budget:,} imply a "
-            f"{gigabytes:.2f} GB pair tensor per batch; lower the budget"
+            f"n_freqs={n_freqs}, cap={cap}, area={area:,} imply a {gigabytes:.2f} GB "
+            "pair tensor per train batch; lower the batch size or the cap"
         )
     # Eval is NOT covered by the budget: get_eval_dataloader takes the standard fixed-batch
     # path, so per_device_eval_batch_size is the only thing bounding it. Job 8839203 trained
     # all 60 steps and then faulted two batches into evaluation at batch size 8 (17.18 GB).
-    eval_gb = training_args.per_device_eval_batch_size * (2 ** 20) * 2 * n_freqs * 4 / 1e9
+    eval_gb = training_args.per_device_eval_batch_size * cap * cap * 2 * n_freqs * 4 / 1e9
     if eval_gb > 4.0:
         raise ValueError(
             f"per_device_eval_batch_size={training_args.per_device_eval_batch_size} implies "
-            f"{eval_gb:.2f} GB at the 1024 cap; the budget does not apply to eval"
+            f"{eval_gb:.2f} GB at the {cap}-peak cap; the budget does not apply to eval"
         )
-    return (f"n_freqs={n_freqs}, train {gigabytes:.2f} GB/batch, "
+    return (f"n_freqs={n_freqs}, cap={cap}, train {gigabytes:.2f} GB/batch, "
             f"eval {eval_gb:.2f} GB/batch")
 
 
