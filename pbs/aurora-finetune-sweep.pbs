@@ -1,8 +1,10 @@
 #!/bin/bash -l
 # Run several denoise fine-tune arms back to back inside one allocation.
 #
-#   qsub -q capacity -l select=1 -l walltime=04:00:00 \
-#        -v ARMS="lr1e5_es0_ep2_h128,lr1e5_es01_ep2_h128" pbs/aurora-finetune-sweep.pbs
+#   qsub -q capacity -l select=16 -l walltime=04:00:00 pbs/aurora-finetune-sweep.pbs
+#   qsub -q capacity -l select=8  -l walltime=04:00:00 -v ARMS_FILE=sweeps/subset.txt ...
+#
+# With no ARMS/ARMS_FILE it runs every arm under configs/sweep-denoise.
 #
 # Each training uses 12 ranks, which is exactly one Aurora node, so an N-node allocation
 # runs N arms CONCURRENTLY -- one per node, each with its own single-node hostfile. At the
@@ -28,7 +30,17 @@
 set -uo pipefail
 REPO_DIR=${REPO_DIR:-${PBS_O_WORKDIR:-$PWD}}
 cd "$REPO_DIR"
-ARMS=${ARMS:?set ARMS to a comma-separated list of arm names under configs/sweep-denoise}
+# ARMS as a comma-separated list only works for small sweeps: `qsub -v` rejects a long
+# environment ("cannot send environment with the job"), and 72 arm names exceed it. So the
+# default is every generated arm, and a subset goes through a file instead of the job
+# environment.
+ARMS=${ARMS:-}
+if [[ -n ${ARMS_FILE:-} ]]; then
+    ARMS=$(tr -s ' \n' ',' < "$ARMS_FILE" | sed 's/,$//')
+elif [[ -z $ARMS ]]; then
+    ARMS=$(ls configs/sweep-denoise | sort | paste -sd,)
+fi
+[[ -n $ARMS ]] || { echo "no arms: generate them with sweeps/make_denoise_grid.py" >&2; exit 2; }
 VENV_DIR=${VENV_DIR:-$REPO_DIR/.venv}
 PROJECT=${PROJECT:-UIC-HPC}
 SCRATCH_ROOT=${SCRATCH_ROOT:-/lus/flare/projects/$PROJECT/$USER/msdelta}
