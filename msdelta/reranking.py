@@ -205,25 +205,30 @@ class PeptideEncoder(nn.Module):
         mod = self.mod_projection(self.mod_features(modifications).to(hidden.dtype))
         hidden = hidden + mod * modified
         hidden = hidden + self.charge(charge.clamp(0, self.charge.num_embeddings - 1))[:, None]
-        # Run the stack in fp32 with autocast off. torch's TransformerEncoderLayer has a
-        # fused fast path (torch._transformer_encoder_layer_fwd) that it takes only when
-        # grad is disabled -- i.e. in eval, never in training -- and that kernel does not
-        # honour autocast. It is meant to be guarded by
+        # Run the stack with autocast off, in whatever dtype the weights are.
+        #
+        # torch's TransformerEncoderLayer has a fused fast path
+        # (torch._transformer_encoder_layer_fwd) that it takes only when grad is disabled
+        # -- eval, never training -- and that kernel does not honour autocast. It is meant
+        # to be guarded by
         #
         #     elif torch.is_autocast_enabled():   # transformer.py:869
         #
         # but the no-argument form of that call reports CUDA's autocast state, so under
-        # torch.autocast("xpu") it returns False and the guard never fires. bf16
-        # activations then meet fp32 weights inside the kernel: "expected scalar type
-        # BFloat16 but found Float". Job 8840257 trained 200 steps and died on its first
-        # evaluation, which is the signature of a path that only exists in eval.
+        # torch.autocast("xpu") it returns False and the guard never fires. Job 8840257
+        # trained 200 steps and died on its first evaluation: "expected scalar type
+        # BFloat16 but found Float".
         #
-        # Forcing fp32 rather than tripping the guard by some other means also makes
-        # training and evaluation numerically identical, and the student is 4.11M
-        # parameters over sequences of at most 64 -- next to the teacher's 512-peak
-        # attention the cost does not register.
+        # What the kernel cannot tolerate is a MISMATCH, not bf16. Forcing fp32 fixed the
+        # single-tile case and then broke DeepSpeed, which holds the parameters in bf16 --
+        # job 8840336 died at step 0 with the same error inverted, "expected scalar type
+        # Float but found BFloat16". Matching the activations to the parameters is right
+        # in both: fp32 against fp32 weights on one tile, bf16 against bf16 under ZeRO-2.
+        # It also keeps training and evaluation numerically identical, which is the other
+        # reason not to leave this to autocast.
+        param_dtype = next(self.encoder.parameters()).dtype
         with torch.autocast(device_type=hidden.device.type, enabled=False):
-            hidden = hidden.float()
+            hidden = hidden.to(param_dtype)
             hidden = self.norm(
                 self.encoder(hidden, src_key_padding_mask=~sequence_mask.bool())
             )
