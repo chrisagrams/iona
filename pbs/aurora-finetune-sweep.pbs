@@ -97,7 +97,11 @@ wandb_code=$(curl --silent --max-time 30 -o /dev/null -w '%{http_code}' https://
 import torch, sys
 n = torch.xpu.device_count()
 print(f'  torch={torch.__version__} xpus={n} xccl={torch.distributed.is_xccl_available()}')
-sys.exit('' if n == $XPUS_PER_HOST else f'  visible tiles {n} != $XPUS_PER_HOST')
+# Guard with an if rather than sys.exit(cond and msg): sys.exit('') returns status 1,
+# because Python treats any string as an error message. That silently killed job 8839920
+# right after this line printed, with no message to say why.
+if n != $XPUS_PER_HOST:
+    sys.exit(f'  visible tiles {n} != $XPUS_PER_HOST')
 " || exit 2
 fi
 
