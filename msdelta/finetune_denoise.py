@@ -279,6 +279,12 @@ def build_denoising_model(
     # freeze_encoder=False: this is a full fine-tune. The freezing that matters here is
     # the temporary kind, handled by the trainer's step schedule.
     model = MSDeltaForDenoising(config, encoder=pretrained.msdelta, freeze_encoder=False)
+    # The mask token is only read when mask_positions is supplied, and denoising never
+    # supplies it, so it can never receive a gradient. Left trainable it makes DDP abort
+    # with "parameters that were not used in producing loss" (job 8839946, param index 0).
+    # Freezing it before the DDP wrapper is built keeps it out of the reducer entirely,
+    # which is cheaper and more honest than find_unused_parameters=True.
+    model.msdelta.embed.mask_token.requires_grad_(False)
     return model, pretrained
 
 
@@ -290,8 +296,6 @@ class DenoiseFinetuneTrainer(DenoisingTrainer):
         self.encoder_lr_scale = encoder_lr_scale
         self.freeze_encoder_steps = freeze_encoder_steps
         self._unfrozen = freeze_encoder_steps <= 0
-        if not self._unfrozen:
-            self.model.msdelta.requires_grad_(False)
 
     def create_optimizer(self):
         """Two parameter groups so the encoder can be nudged while the head moves."""
@@ -312,13 +316,28 @@ class DenoiseFinetuneTrainer(DenoisingTrainer):
         return self.optimizer
 
     def training_step(self, model, inputs, num_items_in_batch=None):
-        if not self._unfrozen and self.state.global_step >= self.freeze_encoder_steps:
-            # requires_grad_ only; the encoder was never put in eval mode, so dropout and
-            # the rest resume exactly as a full fine-tune expects.
-            unwrapped = getattr(model, "module", model)
-            unwrapped.msdelta.requires_grad_(True)
-            self._unfrozen = True
-        return super().training_step(model, inputs, num_items_in_batch)
+        """Freeze by discarding the encoder's gradient, never by toggling requires_grad.
+
+        DDP builds its reducer once, when the model is wrapped, from the parameters that
+        require grad at that moment. A parameter frozen then is NOT added to the reducer
+        if it is later unfrozen, so its gradients are computed locally and never
+        all-reduced -- every rank trains a different encoder and only rank 0's is saved.
+        Verified directly with two gloo ranks: after an unfreeze the encoder's gradients
+        differ across ranks while the head's match.
+
+        Keeping every parameter trainable from the start and dropping the encoder's
+        gradient during the freeze phase gives the same optimisation behaviour with
+        correct synchronisation. It wastes an all-reduce per frozen step, which is a
+        small price for the encoder actually being trained on all twelve shards.
+        """
+        loss = super().training_step(model, inputs, num_items_in_batch)
+        if not self._unfrozen:
+            if self.state.global_step >= self.freeze_encoder_steps:
+                self._unfrozen = True
+            else:
+                for parameter in self.model.msdelta.parameters():
+                    parameter.grad = None
+        return loss
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -431,6 +450,16 @@ def main(argv: list[str] | None = None) -> int:
             processor.save_pretrained(str(out_dir / "final"))
             print(f"[denoise] saved to {out_dir / 'final'}", flush=True)
         return 0
+    except BaseException:
+        # W&B marks a run "crashed" by missing heartbeat, so a process that dies outright
+        # is labelled correctly -- but an exception caught here would reach the bare
+        # finish() below and stamp the run "finished". At sweep scale the run list is the
+        # index, and an arm that died at step 500 must not sit beside a completed one
+        # carrying plausible partial metrics.
+        if wandb_run is not None:
+            wandb_run.finish(exit_code=1)
+            wandb_run = None
+        raise
     finally:
         if wandb_run is not None:
             wandb_run.finish()
