@@ -274,7 +274,17 @@ def _budget():
             f"n_freqs={n_freqs} and budget={training_args.peak_pair_budget:,} imply a "
             f"{gigabytes:.2f} GB pair tensor per batch; lower the budget"
         )
-    return f"n_freqs={n_freqs}, {gigabytes:.2f} GB pair tensor per batch"
+    # Eval is NOT covered by the budget: get_eval_dataloader takes the standard fixed-batch
+    # path, so per_device_eval_batch_size is the only thing bounding it. Job 8839203 trained
+    # all 60 steps and then faulted two batches into evaluation at batch size 8 (17.18 GB).
+    eval_gb = training_args.per_device_eval_batch_size * (2 ** 20) * 2 * n_freqs * 4 / 1e9
+    if eval_gb > 4.0:
+        raise ValueError(
+            f"per_device_eval_batch_size={training_args.per_device_eval_batch_size} implies "
+            f"{eval_gb:.2f} GB at the 1024 cap; the budget does not apply to eval"
+        )
+    return (f"n_freqs={n_freqs}, train {gigabytes:.2f} GB/batch, "
+            f"eval {eval_gb:.2f} GB/batch")
 
 
 @check("optimizer builds two groups at the right learning rates")
