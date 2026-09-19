@@ -30,7 +30,9 @@ from msdelta.processing_msdelta import MSDeltaProcessor
 from msdelta.reranking import (
     POOLING_MODES,
     AlignmentCollator,
+    PeptideEncoder,
     REPLICATE_REPO,
+    SequenceAlignmentModel,
     attach_teacher_embeddings,
     build_alignment_datasets,
     build_alignment_model,
@@ -72,6 +74,11 @@ class AlignDataArguments:
     # running on twelve tiles (FT9). --precompute_targets false keeps the old behaviour
     # for comparison.
     precompute_targets: bool = True
+    # Path written by `python -m msdelta.precompute_align`. When set, training loads the
+    # targets from disk and NEVER constructs a teacher -- no 49.8M model is loaded onto
+    # the device and abandoned, which is the last difference between an alignment job
+    # that faults on twelve tiles and a bisect that does not.
+    target_cache: str | None = None
 
 
 @dataclass
@@ -156,19 +163,42 @@ def main(argv: list[str] | None = None) -> int:
         data_args.processor_name_or_path or model_args.pretrained_path,
         max_peaks=data_args.max_peaks,
     )
-    teacher = MSDeltaForPreTraining.from_pretrained(model_args.pretrained_path)
-    model = build_alignment_model(
-        teacher, pooling=model_args.pooling,
-        hidden_size=model_args.sequence_hidden_size,
-        num_layers=model_args.sequence_num_layers,
-        num_heads=model_args.sequence_num_heads,
-        dropout=model_args.sequence_dropout,
-        max_peptide_length=model_args.max_peptide_length,
-    )
+    cached = Path(data_args.target_cache) if data_args.target_cache else None
+    if cached and cached.exists():
+        # The teacher is never constructed. Its output width comes from the manifest the
+        # precompute wrote, so nothing here needs the checkpoint -- not to size the
+        # student, not to derive the split, not at all.
+        manifest = dict(
+            line.split(": ", 1)
+            for line in (cached / "MANIFEST.txt").read_text().splitlines() if ": " in line)
+        if manifest["pooling"] != model_args.pooling:
+            sys.exit(f"cache was built with pooling={manifest['pooling']!r}, "
+                     f"this run asks for {model_args.pooling!r}")
+        model = SequenceAlignmentModel(
+            None,
+            PeptideEncoder(embedding_size=int(manifest["embedding_size"]),
+                           hidden_size=model_args.sequence_hidden_size,
+                           num_layers=model_args.sequence_num_layers,
+                           num_heads=model_args.sequence_num_heads,
+                           max_length=model_args.max_peptide_length,
+                           dropout=model_args.sequence_dropout,
+                           pooling=model_args.pooling),
+            pooling=model_args.pooling)
+    else:
+        teacher = MSDeltaForPreTraining.from_pretrained(model_args.pretrained_path)
+        model = build_alignment_model(
+            teacher, pooling=model_args.pooling,
+            hidden_size=model_args.sequence_hidden_size,
+            num_layers=model_args.sequence_num_layers,
+            num_heads=model_args.sequence_num_heads,
+            dropout=model_args.sequence_dropout,
+            max_peptide_length=model_args.max_peptide_length,
+        )
     collator = AlignmentCollator(max_peptide_length=model_args.max_peptide_length)
 
     student = sum(p.numel() for p in model.sequence_encoder.parameters())
-    frozen = sum(p.numel() for p in model.spectrum_model.parameters())
+    frozen = (sum(p.numel() for p in model.spectrum_model.parameters())
+              if model.spectrum_model is not None else 0)
     training_args.run_description = (training_args.run_description
                                      or load_description())
     description = (
@@ -197,28 +227,39 @@ def main(argv: list[str] | None = None) -> int:
             print(f"[align] embedding size {model.sequence_encoder.projection[-1].out_features}",
                   flush=True)
 
-        with training_args.main_process_first(local=False, desc="alignment data"):
-            datasets = build_alignment_datasets(
-                data_args.dataset_repo, processor,
-                num_proc=data_args.preprocessing_num_workers or None,
-                validation_fraction=data_args.validation_fraction,
-                seed=training_args.seed,
-            )
-        datasets = subset_splits(datasets, data_args.max_samples,
-                                 training_args.process_index)
-        if data_args.precompute_targets:
-            # Under main_process_first: datasets.map writes a cache file, and twelve ranks
-            # computing the same embeddings into the same file at once is a race at best
-            # and twelve times the work regardless. Rank 0 computes, the rest read.
-            with training_args.main_process_first(local=False, desc="teacher embeddings"):
-                datasets = attach_teacher_embeddings(
-                    datasets, model.spectrum_model, model_args.pooling,
-                    batch_size=training_args.per_device_eval_batch_size,
-                    max_peptide_length=model_args.max_peptide_length)
-            # The teacher has served its purpose; leaving it attached would hand the
-            # wrapped module 49.81M parameters that produce nothing and take gradients
-            # from nobody, which is the shape that faults on twelve tiles.
-            model.spectrum_model = None
+        if cached and cached.exists():
+            # Targets were written by `python -m msdelta.precompute_align`. Nothing in
+            # this process loads or touches a teacher: the split came from the cache,
+            # the student's width came from the manifest, and there is no 49.8M model to
+            # put on the device and abandon.
+            from datasets import load_from_disk
+            datasets = {name: load_from_disk(str(cached / name))
+                        for name in ("train", "validation") if (cached / name).exists()}
+            if training_args.process_index == 0:
+                print(f"[align] targets from {cached} "
+                      + " ".join(f"{k}={len(v):,}" for k, v in datasets.items()),
+                      flush=True)
+        else:
+            with training_args.main_process_first(local=False, desc="alignment data"):
+                datasets = build_alignment_datasets(
+                    data_args.dataset_repo, processor,
+                    num_proc=data_args.preprocessing_num_workers or None,
+                    validation_fraction=data_args.validation_fraction,
+                    seed=training_args.seed,
+                )
+            datasets = subset_splits(datasets, data_args.max_samples,
+                                     training_args.process_index)
+            if data_args.precompute_targets:
+                # In-process fallback, kept for the single-tile path. Under
+                # main_process_first: datasets.map writes a cache file and twelve ranks
+                # writing it at once is a race, as well as twelve times the work.
+                with training_args.main_process_first(local=False,
+                                                      desc="teacher embeddings"):
+                    datasets = attach_teacher_embeddings(
+                        datasets, model.spectrum_model, model_args.pooling,
+                        batch_size=training_args.per_device_eval_batch_size,
+                        max_peptide_length=model_args.max_peptide_length)
+                model.spectrum_model = None
         if training_args.process_index == 0:
             print("[align] " + " ".join(f"{k}={len(v):,}" for k, v in datasets.items()),
                   flush=True)

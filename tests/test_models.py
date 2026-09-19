@@ -162,3 +162,54 @@ class TestAlignmentModel:
         model.spectrum_model = None
         with pytest.raises(ValueError, match="no teacher"):
             model(**AlignmentCollator()(self._rows()))
+
+
+class TestTargetCache:
+    """The cached path must never construct a teacher.
+
+    Every alignment run that faulted on twelve tiles loaded the 49.8M teacher onto the
+    device, used it and abandoned it; the bisect that runs clean never loads one, and the
+    denoise fine-tune never abandons one because its encoder IS the trained model. The
+    point of precomputing to disk is that the training process has no teacher at all, so
+    this asserts the absence rather than trusting the code path to stay that way.
+    """
+
+    def test_manifest_round_trips(self, tiny_config, tmp_path):
+        from datasets import Dataset
+        from msdelta.modeling_msdelta import MSDeltaForPreTraining
+        from msdelta.reranking import attach_teacher_embeddings, teacher_embedding_size
+        teacher = MSDeltaForPreTraining(tiny_config)
+        rows = [{"mz": [100.0, 200.0], "log_intensity": [1.0, 2.0],
+                 "peptide": "PEPTIDE", "charge": 2}]
+        cached = attach_teacher_embeddings({"train": Dataset.from_list(rows)}, teacher,
+                                           "mean+max", batch_size=1, device="cpu")["train"]
+        width = teacher_embedding_size(teacher, "mean+max")
+        assert len(cached[0]["target"]) == width
+
+    def test_training_path_loads_no_teacher(self, tiny_config, tmp_path, monkeypatch):
+        import msdelta.modeling_msdelta as mm
+        from datasets import Dataset
+        from msdelta.reranking import (AlignmentCollator, PeptideEncoder,
+                                       SequenceAlignmentModel, attach_teacher_embeddings)
+
+        teacher = mm.MSDeltaForPreTraining(tiny_config)
+        rows = [{"mz": [100.0, 200.0], "log_intensity": [1.0, 2.0],
+                 "peptide": "PEPTIDE", "charge": 2},
+                {"mz": [150.0], "log_intensity": [0.5], "peptide": "MK", "charge": 3}]
+        cached = list(attach_teacher_embeddings({"t": Dataset.from_list(rows)}, teacher,
+                                                "mean+max", batch_size=2,
+                                                device="cpu")["t"])
+        width = len(cached[0]["target"])
+
+        loads = []
+        original = mm.MSDeltaForPreTraining.from_pretrained.__func__
+        monkeypatch.setattr(mm.MSDeltaForPreTraining, "from_pretrained",
+                            classmethod(lambda cls, *a, **k: (loads.append(a),
+                                                              original(cls, *a, **k))[1]))
+        model = SequenceAlignmentModel(
+            None, PeptideEncoder(embedding_size=width, hidden_size=32, num_layers=1,
+                                 num_heads=4), pooling="mean+max")
+        out = model(**AlignmentCollator()(cached))
+        assert loads == [], "the cached path constructed a teacher"
+        assert model.spectrum_model is None
+        assert torch.isfinite(out["loss"])
