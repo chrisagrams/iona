@@ -118,12 +118,35 @@ teacher is frozen, so its embeddings are IDENTICAL every epoch, and recomputing 
 step spends ~92% of the parameters and all of the 512-peak attention reproducing a
 constant.
 
-- [ ] Precompute the spectrum embeddings once and train the student against a cached
-      target tensor. This removes the teacher from the training graph altogether, which
-      should sidestep the fault, and makes a step roughly an order of magnitude cheaper.
-      It is the better design regardless of the bug, which is the main argument for it.
-- [ ] If the fault survives that, the teacher was not the cause and the student alone
-      faults on twelve tiles -- worth knowing, and a much smaller thing to bisect.
+**The teacher is not the cause.** Job 8840403 precomputed the embeddings, set
+`spectrum_model = None`, and faulted anyway at training step 0 with the 4.11M student as
+the entire wrapped module. Precomputing was still worth doing -- it is an order of
+magnitude cheaper and it is the right design for a frozen teacher -- but it is not the
+fix, and the hypothesis it was based on is dead.
+
+The faults are deterministic but not node-specific: three different nodes
+(x4720c1s4b0n0, x4407c4s2b0n0, x4405c5s2b0n0), different ranks (5, 0, 8, 7), and a
+different address on each node -- but the SAME node gives the same rank and the same
+address every time. 8840378 and 8840403 are bit-identical failures. So it reproduces, and
+it is not bad hardware.
+
+What is left in the faulting module is small: three `nn.Embedding`, a `FourierFeatures`,
+some `nn.Linear`, and an `nn.TransformerEncoder`. The denoise model shares every one of
+those EXCEPT the `nn.TransformerEncoder` -- and torch's transformer is already responsible
+for one confirmed XPU bug today (the fused kernel whose autocast guard reads CUDA state).
+That is the obvious next suspect, though at step 0 in training mode grad is enabled and
+the fused path should not be reachable, so it is a suspect and not an answer.
+
+- [ ] Minimal reproducer: the student alone, twelve tiles, DeepSpeed, ten steps, nothing
+      else in the process. It is now a 4.11M-parameter model with six module types, which
+      is small enough to bisect by deletion.
+- [ ] Probes were enabled on 8840403 and none fired, which places the fault outside the
+      instrumented region -- most likely in DeepSpeed initialisation or the first forward,
+      before `student.in` is reached. Push a probe earlier than that.
+
+**This does not block anything.** One tile at batch 4 runs the full pipeline (8840304) in
+about 35 minutes, which fits the debug queue, and twelve-tile alignment is a throughput
+optimisation rather than a requirement.
 
 Until then the working path is one tile at batch 4: ~35 min for a full 10-epoch run,
 which fits the debug queue.
