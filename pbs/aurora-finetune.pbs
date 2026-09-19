@@ -46,7 +46,13 @@ MODULE=${MODULE:-msdelta.finetune_denoise}
 # Name the run after the task, not after "denoise": this launcher is shared, and a
 # mislabelled run directory is the kind of thing that is only noticed weeks later.
 TASK=${TASK:-$(basename "${MODULE#*finetune_}")}
+# Every run before this prefix existed was produced by a pipeline with known bugs -- the
+# DDP freeze desync, the GPU page fault, the eval-only dtype crash. Their W&B history is
+# not comparable to anything after, and the surest way to stop someone averaging the two
+# together six weeks from now is for the names not to match. Bump it, do not remove it.
+RUN_PREFIX=${RUN_PREFIX:-v2_}
 RUN_NAME=${RUN_NAME:-$TASK-ft-$(basename "$(dirname "$ARGS_FILE")")}
+[[ $RUN_NAME == "$RUN_PREFIX"* ]] || RUN_NAME=$RUN_PREFIX$RUN_NAME
 JOB_ID=${PBS_JOBID:-local}; JOB_ID=${JOB_ID%%.*}
 RUN_DIR=$SCRATCH_ROOT/runs/$RUN_NAME-$JOB_ID
 LOG_DIR=$RUN_DIR/logs

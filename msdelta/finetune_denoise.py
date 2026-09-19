@@ -109,6 +109,14 @@ class DenoiseDataArguments:
     )
     dataset_repo: str = "chrisagrams/ms-denoise-100k"
     preprocessing_num_workers: int = 24
+    max_samples: int = field(
+        default=0,
+        metadata={"help": "Keep at most this many rows per split (0 = all). For smoke "
+                          "tests: a small dataset lets a run finish REAL epochs quickly, "
+                          "so saving, save_total_limit rotation, load_best_model_at_end, "
+                          "the test split and the final save all actually execute. "
+                          "--max_steps skips every one of those."},
+    )
     max_peaks: int = field(
         default=1024,
         metadata={
@@ -436,6 +444,45 @@ class DenoiseFinetuneTrainer(DenoisingTrainer):
 
 
 
+def load_description(argv: list[str] | None = None) -> str | None:
+    """Human intent for a run, read from DESCRIPTION.md beside its args file.
+
+    Not a --run_description in the args file itself: HfArgumentParser reads those with
+    read_text().split(), so any value containing a space becomes several stray positional
+    arguments. A sibling file has no such limit, sits with the settings it describes, and
+    is visible in a diff when someone changes what an experiment is for.
+
+    describe_run() already derives a sentence from the settings, which is what guarantees
+    no run is undescribed. This supplies the one thing settings cannot: WHY the run exists.
+    """
+    argv = list(sys.argv[1:] if argv is None else argv)
+    for flag, value in zip(argv, argv[1:]):
+        if flag == "--args_file":
+            path = Path(value).parent / "DESCRIPTION.md"
+            if path.exists():
+                return " ".join(path.read_text().split())
+    return None
+
+
+def subset_splits(datasets: dict, max_samples: int, process_index: int = 0) -> dict:
+    """Cap every split, for smoke tests that must still run the whole pipeline.
+
+    Capping ROWS rather than steps is the point. `--max_steps` stops training early, so
+    the end-of-training machinery -- checkpoint writes, save_total_limit rotation,
+    load_best_model_at_end, the test pass, the final save -- never runs, and a debug job
+    reports success having exercised none of it. A small dataset instead lets the run
+    finish real epochs in seconds and touch every one of those paths.
+    """
+    if max_samples <= 0:
+        return datasets
+    capped = {name: split.select(range(min(max_samples, len(split))))
+              for name, split in datasets.items() if split is not None}
+    if process_index == 0:
+        print("[subset] " + " ".join(f"{k}={len(v):,}" for k, v in capped.items()),
+              flush=True)
+    return capped
+
+
 def main(argv: list[str] | None = None) -> int:
     select_device()
 
@@ -462,6 +509,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     model, pretrained = build_denoising_model(model_args.pretrained_path, model_args)
 
+    training_args.run_description = training_args.run_description or load_description()
     description, tags = describe_run(model_args, data_args, training_args)
     if training_args.process_index == 0:
         # Also on disk: a checkpoint directory found later should explain itself without
@@ -509,6 +557,8 @@ def main(argv: list[str] | None = None) -> int:
                 processor,
                 num_proc=data_args.preprocessing_num_workers or None,
             )
+        datasets = subset_splits(datasets, data_args.max_samples,
+                                 training_args.process_index)
         if training_args.process_index == 0:
             print(
                 "[denoise] "

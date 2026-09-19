@@ -62,6 +62,9 @@ XPUS_PER_HOST=${XPUS_PER_HOST:-12}
 # generated grid is built. Setting TILES_PER_ARM=12 with arms that do NOT name a deepspeed
 # config puts you back on the reducer and back on the fault, so the two move together.
 TILES_PER_ARM=${TILES_PER_ARM:-1}
+# See aurora-finetune.pbs: everything before this prefix came out of a pipeline with known
+# bugs and must not be compared against what comes after.
+RUN_PREFIX=${RUN_PREFIX:-v2_}
 SLOTS_PER_NODE=$(( XPUS_PER_HOST / TILES_PER_ARM ))
 JOB_ID=${PBS_JOBID:-local}; JOB_ID=${JOB_ID%%.*}
 
@@ -89,6 +92,16 @@ if (( TILES_PER_ARM > 1 )) \
     echo "  that is the DDP reducer, which takes a GPU page fault. See TODO.md FT7." >&2
     exit 2
 fi
+
+# Snapshot the arm configs. run_node reads an arm's training.args at the moment it
+# launches that arm, which can be hours into the job, so editing or regenerating the grid
+# on the login node while a sweep runs silently changes what the later arms train -- or
+# hands one a half-written file. Copying once, up front, makes a job immutable after
+# submission and makes its configs recoverable afterwards from the run directory.
+CONFIG_SNAPSHOT=$SCRATCH_ROOT/runs/.configs-$JOB_ID
+mkdir -p "$CONFIG_SNAPSHOT"
+cp -r configs/sweep-denoise/. "$CONFIG_SNAPSHOT/"
+[[ -n ${DRY_RUN:-} ]] || echo "  configs snapshot: $CONFIG_SNAPSHOT"
 
 mapfile -t HOSTS < <(sort -u "${PBS_NODEFILE:?PBS_NODEFILE is required}")
 # One "node" in the scheduling below is really one SLOT: a host contributes
@@ -209,12 +222,12 @@ run_node() {
         ZE_AFFINITY_MASK=${SLOT_TILES[$index]} \
         MSDELTA_XPUS_PER_HOST=$TILES_PER_ARM MSDELTA_WORLD_SIZE=$TILES_PER_ARM \
         WANDB_DIR=$dir/logs WANDB_RESUME=allow \
-        WANDB_RUN_ID=dn50m-$arm-$JOB_ID \
+        WANDB_RUN_ID=$RUN_PREFIX$arm-$JOB_ID \
         mpiexec --envall --pmi=pmix -n "$TILES_PER_ARM" --ppn "$TILES_PER_ARM" \
             --cpu-bind depth --depth "${CPU_DEPTH:-8}" --hostfile="$hostfile" \
             "$REPO_DIR/pbs/rank_wrapper.sh" \
             "$VENV_DIR/bin/python" -m msdelta.finetune_denoise \
-                --args_file "configs/sweep-denoise/$arm/training.args" \
+                --args_file "$CONFIG_SNAPSHOT/$arm/training.args" \
                 --output_dir "$dir" "${SHORT[@]}" \
             >"$dir/logs/train.log" 2>&1
         # No `|| true` here: the script runs under `set -uo pipefail`, not `set -e`, so a
@@ -243,10 +256,29 @@ run_node() {
 # MAX_STEPS turns the sweep into a mechanics test: the point is to prove the partitioning,
 # the per-node hostfiles and the concurrent mpiexec launches work, which needs a few steps
 # per arm rather than a full fine-tune.
+# Two ways to shorten a run, and they are not equivalent.
+#
+# MAX_SAMPLES caps the number of ROWS and changes nothing else, so the arm runs its real
+# epochs to completion and every end-of-training path actually executes: periodic
+# evaluation, checkpoint writes under ZeRO-2 sharding, save_total_limit rotation,
+# load_best_model_at_end, the test split, the final save. THIS is what a pre-capacity
+# smoke test should use. A failure in any of those is otherwise discovered hours into a
+# real sweep -- and two alignment bugs (8840257, 8840277) did exactly that, training
+# hundreds of steps before dying in evaluation, because parts of that path exist nowhere
+# else: torch takes a fused transformer kernel only when grad is disabled, and
+# metric_for_best_model is only read after an eval.
+#
+# MAX_STEPS caps steps instead, which stops training before any of that machinery runs.
+# It is for measuring throughput, not for proving correctness.
 SHORT=()
-[[ -n ${MAX_STEPS:-} ]] && SHORT=(--max_steps "$MAX_STEPS" --save_strategy no
-                                  --load_best_model_at_end false --eval_strategy no
-                                  --eval_test_split false)
+if [[ -n ${MAX_SAMPLES:-} ]]; then
+    SHORT=(--max_samples "$MAX_SAMPLES" --eval_steps "${SMOKE_EVAL_STEPS:-10}"
+           --save_steps "${SMOKE_EVAL_STEPS:-10}" --logging_steps 5)
+elif [[ -n ${MAX_STEPS:-} ]]; then
+    SHORT=(--max_steps "$MAX_STEPS" --save_strategy no
+           --load_best_model_at_end false
+           --eval_strategy steps --eval_steps "$MAX_STEPS")
+fi
 
 rm -f "$SCRATCH_ROOT/runs/.failed-$JOB_ID"
 declare -A NODE_PID
