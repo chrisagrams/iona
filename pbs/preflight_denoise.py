@@ -235,6 +235,26 @@ def _sampler():
             f"{min(big) if big else '-'} spectra per 1024-peak batch")
 
 
+@check("launcher gives every rank all tiles, as set_device(LOCAL_RANK) requires")
+def _affinity():
+    """Static check for the mismatch that killed job 8839150.
+
+    `main()` calls torch.xpu.set_device(LOCAL_RANK). That only works if every rank can
+    see every tile, so ZE_AFFINITY_MASK must be the full list set once for the job -- a
+    per-rank mask leaves one visible device at index 0 and set_device(7) raises.
+    """
+    import re
+    text = (REPO / PBS_FILE).read_text()
+    per_rank = re.search(r'export ZE_AFFINITY_MASK="?\$\{?LOCAL_RANK', text)
+    if per_rank:
+        raise ValueError("ZE_AFFINITY_MASK is set per rank; set_device(LOCAL_RANK) will go out of range")
+    if "ZE_AFFINITY_MASK" not in text:
+        raise ValueError("ZE_AFFINITY_MASK is never set")
+    if "seq -s, 0" not in text:
+        raise ValueError("ZE_AFFINITY_MASK is not the full tile list")
+    return "job-wide full tile list"
+
+
 @check("optimizer builds two groups at the right learning rates")
 def _optimizer():
     import tempfile

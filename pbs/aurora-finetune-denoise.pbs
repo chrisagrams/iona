@@ -58,6 +58,11 @@ set -u
 # device count equal to what the launcher assumes.
 export ONEAPI_DEVICE_SELECTOR=level_zero:gpu
 export ZE_FLAT_DEVICE_HIERARCHY=FLAT
+# Job-wide, listing every tile -- NOT one tile per rank. Each rank must see all of them
+# so that torch.xpu.set_device(LOCAL_RANK) can pick its own; pinning a rank to a single
+# tile leaves it with one visible device at index 0 and set_device(7) then raises
+# "device index out of range", which killed job 8839150.
+export ZE_AFFINITY_MASK=${ZE_AFFINITY_MASK:-$(seq -s, 0 $((XPUS_PER_HOST - 1)))}
 export OMP_NUM_THREADS=${OMP_NUM_THREADS:-4}
 export MKL_NUM_THREADS=${MKL_NUM_THREADS:-4}
 export OPENBLAS_NUM_THREADS=${OPENBLAS_NUM_THREADS:-4}
@@ -105,7 +110,13 @@ sed 's/^/  node: /' "$PBS_NODEFILE"
 # Preflight. Each of these has cost a job before: a missing W&B key fails only at the
 # first log call, and a proxy that cannot reach the outside world looks identical to a
 # hung step loop.
-"$VENV_DIR/bin/python" -c "import torch; print(f'  torch={torch.__version__} xpus={torch.xpu.device_count()} xccl={torch.distributed.is_xccl_available()}')"
+"$VENV_DIR/bin/python" -c "
+import torch, sys
+n = torch.xpu.device_count()
+print(f'  torch={torch.__version__} xpus={n} xccl={torch.distributed.is_xccl_available()}')
+if n != $XPUS_PER_HOST:
+    sys.exit(f'  visible tiles {n} != XPUS_PER_HOST $XPUS_PER_HOST; set_device(LOCAL_RANK) would go out of range')
+"
 [[ -n ${WANDB_API_KEY:-} ]] || { echo "WANDB_API_KEY not loaded -- see pbs/load_keys.sh" >&2; exit 2; }
 # Any HTTP response proves the proxy routed us; api.wandb.ai/ answers a bare GET with
 # 404, so --fail would reject a working route (it did, on job 8839139).
@@ -132,7 +143,6 @@ exec mpiexec \
         export WORLD_SIZE="$MSDELTA_WORLD_SIZE"
         export LOCAL_RANK="${PALS_LOCAL_RANKID:-${MPI_LOCALRANKID:-$((RANK % MSDELTA_XPUS_PER_HOST))}}"
         export LOCAL_WORLD_SIZE="$MSDELTA_XPUS_PER_HOST"
-        export ZE_AFFINITY_MASK="$LOCAL_RANK"
         exec "$@"
     ' _ "$VENV_DIR/bin/python" -m msdelta.finetune_denoise \
         --args_file "$ARGS_FILE" \
