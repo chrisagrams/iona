@@ -247,6 +247,38 @@ def _eval_autocast():
     return f"loss {float(out['loss']):.4f}, student output {out['embeddings'].dtype}"
 
 
+@check("the student survives bf16 weights, as DeepSpeed gives it")
+def _bf16_weights():
+    """Job 8840336 died at step 0 under ZeRO-2 with the earlier error inverted.
+
+    The fix for 8840257 forced the student's transformer stack to fp32, which is right
+    only while the weights are fp32. DeepSpeed holds them in bf16, so fp32 activations
+    then met bf16 weights: "expected scalar type Float but found BFloat16". What the
+    fused kernel cannot tolerate is a mismatch, not a particular dtype, so the stack now
+    runs in whatever dtype its parameters are. Both cases have to be checked, because
+    fixing one broke the other.
+    """
+    import copy
+    import torch
+    from msdelta.reranking import AlignmentCollator
+    model_args, _, _ = globals()["_parsed"]
+    batch = AlignmentCollator(max_peptide_length=model_args.max_peptide_length)(
+        globals()["_rows"])
+    student = copy.deepcopy(globals()["_model"].sequence_encoder).eval()
+    widths = {}
+    for dtype in (torch.float32, torch.bfloat16):
+        cast = copy.deepcopy(student).to(dtype)
+        with torch.no_grad(), torch.autocast(device_type="cpu", dtype=torch.bfloat16):
+            out = cast(batch["residues"], batch["modifications"],
+                       batch["sequence_mask"], batch["charge"])
+        if out.dtype != torch.float32:
+            raise ValueError(f"{dtype} weights produced {out.dtype}, expected float32 out")
+        widths[str(dtype)] = tuple(out.shape)
+    if len(set(widths.values())) != 1:
+        raise ValueError(f"shape depends on weight dtype: {widths}")
+    return f"fp32 and bf16 weights both give {next(iter(widths.values()))} float32"
+
+
 @check("the Trainer can actually produce eval_loss")
 def _eval_loss_reachable():
     """Job 8840277 evaluated cleanly and then died on metric_for_best_model.

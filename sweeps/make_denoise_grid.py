@@ -29,9 +29,12 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parent.parent
 DEFAULT_TEMPLATE = REPO / "configs" / "finetune-denoise-50m-ds" / "training.args"
 OUT = REPO / "configs" / "sweep-denoise"
-# Which template the arms on disk were built from. Written at generation time and read
-# back by --check, so the staleness check compares against the right base without the
-# sweep launcher having to know or be told which one that is.
+# What the arms on disk were built from: template path on the first line, stage on the
+# second. Written at generation time and read back by --check, so the check compares
+# against the right base AND the right arm set without the sweep launcher having to know
+# or be told either. The launcher used to pass --stage full itself, which silently broke
+# the moment the grid moved to full+batch: the check reported the 144 batch arms as "not
+# in grid" and job 8840323 refused to start. The caller should not have to remember.
 STAMP = OUT / ".template"
 TEMPLATE = DEFAULT_TEMPLATE
 
@@ -137,7 +140,7 @@ def write_arm(lr: str, scale: str, epochs: str, head: str, batch: str = "48",
     return name
 
 
-def check(combos: list[tuple[str, str, str, str]]) -> int:
+def check(combos: list[tuple[str, ...]], stage: str = "full+batch") -> int:
     """Fail if what is on disk is not what this generator would write today.
 
     The arms are generated from configs/finetune-denoise-50m/training.args, so every edit
@@ -162,7 +165,7 @@ def check(combos: list[tuple[str, str, str, str]]) -> int:
             print(f"  {len(names)} {label}: {', '.join(names[:6])}"
                   f"{' ...' if len(names) > 6 else ''}")
     if stale or missing or extra:
-        print(f"\nregenerate: python {Path(__file__).name} --stage full --clean")
+        print(f"\nregenerate: python {Path(__file__).name} --stage {stage} --clean")
         return 1
     print(f"  {len(combos)} arms match {TEMPLATE.relative_to(REPO)}")
     return 0
@@ -185,7 +188,10 @@ def main() -> int:
 
     global TEMPLATE
     if cli.check and STAMP.exists():
-        TEMPLATE = REPO / STAMP.read_text().strip()
+        recorded = STAMP.read_text().split()
+        TEMPLATE = REPO / recorded[0]
+        if len(recorded) > 1:
+            cli.stage = recorded[1]
     elif cli.template:
         TEMPLATE = Path(cli.template)
         if not TEMPLATE.is_absolute():
@@ -213,11 +219,11 @@ def main() -> int:
                                         HEAD_SIZES, BATCHES))
 
     if cli.check:
-        return check(combos)
+        return check(combos, cli.stage)
 
     names = [write_arm(*combo, dry_run=cli.dry_run) for combo in combos]
     if not cli.dry_run:
-        STAMP.write_text(str(TEMPLATE.relative_to(REPO)) + "\n")
+        STAMP.write_text(f"{TEMPLATE.relative_to(REPO)}\n{cli.stage}\n")
     # ~11 min at 2 epochs / head 128; epochs and head width both add to that.
     # 25 min for a 4-epoch arm on twelve tiles with DeepSpeed, measured on job 8840264
     # (235.4 samples/s, 87,200 samples per epoch); a 512-wide head adds ~30%, and an

@@ -94,6 +94,40 @@ or it silently becomes a different experiment. `freeze_encoder_steps=500` is 1.1
 **Nothing currently queued depends on DDP.** The grid runs one tile per arm and the
 alignment validation was resubmitted as 8840238 on one tile.
 
+## FT9. The alignment tower faults on twelve tiles under BOTH backends — **Open**
+
+Denoise runs clean on twelve tiles with DeepSpeed. Alignment does not, under either
+parallelism, so this is the model rather than the reducer and is NOT the same thing as
+FT7:
+
+| config | result |
+| --- | --- |
+| align, 1 tile, batch 4 | clean, 400 steps + eval + cross-modal + save (8840304) |
+| align, 1 tile, batch 16 | GPU fault at step 73 (8840238) |
+| align, 12 tiles, DDP | GPU fault at step 3 (8840223) |
+| align, 12 tiles, DeepSpeed ZeRO-2 | GPU fault at step 56 (8840356) |
+| denoise, 12 tiles, DeepSpeed ZeRO-2 | clean (8840264) |
+
+8840356 had 4 rows per tile -- the same per-tile batch as the clean single-tile run -- and
+peaked at 5.43 GB of 68.7, so it is not per-tile memory either. Three mechanisms have
+been proposed for these faults today and two were wrong, so no fourth is offered here.
+
+**Act on the structural difference instead.** Alignment runs a frozen 49.81M-parameter
+teacher inside the training forward under `no_grad`; denoise has nothing of the kind. The
+teacher is frozen, so its embeddings are IDENTICAL every epoch, and recomputing them each
+step spends ~92% of the parameters and all of the 512-peak attention reproducing a
+constant.
+
+- [ ] Precompute the spectrum embeddings once and train the student against a cached
+      target tensor. This removes the teacher from the training graph altogether, which
+      should sidestep the fault, and makes a step roughly an order of magnitude cheaper.
+      It is the better design regardless of the bug, which is the main argument for it.
+- [ ] If the fault survives that, the teacher was not the cause and the student alone
+      faults on twelve tiles -- worth knowing, and a much smaller thing to bisect.
+
+Until then the working path is one tile at batch 4: ~35 min for a full 10-epoch run,
+which fits the debug queue.
+
 ## FT8. Is a warm-up freeze on the encoder worth anything? — **Open, deferred**
 
 `freeze_encoder_steps` held the encoder still for the first N steps so the randomly

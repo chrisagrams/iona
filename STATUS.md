@@ -14,9 +14,9 @@ INFRASTRUCTURE ─────────────────────�
   denoise, 1 tile ................. OK   8840190  test AUROC 0.8628
   denoise, 12 tiles DeepSpeed ..... OK   8840264  21.4x one tile
   alignment, 1 tile ............... OK   8840304  full pipeline, saved
-  alignment, 12 tiles DeepSpeed ... ??   8840336  RUNNING
+  alignment, 12 tiles DeepSpeed ... NO   8840356  GPU fault, see FT9
   grid, 72 arms, 1 tile ........... OK   8840232  72/72
-  grid, 216 arms, full pipeline ... ??   8840323  RUNNING  <- gates capacity
+  grid, 216 arms, full pipeline ... ??   8840345  RUNNING  <- gates capacity
 
 SCIENCE ───────────────────────────────────────── nothing real run yet
   216-arm HP grid ................. blocked on 8840323  ~84 node-hrs / ~5 h
@@ -46,9 +46,11 @@ and no reranking result exists yet.**
 1. **8840323 passes** -> submit the 216-arm grid to capacity. ~84 node-hours, ~5 h on 16
    nodes. Axes: `learning_rate` x `encoder_lr_scale` x `num_train_epochs` x
    `head_hidden_size` x effective batch.
-2. **Full alignment training.** Fits in the debug hour on one tile (~35 min) if
-   `eval_steps` goes from 200 to 2000; 143 evals at the current setting would cost 28 of
-   those minutes. Faster still if 8840336 shows DeepSpeed works here.
+2. **Full alignment training, one tile.** Twelve tiles faults under both backends
+   (FT9), so one tile at batch 4 is the only proven path: ~35 min, which fits the debug
+   hour if `eval_steps` goes from 200 to 2000. At the current 200 the 143 evals would eat
+   28 of those minutes. The real fix is to precompute the frozen teacher's embeddings,
+   which is cheaper anyway -- see FT9.
 3. **Grid winner** -> FT5 (seeds) and FT8 (freeze), both of which need it.
 4. **Denoise re-runs** on the fixed pipeline: 100m, from-scratch control, seeds.
 5. **Reranking end to end**: features + embedding distance -> classifier, which needs a

@@ -1,1 +1,2 @@
 configs/finetune-denoise-50m-ds/training.args
+full+batch
