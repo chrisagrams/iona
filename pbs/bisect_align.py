@@ -23,7 +23,33 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from msdelta.finetune_denoise import select_device  # noqa: E402
 from msdelta.fourier import FourierFeatures  # noqa: E402
 
-VARIANTS = ("linear", "embeddings", "fourier", "transformer1", "transformer4", "student")
+VARIANTS = ("linear", "embeddings", "fourier", "transformer1", "transformer4", "student",
+            "student_after_teacher", "student_after_teacher_freed")
+
+
+def touch_teacher(free: bool, rank: int) -> None:
+    """Load the real 50m checkpoint onto the device, use it, then drop it."""
+    import os as _os
+    path = _os.environ.get(
+        "MSDELTA_TEST_CHECKPOINT",
+        "/flare/UIC-HPC/homes/cgrams/msdelta-runs/msdelta-50m-production-01/final")
+    from msdelta.modeling_msdelta import MSDeltaForPreTraining
+    teacher = MSDeltaForPreTraining.from_pretrained(path).to("xpu").eval()
+    encoder = getattr(teacher, "msdelta", teacher)
+    with torch.no_grad():
+        encoder(mz=torch.rand(2, 512, device="xpu") * 1000,
+                log_intensity=torch.rand(2, 512, device="xpu"),
+                attention_mask=torch.ones(2, 512, dtype=torch.long, device="xpu"))
+    torch.xpu.synchronize()
+    del encoder, teacher
+    if free:
+        import gc
+        gc.collect()
+        torch.xpu.empty_cache()
+    if rank == 0:
+        reserved = torch.xpu.memory_reserved() / 1e9
+        print(f"[bisect] teacher touched, freed={free}, reserved {reserved:.2f} GB",
+              flush=True)
 
 
 def build(variant: str, hidden: int = 256) -> nn.Module:
@@ -114,12 +140,20 @@ def main() -> int:
 
     select_device()
     rank = int(os.environ.get("RANK", "0"))
+    # The one thing every FAILING alignment run does and the passing bisect never did:
+    # load the 49.8M teacher onto the device, run it, then abandon it. Dropping the
+    # Python reference returns its memory to torch's caching allocator but not to the
+    # driver, so DeepSpeed then initialises against a heap that just held a large model.
+    # Denoise never does this -- its encoder IS the trained model.
+    if cli.variant.startswith("student_after_teacher"):
+        touch_teacher(free=cli.variant.endswith("_freed"), rank=rank)
     world = int(os.environ.get("WORLD_SIZE", "1"))
     device = "xpu" if torch.xpu.is_available() else "cpu"
     if world > 1:
         torch.distributed.init_process_group(backend="xccl", rank=rank, world_size=world)
 
-    model = build(cli.variant).to(device)
+    model = build("student" if cli.variant.startswith("student_after_teacher")
+                  else cli.variant).to(device)
     if world > 1:
         import deepspeed
         # An explicit optimizer, not just model_parameters: ZeRO-2 partitions optimizer

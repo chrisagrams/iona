@@ -24,7 +24,7 @@ cd "$REPO_DIR"
 VENV_DIR=${VENV_DIR:-$REPO_DIR/.venv}
 XPUS_PER_HOST=${XPUS_PER_HOST:-12}
 STEPS=${STEPS:-20}
-VARIANTS=${VARIANTS:-linear embeddings fourier transformer1 transformer4 student}
+VARIANTS=${VARIANTS:-linear embeddings fourier transformer1 transformer4 student student_after_teacher student_after_teacher_freed}
 
 set +u
 source /usr/share/lmod/lmod/init/bash
