@@ -63,6 +63,18 @@ class DenoiseModelArguments:
     )
     head_hidden_size: int = 128
     head_dropout: float = 0.1
+    random_init: bool = field(
+        default=False,
+        metadata={
+            "help": (
+                "Take the ARCHITECTURE from `pretrained_path` but discard its weights and "
+                "start from a fresh initialisation. The control the fine-tuned numbers "
+                "need: if a randomly initialised encoder reaches the same score, "
+                "pretraining contributed nothing to this task and the head is simply "
+                "learning it from the labels."
+            )
+        },
+    )
     freeze_encoder_steps: int = field(
         default=0,
         metadata={
@@ -194,7 +206,15 @@ def build_denoising_model(
     pretrained_path: str, model_args: DenoiseModelArguments
 ) -> tuple[MSDeltaForDenoising, MSDeltaForPreTraining]:
     """Lift the encoder out of a pretraining checkpoint and attach a fresh classifier."""
-    pretrained = MSDeltaForPreTraining.from_pretrained(pretrained_path)
+    if model_args.random_init:
+        # Same architecture, no pretrained weights. from_config rather than
+        # from_pretrained so the checkpoint's tensors are never read at all -- loading
+        # then re-initialising would leave any buffer the init does not touch carrying
+        # pretrained values, which is a subtler thing to be wrong about than it looks.
+        encoder_config = MSDeltaConfig.from_pretrained(pretrained_path)
+        pretrained = MSDeltaForPreTraining(encoder_config)
+    else:
+        pretrained = MSDeltaForPreTraining.from_pretrained(pretrained_path)
     config = MSDeltaDenoisingConfig(
         encoder=copy.deepcopy(pretrained.config if isinstance(pretrained.config, MSDeltaConfig)
                               else MSDeltaConfig(**pretrained.config.to_dict())),
@@ -282,6 +302,7 @@ def main(argv: list[str] | None = None) -> int:
             entity=training_args.wandb_entity,
             config={
                 "model": model_args.pretrained_path,
+                "random_init": model_args.random_init,
                 "encoder": pretrained.config.to_dict(),
                 "data": asdict(data_args),
                 "training": training_args.to_dict(),
@@ -292,7 +313,9 @@ def main(argv: list[str] | None = None) -> int:
         if training_args.process_index == 0:
             total = sum(p.numel() for p in model.parameters())
             head = sum(p.numel() for p in model.denoising_head.parameters())
+            origin = "RANDOM INIT (control)" if model_args.random_init else model_args.pretrained_path
             print(f"[denoise] {total / 1e6:.2f}M params ({head / 1e6:.3f}M in the head)", flush=True)
+            print(f"[denoise] encoder from: {origin}", flush=True)
             print(
                 f"[denoise] max_peaks={processor.max_peaks} "
                 f"freeze_encoder_steps={model_args.freeze_encoder_steps} "
