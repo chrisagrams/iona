@@ -153,6 +153,38 @@ class DenoiseFinetuneArguments(TrainingArguments):
     )
 
 
+def select_device() -> None:
+    """Bind this process to its tile under either ZE_AFFINITY_MASK convention.
+
+    ZE_AFFINITY_MASK filters which tiles a process can see AND renumbers the survivors
+    from zero, so the correct device index depends on how the launcher set it:
+
+      job-wide mask   every rank sees all N tiles -> set_device(LOCAL_RANK)
+      per-rank mask   each rank sees exactly one  -> set_device(0)
+
+    Both are legitimate; the second is what a one-tile-per-arm sweep needs. Mixing them
+    is what killed job 8839150 ("device index out of range... got 7" against a one-device
+    world). Rather than encode a convention here, infer it -- and refuse anything that is
+    neither, because a partial mask would otherwise silently collide two ranks onto one
+    tile and corrupt both.
+    """
+    local_rank = int(os.environ.get("LOCAL_RANK", "-1"))
+    if local_rank < 0 or not torch.xpu.is_available():
+        return
+    visible = torch.xpu.device_count()
+    local_world = int(os.environ.get("LOCAL_WORLD_SIZE", "1"))
+    if visible == 1:
+        torch.xpu.set_device(0)
+    elif visible >= local_world:
+        torch.xpu.set_device(local_rank)
+    else:
+        raise RuntimeError(
+            f"{visible} visible tiles for {local_world} local ranks: neither a per-rank "
+            "mask (1 tile) nor a job-wide mask (>= one tile per rank). Ranks would share "
+            "a tile."
+        )
+
+
 def describe_run(model_args, data_args, training_args) -> tuple[str, list[str]]:
     """A human sentence and machine tags for one run, derived from its own settings.
 
@@ -341,9 +373,7 @@ class DenoiseFinetuneTrainer(DenoisingTrainer):
 
 
 def main(argv: list[str] | None = None) -> int:
-    local_rank = int(os.environ.get("LOCAL_RANK", "-1"))
-    if local_rank >= 0 and torch.xpu.is_available():
-        torch.xpu.set_device(local_rank)
+    select_device()
 
     parser = HfArgumentParser(
         (DenoiseModelArguments, DenoiseDataArguments, DenoiseFinetuneArguments)  # pyright: ignore[reportArgumentType]
