@@ -42,6 +42,33 @@ expensive retrain buys nothing.
       currently discards whole spectra; truncating by m/z keeps them but silently removes
       the high-m/z tail, which is where the large fragment ions live.
 
+## FT6. Ablation: 50m trained from scratch — **SUBMITTED (job 8839946)**
+
+Every fine-tuned number is uninterpretable without this control. If a randomly
+initialised encoder of the same architecture also reaches ~0.935 test AUROC, pretraining
+contributed nothing to denoising, the head simply learned the task from the labels, and
+both the zero-shot investigation and the 50m-to-100m scaling result lose their point.
+
+`configs/finetune-denoise-50m-scratch/training.args`, `--random_init true`. The
+architecture is read from the 50m checkpoint's config; its tensors are never loaded, so
+no buffer can retain a pretrained value that re-initialisation happens to miss.
+
+`freeze_encoder_steps` drops to 0 and `encoder_lr_scale` rises to 1.0 for this arm alone.
+Those defaults exist to shield pretrained weights from an untrained head's early
+gradients; with no pretrained weights there is nothing to shield, and holding a random
+encoder still for 500 steps while a head trains on its noise would handicap the control
+rather than make the comparison fair.
+
+- [x] Submit (8839946).
+- [ ] Report against the pretrained 50m (0.93543) and the raw-intensity baseline (0.751).
+- [ ] If it lands near 0.935: the task is learnable from labels alone and pretraining is
+      not what produced the result. Say that plainly rather than burying it.
+- [ ] If it lands well short: that gap IS the value of pretraining for denoising, and it
+      is the number worth quoting, not the absolute 0.935.
+- [ ] Consider the same control at 100m. The scaling result (+0.0047) only means
+      "pretrained capacity helps" if a from-scratch 100m does NOT show the same gain --
+      otherwise it is just a bigger model fitting the labels better.
+
 ## FT5. Seed replication belongs on the winning config, not the baseline — **Open**
 
 Seeds 1-4 are running against the pre-sweep baseline (lr 5e-5, encoder_lr_scale 0.1,
