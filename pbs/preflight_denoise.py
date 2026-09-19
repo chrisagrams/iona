@@ -332,10 +332,84 @@ def _optimizer():
                     training_args.learning_rate]
         if len(groups) != 2 or not all(abs(a - b) < 1e-12 for a, b in zip(rates, expected)):
             raise ValueError(f"groups {rates} != expected {expected}")
-        frozen = not any(p.requires_grad for p in trainer.model.msdelta.parameters())
-        if model_args.freeze_encoder_steps > 0 and not frozen:
-            raise ValueError("encoder should start frozen")
-        return f"encoder lr {rates[0]:g}, head lr {rates[1]:g}, starts frozen={frozen}"
+
+        # The encoder must be TRAINABLE at construction even when freeze_encoder_steps>0.
+        # DDP builds its reducer from the parameters that require grad at wrap time, so a
+        # parameter frozen then is never all-reduced if it is later unfrozen -- each rank
+        # would train a different encoder and only rank 0's would be saved. The freeze is
+        # implemented by discarding the encoder's gradient instead.
+        encoder = [p for n, p in trainer.model.named_parameters()
+                   if n.startswith("msdelta.") and "mask_token" not in n]
+        if not all(p.requires_grad for p in encoder):
+            raise ValueError("encoder must stay trainable so DDP tracks it; freeze via grads")
+
+        # mask_token is never read when mask_positions is absent, which denoising never
+        # supplies, so it must be frozen before the wrap or DDP aborts on an unused param.
+        if trainer.model.msdelta.embed.mask_token.requires_grad:
+            raise ValueError("mask_token must be frozen: it can never receive a gradient")
+        return (f"encoder lr {rates[0]:g}, head lr {rates[1]:g}, "
+                f"encoder trainable={all(p.requires_grad for p in encoder)}, mask_token frozen")
+
+
+@check("the freeze discards encoder gradients rather than toggling requires_grad")
+def _freeze_mechanism():
+    """Run two real steps and confirm the encoder's gradient is dropped, then applied.
+
+    This is the behaviour that replaced requires_grad toggling; if it silently stopped
+    working the encoder would either never train or train during its warmup, and neither
+    shows up as an error.
+    """
+    import tempfile
+    import numpy as np
+    import torch
+    from datasets import Dataset
+    from transformers import DataCollatorWithPadding
+    from msdelta.finetune_denoise import DenoiseFinetuneTrainer
+    from msdelta.processing_msdelta import MSDeltaProcessor
+
+    model_args, data_args, training_args = globals()["_parsed"]
+    processor = MSDeltaProcessor.from_pretrained(
+        data_args.processor_name_or_path or model_args.pretrained_path,
+        max_peaks=data_args.max_peaks,
+    )
+    batch = globals()["_batch"]
+    rows = [{"mz": batch["mz"][i].tolist(),
+             "log_intensity": batch["log_intensity"][i].tolist(),
+             "labels": batch["labels"][i].tolist()} for i in range(len(batch["mz"]))]
+    tiny = Dataset.from_list(rows)
+    model = globals()["_model"]
+
+    with tempfile.TemporaryDirectory() as out:
+        args = type(training_args)(**{**training_args.to_dict(), "output_dir": out,
+                                      "report_to": [], "use_cpu": True, "bf16": False,
+                                      "eval_strategy": "no", "save_strategy": "no"})
+        trainer = DenoiseFinetuneTrainer(
+            model=model, args=args, train_dataset=tiny,
+            data_collator=DataCollatorWithPadding(tokenizer=processor, padding=True,
+                                                  return_tensors="pt"),
+            processing_class=processor,
+            peak_pair_budget=training_args.peak_pair_budget,
+            encoder_lr_scale=model_args.encoder_lr_scale,
+            freeze_encoder_steps=1,
+        )
+        trainer.create_optimizer()
+        # Normally set by Trainer inside train(); training_step reads it for loss scaling.
+        trainer.current_gradient_accumulation_steps = 1
+        probe = model.msdelta.embed.mlp[0].weight
+        inputs = trainer.data_collator([rows[0]])
+
+        trainer.state.global_step = 0          # inside the freeze window
+        trainer.training_step(model, inputs, None)
+        during = probe.grad
+        trainer.state.global_step = 5          # past it
+        trainer.training_step(model, inputs, None)
+        after = probe.grad
+
+    if during is not None:
+        raise ValueError("encoder gradient survived the freeze window")
+    if after is None or not torch.isfinite(after).all():
+        raise ValueError("encoder gradient missing after the freeze window")
+    return "gradient dropped during freeze, present after"
 
 
 @check("metrics survive a poisoned gather instead of killing the run")
