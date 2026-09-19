@@ -182,10 +182,15 @@ class PeptideCollator:
     """Pad parsed peptides into a batch."""
 
     max_length: int = 64
+    # Pad every batch to max_length instead of to the longest peptide in it, so the shape
+    # is identical on every step. See AlignmentCollator for why that is worth the few
+    # wasted positions.
+    pad_to_max: bool = False
 
     def __call__(self, peptides: list[str], charges: list[int]) -> dict[str, Tensor]:
         parsed = [parse_peptide(p) for p in peptides]
-        width = max(min(max((len(i) for i, _ in parsed), default=1), self.max_length), 1)
+        width = (self.max_length if self.pad_to_max else
+                 max(min(max((len(i) for i, _ in parsed), default=1), self.max_length), 1))
         batch = len(parsed)
         residues = torch.zeros(batch, width, dtype=torch.long)
         modifications = torch.zeros(batch, width, dtype=torch.float32)
@@ -530,9 +535,13 @@ class AlignmentCollator:
     """Pad spectra and their peptides into one batch."""
 
     max_peptide_length: int = 64
+    # Only meaningful on the cached-target path, where it makes every batch the same
+    # shape; with a live teacher the spectra dominate and vary anyway.
+    fixed_shapes: bool = True
 
     def __post_init__(self):
         self.peptides = PeptideCollator(max_length=self.max_peptide_length)
+        self.padded = PeptideCollator(max_length=self.max_peptide_length, pad_to_max=True)
 
     def __call__(self, features: list[dict]) -> dict[str, Tensor]:
         if not features:
@@ -552,14 +561,31 @@ class AlignmentCollator:
             attention_mask[row, :length] = 1
         peptide_batch = self.peptides([f["peptide"] for f in features],
                                       [int(f.get("charge", 0)) for f in features])
-        out = {"mz": mz, "log_intensity": log_intensity,
-               "attention_mask": attention_mask, **peptide_batch}
-        # A precomputed teacher embedding, if attach_teacher_embeddings has been run. The
-        # spectrum columns are still emitted: they cost little and evaluation reuses them.
         if features[0].get("target") is not None:
-            out["target"] = torch.as_tensor(
-                [f["target"] for f in features], dtype=torch.float32)
-        return out
+            # Precomputed target: the spectrum columns are DROPPED, not merely unused.
+            #
+            # The model does not read them once a target is supplied, but the Trainer
+            # moves every tensor in the batch to the device regardless, so leaving them
+            # in ships a (batch x up-to-512) float tensor per step that nothing touches.
+            # Worse than the waste, it is padded to the widest spectrum in the batch, so
+            # the shape changes from step to step -- and variable-shape device
+            # allocations are exactly the churn that made the denoise runs unstable
+            # before fixed batching. Evaluation does not need them either: it reads the
+            # target from the model's own output, which comes from this cached column.
+            # Fixed width too, so EVERY tensor in the batch has the same shape on every
+            # step. The bisect (job 8840444) ran the full student on twelve tiles for 20
+            # steps without a fault using fixed-shape input, while the real job faults at
+            # step 0 with variable-shape input -- so shape variation is the difference
+            # worth removing, and padding to 64 costs a few unused positions on a tensor
+            # that is already tiny.
+            padded = (self.padded if self.fixed_shapes else self.peptides)(
+                [f["peptide"] for f in features],
+                [int(f.get("charge", 0)) for f in features])
+            return {"target": torch.as_tensor([f["target"] for f in features],
+                                              dtype=torch.float32),
+                    **padded}
+        return {"mz": mz, "log_intensity": log_intensity,
+                "attention_mask": attention_mask, **peptide_batch}
 
 
 @torch.no_grad()
