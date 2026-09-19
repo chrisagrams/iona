@@ -104,8 +104,12 @@ class TestPBSScripts:
         refs = {a or b for a, b in re.findall(
             r"\$REPO_DIR/([A-Za-z0-9_./-]+)|(?<![\w/])((?:pbs|configs|sweeps)/[A-Za-z0-9_./-]+)",
             body)}
-        missing = sorted(r for r in (x.rstrip("/.") for x in refs if x)
-                         if not (REPO / r).exists())
+        # A reference ending in a separator is the literal prefix of a name the script
+        # builds at runtime -- "pbs/logs/bisect-$variant-$JOB.log" matches as
+        # "pbs/logs/bisect-" -- so it names no file and cannot be checked.
+        candidates = (x.rstrip("/.") for x in refs if x)
+        missing = sorted(r for r in candidates
+                         if not r.endswith(("-", "_")) and not (REPO / r).exists())
         assert not missing, f"missing: {missing}"
 
     def test_no_secrets_passed_through_qsub(self, script):
