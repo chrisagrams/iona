@@ -136,10 +136,65 @@ class DenoiseFinetuneArguments(TrainingArguments):
     )
     wandb_project: str | None = None
     wandb_entity: str | None = None
+    run_description: str | None = field(
+        default=None,
+        metadata={
+            "help": (
+                "One line saying what this run is FOR. Written to the W&B notes and to "
+                "RUN.md beside the checkpoints. A run name encodes settings but not "
+                "intent, and six months from now 'lr2e4_es10_ep4_h512' will not say "
+                "whether it was a grid point, a control, or a debugging attempt."
+            )
+        },
+    )
     eval_test_split: bool = field(
         default=True,
         metadata={"help": "Score the held-out test split once training finishes."},
     )
+
+
+def describe_run(model_args, data_args, training_args) -> tuple[str, list[str]]:
+    """A human sentence and machine tags for one run, derived from its own settings.
+
+    Generated rather than hand-written so that nothing can be left undescribed: a 72-arm
+    sweep will not get 72 hand-written notes, and the arms that go undescribed are
+    exactly the ones nobody remembers later. An explicit --run_description is appended
+    when given, since intent is the one thing the settings cannot supply.
+    """
+    if model_args.random_init:
+        origin = "randomly initialised encoder (CONTROL: no pretraining)"
+    else:
+        origin = f"encoder from {Path(model_args.pretrained_path).parent.name}"
+
+    if model_args.encoder_lr_scale == 0:
+        encoder = "encoder frozen throughout"
+    else:
+        encoder = (f"encoder at {model_args.encoder_lr_scale:g}x the head's rate"
+                   f"{f', frozen for {model_args.freeze_encoder_steps} steps' if model_args.freeze_encoder_steps else ''}")
+
+    sentence = (
+        f"Per-peak noise classification (noise = positive class) on "
+        f"{data_args.dataset_repo}, max_peaks={data_args.max_peaks}. {origin}. "
+        f"lr={training_args.learning_rate:g}, {encoder}, "
+        f"{training_args.num_train_epochs:g} epochs, head width "
+        f"{model_args.head_hidden_size}, seed {training_args.seed}."
+    )
+    if training_args.run_description:
+        sentence = f"{training_args.run_description} -- {sentence}"
+
+    tags = [
+        "denoise",
+        "scratch" if model_args.random_init else "pretrained",
+        f"lr{training_args.learning_rate:g}",
+        f"els{model_args.encoder_lr_scale:g}",
+        f"ep{training_args.num_train_epochs:g}",
+        f"head{model_args.head_hidden_size}",
+        f"seed{training_args.seed}",
+        f"peaks{data_args.max_peaks}",
+    ]
+    if model_args.encoder_lr_scale == 0 and not model_args.random_init:
+        tags.append("frozen-encoder")
+    return sentence, tags
 
 
 def denoise_metrics(prediction) -> dict[str, float]:
@@ -294,12 +349,24 @@ def main(argv: list[str] | None = None) -> int:
     )
     model, pretrained = build_denoising_model(model_args.pretrained_path, model_args)
 
+    description, tags = describe_run(model_args, data_args, training_args)
+    if training_args.process_index == 0:
+        # Also on disk: a checkpoint directory found later should explain itself without
+        # needing W&B access or the job log.
+        (out_dir / "RUN.md").write_text(
+            f"# {training_args.run_name}\n\n{description}\n\n"
+            f"tags: {', '.join(tags)}\n"
+        )
+        print(f"[denoise] {description}", flush=True)
+
     wandb_run = None
     if training_args.wandb_project:
         wandb_run = init_wandb_run(
             project=training_args.wandb_project,
             run_name=training_args.run_name,
             entity=training_args.wandb_entity,
+            notes=description,
+            tags=tags,
             config={
                 "model": model_args.pretrained_path,
                 "random_init": model_args.random_init,
