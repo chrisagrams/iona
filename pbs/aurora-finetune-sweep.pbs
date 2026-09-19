@@ -81,7 +81,7 @@ done
 # 68.7 GB tile. That is 72 arms OOMing on a 6-node allocation, discovered an hour in.
 # Stdlib only, so this runs before the frameworks module is loaded.
 if [[ -z ${SKIP_GRID_CHECK:-} ]]; then
-    "$VENV_DIR/bin/python" sweeps/make_denoise_grid.py --stage full --check \
+    "$VENV_DIR/bin/python" sweeps/make_denoise_grid.py --check \
         || { echo "sweep arms are stale against their template" >&2; exit 2; }
 fi
 
