@@ -38,7 +38,8 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
 import torch
-from transformers import DataCollatorWithPadding, HfArgumentParser, TrainingArguments, set_seed
+from transformers import (DataCollatorWithPadding, HfArgumentParser, TrainerCallback,
+                          TrainingArguments, set_seed)
 
 from msdelta.configuration_msdelta import MSDeltaConfig, MSDeltaDenoisingConfig
 from msdelta.data import build_denoising_datasets
@@ -320,6 +321,31 @@ def build_denoising_model(
     return model, pretrained
 
 
+class MemoryProbe(TrainerCallback):
+    """Log peak device memory every N steps.
+
+    Added because three successive diagnoses of a GPU page fault were reasoned from
+    first principles and all three were wrong. A page fault is an illegal access, not a
+    clean allocation failure, so it does not say whether memory was the cause -- but
+    peak-vs-capacity does, and it costs one number per interval to know.
+    """
+
+    def __init__(self, every: int = 10):
+        self.every = every
+        self.peak = 0.0
+
+    def on_step_end(self, args, state, control, **kwargs):
+        if not torch.xpu.is_available():
+            return
+        peak = torch.xpu.max_memory_allocated() / 1e9
+        self.peak = max(self.peak, peak)
+        if state.global_step % self.every == 0 and args.process_index == 0:
+            total = torch.xpu.get_device_properties(torch.xpu.current_device()).total_memory / 1e9
+            print(f"[mem] step {state.global_step}: peak {peak:.2f} GB "
+                  f"reserved {torch.xpu.memory_reserved()/1e9:.2f} GB "
+                  f"of {total:.1f} GB", flush=True)
+
+
 class DenoiseFinetuneTrainer(DenoisingTrainer):
     """Budget batching, plus split learning rates and a delayed encoder unfreeze."""
 
@@ -475,6 +501,7 @@ def main(argv: list[str] | None = None) -> int:
             encoder_lr_scale=model_args.encoder_lr_scale,
             freeze_encoder_steps=model_args.freeze_encoder_steps,
         )
+        trainer.add_callback(MemoryProbe(every=10))
         trainer.train()
 
         if training_args.eval_test_split and datasets.get("test") is not None:
