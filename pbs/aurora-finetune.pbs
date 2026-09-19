@@ -81,6 +81,16 @@ export MKL_NUM_THREADS=${MKL_NUM_THREADS:-4}
 export OPENBLAS_NUM_THREADS=${OPENBLAS_NUM_THREADS:-4}
 export CCL_PROCESS_LAUNCHER=pmix CCL_ATL_TRANSPORT=mpi CCL_KVS_MODE=mpi
 export FI_MR_CACHE_MONITOR=${FI_MR_CACHE_MONITOR:-userfaultfd}
+# Recommended by the ALCF Aurora known-issues page for jobs at scale. They tune the
+# CXI completion queues and overflow buffers, which are undersized by default for
+# many-rank jobs, and TMPDIR keeps scratch off a shared filesystem.
+export FI_CXI_DEFAULT_CQ_SIZE=${FI_CXI_DEFAULT_CQ_SIZE:-131072}
+export FI_CXI_OFLOW_BUF_SIZE=${FI_CXI_OFLOW_BUF_SIZE:-8388608}
+export FI_CXI_CQ_FILL_PERCENT=${FI_CXI_CQ_FILL_PERCENT:-20}
+export ZES_ENABLE_SYSMAN=${ZES_ENABLE_SYSMAN:-1}
+export TMPDIR=${TMPDIR:-/tmp}
+# Diagnostic: force SDPA onto the unfused MATH backend. See reranking.py.
+export MSDELTA_SDPA_MATH=${MSDELTA_SDPA_MATH:-}
 # Matching aurora-pretrain.pbs, which all-reduces 200M+ parameters successfully. These
 # select oneCCL's Level Zero IPC path for device-to-device transfers. It did not matter
 # while the DDP reducer held only the 0.082M-parameter head -- the first runs were
@@ -153,7 +163,26 @@ wandb_code=$(curl --silent --show-error --max-time 30 -o /dev/null -w '%{http_co
 echo "  wandb      : reachable (HTTP $wandb_code)"
 echo "  preflight  : ok"
 
+# Optional first phase: build the target cache in its own SINGLE-PROCESS run, before the
+# distributed launch. The training ranks then load targets from disk and never construct
+# a teacher. Skipped if the cache already exists, so a rerun costs nothing.
+if [[ -n ${PRECOMPUTE_CACHE:-} ]]; then
+    EXTRA_PRE=()
+    [[ -n ${MAX_SAMPLES:-} ]] && EXTRA_PRE+=(--max_samples "$MAX_SAMPLES")
+    if [[ -d $PRECOMPUTE_CACHE/train ]]; then
+        echo "  precompute : reusing $PRECOMPUTE_CACHE"
+    else
+        echo "  precompute : building $PRECOMPUTE_CACHE (one process, one tile)"
+        ZE_AFFINITY_MASK=0 "$VENV_DIR/bin/python" -m msdelta.precompute_align             --args_file "$ARGS_FILE" --target_cache "$PRECOMPUTE_CACHE"             --batch_size "${PRECOMPUTE_BATCH:-16}" "${EXTRA_PRE[@]}"             || { echo "precompute failed" >&2; exit 2; }
+    fi
+fi
+
 EXTRA=()
+[[ -n ${PRECOMPUTE_CACHE:-} ]] && EXTRA+=(--target_cache "$PRECOMPUTE_CACHE")
+# Independent of the smoke modes below: a full run may still want a different evaluation
+# cadence from the config's. At 28,630 steps the config's eval_steps=200 is 143
+# evaluations, which is a sixth of a debug hour spent not training.
+[[ -n ${EVAL_STEPS:-} ]] && EXTRA+=(--eval_steps "$EVAL_STEPS" --save_steps "$EVAL_STEPS")
 # MAX_SAMPLES caps ROWS, so the run finishes real epochs and every end-of-training path
 # executes: evaluation, checkpoint writes, save_total_limit rotation,
 # load_best_model_at_end, the test pass, the final save. MAX_STEPS stops before all of

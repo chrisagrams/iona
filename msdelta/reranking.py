@@ -28,6 +28,7 @@ asking them to invent separate notions of the same physical quantity.
 
 from __future__ import annotations
 
+import contextlib
 import os
 import re
 from dataclasses import dataclass
@@ -53,6 +54,26 @@ _MOD = re.compile(r"\[([+-]?[0-9.]+)\]")
 # Off unless MSDELTA_PROBES is set, so a real training run pays one boolean per call site.
 # Turn them on for debug-queue runs: MSDELTA_PROBES=1.
 PROBES = os.environ.get("MSDELTA_PROBES", "") not in ("", "0", "false", "False")
+
+# Force scaled_dot_product_attention onto the unfused MATH backend when set.
+#
+# oneDNN's fused SDPA kernel is a documented source of GPU page faults on Intel GPUs --
+# pytorch/pytorch#195319 reports exactly this fault class from an out-of-bounds access in
+# the fused kernel's second-tile handling, triggered by a rank-4 attention mask, with
+# "force the MATH backend" as the first workaround. nn.TransformerEncoder builds a rank-4
+# mask internally whenever a key_padding_mask is supplied, which this model always does.
+#
+# Not on by default: MATH materialises the full attention matrix and is slower. This is
+# a diagnostic switch, and a fallback if it turns out to be the fix.
+SDPA_MATH = os.environ.get("MSDELTA_SDPA_MATH", "") not in ("", "0", "false", "False")
+
+
+def _sdpa_context():
+    """MATH-only SDPA when MSDELTA_SDPA_MATH is set, otherwise a no-op."""
+    if not SDPA_MATH:
+        return contextlib.nullcontext()
+    from torch.nn.attention import SDPBackend, sdpa_kernel
+    return sdpa_kernel(SDPBackend.MATH)
 
 
 def probe(where: str, *, sync: Tensor | None = None, **tensors) -> None:
@@ -290,9 +311,10 @@ class PeptideEncoder(nn.Module):
         param_dtype = next(self.encoder.parameters()).dtype
         with torch.autocast(device_type=hidden.device.type, enabled=False):
             hidden = hidden.to(param_dtype)
-            hidden = self.norm(
-                self.encoder(hidden, src_key_padding_mask=~sequence_mask.bool())
-            )
+            with _sdpa_context():
+                hidden = self.norm(
+                    self.encoder(hidden, src_key_padding_mask=~sequence_mask.bool())
+                )
         probe("student.encoded", sync=hidden, hidden=hidden)
         pooled = pool_sequence(hidden, sequence_mask, self.pooling)
         out = F.normalize(self.projection(pooled).float(), dim=-1)
