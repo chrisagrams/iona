@@ -28,14 +28,70 @@ implicated -- the identical code runs to completion on one tile.
 proven and is strictly better throughput for a grid search than twelve-way DDP on one arm,
 so the grid and the denoise re-runs are not blocked on this.
 
-**Still to do**, because a 200M-parameter pretrain cannot fall back to one tile: bisect
-the oneCCL environment. The launcher currently unsets `CCL_ZE_IPC`/`CCL_ZE_IPC_EXCHANGE`
-and keeps `CCL_ATL_TRANSPORT=mpi`. A write to an unmapped page from the compute command
-streamer is consistent with oneCCL holding a device pointer that the torch caching
-allocator has since freed and remapped, which would make the suspects, in order:
-`TORCH_XPU_ALLOC_CONF=expandable_segments`, CCL's own buffer cache, and the bucket rebuild
-DDP performs after the first iteration. `aurora-pretrain.pbs` all-reduces 200M+ parameters
-without this fault, so a diff against its exact environment is the cheapest first probe.
+### Working theory: torch DDP on xccl, and reducer size is NOT the discriminator
+
+The environment is exonerated. `aurora-pretrain.pbs` and `aurora-finetune.pbs` set the
+same `CCL_PROCESS_LAUNCHER`, `CCL_ATL_TRANSPORT`, `CCL_KVS_MODE`, `FI_MR_CACHE_MONITOR`,
+`ZE_FLAT_DEVICE_HIERARCHY` and the same two `unset`s. What differs is the parallelism:
+**pretrain runs DeepSpeed ZeRO-2** (`--deepspeed configs/deepspeed-zero2.json` in every
+`configs/msdelta-base-*/training.args`), which partitions gradients itself and never
+constructs a PyTorch DDP `Reducer`. So xccl is fine -- ZeRO-2 reduce-scatters 200M+
+parameters over it routinely -- and nothing in this repo had exercised DDP before these
+fine-tunes.
+
+Job 8840223 then killed the size-based explanation. The alignment model's reducer holds
+only the 4.11M-parameter student (the teacher is `requires_grad=False` and excluded), and
+it faulted anyway -- at step 3 of 200, not 168:
+
+| run | reducer holds | steps survived | fault |
+| --- | --- | --- | --- |
+| denoise, head only (8840007 era) | 0.082M | full runs | none |
+| **align, student only (8840223)** | **4.11M** | **3** | `level: 0 (PTE)`, `access: 0 (Read)` |
+| denoise, encoder in (8840154) | 49.9M | 168 | `level: 2 (PDP)`, `access: 1 (Write)` |
+| denoise, 1 tile (8840190) | n/a, no DDP | 700 + eval + test | none |
+
+Two different fault levels and two different access types, so plausibly two distinct
+failure modes rather than one. What holds across all of it is narrow and worth stating
+plainly: **any run whose DDP reducer is non-trivial faults; one tile never does.** Bucket
+size, model, task and step count all vary; the presence of the reducer does not.
+
+The step-3 timing is suggestive. DDP calls `rebuild_buckets()` exactly once, after the
+first iteration, reallocating the bucket tensors and re-registering the gradient hooks --
+which lands at iteration 2-3. A read fault at the *same* address on two ranks also looks
+more like a broadcast or a bucket view reading a buffer that is not mapped on that rank
+than like a random use-after-free. But a single data point is not enough to call it, and
+the step-168 write fault does not fit the same story.
+
+Probes, cheapest first, one debug run each:
+
+- [ ] `--ddp_bucket_cap_mb 1024` so there is a single bucket and the rebuild is a no-op.
+- [ ] `--ddp_broadcast_buffers false` -- tests the read-fault-on-broadcast reading.
+- [ ] `TORCH_XPU_ALLOC_CONF=expandable_segments:False`, which stops segments being
+      unmapped. Diagnostic, not a fix: if the fault goes away and the loss goes strange,
+      it is a use-after-free.
+- [ ] `CCL_ATL_TRANSPORT=ofi`.
+
+**The multi-tile answer IS DeepSpeed. Confirmed by job 8840264:** the same denoise
+config with `--deepspeed configs/deepspeed-zero2.json`, twelve tiles, 300 steps plus eval
+plus test, **zero faults**, and `label_dropped`/`label_extra` of 0 -- so ZeRO-2's gather is
+clean where DDP's is not, which also points at [FT4](#ft4) being a DDP-reducer problem
+specifically. ZeRO-2 needs no change to the fine-tune script: the config carries no
+`optimizer` or `scheduler` key, so Trainer's param groups and the `encoder_lr_scale`
+LambdaLR gate survive untouched.
+
+It is also 21.4x the throughput of one tile (235.4 vs 11.02 samples/s), which retires the
+sweep's cost problem -- a 4-epoch arm goes from 8.8 h on a tile, or 21.2 h once twelve
+arms contend for one node, to **0.41 h on a node**. The whole 72-arm grid is then about 22
+node-hours, which is what `make_denoise_grid.py` estimated all along; the estimate was
+never wrong, it just assumed the full-node parallelism that the DDP bug had taken away.
+
+Caveat when switching the grid over: twelve tiles means an effective batch of 48 rather
+than 4, so 12x fewer optimizer steps, and anything denominated in steps has to be rescaled
+or it silently becomes a different experiment. `freeze_encoder_steps=500` is 1.1% of a
+2-epoch run at batch 4 and 13.8% of the same run at batch 48. Same for `warmup_steps`.
+
+**Nothing currently queued depends on DDP.** The grid runs one tile per arm and the
+alignment validation was resubmitted as 8840238 on one tile.
 
 ## FT1. Does the denoiser generalise beyond 1024 peaks? — **Open**
 

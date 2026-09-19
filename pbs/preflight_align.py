@@ -217,6 +217,36 @@ def _learns():
     return f"L2 {first:.4f} -> {last:.4f}, teacher bit-identical"
 
 
+@check("eval mode under autocast, where the fused fast path lives")
+def _eval_autocast():
+    """The gap that let job 8840257 through.
+
+    Everything above runs the model in TRAIN mode in fp32. torch's
+    TransformerEncoderLayer keeps a fused kernel it takes only when grad is disabled, so
+    train-mode checks cannot reach it, and its autocast guard (transformer.py:869) calls
+    the no-argument torch.is_autocast_enabled(), which reports CUDA state and so is blind
+    to torch.autocast("xpu"). The result was 200 clean training steps and a crash on the
+    first evaluation. This runs the combination that actually failed.
+
+    It is a weaker check on a login node than on a tile -- CPU and XPU do not take the
+    fast path under identical conditions -- so a debug run that performs at least one
+    evaluation stays mandatory.
+    """
+    import torch
+    from msdelta.reranking import AlignmentCollator
+    model_args, _, _ = globals()["_parsed"]
+    model = globals()["_model"].eval()
+    batch = AlignmentCollator(max_peptide_length=model_args.max_peptide_length)(
+        globals()["_rows"])
+    with torch.no_grad(), torch.autocast(device_type="cpu", dtype=torch.bfloat16):
+        out = model(**batch)
+    if not torch.isfinite(out["loss"]):
+        raise ValueError("loss is not finite under autocast")
+    if out["embeddings"].dtype != torch.float32:
+        raise ValueError(f"student emits {out['embeddings'].dtype}, expected float32")
+    return f"loss {float(out['loss']):.4f}, student output {out['embeddings'].dtype}"
+
+
 @check("cross-modal metrics deduplicate candidates")
 def _metrics():
     import numpy as np
