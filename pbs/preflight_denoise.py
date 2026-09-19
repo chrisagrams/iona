@@ -24,6 +24,11 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parent.parent
 ARGS_FILE = os.environ.get("ARGS_FILE", "configs/finetune-denoise-50m/training.args")
 PBS_FILE = os.environ.get("PBS_FILE", "pbs/aurora-finetune-denoise.pbs")
+# All fine-tuning work reports here. The entity matters as much as the project: the key's
+# default entity is personal, and CS_Pharm has same-named projects, so an unset entity
+# produces a successful-looking run under the wrong owner (it did, for 8839683).
+WANDB_ENTITY = os.environ.get("EXPECT_WANDB_ENTITY", "CS_Pharm")
+WANDB_PROJECT = os.environ.get("EXPECT_WANDB_PROJECT", "msdelta-finetune")
 
 results: list[tuple[str, bool, str]] = []
 
@@ -120,20 +125,20 @@ def _parse():
             f"freeze={model_args.freeze_encoder_steps} lr_scale={model_args.encoder_lr_scale}")
 
 
-@check("W&B project is msdelta-denoise and reporting is on")
+@check(f"W&B destination is {WANDB_ENTITY}/{WANDB_PROJECT} and reporting is on")
 def _wandb_cfg():
     _, _, training_args = globals()["_parsed"]
-    if training_args.wandb_project != "msdelta-denoise":
-        raise ValueError(f"project is {training_args.wandb_project!r}")
+    if training_args.wandb_project != WANDB_PROJECT:
+        raise ValueError(f"project is {training_args.wandb_project!r}, expected {WANDB_PROJECT!r}")
     # The key's default entity is the personal one, so an unset entity silently lands the
     # run beside a same-named project under the wrong owner -- which is what happened to
     # run denoise-ft-50m-8839683.
-    if training_args.wandb_entity != "CS_Pharm":
-        raise ValueError(f"entity is {training_args.wandb_entity!r}, expected CS_Pharm")
+    if training_args.wandb_entity != WANDB_ENTITY:
+        raise ValueError(f"entity is {training_args.wandb_entity!r}, expected {WANDB_ENTITY!r}")
     original = (REPO / ARGS_FILE).read_text()
     if "--report_to wandb" not in original:
         raise ValueError("--report_to wandb missing from the args file")
-    return "CS_Pharm/msdelta-denoise"
+    return f"{WANDB_ENTITY}/{WANDB_PROJECT}"
 
 
 @check("credentials load (length only, never the value)")

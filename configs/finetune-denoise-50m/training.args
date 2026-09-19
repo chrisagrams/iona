@@ -36,5 +36,5 @@
 --ddp_find_unused_parameters false
 --seed 0
 --report_to wandb
---wandb_project msdelta-denoise
+--wandb_project msdelta-finetune
 --wandb_entity CS_Pharm
