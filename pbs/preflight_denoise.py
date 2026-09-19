@@ -255,6 +255,28 @@ def _affinity():
     return "job-wide full tile list"
 
 
+@check("peak_pair_budget is sized for THIS checkpoint's delta_bias_n_freqs")
+def _budget():
+    """The repo default is tuned for n_freqs=64; these checkpoints use 256.
+
+    The pair branch builds a Fourier encoding of every (i, j) m/z difference, so its
+    tensor is batch * L^2 * 2 * n_freqs floats. The budget bounds batch * L^2, which
+    means the memory it implies scales with n_freqs -- and the 50m/100m production
+    checkpoints quadrupled that from 64 to 256. Job 8839166 trained 19 steps on the
+    inherited budget and then took a GPU page fault.
+    """
+    model_args, _, training_args = globals()["_parsed"]
+    model = globals()["_model"]
+    n_freqs = model.config.encoder.delta_bias_n_freqs
+    gigabytes = training_args.peak_pair_budget * 2 * n_freqs * 4 / 1e9
+    if gigabytes > 4.0:
+        raise ValueError(
+            f"n_freqs={n_freqs} and budget={training_args.peak_pair_budget:,} imply a "
+            f"{gigabytes:.2f} GB pair tensor per batch; lower the budget"
+        )
+    return f"n_freqs={n_freqs}, {gigabytes:.2f} GB pair tensor per batch"
+
+
 @check("optimizer builds two groups at the right learning rates")
 def _optimizer():
     import tempfile

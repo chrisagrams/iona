@@ -16,7 +16,7 @@
 --adam_beta2 0.95
 --max_grad_norm 1.0
 --num_train_epochs 2
---peak_pair_budget 4194304
+--peak_pair_budget 1048576
 --per_device_eval_batch_size 8
 --dataloader_num_workers 4
 --bf16 true
