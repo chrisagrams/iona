@@ -49,6 +49,10 @@ HEAD_SIZES = ("128", "256", "512")
 # steps are: per_device=1 gives an effective 12 and 14,533 steps. A batch axis worth
 # sweeping therefore has to use both knobs, so it is expressed as the effective batch and
 # the pair is derived.
+# Matches RUN_PREFIX in the pbs launchers. Runs from before the DDP and eval fixes are
+# not comparable to these, so the names must not collide in W&B.
+RUN_PREFIX = "v2_dn50m-"
+
 BATCHES = {
     "12":  ("1", "1"),   # 14,533 steps at 2 epochs -- 4x the updates
     "48":  ("4", "1"),   #  3,633 steps -- the current default
@@ -79,8 +83,8 @@ def render_arm(lr: str, scale: str, epochs: str, head: str,
         "--head_hidden_size": head,
         "--per_device_train_batch_size": per_device,
         "--gradient_accumulation_steps": accumulation,
-        "--run_name": f"dn50m-{name}",
-        "--output_dir": f"./runs/dn50m-{name}",
+        "--run_name": f"{RUN_PREFIX}{name}",
+        "--output_dir": f"./runs/{RUN_PREFIX}{name}",
     }
     lines, seen = [], set()
     tokens = TEMPLATE.read_text().split()
@@ -99,6 +103,28 @@ def render_arm(lr: str, scale: str, epochs: str, head: str,
     return name, "\n".join(lines) + "\n"
 
 
+def arm_description(lr: str, scale: str, epochs: str, head: str, batch: str) -> str:
+    """Why this arm exists, in words, so no arm in a 216-arm grid is unexplained.
+
+    describe_run() derives a sentence from the settings at run time; this says what the
+    arm is FOR, which the settings cannot. The template's own DESCRIPTION.md leads, so the
+    shared purpose is stated once and the arm adds only what makes it different.
+    """
+    shared = (TEMPLATE.parent / "DESCRIPTION.md")
+    lead = " ".join(shared.read_text().split()) + " " if shared.exists() else ""
+    per_device, accumulation = BATCHES[batch]
+    updates = 87200 * int(epochs) // int(batch)
+    encoder = ("encoder frozen (control for whether fine-tuning the encoder helps at all)"
+               if scale == "0" else f"encoder learning at {scale}x the head's rate")
+    return (
+        f"{lead}GRID ARM: lr={lr}, {encoder}, {epochs} epochs, head width {head}, "
+        f"effective batch {batch} ({per_device} per tile x 12 tiles x {accumulation} "
+        f"accumulation) giving about {updates:,} optimizer updates. The batch axis exists "
+        f"to test whether more, smaller updates beat fewer, larger ones; batch and update "
+        f"count move together, so it cannot separate the two."
+    )
+
+
 def write_arm(lr: str, scale: str, epochs: str, head: str, batch: str = "48",
               *, dry_run: bool = False) -> str:
     name, text = render_arm(lr, scale, epochs, head, batch)
@@ -106,6 +132,8 @@ def write_arm(lr: str, scale: str, epochs: str, head: str, batch: str = "48",
         directory = OUT / name
         directory.mkdir(parents=True, exist_ok=True)
         (directory / "training.args").write_text(text)
+        (directory / "DESCRIPTION.md").write_text(
+            arm_description(lr, scale, epochs, head, batch) + "\n")
     return name
 
 
@@ -122,7 +150,7 @@ def check(combos: list[tuple[str, str, str, str]]) -> int:
     for combo in combos:
         name, text = render_arm(*combo)
         path = OUT / name / "training.args"
-        if not path.exists():
+        if not path.exists() or not (OUT / name / "DESCRIPTION.md").exists():
             missing.append(name)
         elif path.read_text() != text:
             stale.append(name)

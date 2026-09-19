@@ -2,8 +2,8 @@
 --dataset_repo chrisagrams/ms-denoise-100k
 --max_peaks 512
 --preprocessing_num_workers 24
---run_name dn50m-lr2e4_es10_ep2_h512
---output_dir ./runs/dn50m-lr2e4_es10_ep2_h512
+--run_name v2_dn50m-lr2e4_es10_ep2_h512
+--output_dir ./runs/v2_dn50m-lr2e4_es10_ep2_h512
 --freeze_encoder_steps 0
 --encoder_lr_scale 1.0
 --head_hidden_size 512

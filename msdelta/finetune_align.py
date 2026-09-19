@@ -23,7 +23,8 @@ import numpy as np
 import torch
 from transformers import HfArgumentParser, Trainer, TrainingArguments, set_seed
 
-from msdelta.finetune_denoise import MemoryProbe, select_device
+from msdelta.finetune_denoise import (MemoryProbe, load_description, select_device,
+                                      subset_splits)
 from msdelta.modeling_msdelta import MSDeltaForPreTraining
 from msdelta.processing_msdelta import MSDeltaProcessor
 from msdelta.reranking import (
@@ -61,6 +62,10 @@ class AlignDataArguments:
     preprocessing_num_workers: int = 24
     max_peaks: int = 512
     validation_fraction: float = 0.1
+    # See subset_splits in finetune_denoise: caps ROWS, not steps, so a smoke test still
+    # runs real epochs and therefore still exercises saving, load_best_model_at_end, the
+    # cross-modal evaluation and the final save.
+    max_samples: int = 0
 
 
 @dataclass
@@ -158,6 +163,8 @@ def main(argv: list[str] | None = None) -> int:
 
     student = sum(p.numel() for p in model.sequence_encoder.parameters())
     frozen = sum(p.numel() for p in model.spectrum_model.parameters())
+    training_args.run_description = (training_args.run_description
+                                     or load_description())
     description = (
         f"Peptide encoder aligned to a frozen {Path(model_args.pretrained_path).parent.name} "
         f"spectrum encoder under L2 on unit vectors. pooling={model_args.pooling}, "
@@ -191,6 +198,8 @@ def main(argv: list[str] | None = None) -> int:
                 validation_fraction=data_args.validation_fraction,
                 seed=training_args.seed,
             )
+        datasets = subset_splits(datasets, data_args.max_samples,
+                                 training_args.process_index)
         if training_args.process_index == 0:
             print("[align] " + " ".join(f"{k}={len(v):,}" for k, v in datasets.items()),
                   flush=True)

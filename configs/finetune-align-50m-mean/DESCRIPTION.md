@@ -1,0 +1,1 @@
+Pooling ablation for the alignment tower: identical to finetune-align-50m but mean pooling only, which halves the embedding to 640 dimensions. Mean is the standard choice for sentence embeddings; mean+max is the default here. This says whether the max half earns its doubling of the target width.
