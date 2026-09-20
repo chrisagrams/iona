@@ -43,6 +43,16 @@ class ContrastiveModelArguments:
                           "layer_mix -- a trained convex mixture over every encoder "
                           "depth, sequence-mean pooled to d_model."},
     )
+    random_init: bool = field(
+        default=False,
+        metadata={"help": "Same architecture, NO pretrained weights. The control that "
+                          "asks whether contrastive training needs the pretrained "
+                          "encoder at all: the frozen probe already showed the "
+                          "pretrained embedding is indistinguishable from random "
+                          "(1.35 either way), so if a random encoder also reaches ~7.8 "
+                          "under this loss, pretraining contributes nothing to this "
+                          "objective either."},
+    )
     layer_mix_norm: bool = field(
         default=True,
         metadata={"help": "LayerNorm each depth before mixing. Off, the deepest blocks "
@@ -296,9 +306,25 @@ def main(argv: list[str] | None = None) -> int:
     processor = MSDeltaProcessor.from_pretrained(
         data_args.processor_name_or_path or model_args.pretrained_path,
         max_peaks=data_args.max_peaks)
-    encoder = MSDeltaForPreTraining.from_pretrained(model_args.pretrained_path)
-    reference = (MSDeltaForPreTraining.from_pretrained(model_args.pretrained_path)
-                 if model_args.kl_weight > 0 else None)
+    if model_args.random_init:
+        # from_config, never from_pretrained-then-reinitialise: loading first would
+        # leave any buffer the init does not touch still carrying pretrained values,
+        # which is a subtler thing to be wrong about than it looks. Matches
+        # build_denoising_model, which learned this the same way.
+        from msdelta.configuration_msdelta import MSDeltaConfig
+        config = MSDeltaConfig.from_pretrained(model_args.pretrained_path)
+        encoder = MSDeltaForPreTraining(config)
+        # The reference is a SEPARATE random model with the same config, not a copy of
+        # the encoder, only if a KL target is asked for. Regularising a random encoder
+        # toward a DIFFERENT random function is meaningless, so the honest control is
+        # kl_weight 0; the arms that set it are kept for grid symmetry and say so.
+        reference = MSDeltaForPreTraining(config) if model_args.kl_weight > 0 else None
+        print("[contrastive] RANDOM INIT control: architecture of "
+              f"{model_args.pretrained_path}, no pretrained weights", flush=True)
+    else:
+        encoder = MSDeltaForPreTraining.from_pretrained(model_args.pretrained_path)
+        reference = (MSDeltaForPreTraining.from_pretrained(model_args.pretrained_path)
+                     if model_args.kl_weight > 0 else None)
     model = MSDeltaForContrastive(encoder, reference, pooling=model_args.pooling,
                                   temperature=model_args.temperature,
                                   kl_weight=model_args.kl_weight,
