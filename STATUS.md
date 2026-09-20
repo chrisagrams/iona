@@ -10,35 +10,69 @@ anyone's memory. Last updated: 2026-09-20.
 ## Where things stand
 
 ```
-INFRASTRUCTURE ────────────────────────────────────────── green except FT9
-  denoise, 1 tile ................. OK   8840190  test AUROC 0.8628
-  denoise, 12 tiles DeepSpeed ..... OK   8840264  21.4x one tile
-  denoise 200m, 12 tiles .......... OK   8841966  peak 7.66 of 68.7 GB, 0 faults
-  alignment, 1 tile ............... OK   8840304  full pipeline, saved
-  alignment, 12 tiles DeepSpeed ... NO   8840603  GPU fault, see FT9
-  grid launcher, full pipeline .... OK   8841345  12/12 arms incl. test split
+LEGEND   [x] done   [~] running   [q] queued   [!] ready, needs your go-ahead
+         [?] decision needed   [X] dead, closed   [ ] not started
 
-SCIENCE ─────────────────────────────── denoise delivering, embedding does not
-  50m  grid, 216 arms ............. DONE   216/216  best test AUROC 0.9320
-  100m grid, 12 arms .............. DONE            best test AUROC 0.9403
-  200m grid, 12 arms .............. QUEUED 8841992  memtest passed, ~4 h
-  from-scratch ablation, 12 arms .. QUEUED 8841984  isolates pretraining's worth
-  layer/scale readout probe ....... VOID   8841973  read a stale final/, withdrawn
-  readout probe along pretraining . DONE   8842038  no scale effect; all plateau by 50k
-  feature rescorer ................ DONE            hit@1 0.889, no embedding
-  neural embedding -> rescorer .... DEAD            -0.109 hit@1, 5 paired seeds
 
-BUGS (detail in TODO.md) ──────────────────────────────────────────────────
-  FT9  12-tile alignment fault .... 8 hypotheses dead, parked for ALCF
-  FT7  GPU fault is DDP ........... worked around with DeepSpeed, NOT fixed
-  FT4  32 stray labels ............ DDP gather only; absent under ZeRO-2
-  FT3  failure reports "finished" . open
-  FT1  >1024 peaks ................ open
-  FT5  seeds on the winner ........ configs/sweep-denoise-seeds ready, unsubmitted
-  FT6  from-scratch control ....... running as 8841984
-  FT8  encoder warm-up freeze ..... deferred, set to 0 everywhere
-  FT2  ............................ closed, not a bug
+DENOISE  — this is the line that works
+──────────────────────────────────────────────────────────────────────────
+  [x] 50m grid, 216 arms ........... best test AUROC 0.9320   (216/216)
+  [x] 100m grid, 12 arms ........... best test AUROC 0.9403
+  [q] 200m grid .................... 8841992, ~4h once it starts
+  [q] from-scratch ablation ........ 8841984, is pretraining worth anything?
+  [!] seed repetition (FT5) ........ 12 arms ready, not submitted
+  [?] matched-checkpoint control ... not built  <-- DECISION 1
+  [ ] final model on best config ... after the above
+
+
+EMBEDDING — almost entirely closed today
+──────────────────────────────────────────────────────────────────────────
+  [x] random-init control .......... 1.35. THE FLOOR. Everything below is why.
+        pretrained encoders score 1.35 / 1.36 / 1.35 -- same as random.
+
+  [X] read a different layer ....... noise on the floor
+  [X] pool differently ............. noise on the floor
+  [X] bigger encoder ............... no effect (earlier "worse" was a stale file)
+  [X] pretrain longer .............. plateaus at the floor by 50k steps
+  [X] embedding -> reranker ........ -0.109 hit@1, actively harmful
+
+  [x] contrastive training ......... 6.94 vs 1.35 floor. REAL, and the only lever.
+  [!] layer-mix readout ............ built, smoke-passed, ready  <-- DECISION 2
+  [ ] start from the 10k checkpoint . only frozen reading above the floor (1.67)
+
+
+RERANKING
+──────────────────────────────────────────────────────────────────────────
+  [x] feature rescorer ............. hit@1 0.889, no neural embedding
+  [X] + embedding cosine ........... -0.109, dropped
+  [ ] cross-encoder ................ the untried formulation
+
+
+INFRASTRUCTURE & BUGS
+──────────────────────────────────────────────────────────────────────────
+  [x] DeepSpeed ZeRO-2 ............. 21.4x, replaces faulting DDP
+  [x] test suite ................... 273 pass / 24 skip / 0 fail
+  [x] staleness guard .............. now covers all 7 grids (5 were bypassing)
+  [x] test-metric recovery ......... 4 lost arms recovered in minutes
+  [~] FT9 12-tile alignment fault .. parked for ALCF, 8 hypotheses dead
+  [ ] FT1 >1024 peaks / FT3 / FT4 / FT8 ... open, none blocking
 ```
+
+### The two decisions waiting on you
+
+**1. Matched-checkpoint control for the 200m.** The queued 200m grid trains from
+checkpoint-192799 while the 100m grid trained from 138073 -- about 40% more
+pretraining as well as more capacity. Its number will not be comparable to the
+100m's 0.9403 at face value. The 50m-vs-100m comparison is fine (133233 vs
+138073, 3.6% apart). To make the 200m join it, run the 200m from its own
+checkpoint-140000, which exists. One extra job.
+
+**2. Layer-mix full run.** Built, unit-tested, and smoke-passed 3/3 arms. Three
+arms, one node, encoder frozen / 0.3x / 1.0x. It is the last untested idea on the
+embedding side, and the random-init floor makes it a long shot: the mixture can
+only combine layers that individually carry nothing. Worth one node because it is
+cheap and it is the difference between 'a learned readout does not help' as a
+measurement rather than an inference.
 
 ## Reranking: the causal chain, validated end to end
 
