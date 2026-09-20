@@ -86,8 +86,31 @@ done
 # moved to 512 and a batch of 4 -- an 8x larger DeltaMZBias tensor, ~118 GB against a
 # 68.7 GB tile. That is 72 arms OOMing on a 6-node allocation, discovered an hour in.
 # Stdlib only, so this runs before the frameworks module is loaded.
-if [[ -z ${SKIP_GRID_CHECK:-} && $SWEEP_ROOT == configs/sweep-denoise ]]; then
-    "$VENV_DIR/bin/python" sweeps/make_denoise_grid.py --check \
+#
+# Every grid gets checked, not just the first one. The guard was written for
+# configs/sweep-denoise and stayed pinned to it while five more grids appeared, each of
+# which then had to be checked by hand -- which is precisely the habit this exists to
+# replace. A grid with no entry here is REFUSED rather than waved through: silently
+# skipping the check for an unrecognised path is how the pinned version stopped covering
+# anything, and SKIP_GRID_CHECK is there for the deliberate exception.
+declare -A GRID_CHECK=(
+    [configs/sweep-denoise]="sweeps/make_denoise_grid.py --check"
+    [configs/sweep-denoise-100m]="sweeps/make_denoise_size_grid.py --size 100m --check"
+    [configs/sweep-denoise-200m]="sweeps/make_denoise_size_grid.py --size 200m --check"
+    [configs/sweep-denoise-scratch]="sweeps/make_scratch_grid.py --check"
+    [configs/sweep-denoise-seeds]="sweeps/make_seed_grid.py --check"
+    [configs/sweep-layermix]="sweeps/make_layermix_grid.py --check"
+    [configs/sweep-contrastive]="sweeps/make_contrastive_grid.py --check"
+)
+if [[ -z ${SKIP_GRID_CHECK:-} ]]; then
+    check=${GRID_CHECK[${SWEEP_ROOT%/}]:-}
+    if [[ -z $check ]]; then
+        echo "no staleness check registered for $SWEEP_ROOT." >&2
+        echo "  Add its generator to GRID_CHECK in this script, or set SKIP_GRID_CHECK=1" >&2
+        echo "  to accept arms that nothing has verified against their template." >&2
+        exit 2
+    fi
+    "$VENV_DIR/bin/python" $check \
         || { echo "sweep arms are stale against their template" >&2; exit 2; }
 fi
 
