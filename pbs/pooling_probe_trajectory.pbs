@@ -1,0 +1,75 @@
+#!/bin/bash -l
+# Does the frozen embedding's peptide structure IMPROVE as pretraining proceeds?
+#
+#   qsub -q debug-scaling -l select=1 -l walltime=00:55:00 pbs/pooling_probe_trajectory.pbs
+#
+# Job 8841973 measured the separation ratio at every layer of the 50m, 100m and 200m
+# encoders and found it falls with capacity: output 1.43, 1.36, 1.35. Read as "scale
+# hurts" that is an overstatement, because all three are `production-01` and all three
+# sit about a third of the way through the same 540,423-step schedule:
+#
+#   50m   step 180,000  33.3%  epoch 1.00  pretrain loss 0.0705, still falling
+#   100m  step 190,000  35.2%  epoch 1.06  pretrain loss 0.0639, still falling
+#   200m  step 192,799  35.7%  epoch 1.07  pretrain loss 0.0558, still falling
+#
+# The losses order correctly by capacity, so the larger encoders are better at the
+# objective they were trained on. But replicate-identity structure is not that objective
+# -- nothing optimises it -- so it is exactly the kind of property that could emerge late,
+# and later in a larger model. Matched schedule fraction is not matched convergence.
+#
+# This sweeps the SAME training-free probe along each model's own trajectory. Reading it:
+#
+#   ratio rising at the last checkpoint      -> we measured too early; the 3-scale
+#     (especially rising faster at 200m)        comparison is an artefact, withdraw it
+#   ratio flat or falling by mid-training    -> more pretraining will not supply this,
+#                                               and the scale comparison stands
+#
+# Nothing is trained here. Each checkpoint is loaded, frozen, and read.
+
+#PBS -N msdelta-probetraj
+#PBS -A UIC-HPC
+#PBS -l place=scatter
+#PBS -l filesystems=home:flare
+#PBS -j oe
+#PBS -o pbs/logs/
+
+set -uo pipefail
+REPO_DIR=${REPO_DIR:-${PBS_O_WORKDIR:-$PWD}}
+cd "$REPO_DIR"
+VENV_DIR=${VENV_DIR:-$REPO_DIR/.venv}
+SCRATCH=/lus/flare/projects/UIC-HPC/$USER/msdelta
+
+set +u
+source /usr/share/lmod/lmod/init/bash
+module load "${FRAMEWORKS_MODULE:-frameworks/2025.3.1}"
+set -u
+export ONEAPI_DEVICE_SELECTOR=level_zero:gpu
+export ZE_FLAT_DEVICE_HIERARCHY=FLAT
+export ZE_AFFINITY_MASK=${ZE_AFFINITY_MASK:-0}
+export PYTHONPATH=$REPO_DIR${PYTHONPATH:+:$PYTHONPATH}
+export HF_HOME=${HF_HOME:-$SCRATCH/huggingface}
+export HF_HUB_OFFLINE=1 HF_DATASETS_OFFLINE=1
+
+CACHE=${CACHE:-$SCRATCH/align-targets-50m}
+SIZES=${SIZES:-50m 100m 200m}
+# Five points spanning each trajectory. The last is whatever that model actually reached,
+# so the three curves end at their own frontier rather than a common truncation.
+STEPS=${STEPS:-10000 50000 100000 150000}
+
+for size in $SIZES; do
+    root=/flare/UIC-HPC/homes/cgrams/msdelta-runs/msdelta-$size-production-01
+    last=$(ls -d "$root"/checkpoint-* 2>/dev/null | sed 's/.*checkpoint-//' | sort -n | tail -1)
+    for step in $STEPS $last; do
+        ckpt=$root/checkpoint-$step
+        echo
+        echo "############ $size step $step"
+        if [[ ! -r $ckpt/model.safetensors ]]; then
+            echo "  no readable weights at $ckpt, skipping"
+            continue
+        fi
+        "$VENV_DIR/bin/python" -X faulthandler -u pbs/pooling_probe.py \
+            --pretrained "$ckpt" \
+            --cache "$CACHE" --layers --max_rows "${MAX_ROWS:-1200}" \
+            || echo "  [$size step $step] FAILED"
+    done
+done

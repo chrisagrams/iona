@@ -133,7 +133,7 @@ Every lever tried, and what it did to the separation ratio (pretrained = 1.34):
 | intensity-weighted pooling, frozen | 1.43 -> 1.44, nothing |
 | denoiser P(signal) pooling, frozen | 1.34 -> **1.46**, the best readout available, and still nothing next to 6.94 |
 | reading layer 8 instead of the output | 1.43 -> **1.53**; the stack peaks at 8 and DROPS at 9 |
-| scaling the encoder 50m -> 100m -> 200m, frozen | output 1.43 -> 1.36 -> 1.35; best-block 1.53 -> 1.41 -> 1.44. Scale HURTS |
+| scaling the encoder 50m -> 100m -> 200m, frozen | output 1.43 -> 1.36 -> 1.35; best-block 1.53 -> 1.41 -> 1.44. No gain, but all three checkpoints are at ~1 epoch of a 3-epoch schedule, so this is confounded with undertraining |
 | `mean` instead of `mean+max`, frozen | 1.34 -> 1.43, free but small |
 | contrastive teacher -> alignment | cross-modal hit@1 +79% |
 | that embedding -> reranker | **-0.109 hit@1**, five paired seeds |
@@ -179,13 +179,42 @@ its pretraining head: predicting masked peak intensities is not the same objecti
 representing peptide identity, and the final blocks have been optimised for the former.
 Reading one block earlier is free.
 
-**Scale makes the frozen embedding WORSE, not better.** The output-layer ratio falls
-monotonically with capacity -- 1.43, 1.36, 1.35 -- and the best-block ratio over the
-whole stack peaks at the SMALLEST model. Quadrupling parameters buys nothing here and
-costs a little. This is the opposite of the denoise result on the same checkpoints, where
-100m beats 50m (0.9403 vs 0.9320); the pretraining objective scales, the frozen
-replicate-identity structure does not. It rules out "use a bigger encoder" as a lever on
-the embedding, which was the last untested cheap idea on this axis.
+**Scale does not help the frozen embedding, and MAY hurt it -- confounded.** The
+output-layer ratio falls monotonically with capacity (1.43, 1.36, 1.35) and the best
+block over the whole stack belongs to the smallest model. The tempting reading is "scale
+hurts". It is not supported yet, because all three checkpoints are `production-01`, and
+reading their pretraining state says why:
+
+| scale | step | of schedule | epoch | pretrain loss | still falling? |
+| --- | --- | --- | --- | --- | --- |
+| 50m  | 180,000 | 33.3% | 1.00 | 0.0705 | yes, -0.0012 / 10% |
+| 100m | 190,000 | 35.2% | 1.06 | 0.0639 | yes, -0.0013 / 10% |
+| 200m | 192,799 | 35.7% | 1.07 | 0.0558 | yes, -0.0012 / 10% |
+
+None of them is converged -- every one is about a third of the way through a 540,423-step
+schedule and still descending at the same rate. And the pretraining loss orders correctly
+by capacity, so the larger encoders are straightforwardly better at the objective they
+were trained on. A bigger model can be better at its objective while its frozen
+replicate-identity structure, which nothing ever optimised, has simply not emerged yet.
+Matched schedule FRACTION is not matched convergence, and larger models generally need
+more data to reach a given representation quality.
+
+So the honest statement is narrower: **at ~1 epoch of pretraining, scale buys nothing for
+the frozen embedding.** Whether it would at 3 epochs is untested.
+
+Two things settle it, and both are cheap:
+
+  The checkpoint sweep. Every scale kept checkpoints from 10,000 to ~190,000, so the
+  same training-free probe can be run along the pretraining trajectory. If the ratio is
+  still climbing at the last checkpoint -- especially if the 200m is climbing faster --
+  the number above is an artefact of reading too early. If it is flat, it is not.
+
+  The 200m denoise grid (8841992, queued). Fine-tuning is the control the frozen probe
+  lacks. The 100m checkpoint already fine-tunes BETTER than the 50m (0.9403 vs 0.9320)
+  despite a worse frozen ratio, which alone shows the frozen readout is not measuring
+  encoder quality. If the 200m fine-tunes better again, the encoders are fine and only
+  the frozen readout degrades; if it fine-tunes worse, undertraining is real and reaches
+  the fine-tuned numbers too.
 
 `clean` -- the fraction of groups whose every replicate is nearer to its own group than
 to anything outside it -- sits at 0.010 for essentially all 39 configurations, meaning 1

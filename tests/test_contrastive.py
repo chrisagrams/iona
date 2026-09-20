@@ -319,3 +319,98 @@ class TestGradCache:
             gradcache_step(model, batch, chunk_size=2)
             grads.append(self._flat_grad(model))
         assert torch.allclose(grads[0], grads[1], atol=1e-6)
+
+
+class TestLayerMixPooler:
+    """A trained mixture over depth, instead of picking one layer by hand.
+
+    Motivated by job 8841973: the separation ratio peaks mid-stack at every scale and
+    sags at the output, so every embedding measured in this repo was read from the wrong
+    layer. These tests pin the properties that make the mixture mean what it says.
+    """
+
+    def _model(self, layers=4, hidden=32):
+        from msdelta.configuration_msdelta import MSDeltaConfig
+        from msdelta.modeling_msdelta import MSDeltaForPreTraining
+        return MSDeltaForPreTraining(MSDeltaConfig(
+            hidden_size=hidden, num_hidden_layers=layers,
+            num_attention_heads=4, intermediate_size=hidden * 2))
+
+    def _batch(self, batch=2, peaks=10, pad_from=7):
+        mz = torch.rand(batch, peaks) * 1000 + 100
+        log_intensity = torch.rand(batch, peaks)
+        mask = torch.ones(batch, peaks, dtype=torch.bool)
+        mask[0, pad_from:] = False
+        return mz, log_intensity, mask
+
+    def test_captures_one_state_per_depth_plus_the_embedding(self):
+        from msdelta.contrastive import encoder_layer_states
+        model = self._model(layers=4)
+        states, _ = encoder_layer_states(model.msdelta, *self._batch())
+        assert len(states) == 5
+
+    def test_embedding_is_d_model_not_double(self):
+        """A sequence mean only. Doubling it would silently change every consumer."""
+        from msdelta.contrastive import MSDeltaForContrastive, embedding_size
+        model = self._model(hidden=32)
+        wrapped = MSDeltaForContrastive(model, pooling="layer_mix", kl_weight=0.0)
+        pooled, _ = wrapped.embed(*self._batch())
+        assert pooled.shape[-1] == 32 == embedding_size(model, "layer_mix")
+
+    def test_mixture_starts_uniform_and_stays_convex(self):
+        from msdelta.contrastive import LayerMixPooler
+        weights = LayerMixPooler(5, 8).weights
+        assert float(weights.sum()) == pytest.approx(1.0)
+        assert float(weights.std()) < 1e-6
+
+    def test_padding_cannot_reach_the_embedding(self, ):
+        """(regression) The masked mean is the only thing keeping padded peaks out."""
+        from msdelta.contrastive import MSDeltaForContrastive
+        wrapped = MSDeltaForContrastive(self._model(), pooling="layer_mix",
+                                        kl_weight=0.0).eval()
+        mz, log_intensity, mask = self._batch()
+        with torch.no_grad():
+            before, _ = wrapped.embed(mz, log_intensity, mask)
+            noisy = log_intensity.clone(); noisy[0, 7:] = 999.0
+            after, _ = wrapped.embed(mz, noisy, mask)
+            shifted = mz.clone(); shifted[0, 7:] = 5000.0
+            moved, _ = wrapped.embed(shifted, log_intensity, mask)
+        assert torch.allclose(before, after, atol=1e-6)
+        assert torch.allclose(before, moved, atol=1e-6)
+
+    def test_gradient_reaches_the_mix_and_the_whole_stack(self):
+        """The mixture must train the encoder through every depth it draws on."""
+        from msdelta.contrastive import MSDeltaForContrastive
+        model = self._model()
+        wrapped = MSDeltaForContrastive(model, pooling="layer_mix", kl_weight=0.0)
+        wrapped.embed(*self._batch())[0].pow(2).sum().backward()
+        assert wrapped.layer_mix.mix.grad is not None
+        assert bool((wrapped.layer_mix.mix.grad != 0).any())
+        first_block = [p.grad for p in model.msdelta.blocks[0].parameters()
+                       if p.grad is not None]
+        assert first_block and any(bool((g != 0).any()) for g in first_block)
+
+    def test_normalisation_is_what_stops_deep_layers_dominating(self):
+        """Without it the 'learned' mixture is decided by magnitude before step one.
+
+        The 200m probe measured in-group distances of 0.0044 at block 2 against 0.0596
+        at block 15, so an unnormalised convex sum is the deepest layer with extra steps.
+        """
+        from msdelta.contrastive import LayerMixPooler
+        states = [torch.ones(2, 4, 8) * scale for scale in (0.01, 0.1, 10.0)]
+        mask = torch.ones(2, 4, dtype=torch.bool)
+        without = LayerMixPooler(3, 8, normalise=False)(states, mask)
+        # Uniform weights over 0.01/0.1/10.0 -> 3.37, i.e. the largest layer and nothing
+        # else. Normalised, every depth contributes on equal footing.
+        assert float(without.mean()) == pytest.approx(3.37, abs=0.01)
+        with_norm = LayerMixPooler(3, 8, normalise=True)(states, mask)
+        assert abs(float(with_norm.mean())) < 1e-5
+
+    def test_refuses_gradient_checkpointing_rather_than_mishandling_it(self):
+        """Under checkpointing each block runs twice and the first output is detached."""
+        from msdelta.contrastive import encoder_layer_states
+        model = self._model()
+        model.msdelta.gradient_checkpointing = True
+        model.msdelta.train()
+        with pytest.raises(RuntimeError, match="gradient checkpointing"):
+            encoder_layer_states(model.msdelta, *self._batch())

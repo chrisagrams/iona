@@ -254,3 +254,60 @@ class TestSweepPartition:
         finally:
             (arm / "training.args").unlink(missing_ok=True)
             arm.rmdir()
+
+
+class TestEvalCheckpointArgs:
+    """`expand_args_file` decides what an eval-only run inherits from a training config.
+
+    Getting this wrong is silent, not loud: inheriting --deepspeed hangs a single-tile
+    job waiting on a launcher that is not there, and inheriting --report_to publishes an
+    evaluation into the sweep project as if it were a thirteenth arm.
+    """
+
+    def _expand(self, tmp_path, text, extra=()):
+        from msdelta.eval_checkpoint import expand_args_file
+        path = tmp_path / "training.args"
+        path.write_text(text)
+        return expand_args_file(["--args_file", str(path), *extra])
+
+    def test_strips_the_flags_an_eval_must_not_inherit(self, tmp_path):
+        tokens = self._expand(tmp_path, (
+            "--learning_rate 2e-4\n--deepspeed configs/deepspeed-zero2.json\n"
+            "--report_to wandb\n--wandb_project msdelta-finetune-denoise\n"
+            "--load_best_model_at_end true\n--output_dir ./runs/original\n"
+        ))
+        for flag in ("--deepspeed", "--report_to", "--wandb_project",
+                     "--load_best_model_at_end", "--output_dir"):
+            assert flag not in tokens, f"{flag} leaked into an eval-only run"
+        assert tokens == ["--learning_rate", "2e-4"]
+
+    def test_keeps_everything_that_defines_the_model(self, tmp_path):
+        """Strip too much and the checkpoint stops matching the model it is loaded into."""
+        tokens = self._expand(tmp_path, (
+            "--pretrained_path /flare/model\n--head_hidden_size 128\n"
+            "--head_dropout 0.1\n--max_peaks 512\n--encoder_lr_scale 0.5\n"
+        ))
+        for flag in ("--pretrained_path", "--head_hidden_size", "--head_dropout",
+                     "--max_peaks"):
+            assert flag in tokens
+
+    def test_caller_flags_survive_alongside_the_file(self, tmp_path):
+        tokens = self._expand(tmp_path, "--max_peaks 512\n",
+                              extra=["--output_dir", "/scratch/x", "--checkpoint", "/c"])
+        assert tokens == ["--max_peaks", "512", "--output_dir", "/scratch/x",
+                          "--checkpoint", "/c"]
+
+    def test_rejects_an_unpaired_file(self, tmp_path):
+        """Pairwise stripping is only safe on strict pairs, so refuse anything else."""
+        with pytest.raises(SystemExit):
+            self._expand(tmp_path, "--max_peaks 512 --bf16\n")
+
+    def test_every_generated_arm_is_strict_pairs(self):
+        """The property the stripper depends on, checked against the real grids."""
+        roots = sorted((REPO / "configs").glob("sweep-*"))
+        assert roots, "no generated grids to check"
+        for args in sorted(p for root in roots for p in root.glob("*/training.args")):
+            tokens = args.read_text().split()
+            assert len(tokens) % 2 == 0, f"{args} has an odd token count"
+            odd = [t for t in tokens[1::2] if t.startswith("--")]
+            assert not odd, f"{args} has bare boolean flags: {odd[:3]}"
