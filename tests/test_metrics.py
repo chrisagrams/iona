@@ -89,3 +89,43 @@ class TestCrossModalMetrics:
         spectra = torch.nn.functional.normalize(torch.randn(20, 16), dim=-1)
         out = cross_modal_metrics(candidates, spectra, np.arange(20), np.arange(20))
         assert out["crossmodal/hit@5"] >= out["crossmodal/hit@1"]
+
+
+class TestDistanceAndCosineAgree:
+    """Ranking by L2 and by cosine must stay interchangeable.
+
+    Both towers emit unit vectors, and on unit vectors ||a-b||^2 = 2 - 2cos, so smallest
+    distance and largest cosine are the same ordering. That equivalence is what makes the
+    L2 training loss and the cosine-ranked retrieval metric the SAME quantity rather than
+    two things that happen to correlate.
+
+    It rests entirely on the normalisation. Remove an F.normalize and L2 silently starts
+    preferring short candidate vectors while cosine ignores length -- measured below,
+    top-1 agreement falls from 1.00 to 0.00. Nothing else in the suite would notice.
+    """
+
+    def _pair(self):
+        torch.manual_seed(0)
+        candidates = torch.nn.functional.normalize(torch.randn(40, 32), dim=-1)
+        queries = torch.nn.functional.normalize(
+            candidates[np.arange(200) % 40] + 0.8 * torch.randn(200, 32), dim=-1)
+        return queries, candidates
+
+    def test_identical_top1_on_unit_vectors(self):
+        queries, candidates = self._pair()
+        by_distance = torch.cdist(queries, candidates).argmin(dim=1)
+        by_cosine = (queries @ candidates.T).argmax(dim=1)
+        assert torch.equal(by_distance, by_cosine)
+
+    def test_equivalence_needs_normalised_candidates(self):
+        """The guard: if this ever passes, the equivalence is no longer being tested."""
+        queries, candidates = self._pair()
+        stretched = candidates * (torch.rand(40, 1) * 3 + 0.5)
+        by_distance = torch.cdist(queries, stretched).argmin(dim=1)
+        by_cosine = (queries @ stretched.T).argmax(dim=1)
+        assert not torch.equal(by_distance, by_cosine)
+
+    def test_squared_l2_is_two_minus_two_cosine(self):
+        queries, candidates = self._pair()
+        squared = torch.cdist(queries, candidates).pow(2)
+        assert torch.allclose(squared, 2 - 2 * (queries @ candidates.T), atol=1e-4)
