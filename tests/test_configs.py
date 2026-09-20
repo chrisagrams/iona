@@ -332,6 +332,12 @@ def _known_flags():
           "ContrastiveTrainingArguments")),
         ("msdelta.finetune_align",
          ("AlignModelArguments", "AlignDataArguments", "AlignTrainingArguments")),
+        # Pretraining. configs/msdelta-base-* are for msdelta/train.py, not a
+        # fine-tune, and leaving these out made the test fail on five perfectly
+        # valid configs -- a test that cries wolf gets deleted, so it has to know
+        # about every entry point whose configs live under configs/.
+        ("msdelta.training_args",
+         ("ModelArguments", "DataArguments", "MSDeltaTrainingArguments")),
     ):
         try:
             mod = __import__(module, fromlist=classes)
