@@ -10,69 +10,61 @@ anyone's memory. Last updated: 2026-09-20.
 ## Where things stand
 
 ```
-LEGEND   [x] done   [~] running   [q] queued   [!] ready, needs your go-ahead
-         [?] decision needed   [X] dead, closed   [ ] not started
+LEGEND   [x] done   [~] RUNNING NOW   [q] queued   [!] ready, awaiting your go-ahead
+         [X] dead, closed   [ ] not started
 
 
-DENOISE  — this is the line that works
+DENOISE  — the line that works
 ──────────────────────────────────────────────────────────────────────────
-  [x] 50m grid, 216 arms ........... best test AUROC 0.9320   (216/216)
-  [x] 100m grid, 12 arms ........... best test AUROC 0.9403
-  [q] 200m grid .................... 8841992, ~4h once it starts
-  [q] from-scratch ablation ........ 8841984, is pretraining worth anything?
-  [!] seed repetition (FT5) ........ 12 arms ready, not submitted
-  [?] matched-checkpoint control ... not built  <-- DECISION 1
-  [ ] final model on best config ... after the above
+  [x] 50m grid, 216 arms ........... 0.9320   216/216
+  [x] 100m grid, 12 arms ........... 0.9403
+  [q] 200m grid .................... 8841992   capacity, ~4h once it starts
+  [q] from-scratch ablation ........ 8841984   capacity, is pretraining worth it?
+  [~] 400m memory test ............. 8842130   debug, gates the 400m grid
+  [!] 400m grid, 12 arms ........... configs ready, submit after the 200m
+  [!] seed repetition (FT5) ........ 12 arms ready
+  [ ] final model on best config ... last step
+  [X] matched-checkpoint control ... dropped: normalising by compute budget instead
 
 
-EMBEDDING — almost entirely closed today
+EMBEDDING — closed today, except one live sweep
 ──────────────────────────────────────────────────────────────────────────
-  [x] random-init control .......... 1.35. THE FLOOR. Everything below is why.
-        pretrained encoders score 1.35 / 1.36 / 1.35 -- same as random.
+  [x] random-init control .......... 1.35 = THE FLOOR
+        pretrained encoders score 1.35 / 1.36 / 1.35. Same as random.
 
   [X] read a different layer ....... noise on the floor
   [X] pool differently ............. noise on the floor
-  [X] bigger encoder ............... no effect (earlier "worse" was a stale file)
-  [X] pretrain longer .............. plateaus at the floor by 50k steps
-  [X] embedding -> reranker ........ -0.109 hit@1, actively harmful
+  [X] bigger encoder ............... no effect at matched steps
+  [X] pretrain longer .............. at the floor from 50k steps on
+  [X] embedding -> reranker ........ -0.109 hit@1, harmful
 
-  [x] contrastive training ......... 6.94 vs 1.35 floor. REAL, and the only lever.
-  [!] layer-mix readout ............ built, smoke-passed, ready  <-- DECISION 2
-  [ ] start from the 10k checkpoint . only frozen reading above the floor (1.67)
+  [x] contrastive training ......... 6.94 vs 1.35 floor. The only real lever.
+  [~] layer-mix readout sweep ...... 8842121   frozen / 0.3x / 1.0x
+  [ ] start from the 10k checkpoint . 1.67, the one frozen reading above the floor
 
 
 RERANKING
 ──────────────────────────────────────────────────────────────────────────
   [x] feature rescorer ............. hit@1 0.889, no neural embedding
-  [X] + embedding cosine ........... -0.109, dropped
-  [ ] cross-encoder ................ the untried formulation
+  [X] + embedding cosine ........... dropped
+  [ ] cross-encoder ................ deferred until embeddings are worth something
 
 
 INFRASTRUCTURE & BUGS
 ──────────────────────────────────────────────────────────────────────────
-  [x] DeepSpeed ZeRO-2 ............. 21.4x, replaces faulting DDP
+  [x] DeepSpeed ZeRO-2 ............. 21.4x, replaces the faulting DDP path
   [x] test suite ................... 273 pass / 24 skip / 0 fail
-  [x] staleness guard .............. now covers all 7 grids (5 were bypassing)
-  [x] test-metric recovery ......... 4 lost arms recovered in minutes
-  [~] FT9 12-tile alignment fault .. parked for ALCF, 8 hypotheses dead
-  [ ] FT1 >1024 peaks / FT3 / FT4 / FT8 ... open, none blocking
+  [x] staleness guard .............. all 8 grids, refuses unregistered ones
+  [x] checkpoint provenance ........ recorded; final/ moves, so it had to be
+  [~] FT9 12-tile align fault ...... parked for ALCF
+  [ ] FT1 / FT3 / FT4 / FT8 ........ open, none blocking
 ```
 
-### The two decisions waiting on you
-
-**1. Matched-checkpoint control for the 200m.** The queued 200m grid trains from
-checkpoint-192799 while the 100m grid trained from 138073 -- about 40% more
-pretraining as well as more capacity. Its number will not be comparable to the
-100m's 0.9403 at face value. The 50m-vs-100m comparison is fine (133233 vs
-138073, 3.6% apart). To make the 200m join it, run the 200m from its own
-checkpoint-140000, which exists. One extra job.
-
-**2. Layer-mix full run.** Built, unit-tested, and smoke-passed 3/3 arms. Three
-arms, one node, encoder frozen / 0.3x / 1.0x. It is the last untested idea on the
-embedding side, and the random-init floor makes it a long shot: the mixture can
-only combine layers that individually carry nothing. Worth one node because it is
-cheap and it is the difference between 'a learned readout does not help' as a
-measurement rather than an inference.
+Model scales are NOT compared against each other directly; figures normalise by
+compute budget. That is why the matched-checkpoint control was dropped -- and why
+`results/checkpoint_provenance.txt` matters: `final/` is a moving export, so the
+step each fine-tune started from is only recoverable while those checkpoints still
+exist. It is recorded there rather than left to be reconstructed later.
 
 ## Reranking: the causal chain, validated end to end
 
