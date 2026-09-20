@@ -145,6 +145,60 @@ the dataset before deriving anything from it, and never carry a figure across jo
 
 ---
 
+## Pooled and within-spectrum AUROC agree on denoise; the headline numbers hold
+
+Job 8842917 re-scored the finished winners with AUROC computed inside each spectrum and
+averaged, alongside the pooled figure. Both from the same evaluation, so they are
+directly comparable:
+
+| winner | pooled | per-spectrum | sd | p10 | unscorable |
+| --- | --- | --- | --- | --- | --- |
+| 50m lr2e4_es05_ep4_h512_b12 | 0.9213 | **0.9269** | 0.067 | 0.856 | 17 of 8584 |
+| 100m lr2e4_es05_b12 | 0.9331 | **0.9377** | 0.070 | 0.878 | 17 of 8584 |
+
+Per-spectrum is slightly HIGHER than pooled, by 0.006 in both cases -- so pooling was
+mildly deflating the number, not inflating it. The feared mechanism, a per-spectrum
+offset propping up the pooled figure, is not operating. The ordering is preserved too:
+100m beats 50m by the same ~0.011 on either metric.
+
+The distribution is tight rather than a hidden split. sd around 0.07, and the 10th
+percentile still above 0.85, so there is no substantial subset of spectra the model
+fails on while the average looks fine. Only 17 spectra of 8,584 are unscorable for
+being single-class.
+
+So the denoise result stands on the axis the model is actually used on. Worth having
+checked -- the direction was not predictable, see TODO FT12 -- but the answer is that
+nothing was wrong.
+
+NOTE ON THE ABSOLUTE NUMBERS: these are FINAL-weights evaluations (0.9213, 0.9331)
+against the grids' best-validation figures (0.9320, 0.9403). The ~0.008-0.011 gap is
+best-vs-final selection, measured earlier at ~0.006, and is not a discrepancy. The
+pooled-vs-per-spectrum comparison above is unaffected because both come from the same
+evaluation pass.
+
+---
+
+## Training the depth mixture beats a uniform average, and loses to picking one layer
+
+The baseline the frozen layer-mix arm was missing, measured training-free at the same
+checkpoint the arm used (job 8842806):
+
+| readout on the frozen 50m | ratio |
+| --- | --- |
+| uniform mixture over all 11 depths, UNTRAINED | 1.43 |
+| the same mixture after contrastive training | 1.49 |
+| block 8 alone, picked by hand off the layer probe | **1.53** |
+| mean pooling of the output layer | 1.43 |
+| random-init floor | 1.35 |
+
+So training those twelve weights did achieve something, +0.06 over the uniform average,
+which the earlier report could not establish either way. And it still loses to reading
+one layer chosen by eye. A trained linear reweighting of depths is worse than a good
+guess, and both sit within 0.2 of a random network.
+
+That closes the loop on the frozen arm: it is a real measurement, it is just a small
+one, and it points the same way as everything else on this axis.
+
 ## Denoise is the line that works; the reranker does not need a neural embedding
 
 50m grid best test AUROC **0.9320** over 216 arms; 100m best **0.9403** over 12. A
