@@ -414,3 +414,64 @@ class TestLayerMixPooler:
         model.msdelta.train()
         with pytest.raises(RuntimeError, match="gradient checkpointing"):
             encoder_layer_states(model.msdelta, *self._batch())
+
+
+class TestSaveEncoderCallback:
+    """Mid-run checkpoints must contain something loadable.
+
+    MSDeltaForContrastive is a plain nn.Module, so the Trainer writes checkpoint-N as a
+    bare state dict with `model.*` keys and no config.json. `final/` is fine because
+    main() saves the inner model there by hand; these are the checkpoints that are not.
+    """
+
+    def _wrapped(self):
+        from msdelta.configuration_msdelta import MSDeltaConfig
+        from msdelta.modeling_msdelta import MSDeltaForPreTraining
+        from msdelta.contrastive import MSDeltaForContrastive
+        inner = MSDeltaForPreTraining(MSDeltaConfig(
+            hidden_size=32, num_hidden_layers=2, num_attention_heads=4,
+            intermediate_size=64))
+        return MSDeltaForContrastive(inner, pooling="mean+max", kl_weight=0.0), inner
+
+    def _fire(self, callback, out_dir, step=40, is_zero=True):
+        from types import SimpleNamespace
+        callback.on_save(SimpleNamespace(output_dir=str(out_dir)),
+                         SimpleNamespace(global_step=step, is_world_process_zero=is_zero),
+                         SimpleNamespace())
+
+    def test_writes_an_encoder_that_from_pretrained_can_read(self, tmp_path):
+        from msdelta.finetune_contrastive import SaveEncoderCallback
+        from msdelta.modeling_msdelta import MSDeltaForPreTraining
+        wrapped, inner = self._wrapped()
+        (tmp_path / "checkpoint-40").mkdir(parents=True)
+        self._fire(SaveEncoderCallback(wrapped), tmp_path)
+
+        encoder_dir = tmp_path / "checkpoint-40" / "encoder"
+        assert (encoder_dir / "config.json").exists(), "no config.json: still not loadable"
+        reloaded = MSDeltaForPreTraining.from_pretrained(str(encoder_dir))
+        for (name, before), (_, after) in zip(inner.named_parameters(),
+                                              reloaded.named_parameters()):
+            assert torch.allclose(before, after), f"{name} changed on the round trip"
+
+    def test_only_rank_zero_writes(self, tmp_path):
+        """Twelve ranks writing the same directory is a race, not redundancy."""
+        from msdelta.finetune_contrastive import SaveEncoderCallback
+        wrapped, _ = self._wrapped()
+        (tmp_path / "checkpoint-40").mkdir(parents=True)
+        self._fire(SaveEncoderCallback(wrapped), tmp_path, is_zero=False)
+        assert not (tmp_path / "checkpoint-40" / "encoder").exists()
+
+    def test_a_failure_to_save_does_not_kill_the_run(self, tmp_path, capsys):
+        """The real checkpoint is already on disk; a side artifact must not abort."""
+        from msdelta.finetune_contrastive import SaveEncoderCallback
+        wrapped, _ = self._wrapped()
+
+        def explode(*args, **kwargs):
+            raise OSError("disk full")
+        wrapped.model.save_pretrained = explode
+        self._fire(SaveEncoderCallback(wrapped), tmp_path)          # must not raise
+        assert "could not save encoder" in capsys.readouterr().out
+
+    def test_tolerates_a_model_with_no_save_pretrained(self, tmp_path):
+        from msdelta.finetune_contrastive import SaveEncoderCallback
+        self._fire(SaveEncoderCallback(torch.nn.Linear(2, 2)), tmp_path)  # must not raise
