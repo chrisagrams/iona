@@ -37,9 +37,15 @@ class ContrastiveModelArguments:
     pooling: str = "mean+max"
     temperature: float = field(default=0.07, metadata={"help": "SupCon temperature"})
     kl_weight: float = field(
-        default=1.0,
+        default=100.0,
         metadata={"help": "weight on KL to the frozen pretrained head. 0 disables the "
-                          "regulariser and lets the encoder forget the chemistry."})
+                          "regulariser and lets the encoder forget the chemistry. The "
+                          "default is 100 because the two terms are on very different "
+                          "scales: measured on real batches, contrastive is ~2.6 and the "
+                          "KL ~0.007, so at weight 1.0 the regulariser is 0.3% of the "
+                          "loss and constrains nothing. 100 puts them within an order of "
+                          "magnitude, which is where a regulariser can actually trade "
+                          "against the objective."})
 
 
 @dataclass
