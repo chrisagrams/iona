@@ -159,6 +159,50 @@ The whole 100m grid spans 0.019 against the 50m grid's 0.26. Once the encoder is
 at a sane rate, the larger model barely cares about these hyperparameters, which is the
 strongest argument that narrowing the grid was right.
 
+## Pretraining IS essential — but nothing in the frozen embedding shows it
+
+Job 8842288 ran the contrastive grid arm for arm on a RANDOMLY INITIALISED encoder.
+All twelve arms land on the floor:
+
+| arm | pretrained | random | delta |
+| --- | --- | --- | --- |
+| lr5e4_kl10_t007 | **7.83** | 1.35 | -6.48 |
+| lr2e5_kl0_t02 | 7.71 | 1.35 | -6.36 |
+| lr1e4_kl10_t02 | 7.14 | 1.36 | -5.78 |
+| ... | ... | ... | ... |
+| lr5e4_kl0_t007 | 1.35 | 1.35 | 0.00 |
+
+Random spans 1.34 to 1.36 across every learning rate, temperature and KL weight. That is
+the random-init floor to two decimal places: **the contrastive loss achieves literally
+nothing on a random encoder**, while the same loss on the same data with the same
+hyperparameters takes a pretrained encoder to 7.83.
+
+THIS OVERTURNS THE OBVIOUS READING OF THE FLOOR RESULT. Job 8842086 found the frozen
+pretrained embedding indistinguishable from random -- 1.35 either way, every layer,
+every scale -- and the natural inference was that pretraining contributes nothing to
+peptide identity. That inference is now dead. Both facts are true at once:
+
+  frozen:            pretrained 1.35  ==  random 1.35
+  after contrastive: pretrained 7.83  >>  random 1.35
+
+So pretraining builds something that does NOT appear in the frozen embedding under any
+readout we can construct, and that is nevertheless REQUIRED for the contrastive
+objective to move at all. The pretrained weights are a learnable initialisation for this
+task; random weights are not. "Nothing is there" was wrong; the right statement is
+"nothing is there THAT A FROZEN READOUT CAN REACH".
+
+It also retires the last worry about the readout work. Layer choice, pooling and mixture
+were all measuring a quantity that does not predict fine-tuned performance, which is why
+none of them moved it -- and why the 1.52 trained-mixture result closes that axis without
+saying anything bad about the encoder.
+
+THE HONEST CAVEAT. These runs are ~90 optimizer steps at batch 4. A randomly initialised
+50m encoder has no realistic chance of learning a metric space in 90 steps, so this shows
+pretraining is essential AT THE BUDGET WE USE, not that a random encoder could never get
+there. Testing that properly means giving the random arm far more steps, which is cheap
+here -- the whole grid is five minutes -- and is the obvious follow-up if the claim needs
+to be stronger than "at equal budget".
+
 ## A trained readout over depth buys nothing; the corrected schedule buys 13%
 
 Two jobs, both under the fixed warmup (FT10).

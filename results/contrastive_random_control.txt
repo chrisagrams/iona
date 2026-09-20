@@ -1,0 +1,19 @@
+# Contrastive on a RANDOM encoder (8842288) vs pretrained (8842232).
+# Identical arms; the only difference is --random_init true.
+
+arm                       pretrained   random    delta
+lr5e4_kl10_t007                 7.83     1.35    -6.48
+lr2e5_kl0_t02                   7.71     1.35    -6.36
+lr1e4_kl10_t02                  7.14     1.36    -5.78
+lr2e5_kl10_t02                  6.69     1.34    -5.35
+lr1e4_kl0_t02                   6.41     1.36    -5.05
+lr2e5_kl10_t007                 6.21     1.35    -4.86
+lr1e4_kl0_t007                  5.91     1.35    -4.55
+lr1e4_kl10_t007                 5.66     1.35    -4.31
+lr2e5_kl0_t007                  5.33     1.35    -3.98
+lr5e4_kl10_t02                  4.33     1.34    -2.99
+lr5e4_kl0_t02                   2.35     1.35    -1.00
+lr5e4_kl0_t007                  1.35     1.35    -0.00
+
+random-init frozen floor: 1.35
+random spans 1.34-1.36 across every arm: no learning at all.
