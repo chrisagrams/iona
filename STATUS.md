@@ -10,78 +10,74 @@ anyone's memory. Last updated: 2026-09-20.
 ## Where things stand
 
 ```
-LEGEND  [x] done  [~] RUNNING  [q] queued  [>] blocked  [X] closed  [ ] not started
+LEGEND  [x] done  [~] RUNNING  [>] blocked  [X] closed  [ ] not started
 
 
 JOBS
 ──────────────────────────────────────────────────────────────────────────
-  [~] 200m denoise grid .. 8841992  capacity   6/12 arms   2h20m   best 0.9443
-  [~] scratch 50m ........ 8841984  capacity   9/12 arms   2h20m   best 0.8960
-  [q] 400m denoise grid .. 8842147  capacity   0/12  waiting for a slot; capacity
-                                     runs 2 of mine at once, so ~1h then ~2.5h
-  [ ] layermix on RANDOM . configs/sweep-layermix-random ready, unsubmitted
-  [ ] random at 10x budget configs/sweep-random-budget ready, unsubmitted
-
-
-TODAY'S TWO CHECKS -- both came back clean
-──────────────────────────────────────────────────────────────────────────
-  [x] is pooled AUROC hiding a within-spectrum failure?   NO
-        50m  pooled 0.9213  per-spectrum 0.9269
-        100m pooled 0.9331  per-spectrum 0.9377
-        Pooling was mildly DEFLATING. p10 > 0.85, so no failing subset.
-        Denoise holds on the axis the model is actually used on.
-
-  [x] did training the depth mixture achieve anything?    A LITTLE
-        untrained uniform 1.43 -> trained 1.49 -> block 8 by hand 1.53
-        A trained linear reweighting of depth loses to a good guess.
+  [~] 400m denoise grid .. 8842147  capacity  just started, ~2.5h
+      everything else in the queue has finished
 
 
 DENOISE  — the line that works
 ──────────────────────────────────────────────────────────────────────────
   [x] 50m,  216 arms ..... 0.9320 auroc / 0.8632 f1
-  [x] 100m,  12 arms ..... 0.9403 / 0.8723
-  [~] 200m,  12 arms ..... 0.9443 / 0.8773  (partial, b48 half only)
-  [~] scratch 50m ........ 0.8960 / 0.8249  -> pretraining worth ~+0.036
-  [q] 400m,  12 arms
-  [>] FT5 multi-seed, all scales .. blocked on 200m + 400m naming winners.
-        The apparent 0.9320 -> 0.9403 -> 0.9443 trend is 0.008 and 0.004,
-        and the 50m top-8 span 0.0023 on one seed each. Unresolved until FT5.
+  [x] 100m,  12 arms ..... 0.9403 / 0.8723      (+0.0083)
+  [x] 200m,  12 arms ..... 0.9446 / 0.8778      (+0.0043)
+  [~] 400m,  12 arms ..... running
+        Gains are HALVING while the within-grid spread holds at ~0.001.
+        400m is predicted +0.002, which is inside that spread.
+  [x] scratch 50m, random encoder
+        matched 4 epochs ....... 0.8856  -> pretraining worth +0.046
+        scratch at 8 epochs .... 0.9001  -> pretraining worth +0.032
+        never quote +0.032 alone; see FT13 for the missing cell
+  [>] FT5 multi-seed, all scales .. blocked on 400m. Now a PRECONDITION,
+        not a refinement: without seeds there is no basis for ranking 400m.
+  [>] final model ................. after FT5
 
 
-EMBEDDING  — one finding explains every failure on this axis
+EMBEDDING  — one finding explains the whole axis
 ──────────────────────────────────────────────────────────────────────────
-  [x] THE FINDING: the pretrained representation is REAL but NON-LINEAR
-        frozen            pretrained 1.35 == random 1.35
-        after contrastive pretrained 7.83 >> random 1.35
-        No linear readout reaches it; post-training makes it accessible.
+  [x] THE FINDING: pretrained structure is REAL but NON-LINEAR
+        frozen              pretrained 1.35 == random 1.35
+        after contrastive   pretrained 7.83 >> random 1.35
+        No readout reaches it. Fine-tuning unlocks it. Both needed.
 
+  [x] complete readout x encoder x init factorial -- every random cell
+        is exactly 1.35; on the pretrained side only "final layer +
+        encoder trains" works, every elaboration is worse
+  [x] pretraining is worth >10x the fine-tuning budget
+        random: 1.35 @1.3k steps -> 2.10 @4.5k -> 2.73 @13.5k
+        pretrained: 7.83 @1.3k
   [X] layer / pooling / scale / longer pretraining .. noise on the floor
-  [X] trained mixture over depths .................. 1.49, loses to 1.53
+  [X] trained depth mixture ........................ 1.49 vs 1.53 by hand
   [X] genuine blend vs one layer ................... blend is WORSE
   [X] embedding -> reranker ........................ -0.109 hit@1
-  [x] contrastive training ......................... 7.83 vs 1.35 floor
-  [ ] start from the 10k checkpoint ................ 1.67, the one reading
-                                                     that ever beat the floor
+  [ ] contrastive from the 10k checkpoint .......... THE LAST LEAD
+        1.67 frozen, the only reading that ever beat the floor.
+        3 arms, one node, ~5 min. Needs checkpoint-10000 frozen first.
 
 
 RERANKING
 ──────────────────────────────────────────────────────────────────────────
   [x] feature rescorer ... hit@1 0.889, no neural embedding
-  [ ] cross-encoder ...... waiting on meaningful embeddings
+  [ ] cross-encoder ...... unblocked now: embeddings reach 7.83
 
 
 INFRA & BUGS
 ──────────────────────────────────────────────────────────────────────────
-  [x] per-spectrum AUROC now reported on every denoise run
-  [x] checkpoints frozen by step number; nothing chases a moving final/
-  [x] validation gate; nothing unvalidated reaches capacity
-  [x] unknown-flag tests; SaveEncoderCallback; staleness guard on 10 grids
-  [X] FT10 RETRACTED -- warmup was never the bug, I read a smoke log as real
-  [X] FT11 closed unused -- the blend worked and was worse anyway
-  [ ] FT12 pooled-vs-within sign is unpredictable .. recorded, check applied
-  [ ] MSDeltaForContrastive -> PreTrainedModel ..... deferred
-  [~] FT9 12-tile align fault ..... parked for ALCF
-  [ ] FT1 / FT3 / FT4 / FT8 ....... open, none blocking
+  [x] per-spectrum AUROC .. pooled was NOT hiding a within-spectrum failure
+        50m 0.9213 -> 0.9269, 100m 0.9331 -> 0.9377, p10 > 0.85
+  [x] checkpoints frozen by step; validation gate; unknown-flag tests;
+      SaveEncoderCallback; staleness guard on 10 grids
+  [X] FT10 RETRACTED ... warmup was never the bug, I read a smoke log as real
+  [X] FT11 closed ...... blend worked and was worse, nothing to protect
+  [ ] FT12 ............. pooled-vs-within sign unpredictable; check applied
+  [ ] FT13 ............. pretrained @ 8 epochs never run; fold into FT5
+  [ ] MSDeltaForContrastive -> PreTrainedModel .. worth revisiting, the
+      contrastive line survived
+  [~] FT9 12-tile align fault .. parked for ALCF
+  [ ] FT1 / FT3 / FT4 / FT8 .... open, none blocking
 ```
 
 Model scales are NOT compared against each other directly; figures normalise by
