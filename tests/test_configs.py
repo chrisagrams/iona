@@ -311,3 +311,51 @@ class TestEvalCheckpointArgs:
             assert len(tokens) % 2 == 0, f"{args} has an odd token count"
             odd = [t for t in tokens[1::2] if t.startswith("--")]
             assert not odd, f"{args} has bare boolean flags: {odd[:3]}"
+
+
+def _known_flags():
+    """Every flag any entry point can accept, from the dataclasses themselves.
+
+    Built by reflection rather than hardcoded, so it tracks the installed transformers
+    instead of what its documentation says. That distinction is the point: transformers
+    5.17 on this machine has NO `warmup_ratio` field, only `warmup_steps`, and 27 configs
+    were rewritten to use it and submitted before two jobs died with "Some specified
+    arguments are not used by the HfArgumentParser".
+    """
+    from transformers import TrainingArguments
+    names = {f"--{n}" for n in TrainingArguments.__dataclass_fields__}
+    for module, classes in (
+        ("msdelta.finetune_denoise",
+         ("DenoiseModelArguments", "DenoiseDataArguments", "DenoiseFinetuneArguments")),
+        ("msdelta.finetune_contrastive",
+         ("ContrastiveModelArguments", "ContrastiveDataArguments",
+          "ContrastiveTrainingArguments")),
+        ("msdelta.finetune_align",
+         ("AlignModelArguments", "AlignDataArguments", "AlignTrainingArguments")),
+    ):
+        try:
+            mod = __import__(module, fromlist=classes)
+        except Exception:
+            continue
+        for cls in classes:
+            obj = getattr(mod, cls, None)
+            if obj is not None and hasattr(obj, "__dataclass_fields__"):
+                names |= {f"--{n}" for n in obj.__dataclass_fields__}
+    return names
+
+
+@pytest.mark.parametrize("path", args_files(), ids=lambda p: p.parent.name)
+def test_every_flag_is_one_the_parser_accepts(path):
+    """(regression) A flag no dataclass declares is a hard failure at job start.
+
+    The other args-file tests check SHAPE -- pairs, no comments, no duplicates -- and a
+    well-formed flag that simply does not exist passes all of them. It then costs a
+    queue slot to discover, which is exactly what jobs 8842153 and 8842154 did.
+    """
+    known = _known_flags()
+    flags = {l.split()[0] for l in path.read_text().splitlines() if l.strip()}
+    unknown = sorted(flags - known)
+    assert not unknown, (
+        f"{path.parent.name}: no dataclass declares {unknown}. "
+        f"Check the installed transformers rather than its docs."
+    )
