@@ -320,3 +320,20 @@ deliberately, with the baseline re-run alongside, rather than as a side effect.
 
 Found while sizing `layer_mix_lr`, which had to be raised to 5e-2 to move at all inside
 90 warmup-damped steps.
+
+### FT10 update (2026-09-20)
+
+Fixed for the contrastive family: `--warmup_steps 100` replaced by `--warmup_ratio 0.06`
+across all 27 contrastive-family arm configs, so the schedule scales with the run and
+cannot be wrong again if the epoch count changes. The mean applied rate barely moves
+(0.445x -> 0.500x), but the PROFILE was the real damage: the old schedule ended the run
+at 0.89x peak with cosine decay never engaging, so training stopped while still taking
+near-maximum steps.
+
+Denoise configs keep `warmup_steps 100` deliberately -- those runs are ~29,000 steps, so
+100 is 0.3% and entirely appropriate. `finetune-align-contrastive` keeps 200 for the same
+reason (~28,600 steps).
+
+Contrastive baseline re-run under the corrected schedule: job 8842154. Until it lands,
+every contrastive number in STATUS.md -- including the 6.94 -- was produced under the
+warmup-only schedule.
