@@ -51,6 +51,11 @@ class GroupBatchSampler(Sampler[list[int]]):
                  seed: int = 0, drop_last: bool = True):
         if replicates < 2:
             raise ValueError("replicates must be >= 2 or there are no positive pairs")
+        if groups_per_batch < 2:
+            raise ValueError(
+                "groups_per_batch must be >= 2 or a batch holds one peptide and has no "
+                "NEGATIVES: every off-diagonal entry is a positive, the loss collapses "
+                "to the constant log(replicates - 1), and nothing is learned")
         self.groups_per_batch = groups_per_batch
         self.replicates = replicates
         self.seed = seed
