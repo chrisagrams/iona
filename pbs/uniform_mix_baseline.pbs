@@ -1,0 +1,52 @@
+#!/bin/bash -l
+# One number: the UNTRAINED uniform mixture on the checkpoint the frozen layer-mix arm
+# actually used.
+#
+#   qsub -q debug-scaling -l select=1 -l walltime=00:20:00 pbs/uniform_mix_baseline.pbs
+#
+# The frozen arm of job 8842351 trained only the twelve mixture weights and scored 1.49.
+# Its contrastive loss fell (1.344 -> 1.032), so those weights genuinely moved, but
+# separation_results.json records only the endpoint -- so a trained readout that
+# improved the embedding and one that landed where the untrained readout already was
+# are indistinguishable in the record.
+#
+# softmax(zeros) is exactly uniform, so evaluating a uniform mixture IS evaluating the
+# pooler at initialisation. Training-free: one forward pass over 1167 spectra.
+#
+# CHECKPOINT-133233 specifically, because that is what configs/sweep-layermix points at.
+# An earlier attempt at this (8842723) probed the pretraining trajectory instead and
+# would not have been comparable to anything.
+
+#PBS -N msdelta-uniformmix
+#PBS -A UIC-HPC
+#PBS -l place=scatter
+#PBS -l filesystems=home:flare
+#PBS -j oe
+#PBS -o pbs/logs/
+
+set -uo pipefail
+REPO_DIR=${REPO_DIR:-${PBS_O_WORKDIR:-$PWD}}
+cd "$REPO_DIR"
+VENV_DIR=${VENV_DIR:-$REPO_DIR/.venv}
+SCRATCH=/lus/flare/projects/UIC-HPC/$USER/msdelta
+
+set +u
+source /usr/share/lmod/lmod/init/bash
+module load "${FRAMEWORKS_MODULE:-frameworks/2025.3.1}"
+set -u
+export ONEAPI_DEVICE_SELECTOR=level_zero:gpu
+export ZE_FLAT_DEVICE_HIERARCHY=FLAT
+export ZE_AFFINITY_MASK=${ZE_AFFINITY_MASK:-0}
+export PYTHONPATH=$REPO_DIR${PYTHONPATH:+:$PYTHONPATH}
+export HF_HOME=${HF_HOME:-$SCRATCH/huggingface}
+export HF_HUB_OFFLINE=1 HF_DATASETS_OFFLINE=1
+
+CKPT=${CKPT:-/flare/UIC-HPC/khuss/msdelta/pretrained/msdelta-50m-production-01-checkpoint-133233}
+CACHE=${CACHE:-$SCRATCH/align-targets-50m}
+
+echo "############ untrained uniform mixture, $(basename "$CKPT")"
+"$VENV_DIR/bin/python" -X faulthandler -u pbs/pooling_probe.py \
+    --pretrained "$CKPT" --cache "$CACHE" --layers --max_rows "${MAX_ROWS:-1200}"
+echo
+echo "Read layer_mix/uniform against the TRAINED frozen arm's 1.49 (job 8842351)."
+echo "Equal means training the readout achieved nothing."

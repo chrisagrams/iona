@@ -61,6 +61,7 @@ RUN_PREFIX = "v2_lmix-"
 
 # name -> encoder learning rate as a multiple of the mixture's
 SCALES = {"frozen": "0.0", "els03": "0.3", "els10": "1.0"}
+RANDOM_INIT = False    # set by --random in main()
 LAYER_MIX_LR = "3e-3"
 
 
@@ -85,6 +86,13 @@ def render_arm(scale: str, seed: str) -> tuple[str, str]:
         # top weight near 0.43 against a uniform 0.091: concentrated enough to read,
         # not so much that it degenerates.
         "--layer_mix_lr": LAYER_MIX_LR,
+    }
+    if RANDOM_INIT:
+        overrides["--random_init"] = "true"
+        # A frozen RANDOM encoder with KL on would regularise toward a second random
+        # model, which preserves nothing. Off for every random arm, not just frozen.
+        overrides["--kl_weight"] = "0.0"
+    overrides |= {
         "--encoder_lr_scale": SCALES[scale],
         # See the module docstring: hooks cannot read intermediates under checkpointing.
         "--gradient_checkpointing": "false",
@@ -134,12 +142,22 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--check", action="store_true")
     parser.add_argument("--clean", action="store_true")
+    parser.add_argument("--random", action="store_true",
+                        help="the two missing cells of the design: a trained mixture "
+                             "over the depths of a RANDOM encoder, frozen and unfrozen")
     parser.add_argument("--seeds", type=int, default=1,
                         help="repetitions per arm. 1 gives the three arms asked for; 4 "
                              "gives 12 and fills a node's tiles, which is free in "
                              "wall-clock and is the only defence against reading a "
                              "difference that is inside seed noise.")
     cli = parser.parse_args()
+
+    global RANDOM_INIT, OUT, STAMP, RUN_PREFIX
+    if cli.random:
+        RANDOM_INIT = True
+        OUT = REPO / "configs" / "sweep-layermix-random"
+        STAMP = OUT / ".template"
+        RUN_PREFIX = "v2_lmixrand-"
 
     if not TEMPLATE.exists():
         raise SystemExit(f"no template at {TEMPLATE}")
