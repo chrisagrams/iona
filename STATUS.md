@@ -121,6 +121,55 @@ The whole 100m grid spans 0.019 against the 50m grid's 0.26. Once the encoder is
 at a sane rate, the larger model barely cares about these hyperparameters, which is the
 strongest argument that narrowing the grid was right.
 
+## The frozen embedding never carried peptide identity: random scores the same
+
+Job 8842086 ran the control that should have come first. A RANDOMLY INITIALISED encoder
+-- same architecture, no pretrained weights -- on the same 1167 spectra and 99 groups:
+
+| encoder | separation ratio |
+| --- | --- |
+| 50m random init | **1.35** |
+| 100m random init | **1.35** |
+| 200m random init | **1.35** |
+| 50m pretrained, its own frontier | 1.35 |
+| 100m pretrained, its own frontier | 1.36 |
+| 200m pretrained, its own frontier | 1.35 |
+
+**The pretrained encoders are indistinguishable from untrained ones.** Every layer of the
+random models reads 1.35 as well -- there is no depth structure to find because there is
+nothing there. Replicate spectra of one peptide have similar peaks, so ANY function that
+does not actively destroy that similarity scores about 1.35 on this metric. That is the
+floor, and essentially every frozen number this project has reported sits on it.
+
+This retro-explains the whole line at once. Pooling mode moved 1.29 to 1.44; layer choice
+moved 1.35 to 1.53; scale moved nothing; the teacher space sat at 1.34. All of those are
+noise around a random-network floor, which is why none of them ever reached the reranker
+and why the embedding measured as actively harmful (-0.109 hit@1). We were tuning the
+readout of a representation that did not contain the signal.
+
+Two things survive, and they are the only two:
+
+**Contrastive training genuinely creates the structure.** 6.94 against a 1.35 floor is
+not a readout effect. Training is the whole of the difference, and the earlier "+418%
+against +14%" understated it, because the +14% was measurement noise on a floor.
+
+**Pretraining briefly creates this structure and then destroys it.** The 50m at 10,000
+steps reads 1.67, which is 0.32 ABOVE the random floor and the only frozen measurement
+in this project that clearly clears it. By 50,000 steps it is back to 1.33. The 100m and
+200m show the same sign at 10,000 (1.42, 1.43) and also decay to the floor. So the
+masked-peak objective passes through a phase where the representation carries replicate
+identity, and then trains it away -- it is not that the information was never learned.
+
+WHAT THIS CHANGES. "Read a better layer", "pool differently", "use a bigger encoder" and
+"pretrain longer" are all closed: there is nothing to read. The open questions are
+whether the 10,000-step checkpoint is a better CONTRASTIVE starting point than the
+frontier one, and whether a learned mixture can find anything the fixed readouts could
+not -- which is what configs/sweep-layermix measures, now that its mixture can actually
+move.
+
+CALIBRATION, for anything reported later: on this data and metric the floor is 1.35, not
+1.0. A ratio must be read against 1.35.
+
 ## The embedding direction has exhausted its identified levers
 
 Every lever tried, and what it did to the separation ratio (pretrained = 1.34):

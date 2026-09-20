@@ -61,6 +61,7 @@ RUN_PREFIX = "v2_lmix-"
 
 # name -> encoder learning rate as a multiple of the mixture's
 SCALES = {"frozen": "0.0", "els03": "0.3", "els10": "1.0"}
+LAYER_MIX_LR = "1e-3"
 
 
 def arm_name(scale: str, seed: str) -> str:
@@ -72,6 +73,10 @@ def render_arm(scale: str, seed: str) -> tuple[str, str]:
     overrides = {
         "--pooling": "layer_mix",
         "--layer_mix_norm": "true",
+        # Not the encoder's rate: see ContrastiveModelArguments.layer_mix_lr. At 2e-5
+        # the mixture stays uniform for the whole run and the arm silently measures an
+        # unweighted average of every layer.
+        "--layer_mix_lr": LAYER_MIX_LR,
         "--encoder_lr_scale": SCALES[scale],
         # See the module docstring: hooks cannot read intermediates under checkpointing.
         "--gradient_checkpointing": "false",

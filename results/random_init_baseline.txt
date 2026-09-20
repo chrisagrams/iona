@@ -1,0 +1,6 @@
+# Random-init control (job 8842086): same architecture, no pretrained weights.
+# Every layer reads the same. This is the floor any frozen ratio must be read against.
+
+50m mean
+100m mean
+200m mean
