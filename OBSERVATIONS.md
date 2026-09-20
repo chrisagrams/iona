@@ -113,16 +113,48 @@ That is the cleanest statement of the non-linearity finding. Pretraining deposit
 structure that no readout can extract and that training cannot create from scratch --
 it can only be unlocked, by fine-tuning the weights that hold it.
 
-## Fine-tuning is about how much EXTRA training is needed, not about a ceiling
+## Pretraining is worth more than 10x the fine-tuning budget, and probably far more
 
-Worth stating because the random-init control is easy to over-read. It does not show
-that a randomly initialised encoder could never learn this task; with enough data and
-steps it very likely could. What it shows is the thing that actually matters in
-practice: at the budget we can afford, pretrained reaches 7.83 and random reaches
-nothing. That IS the value of pretraining -- less extra training to a good result --
-and the budget-limited comparison is the relevant one, not a confound in it.
+The value of pretraining is measured in extra training saved, not in a ceiling a random
+encoder could never reach. Job 8843262 put numbers on it by varying only the budget on a
+random encoder, at the best pretrained arm's hyperparameters:
 
----
+| budget | steps | random encoder | pretrained |
+| --- | --- | --- | --- |
+| 3 epochs | 1,347 | **1.35** (the floor) | **7.83** |
+| 10 epochs | 4,490 | 2.10 | -- |
+| 30 epochs | 13,470 | **2.73** | -- |
+
+A random encoder DOES learn. At 10x the budget it reaches 2.73, well clear of the 1.35
+floor. So the earlier statement that "the contrastive loss achieves literally nothing on
+a random encoder" was a claim about 1,347 steps and not about random encoders, and it
+was over-claimed on a single budget point.
+
+What the curve actually says. The ratio climbs roughly linearly in log(steps) at about
+1.38 per decade, and the increments are already shrinking (+1.43 then +1.32 per decade).
+Pretrained reaches 7.83 at 1,347 steps; random is at 2.73 after ten times that. So
+pretraining is worth MORE THAN 10x the fine-tuning budget, which is the number this
+experiment establishes.
+
+A naive log-linear extrapolation says random would need ~7e7 steps -- around 50,000x --
+to reach 7.83. DO NOT USE THAT NUMBER. Log-linear scaling has no reason to hold four
+decades past the data, and the corpus has only 898 training groups, so the curve will
+saturate somewhere well before then. The honest statement is the measured one: >10x, and
+the gap is not closing fast enough for a 10x budget to matter.
+
+The denoise side tells the same story with a much smaller magnitude, which is the
+informative contrast:
+
+| objective | supervision available | pretrained | random, equal budget | gap |
+| --- | --- | --- | --- | --- |
+| denoise | 87k labelled peaks | 0.9320 | 0.9001 | +0.032 |
+| contrastive | 898 replicate groups | 7.83 | 1.35 | +6.5 |
+
+Pretraining is a modest advantage where supervision is abundant and a near-total one
+where it is scarce -- consistent with pretraining substituting for labelled data. Note
+the scratch denoise grid's top five arms are ALL 8 epochs against the pretrained grid's
+fixed 4, so a random encoder wants more training on that objective too, and +0.032 is an
+upper bound on pretraining's value there rather than a settled figure.
 
 ## KL regularisation is not needed in general; it prevents collapse at high learning rates
 
