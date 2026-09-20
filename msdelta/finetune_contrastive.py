@@ -47,6 +47,20 @@ class ContrastiveModelArguments:
                           "dominate by magnitude alone and the learned weights are "
                           "decorative."},
     )
+    layer_mix_lr: float = field(
+        default=1e-3,
+        metadata={"help": "Learning rate for the layer-mixture logits ONLY. They are a "
+                          "different kind of parameter from network weights and their "
+                          "scale is set by softmax geometry, not by the encoder: they "
+                          "start equal and must travel O(1-5) apart before the mixture "
+                          "is anything but uniform. At the encoder's 2e-5 that takes "
+                          "~150k steps, so a full run would have measured an unweighted "
+                          "average of all layers while appearing to learn one. At 1e-2 "
+                          "it collapses onto a single layer inside 1000 steps, which "
+                          "throws away the mixture just as completely. mix/entropy in "
+                          "the log says which failure is happening: pinned at ln(L) is "
+                          "too slow, crashing to 0 early is too fast."},
+    )
     encoder_lr_scale: float = field(
         default=1.0,
         metadata={"help": "Encoder learning rate as a multiple of the head's. 0 freezes "
@@ -101,13 +115,15 @@ class ContrastiveTrainer(Trainer):
     """Standard Trainer, with the PK sampler and the loss components surfaced."""
 
     def __init__(self, *args, groups=None, groups_per_batch=12, replicates=4,
-                 gradcache_chunk=0, encoder_lr_scale=1.0, **kwargs):
+                 gradcache_chunk=0, encoder_lr_scale=1.0, layer_mix_lr=None,
+                 **kwargs):
         super().__init__(*args, **kwargs)
         self.groups = groups
         self.groups_per_batch = groups_per_batch
         self.replicates = replicates
         self.gradcache_chunk = gradcache_chunk
         self.encoder_lr_scale = encoder_lr_scale
+        self.layer_mix_lr = layer_mix_lr
 
     def create_optimizer(self):
         """Encoder and readout in separate groups, so one can move slower than the other.
@@ -116,19 +132,33 @@ class ContrastiveTrainer(Trainer):
         coming from the readout or from moving the encoder? Only comparing the same
         readout at several encoder rates answers that.
         """
-        if self.optimizer is not None or self.encoder_lr_scale == 1.0:
+        if self.optimizer is not None:
+            return self.optimizer
+        if self.encoder_lr_scale == 1.0 and self.layer_mix_lr is None:
             return super().create_optimizer()
         optimizer_class, kwargs = type(self).get_optimizer_cls_and_kwargs(self.args, self.model)
         kwargs.pop("lr", None)
-        encoder, readout = [], []
+        encoder, readout, mixture = [], [], []
         for name, parameter in self.model.named_parameters():
             if not parameter.requires_grad:
                 continue
-            (encoder if name.startswith("model.") else readout).append(parameter)
-        groups = [{"params": readout, "lr": self.args.learning_rate}]
+            if name.startswith("layer_mix."):
+                mixture.append(parameter)
+            elif name.startswith("model."):
+                encoder.append(parameter)
+            else:
+                readout.append(parameter)
+        groups = []
         if encoder:
-            groups.insert(0, {"params": encoder,
-                              "lr": self.args.learning_rate * self.encoder_lr_scale})
+            groups.append({"params": encoder,
+                           "lr": self.args.learning_rate * self.encoder_lr_scale})
+        if readout:
+            groups.append({"params": readout, "lr": self.args.learning_rate})
+        if mixture:
+            groups.append({"params": mixture,
+                           "lr": self.layer_mix_lr or self.args.learning_rate})
+        if not groups:
+            raise ValueError("nothing to optimise: every parameter is frozen")
         self.optimizer = optimizer_class(groups, **kwargs)
         return self.optimizer
 
@@ -146,6 +176,7 @@ class ContrastiveTrainer(Trainer):
         weights = mixer.weights.detach().float().cpu()
         self.log({f"mix/layer{i:02d}": float(w) for i, w in enumerate(weights)}
                  | {"mix/argmax": int(weights.argmax()),
+                    "mix/max": float(weights.max()),
                     "mix/entropy": float(-(weights * weights.clamp_min(1e-9).log()).sum()),
                     "mix/gamma": float(mixer.gamma) if mixer.gamma is not None else 1.0})
 
@@ -293,7 +324,9 @@ def main(argv: list[str] | None = None) -> int:
             groups=groups, groups_per_batch=data_args.groups_per_batch,
             replicates=data_args.replicates,
             gradcache_chunk=data_args.gradcache_chunk,
-            encoder_lr_scale=model_args.encoder_lr_scale)
+            encoder_lr_scale=model_args.encoder_lr_scale,
+            layer_mix_lr=(model_args.layer_mix_lr
+                          if model_args.pooling == "layer_mix" else None))
         trainer.add_callback(MemoryProbe(every=50))
         trainer.train()
 
