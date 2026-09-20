@@ -68,7 +68,17 @@ class TestFinetuneConfigs:
         """Denoise and alignment metrics are not comparable and must not share a project."""
         flags = _flags(path)
         assert flags.get("--wandb_entity") == "CS_Pharm"
-        expected = ("msdelta-finetune-align" if "align" in path.parent.name
+        # One project per objective, because the metrics are not comparable: per-peak
+        # AUROC, cross-modal hit@1 and an embedding separation ratio answer different
+        # questions and sharing a project invites exactly the comparison that should
+        # not be made.
+        # align is checked FIRST: finetune-align-contrastive is an ALIGNMENT run whose
+        # metric is cross-modal hit@1 -- it merely uses a contrastively-trained teacher --
+        # so it belongs with the other alignment runs it must be compared against, not
+        # with the encoder runs measured by separation ratio.
+        name = path.parent.name
+        expected = ("msdelta-finetune-align" if "align" in name
+                    else "msdelta-finetune-contrastive" if "contrastive" in name
                     else "msdelta-finetune-denoise")
         assert flags.get("--wandb_project") == expected
 

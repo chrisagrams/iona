@@ -34,5 +34,5 @@
 --ddp_find_unused_parameters false
 --seed 0
 --report_to wandb
---wandb_project msdelta-finetune-align
+--wandb_project msdelta-finetune-contrastive
 --wandb_entity CS_Pharm
