@@ -233,28 +233,45 @@ rather than make the comparison fair.
       "pretrained capacity helps" if a from-scratch 100m does NOT show the same gain --
       otherwise it is just a bigger model fitting the labels better.
 
-## FT5. Seed replication belongs on the winning config, not the baseline — **Open**
+## FT5. Multi-seed denoise on every scale — **Open, deprioritised**
 
-Seeds 1-4 are running against the pre-sweep baseline (lr 5e-5, encoder_lr_scale 0.1,
-2 epochs, head 128), which was a guess rather than a tuned point. Those runs give a noise
-floor, but it is the noise floor of a configuration we are about to replace.
+Not urgent while the 200m, 400m and scratch grids are queued; those answer questions we
+do not have answers to at all, where this sharpens ones we do. Keep it on the list.
 
-Once the grid picks a winner, re-run the seed replication on THAT config. Two reasons it
-is not optional:
+WHY IT IS NOT OPTIONAL EVENTUALLY. Every grid ranks its arms on ONE seed each, and the
+gaps being ranked are tiny:
 
-  The grid ranks 72 arms on one seed each. If seed spread is comparable to the spread
-  between neighbouring arms, the ranking is largely noise and the "winner" is whichever
-  arm drew a good seed. The replication is what licenses calling it a winner at all.
+  50m, 216 arms: the top eight span 0.0023 test AUROC, across three head widths and two
+                 encoder_lr_scales. h128/h256/h512 at the same lr and scale gave
+                 0.9319 / 0.9319 / 0.9320.
+  100m, 12 arms: the top five span 0.0012, across lr 5e-5 to 5e-4 and both batch sizes.
 
-  Seed sensitivity is not constant across the space. A high learning rate or an unfrozen
-  encoder can be stable at one seed and divergent at another, so the baseline's spread
-  does not transfer to a more aggressive winning config.
+If seed spread is comparable to those, the rankings are largely noise and each "winner"
+is whichever arm drew a good seed. The replication is what licenses the word winner. It
+also decides whether 100m's 0.9403 genuinely beats 50m's 0.9320 -- a gap of 0.0083, only
+about 4x the within-grid top-cluster spread.
 
-- [ ] After the grid, run >=5 seeds on the winning arm and report mean +/- sd.
-- [ ] Compare that spread against the gap between the top few arms. If they overlap, say
-      so plainly and treat the top group as tied rather than ranked.
-- [ ] Keep the existing baseline seed runs as the comparison point, so the two spreads
-      can be read against each other.
+SHAPE. `sweeps/make_seed_grid.py --sizes ... --seeds N`, which now takes any set of
+scales. Scales x seeds wants to be a multiple of 12 to fill a node-wave exactly:
+
+  50m + 100m, 6 seeds     12 arms, one wave   <- generated and ready now
+  all four scales, 3 seeds 12 arms, one wave
+  all four scales, 6 seeds 24 arms, two waves <- the version worth having
+
+DEPENDENCY, and the reason it cannot just be run now: each scale must repeat its OWN
+winning configuration, and 200m and 400m have not got one yet -- their grids are 8841992
+and 8842147. Generating 200m/400m seed arms today would only repeat a guess. Run this
+after those land.
+
+What varies is `--seed` alone: head initialisation, data order, dropout. The
+train/validation/test split comes from the dataset, not the seed, so every arm is scored
+on identical rows and the spread measures training noise and nothing else.
+
+- [ ] After the 200m and 400m grids report, regenerate with all four scales.
+- [ ] Report mean +/- sd per scale, and say plainly whether the top group of each grid
+      is tied rather than ranked.
+- [ ] Only then compare scales to each other, normalised by compute budget
+      (`results/checkpoint_provenance.txt` has the pretraining step each started from).
 
 ## FT2. Test metrics never reach W&B — **NOT A BUG (closed)**
 

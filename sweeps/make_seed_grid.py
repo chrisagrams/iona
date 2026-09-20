@@ -50,7 +50,7 @@ OUT = REPO / "configs" / "sweep-denoise-seeds"
 STAMP = OUT / ".template"
 RUN_PREFIX = "v2_dnseed-"
 
-SIZES = ("50m", "100m")
+SIZES = ("50m", "100m")      # overridden by --sizes
 SEEDS = ("1", "2", "3", "4", "5", "6")
 # The configuration both grids selected, held fixed. per_device 1 x 12 tiles x 1
 # accumulation = effective batch 12, which is what b12 meant in the grids.
@@ -114,7 +114,18 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--check", action="store_true")
     parser.add_argument("--clean", action="store_true")
+    parser.add_argument("--sizes", default="50m,100m",
+                        help="comma-separated scales. Defaults to the two whose grids "
+                             "have finished and named a winner; 200m and 400m can only "
+                             "join once theirs do, because the point is to repeat each "
+                             "scale's OWN winning configuration.")
+    parser.add_argument("--seeds", type=int, default=6,
+                        help="repetitions per scale. scales x seeds should be a "
+                             "multiple of 12 to fill a node-wave exactly.")
+    global SIZES, SEEDS
     cli = parser.parse_args()
+    SIZES = tuple(x.strip() for x in cli.sizes.split(",") if x.strip())
+    SEEDS = tuple(str(i + 1) for i in range(cli.seeds))
 
     for size in SIZES:
         if not template_for(size).exists():
