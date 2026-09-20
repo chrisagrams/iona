@@ -97,6 +97,7 @@ declare -A GRID_CHECK=(
     [configs/sweep-denoise]="sweeps/make_denoise_grid.py --check"
     [configs/sweep-denoise-100m]="sweeps/make_denoise_size_grid.py --size 100m --check"
     [configs/sweep-denoise-200m]="sweeps/make_denoise_size_grid.py --size 200m --check"
+    [configs/sweep-denoise-400m]="sweeps/make_denoise_size_grid.py --size 400m --check"
     [configs/sweep-denoise-scratch]="sweeps/make_scratch_grid.py --check"
     [configs/sweep-denoise-seeds]="sweeps/make_seed_grid.py --check"
     [configs/sweep-layermix]="sweeps/make_layermix_grid.py --check"
