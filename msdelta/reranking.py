@@ -494,6 +494,12 @@ def group_separation_metrics(embeddings: Tensor, groups: np.ndarray,
         f"{prefix}/out_max": float(outside.max()),
         # Positive means replicates are closer to each other than to other peptides.
         f"{prefix}/margin": float(outside.mean() - inside.mean()),
+        # Rank arms by THIS, not by margin. Margin is a difference, so it rises when a
+        # model simply inflates the whole space, and the contrastive sweep produced
+        # exactly that trap: lr1e4_kl0_t02 took the best margin (+0.278) with a ratio of
+        # 2.01 while lr1e4_kl0_t007 clustered far better at 2.95 for a margin 0.0008
+        # lower. The ratio is scale-invariant and cannot be bought by expansion.
+        f"{prefix}/ratio": float(outside.mean() / inside.mean().clamp_min(1e-9)),
         # 1.0 would mean every group is perfectly separated from every other.
         f"{prefix}/clean": clean / max(len(worst_in), 1),
         f"{prefix}/worst_in_mean": float(np.mean(worst_in)) if worst_in else 0.0,
