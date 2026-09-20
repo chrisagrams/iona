@@ -18,7 +18,9 @@ from pathlib import Path
 
 import numpy as np
 import torch
-from transformers import HfArgumentParser, Trainer, TrainingArguments, set_seed
+from torch import nn
+from transformers import (HfArgumentParser, Trainer, TrainerCallback, TrainingArguments,
+                          set_seed)
 
 from msdelta.contrastive import (GroupBatchSampler, MSDeltaForContrastive,
                                  gradcache_step,
@@ -109,6 +111,50 @@ class ContrastiveTrainingArguments(TrainingArguments):
     wandb_project: str | None = None
     wandb_entity: str | None = None
     run_description: str | None = None
+
+
+class SaveEncoderCallback(TrainerCallback):
+    """Write a loadable HF encoder into every checkpoint the Trainer saves.
+
+    MSDeltaForContrastive is a plain nn.Module wrapping a real PreTrainedModel, so the
+    Trainer saves it as a bare state dict: `checkpoint-N/model.safetensors` carries
+    `model.*` and `layer_mix.*` keys and no config.json, and nothing can load it without
+    first reconstructing the wrapper by hand. The end-of-run `final/` is fine because
+    main() saves the INNER model there explicitly; the intermediate checkpoints are the
+    gap, and they are the ones you want when a run dies or when a mid-training encoder
+    turns out to be the interesting one.
+
+    Making the wrapper a PreTrainedModel would fix this properly, and should be done if
+    this line survives -- it also brings resume and best-model selection. That is a
+    config class, a from_pretrained that rebuilds the inner model, and care to keep the
+    frozen reference encoder out of the serialised weights (it is a duplicate of the
+    pretrained encoder and would roughly double every checkpoint). This callback buys
+    the loadable artifact without any of that.
+
+    The unwrapped model is captured at construction rather than taken from kwargs,
+    because by save time the Trainer's model may be behind DeepSpeed or DDP.
+    """
+
+    def __init__(self, model: nn.Module, processor=None):
+        self.model = model
+        self.processor = processor
+
+    def on_save(self, args, state, control, **kwargs):
+        if not state.is_world_process_zero:
+            return
+        inner = getattr(self.model, "model", self.model)
+        if not hasattr(inner, "save_pretrained"):
+            return
+        target = Path(args.output_dir) / f"checkpoint-{state.global_step}" / "encoder"
+        try:
+            inner.save_pretrained(str(target))
+            if self.processor is not None:
+                self.processor.save_pretrained(str(target))
+        except Exception as error:
+            # A failed side-artifact must not take down a training run whose real
+            # checkpoint the Trainer has already written.
+            print(f"[contrastive] could not save encoder into {target}: {error}",
+                  flush=True)
 
 
 class ContrastiveTrainer(Trainer):
@@ -328,6 +374,7 @@ def main(argv: list[str] | None = None) -> int:
             layer_mix_lr=(model_args.layer_mix_lr
                           if model_args.pooling == "layer_mix" else None))
         trainer.add_callback(MemoryProbe(every=50))
+        trainer.add_callback(SaveEncoderCallback(model, processor))
         trainer.train()
 
         # The number this whole exercise exists to move: does the space separate peptides?
