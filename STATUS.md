@@ -86,6 +86,7 @@ Every lever tried, and what it did to the separation ratio (pretrained = 1.34):
 | more negatives (GradCache, batch 64) | best 5.70, BELOW the batch-4 best |
 | more steps at batch 64 | 5.70 -> 5.35 -> 4.37 |
 | intensity-weighted pooling, frozen | 1.43 -> 1.44, nothing |
+| denoiser P(signal) pooling, frozen | 1.34 -> **1.46**, the best readout available, and still nothing next to 6.94 |
 | `mean` instead of `mean+max`, frozen | 1.34 -> 1.43, free but small |
 | contrastive teacher -> alignment | cross-modal hit@1 +79% |
 | that embedding -> reranker | **-0.109 hit@1**, five paired seeds |
