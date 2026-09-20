@@ -84,6 +84,15 @@ def main() -> int:
             handles.append(block.register_forward_hook(capture(index)))
         print(f"[pool] hooked {len(handles)} encoder layers", flush=True)
 
+    # Separately captured, and NOT added to layer_outputs, so the per-layer table keeps
+    # its existing numbering (layerNN == block NN) and stays comparable with job
+    # 8841973. It exists only so the uniform-mixture baseline can average the same
+    # eleven things LayerMixPooler does -- ten blocks plus the pre-block embedding.
+    embed_output: dict[int, Tensor] = {}
+    if cli.layers:
+        handles.append(encoder.embed.register_forward_hook(
+            lambda _m, _i, out: embed_output.__setitem__(0, out)))
+
     collator = AlignmentCollator()
     modes = ["mean", "mean+max", "weighted_mean", "weighted_mean+max"]
     pooled: dict[str, list] = {m: [] for m in modes}
@@ -123,6 +132,24 @@ def main() -> int:
                     pooled[f"{mode}/denoised"].append(
                         pool_sequence(hidden, batch["attention_mask"], mode,
                                       weights=signal).float().cpu())
+            # The UNTRAINED uniform mixture: exactly what LayerMixPooler computes at
+            # initialisation, before any of its weights have moved. Without it the
+            # trained frozen arm's 1.49 cannot be read -- a trained readout that lands
+            # where the untrained one already was has achieved nothing, and there was
+            # no way to tell those apart.
+            if cli.layers and layer_outputs:
+                depths = ([embed_output[0]] if embed_output else []) \
+                    + [layer_outputs[i] for i in sorted(layer_outputs)]
+                # LayerNorm each depth with no affine parameters, matching the pooler:
+                # raw block outputs differ by an order of magnitude across depth, so an
+                # unnormalised average is just the largest layer.
+                normed = torch.stack([
+                    torch.nn.functional.layer_norm(h, (h.shape[-1],)) for h in depths
+                ], dim=0)
+                uniform = normed.mean(0)      # softmax(zeros) is exactly uniform
+                pooled.setdefault("layer_mix/uniform", []).append(
+                    pool_sequence(uniform, batch["attention_mask"], "mean").float().cpu())
+
             for index, states in layer_outputs.items():
                 # `mean` only for the layer sweep: the +max variants were uniformly
                 # worse on the output layer and doubling the table would hide the axis
