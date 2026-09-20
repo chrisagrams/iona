@@ -40,6 +40,49 @@ comparison has to go through an actual fine-tune.
 
 ---
 
+## Blending encoder depths is worse than using one, and the readout axis is closed
+
+Job 8842351 ran the layer mixture with the learning rate corrected so it could not
+saturate. It produced a real blend this time -- final entropy 2.065 against 2.398 for
+uniform and 0 for one-hot -- and the blend is WORSE than the collapsed run at every
+encoder learning rate:
+
+| arm | v1, collapsed to one layer | v2, genuine blend |
+| --- | --- | --- |
+| frozen | 1.52 | **1.49** |
+| els03 (0.3x) | 3.46 | **2.18** |
+| els10 (1.0x) | 4.28 | **4.14** |
+
+Both sit far below the plain final-layer `mean+max` contrastive result. So mixing depths
+does not help, and combining them is actively worse than committing to one -- most
+visibly at els03, 3.46 to 2.18.
+
+The mixture learned the RIGHT thing about where the signal is and still lost. Its weight
+concentrated on the top of the stack -- indices 6 to 10 hold about 83% of the mass, peak
+at index 8 -- which is exactly the region the frozen layer probe independently found
+best (blocks 5-8, ratios 1.51-1.53). It identified the useful depths correctly and
+averaging them still degraded the embedding.
+
+LIKELY MECHANISM, not established: LayerNorm puts every depth on a comparable scale but
+cannot align their DIRECTIONS. Summing representations whose useful axes point
+differently partially cancels them, so a weighted average of several good layers can be
+worse than the best one alone. This would also explain why the effect grows with the
+number of depths carrying real weight.
+
+WHAT THIS CLOSES. Layer choice, pooling mode, peak weighting, model scale, pretraining
+duration and now a trained mixture over depths have all been tested. Nothing on the
+readout axis moves the embedding. Combined with the non-linearity finding above, the
+reason is clear: the information is not recoverable by ANY linear function of the
+activations, so no amount of choosing or combining them helps.
+
+CAVEAT ON THE COMPARISON. The layer-mix arms run at the template's lr 2e-5 and KL 100,
+while the 7.83 figure is the best arm of a sweep over lr, KL and temperature. The
+nearest matched grid point is lr2e5_kl10_t007 at 6.21. Layer-mix is worse either way,
+but 4.14 against 6.21 is the fair comparison, not 4.14 against 7.83.
+
+I predicted a genuine blend would land close to the final-layer result rather than beat
+it. It landed well below it. The direction was right and the magnitude was not.
+
 ## Fine-tuning is about how much EXTRA training is needed, not about a ceiling
 
 Worth stating because the random-init control is easy to over-read. It does not show

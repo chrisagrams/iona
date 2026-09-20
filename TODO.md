@@ -463,7 +463,19 @@ Contrastive baseline re-run under the corrected schedule: job 8842154. Until it 
 every contrastive number in STATUS.md -- including the 6.94 -- was produced under the
 warmup-only schedule.
 
-## FT11. Make the layer mixture resist collapse structurally — **Contingent on 8842351**
+## FT11. Make the layer mixture resist collapse structurally — **CLOSED, not needed**
+
+Job 8842351 produced a genuine blend at `layer_mix_lr 3e-3` without any of this:
+final entropy 2.065 against 2.398 uniform, weight spread over five depths. The
+decision table below resolved to "nothing needed, the result stands".
+
+And the result is that blending is WORSE than one layer -- 1.49 / 2.18 / 4.14 against
+the collapsed run's 1.52 / 3.46 / 4.28. So there is nothing to protect: making the
+mixture harder to collapse would only make it more reliably worse. Kept for the record
+because the options are correct if a mixture is ever wanted for another purpose.
+
+Original ticket follows.
+
 
 Only worth doing if the corrected layer-mix run lands ambiguously. Read `mix/entropy`
 at the end of each arm first (uniform over 11 depths is ln(11) = 2.398, one-hot is 0):
