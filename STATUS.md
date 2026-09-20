@@ -75,6 +75,47 @@ once there is enough training to overfit, and a smoke test would have locked in 
 answer. And rank arms by RATIO, not margin: margin is a difference and rises when a model
 merely inflates the space, which one arm did.
 
+## Denoise: the grid is finished and 100m beats 50m
+
+216 arms at 50m, then 12 at 100m narrowed by what the first grid measured.
+
+| | best test AUROC |
+| --- | --- |
+| free raw-intensity baseline | ~0.75 |
+| first 700-step run | 0.8628 |
+| 50m grid, 212 arms | 0.9320 (`lr2e4_es05_ep4_h512_b12`) |
+| **100m grid, 12 arms** | **0.9403** (`lr2e4_es05_b12`) |
+
+What the 50m grid established, by mean AUROC across arms:
+
+| axis | effect |
+| --- | --- |
+| `encoder_lr_scale` | 0.760 frozen -> 0.872 at full rate. The largest factor by far |
+| `learning_rate` | 0.776 -> 0.885 at 2e-4, monotone |
+| batch | b144 0.813, b48 0.831, b12 0.849 |
+| `num_train_epochs` | 0.824 -> 0.838 |
+| `head_hidden_size` | 0.828 / 0.832 / 0.834 -- nothing |
+
+**Fine-tuning the encoder is the whole game.** Frozen arms average 0.760, barely above the
+free baseline, so what the pretrained model contributes comes from ADAPTING it rather
+than from its features as they stand -- the same conclusion the reranking work reached
+from the opposite direction.
+
+Three things the 100m grid settled that the 50m grid could not:
+
+- **2e-4 is a real interior optimum.** It was the best value AND the boundary at 50m, so
+  the 100m grid extended to 5e-4, which is worse (0.9332 against 0.9392). Extending was
+  the point of including it.
+- **Keeping 5e-5 was sound reasoning and a wrong hypothesis.** Larger models often prefer
+  lower rates; this one does not.
+- **The b12 advantage is 50m-specific.** It beat b48 by 0.018 at 50m and loses to it by
+  0.001 at 100m, so "more optimizer steps win" was about to become folklore on one data
+  point.
+
+The whole 100m grid spans 0.019 against the 50m grid's 0.26. Once the encoder is unfrozen
+at a sane rate, the larger model barely cares about these hyperparameters, which is the
+strongest argument that narrowing the grid was right.
+
 ## The embedding direction has exhausted its identified levers
 
 Every lever tried, and what it did to the separation ratio (pretrained = 1.34):
@@ -84,7 +125,7 @@ Every lever tried, and what it did to the separation ratio (pretrained = 1.34):
 | contrastive + KL, batch 4 | 1.34 -> **6.94**, the best figure reached |
 | more steps at batch 4 | 6.94 -> 4.82 -> 4.46 across 3, 10 and 50 epochs |
 | more negatives (GradCache, batch 64) | best 5.70, BELOW the batch-4 best |
-| more steps at batch 64 | 5.70 -> 5.35 -> 4.37 |
+| more steps at batch 64, to 17,893 | 5.70 -> 5.35 -> 4.37 -> 4.34 -> **3.35**, monotone |
 | intensity-weighted pooling, frozen | 1.43 -> 1.44, nothing |
 | denoiser P(signal) pooling, frozen | 1.34 -> **1.46**, the best readout available, and still nothing next to 6.94 |
 | reading layer 8 instead of the output | 1.43 -> **1.53**; the stack peaks at 8 and DROPS at 9 |
