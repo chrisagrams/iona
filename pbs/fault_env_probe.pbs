@@ -1,0 +1,72 @@
+#!/bin/bash -l
+# FT9: test the documented workarounds for intel/compute-runtime#973.
+#
+#   qsub -q debug -l select=1 -l walltime=00:50:00 pbs/fault_env_probe.pbs
+#
+# That issue describes a per-dispatch private (scratch) surface that is cached at the
+# command-stream level but only declared resident when first allocated. When
+# evictUnusedAllocations() sweeps, it unbinds the surface, and later dispatches reuse the
+# cached allocation without re-binding -- so the kernel's private base points at an
+# unmapped GPU VA. It matches our fault in every respect we can check: a fixed high
+# address per tile (0xff0N_ffffe00000), NotPresent on a READ, a step count that varies
+# between runs, and a fault that arrives later when we reduce allocation churn.
+#
+# The issue reports it as SILENT CORRUPTION on Arc, which has scratch pages. Aurora's PVC
+# does not, so the same unmapped private read faults instead. Same cause, louder symptom.
+#
+# Each variant runs the real 12-tile alignment briefly under one environment. A fault
+# kills only that variant.
+
+#PBS -N msdelta-faultenv
+#PBS -A UIC-HPC
+#PBS -l place=scatter
+#PBS -l filesystems=home:flare
+#PBS -j oe
+#PBS -o pbs/logs/
+
+set -uo pipefail
+REPO_DIR=${REPO_DIR:-${PBS_O_WORKDIR:-$PWD}}
+cd "$REPO_DIR"
+JOB=${PBS_JOBID:-local}; JOB=${JOB%%.*}
+CACHE=${PRECOMPUTE_CACHE:-/lus/flare/projects/UIC-HPC/khuss/msdelta/align-targets-50m}
+ARGS=${ARGS_FILE:-configs/finetune-align-50m-ds/training.args}
+STEPS=${MAX_STEPS:-400}
+
+# name : extra environment
+VARIANTS=${VARIANTS:-baseline immediate_off resident_always both}
+declare -A ENVS=(
+  [baseline]=""
+  # The issue's primary workaround: regular rather than immediate command lists, so the
+  # per-submission cache is freed on reset and the surface is reallocated fresh.
+  [immediate_off]="UR_L0_USE_IMMEDIATE_COMMANDLISTS=0"
+  # Debug key that binds every allocation at flush, so an evicted surface is re-bound.
+  [resident_always]="NEOReadDebugKeys=1 MakeEachAllocationResident=2"
+  [both]="UR_L0_USE_IMMEDIATE_COMMANDLISTS=0 NEOReadDebugKeys=1 MakeEachAllocationResident=2"
+)
+
+survived=(); faulted=()
+for variant in $VARIANTS; do
+    log=$REPO_DIR/pbs/logs/faultenv-$variant-$JOB.log
+    echo "=== $variant : ${ENVS[$variant]:-<none>}"
+    # shellcheck disable=SC2086
+    env ${ENVS[$variant]:-} \
+        MODULE=msdelta.finetune_align ARGS_FILE="$ARGS" PRECOMPUTE_CACHE="$CACHE" \
+        MAX_STEPS="$STEPS" RUN_NAME="faultenv-$variant-$JOB" \
+        REPO_DIR="$REPO_DIR" PBS_NODEFILE="$PBS_NODEFILE" PBS_JOBID="$PBS_JOBID" \
+        bash pbs/aurora-finetune.pbs >"$log" 2>&1
+    status=$?
+    faults=$(grep -ac "Segmentation fault from GPU" "$log")
+    reached=$(tr '\r' '\n' < "$log" | grep -oaE "[0-9]+/[0-9]+ \[" | tail -1 | tr -d ' [')
+    if [[ $faults -eq 0 && $status -eq 0 ]]; then
+        echo "  [ok    ] $variant  reached ${reached:-?}"
+        survived+=("$variant")
+    else
+        echo "  [FAULT ] $variant  faults=$faults exit=$status reached ${reached:-?}"
+        faulted+=("$variant")
+    fi
+done
+
+echo
+echo "=== survived: ${survived[*]:-none}"
+echo "=== faulted : ${faulted[*]:-none}"
+exit 0
