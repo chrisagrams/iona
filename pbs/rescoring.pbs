@@ -28,10 +28,20 @@ set +u
 source /usr/share/lmod/lmod/init/bash
 module load "${FRAMEWORKS_MODULE:-frameworks/2025.3.1}"
 set -u
+# Level Zero settings, the same ones every other launcher here sets before running
+# python. This job is CPU work, but importing torch still initialises XPU, and on a
+# compute node without the flat hierarchy and an affinity mask that enumeration
+# segfaults before Python can report anything -- jobs 8840898 and 8840907 died with a
+# bare "Segmentation fault" and no traceback even under -X faulthandler, while every
+# component ran fine on a login node. One tile is plenty; nothing here uses the GPU.
+export ONEAPI_DEVICE_SELECTOR=level_zero:gpu
+export ZE_FLAT_DEVICE_HIERARCHY=FLAT
+export ZE_AFFINITY_MASK=${ZE_AFFINITY_MASK:-0}
 export PYTHONPATH=$REPO_DIR${PYTHONPATH:+:$PYTHONPATH}
 export HF_HOME=${HF_HOME:-$SCRATCH/huggingface}
 export HF_HUB_OFFLINE=1 HF_DATASETS_OFFLINE=1
-export OMP_NUM_THREADS=${OMP_NUM_THREADS:-32}
+export OMP_NUM_THREADS=${OMP_NUM_THREADS:-8}
+export MKL_NUM_THREADS=${MKL_NUM_THREADS:-8}
 
 echo "=== rescoring: $(date -Is) ==="
 echo "  cache   : $TARGET_CACHE"
@@ -39,7 +49,10 @@ echo "  student : $STUDENT"
 [[ -d $TARGET_CACHE/$SPLIT ]] || { echo "no cache at $TARGET_CACHE/$SPLIT" >&2; exit 2; }
 [[ -f $STUDENT/model.safetensors ]] || { echo "no student at $STUDENT" >&2; exit 2; }
 
-"$VENV_DIR/bin/python" -m msdelta.run_rescoring \
+# -X faulthandler: the first attempt (8840898) died with a bare "Segmentation fault"
+# and no traceback, before the script printed anything, so there was nothing to act on.
+# faulthandler turns a C-level crash into a Python stack.
+"$VENV_DIR/bin/python" -X faulthandler -u -m msdelta.run_rescoring \
     --target_cache "$TARGET_CACHE" --student "$STUDENT" --split "$SPLIT" \
     --epochs "${EPOCHS:-40}" --seed "${SEED:-0}" \
     --out "$REPO_DIR/pbs/logs/rescoring-${PBS_JOBID%%.*}.json"
