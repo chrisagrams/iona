@@ -35,11 +35,17 @@ cd "$REPO_DIR"
 # environment ("cannot send environment with the job"), and 72 arm names exceed it. So the
 # default is every generated arm, and a subset goes through a file instead of the job
 # environment.
+# Which grid, and which entry point trains an arm. Defaulted to denoise because that is
+# what this launcher was written for, but the partitioning, per-slot tile pinning,
+# failure accounting and config snapshotting are task-independent and there is no reason
+# to fork the file per objective.
+SWEEP_ROOT=${SWEEP_ROOT:-configs/sweep-denoise}
+SWEEP_MODULE=${SWEEP_MODULE:-msdelta.finetune_denoise}
 ARMS=${ARMS:-}
 if [[ -n ${ARMS_FILE:-} ]]; then
     ARMS=$(tr -s ' \n' ',' < "$ARMS_FILE" | sed 's/,$//')
 elif [[ -z $ARMS ]]; then
-    ARMS=$(ls configs/sweep-denoise | sort | paste -sd,)
+    ARMS=$(ls "$SWEEP_ROOT" | sort | paste -sd,)
 fi
 [[ -n $ARMS ]] || { echo "no arms: generate them with sweeps/make_denoise_grid.py" >&2; exit 2; }
 VENV_DIR=${VENV_DIR:-$REPO_DIR/.venv}
@@ -70,7 +76,7 @@ JOB_ID=${PBS_JOBID:-local}; JOB_ID=${JOB_ID%%.*}
 
 IFS=',' read -r -a ARM_LIST <<< "$ARMS"
 for arm in "${ARM_LIST[@]}"; do
-    [[ -f configs/sweep-denoise/$arm/training.args ]] \
+    [[ -f $SWEEP_ROOT/$arm/training.args ]] \
         || { echo "unknown arm: $arm" >&2; exit 2; }
 done
 
@@ -80,14 +86,14 @@ done
 # moved to 512 and a batch of 4 -- an 8x larger DeltaMZBias tensor, ~118 GB against a
 # 68.7 GB tile. That is 72 arms OOMing on a 6-node allocation, discovered an hour in.
 # Stdlib only, so this runs before the frameworks module is loaded.
-if [[ -z ${SKIP_GRID_CHECK:-} ]]; then
+if [[ -z ${SKIP_GRID_CHECK:-} && $SWEEP_ROOT == configs/sweep-denoise ]]; then
     "$VENV_DIR/bin/python" sweeps/make_denoise_grid.py --check \
         || { echo "sweep arms are stale against their template" >&2; exit 2; }
 fi
 
 # Multiple tiles per arm without DeepSpeed means the DDP reducer, which faults (FT7).
 if (( TILES_PER_ARM > 1 )) \
-   && ! grep -q -- "--deepspeed" "configs/sweep-denoise/${ARM_LIST[0]}/training.args"; then
+   && ! grep -q -- "--deepspeed" "$SWEEP_ROOT/${ARM_LIST[0]}/training.args"; then
     echo "TILES_PER_ARM=$TILES_PER_ARM but the arms name no --deepspeed config:" >&2
     echo "  that is the DDP reducer, which takes a GPU page fault. See TODO.md FT7." >&2
     exit 2
@@ -100,7 +106,7 @@ fi
 # submission and makes its configs recoverable afterwards from the run directory.
 CONFIG_SNAPSHOT=$SCRATCH_ROOT/runs/.configs-$JOB_ID
 mkdir -p "$CONFIG_SNAPSHOT"
-cp -r configs/sweep-denoise/. "$CONFIG_SNAPSHOT/"
+cp -r "$SWEEP_ROOT/." "$CONFIG_SNAPSHOT/"
 [[ -n ${DRY_RUN:-} ]] || echo "  configs snapshot: $CONFIG_SNAPSHOT"
 
 mapfile -t HOSTS < <(sort -u "${PBS_NODEFILE:?PBS_NODEFILE is required}")
@@ -185,7 +191,7 @@ if n != $XPUS_PER_HOST:
 " || exit 2
 fi
 
-echo "=== denoise sweep: ${#ARM_LIST[@]} arms, ${#HOSTS[@]} hosts x $SLOTS_PER_NODE slots"\
+echo "=== sweep [$SWEEP_MODULE]: ${#ARM_LIST[@]} arms, ${#HOSTS[@]} hosts x $SLOTS_PER_NODE slots"\
      "= $NUM_NODES concurrent, $TILES_PER_ARM tile(s) each, job $JOB_ID ==="
 
 # Longest-processing-time-first onto the emptiest node: the standard greedy makespan
@@ -242,7 +248,7 @@ run_node() {
         mpiexec --envall --pmi=pmix -n "$TILES_PER_ARM" --ppn "$TILES_PER_ARM" \
             --cpu-bind depth --depth "${CPU_DEPTH:-8}" --hostfile="$hostfile" \
             "$REPO_DIR/pbs/rank_wrapper.sh" \
-            "$VENV_DIR/bin/python" -m msdelta.finetune_denoise \
+            "$VENV_DIR/bin/python" -m "$SWEEP_MODULE" \
                 --args_file "$CONFIG_SNAPSHOT/$arm/training.args" \
                 --output_dir "$dir" "${SHORT[@]}" \
             >"$dir/logs/train.log" 2>&1
