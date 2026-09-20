@@ -9,6 +9,15 @@
 
 module load frameworks
 
+# Level Zero, before any python runs. This job never touches a GPU, but
+# msdelta.preprocess pulls in torch through msdelta.data, and importing torch on
+# an Aurora compute node without the flat hierarchy and an affinity mask
+# segfaults during device enumeration before Python can report anything. Found
+# when the same omission killed pbs/rescoring.pbs twice (8840898, 8840907).
+export ONEAPI_DEVICE_SELECTOR=${ONEAPI_DEVICE_SELECTOR:-level_zero:gpu}
+export ZE_FLAT_DEVICE_HIERARCHY=${ZE_FLAT_DEVICE_HIERARCHY:-FLAT}
+export ZE_AFFINITY_MASK=${ZE_AFFINITY_MASK:-0}
+
 set -euo pipefail
 
 REPO_DIR=${REPO_DIR:-${PBS_O_WORKDIR:-$PWD}}
