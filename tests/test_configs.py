@@ -99,6 +99,38 @@ class TestFinetuneConfigs:
 
 @pytest.mark.parametrize("script", PBS_SCRIPTS, ids=lambda p: p.name)
 class TestPBSScripts:
+    def test_sets_level_zero_environment_if_it_imports_torch(self, script):
+        """An Aurora script whose module imports torch must set the ZE variables first.
+
+        Importing torch initialises XPU even for work that never uses a GPU, and on a
+        compute node without ZE_FLAT_DEVICE_HIERARCHY and an affinity mask that
+        enumeration segfaults before Python can report anything: jobs 8840898 and
+        8840907 died with a bare "Segmentation fault", no traceback, even under
+        -X faulthandler, while every component ran fine on a login node. The launcher
+        simply omitted three exports every other Aurora script already had.
+
+        Whether a module pulls in torch is checked by importing it, not guessed from
+        the filename: msdelta.preprocess does not, so aurora-preprocess.pbs is exempt
+        and stays exempt only for as long as that remains true.
+        """
+        text = script.read_text()
+        if script.name.startswith("polaris"):
+            pytest.skip("CUDA, not Level Zero")
+        modules = re.findall(r"-m\s+\"?(msdelta\.[a-z_.]+)", text)
+        modules += re.findall(r'-m "\$([A-Z_]+)"', text) and ["msdelta.finetune_denoise"]
+        if not modules:
+            pytest.skip("launches no msdelta module")
+        probe = subprocess.run(
+            [str(REPO / ".venv/bin/python"), "-c",
+             f"import {modules[0]}, sys; print('torch' in sys.modules)"],
+            cwd=REPO, capture_output=True, text=True,
+            env={**os.environ, "PYTHONPATH": str(REPO), "HF_HUB_OFFLINE": "1"})
+        if "True" not in probe.stdout:
+            pytest.skip(f"{modules[0]} does not import torch")
+        for variable in ("ONEAPI_DEVICE_SELECTOR", "ZE_FLAT_DEVICE_HIERARCHY",
+                         "ZE_AFFINITY_MASK"):
+            assert f"export {variable}" in text, f"{script.name} never exports {variable}"
+
     def test_valid_bash(self, script):
         subprocess.run(["bash", "-n", str(script)], check=True, capture_output=True)
 
