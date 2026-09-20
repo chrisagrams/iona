@@ -21,6 +21,7 @@ import torch
 from transformers import HfArgumentParser, Trainer, TrainingArguments, set_seed
 
 from msdelta.contrastive import (GroupBatchSampler, MSDeltaForContrastive,
+                                 gradcache_step,
                                  embedding_size, group_separation_summary,
                                  subset_by_group)
 from msdelta.finetune_denoise import MemoryProbe, load_description, select_device, subset_splits
@@ -64,6 +65,12 @@ class ContrastiveDataArguments:
     # other row in it is a negative.
     groups_per_batch: int = field(default=6, metadata={"help": "P in the PK sampler"})
     replicates: int = field(default=4, metadata={"help": "K in the PK sampler"})
+    gradcache_chunk: int = field(
+        default=0,
+        metadata={"help": "spectra per forward when using GradCache (0 = off). With it "
+                          "on, groups_per_batch x replicates can far exceed what fits: "
+                          "peak memory is one chunk, not the batch. The gradient is "
+                          "exact -- tests assert it against a full-batch backward."})
 
 
 @dataclass
@@ -76,11 +83,13 @@ class ContrastiveTrainingArguments(TrainingArguments):
 class ContrastiveTrainer(Trainer):
     """Standard Trainer, with the PK sampler and the loss components surfaced."""
 
-    def __init__(self, *args, groups=None, groups_per_batch=12, replicates=4, **kwargs):
+    def __init__(self, *args, groups=None, groups_per_batch=12, replicates=4,
+                 gradcache_chunk=0, **kwargs):
         super().__init__(*args, **kwargs)
         self.groups = groups
         self.groups_per_batch = groups_per_batch
         self.replicates = replicates
+        self.gradcache_chunk = gradcache_chunk
 
     def _get_train_sampler(self, *args, **kwargs):
         # Random batches hold about one positive PAIR; the PK sampler guarantees
@@ -95,6 +104,20 @@ class ContrastiveTrainer(Trainer):
                           collate_fn=self.data_collator,
                           num_workers=self.args.dataloader_num_workers,
                           pin_memory=self.args.dataloader_pin_memory)
+
+    def training_step(self, model, inputs, num_items_in_batch=None):
+        """GradCache when a chunk size is set, otherwise the ordinary path."""
+        if not self.gradcache_chunk:
+            return super().training_step(model, inputs, num_items_in_batch)
+        model.train()
+        inputs = self._prepare_inputs(inputs)
+        inner = model.module if hasattr(model, "module") else model
+        outputs = gradcache_step(inner, inputs, self.gradcache_chunk,
+                                 accelerator=getattr(self, "accelerator", None))
+        if self.state.global_step % max(self.args.logging_steps, 1) == 0:
+            self.log({"contrastive": float(outputs["contrastive"]),
+                      "kl": float(outputs["kl"])})
+        return outputs["loss"].detach()
 
     def compute_loss(self, model, inputs, return_outputs=False, **kwargs):
         outputs = model(**inputs)
@@ -199,7 +222,8 @@ def main(argv: list[str] | None = None) -> int:
             model=model, args=training_args, train_dataset=datasets["train"],
             eval_dataset=datasets.get("validation"), data_collator=collator,
             groups=groups, groups_per_batch=data_args.groups_per_batch,
-            replicates=data_args.replicates)
+            replicates=data_args.replicates,
+            gradcache_chunk=data_args.gradcache_chunk)
         trainer.add_callback(MemoryProbe(every=50))
         trainer.train()
 
