@@ -75,6 +75,47 @@ once there is enough training to overfit, and a smoke test would have locked in 
 answer. And rank arms by RATIO, not margin: margin is a difference and rises when a model
 merely inflates the space, which one arm did.
 
+## The embedding direction has exhausted its identified levers
+
+Every lever tried, and what it did to the separation ratio (pretrained = 1.34):
+
+| lever | result |
+| --- | --- |
+| contrastive + KL, batch 4 | 1.34 -> **6.94**, the best figure reached |
+| more steps at batch 4 | 6.94 -> 4.82 -> 4.46 across 3, 10 and 50 epochs |
+| more negatives (GradCache, batch 64) | best 5.70, BELOW the batch-4 best |
+| more steps at batch 64 | 5.70 -> 5.35 -> 4.37 |
+| intensity-weighted pooling, frozen | 1.43 -> 1.44, nothing |
+| `mean` instead of `mean+max`, frozen | 1.34 -> 1.43, free but small |
+| contrastive teacher -> alignment | cross-modal hit@1 +79% |
+| that embedding -> reranker | **-0.109 hit@1**, five paired seeds |
+
+Two of these deserve care, because the obvious reading of each is wrong.
+
+**Longer training degrading the ratio is not overfitting.** At batch 4 the contrastive
+loss reached 0.4% of chance, so "the task is solved and further steps overfit it" was a
+natural explanation, and it is the one recorded earlier. GradCache disproves it: at batch
+64 the loss is at 30.6% of chance and still falling -- nowhere near saturated -- and the
+ratio falls monotonically anyway. Something about optimising in-batch discrimination
+rearranges the space in a way the global separation metric dislikes, independent of
+whether the training task has been learned.
+
+**A feature can be strong alone and harmful in a model.** `embedding_cosine` separates
+true from decoy pairs at AUROC 0.846, yet adding it costs eleven points of reranking
+hit@1 while leaving pooled AUROC untouched. AUROC pools all pairs; hit@1 ranks within a
+spectrum; the two diverge when a feature's errors are correlated within a spectrum, and
+this one is structurally so -- every candidate for a spectrum is scored against the SAME
+cached teacher vector.
+
+**What works instead.** A hand-built feature rescorer reaches hit@1 0.889 on fragment
+coverage, mass error and spectrum quality, with no neural embedding at all.
+
+**What has not been tried.** The correlated-error structure is a property of the
+two-tower formulation, not of embedding quality, so no amount of better embedding fixes
+it. A cross-encoder scoring (spectrum, candidate) jointly has no shared per-spectrum
+vector and is the natural next formulation -- reranking only scores the top-k candidates,
+so it never needed a shared retrieval space in the first place.
+
 ## The embedding does not help the reranker, and hurts it
 
 Measured, five paired seeds, both arms sharing each seed's split and initialisation:

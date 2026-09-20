@@ -30,12 +30,32 @@ class TestFourierFeatures:
         assert not torch.allclose(a, b, atol=1e-3)
 
 
+def _weights(mode, rows, length):
+    """Weighted modes need per-peak weights; unweighted ones must not be given any."""
+    return torch.rand(rows, length) if mode.startswith("weighted") else None
+
+
 class TestPooling:
     @pytest.mark.parametrize("mode", POOLING_MODES)
     def test_width_matches_reality(self, mode):
         tokens = torch.randn(2, 5, 32)
         mask = torch.ones(2, 5, dtype=torch.long)
-        assert pool_sequence(tokens, mask, mode).shape[-1] == pooled_width(32, mode)
+        pooled = pool_sequence(tokens, mask, mode, weights=_weights(mode, 2, 5))
+        assert pooled.shape[-1] == pooled_width(32, mode)
+
+    def test_uniform_weights_reproduce_the_plain_mean(self):
+        """The weighted path must be a strict generalisation, not a different function."""
+        tokens = torch.randn(2, 5, 32)
+        mask = torch.ones(2, 5, dtype=torch.long)
+        assert torch.allclose(pool_sequence(tokens, mask, "mean"),
+                              pool_sequence(tokens, mask, "weighted_mean",
+                                            weights=torch.ones(2, 5)), atol=1e-6)
+
+    def test_weighted_modes_reject_missing_weights(self):
+        """Silently falling back to an unweighted mean would be an invisible no-op."""
+        with pytest.raises(ValueError, match="weights"):
+            pool_sequence(torch.randn(1, 4, 8), torch.ones(1, 4, dtype=torch.long),
+                          "weighted_mean")
 
     @pytest.mark.parametrize("mode", POOLING_MODES)
     def test_padding_is_ignored(self, mode):
@@ -48,12 +68,23 @@ class TestPooling:
         mask = torch.tensor([[1, 1, 0]])
         padded = tokens.clone()
         padded[0, 2] = 1e4
-        assert torch.allclose(pool_sequence(tokens, mask, mode),
-                              pool_sequence(padded, mask, mode), atol=1e-5)
+        weights = _weights(mode, 1, 3)
+        assert torch.allclose(pool_sequence(tokens, mask, mode, weights=weights),
+                              pool_sequence(padded, mask, mode, weights=weights),
+                              atol=1e-5)
 
     def test_unknown_mode_raises(self):
         with pytest.raises((ValueError, KeyError)):
             pool_sequence(torch.randn(1, 2, 4), torch.ones(1, 2, dtype=torch.long), "nope")
+
+    def test_weighting_actually_changes_the_result(self):
+        """Guards against weights being accepted and then ignored."""
+        tokens = torch.randn(1, 6, 8)
+        mask = torch.ones(1, 6, dtype=torch.long)
+        skewed = torch.tensor([[10.0, 1.0, 1.0, 1.0, 1.0, 1.0]])
+        assert not torch.allclose(pool_sequence(tokens, mask, "mean"),
+                                  pool_sequence(tokens, mask, "weighted_mean",
+                                                weights=skewed), atol=1e-3)
 
 
 class TestParsePeptide:

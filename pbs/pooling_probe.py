@@ -1,0 +1,109 @@
+"""Which pooling extracts the most peptide structure from a FROZEN encoder?
+
+    python pbs/pooling_probe.py --pretrained PATH [--denoiser PATH]
+
+No training. The encoder is whatever it already is; only the reduction from per-peak
+token embeddings to one vector changes. That makes this the cheapest experiment
+available -- and it asks a question the whole contrastive effort assumed away.
+
+The current default takes an unweighted mean over every peak. A mass spectrum is mostly
+noise (53% by count in the denoise corpus), so that mean is dominated by peaks carrying
+no identity, and the concatenated max is taken over those same dimensions. Two weightings
+are worth a look: raw intensity, which is free and where the identifying fragments
+usually are, and a denoiser's P(signal), which is the same idea learned rather than
+assumed -- and we have one at 0.932 test AUROC.
+"""
+
+from __future__ import annotations
+
+import argparse
+from pathlib import Path
+
+import numpy as np
+import torch
+
+from msdelta.reranking import (AlignmentCollator, group_separation_metrics, peptide_key,
+                               pool_sequence)
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--pretrained", required=True)
+    parser.add_argument("--denoiser", default="", help="MSDeltaForDenoising checkpoint")
+    parser.add_argument("--cache", required=True, help="precompute_align cache")
+    parser.add_argument("--split", default="validation")
+    parser.add_argument("--max_rows", type=int, default=1200)
+    parser.add_argument("--batch_size", type=int, default=8)
+    cli = parser.parse_args()
+
+    device = "xpu" if torch.xpu.is_available() else "cpu"
+    from datasets import load_from_disk
+    from msdelta.modeling_msdelta import MSDeltaForPreTraining
+    rows = list(load_from_disk(str(Path(cli.cache) / cli.split)))[: cli.max_rows]
+    model = MSDeltaForPreTraining.from_pretrained(cli.pretrained).to(device).eval()
+    encoder = getattr(model, "msdelta", model)
+
+    denoiser = None
+    if cli.denoiser:
+        from msdelta.modeling_msdelta import MSDeltaForDenoising
+        denoiser = MSDeltaForDenoising.from_pretrained(cli.denoiser).to(device).eval()
+        print(f"[pool] denoiser from {cli.denoiser}", flush=True)
+
+    collator = AlignmentCollator()
+    modes = ["mean", "mean+max", "weighted_mean", "weighted_mean+max"]
+    pooled: dict[str, list] = {m: [] for m in modes}
+    pooled |= {f"{m}/denoised": [] for m in ("weighted_mean", "weighted_mean+max")
+               if denoiser is not None}
+
+    with torch.no_grad():
+        for start in range(0, len(rows), cli.batch_size):
+            chunk = rows[start : start + cli.batch_size]
+            # Strip `target` before collating. AlignmentCollator drops the spectrum
+            # columns when a cached target is present -- correct for training, where the
+            # model reads the target and never the spectrum, and exactly wrong here,
+            # where the spectrum is the only thing we want.
+            spectra = [{k: v for k, v in row.items() if k != "target"} for row in chunk]
+            batch = {k: v.to(device) for k, v in collator(spectra).items()
+                     if k in ("mz", "log_intensity", "attention_mask")}
+            if not batch:
+                raise RuntimeError("collator produced no spectrum columns")
+            hidden = encoder(**batch).last_hidden_state
+            # Intensity as stored is log1p; undo it so a peak ten times taller counts
+            # ten times, not log(10) times.
+            intensity = torch.expm1(batch["log_intensity"]).clamp_min(0)
+            signal = None
+            if denoiser is not None:
+                logits = denoiser(**batch).logits
+                # The head predicts NOISE as the positive class, so P(signal) is the
+                # complement. Getting this backwards would weight by noise and look
+                # like a failed idea rather than an inverted one.
+                signal = torch.sigmoid(-logits.squeeze(-1).float())
+            for mode in modes:
+                weights = intensity if mode.startswith("weighted") else None
+                pooled[mode].append(
+                    pool_sequence(hidden, batch["attention_mask"], mode,
+                                  weights=weights).float().cpu())
+            if signal is not None:
+                for mode in ("weighted_mean", "weighted_mean+max"):
+                    pooled[f"{mode}/denoised"].append(
+                        pool_sequence(hidden, batch["attention_mask"], mode,
+                                      weights=signal).float().cpu())
+            if start % (cli.batch_size * 40) == 0:
+                print(f"[pool] {start}/{len(rows)}", flush=True)
+
+    groups = np.unique(np.array([peptide_key(r["peptide"], int(r.get("charge") or 0))
+                                 for r in rows]), return_inverse=True)[1]
+    print(f"\n[pool] {len(rows)} spectra, {len(set(groups.tolist()))} groups, "
+          f"frozen encoder, no training\n", flush=True)
+    print(f"  {'pooling':<24} {'RATIO':>7} {'in_mean':>8} {'out_mean':>9} {'clean':>7}")
+    for name, chunks in pooled.items():
+        if not chunks:
+            continue
+        m = group_separation_metrics(torch.cat(chunks), groups, "s")
+        print(f"  {name:<24} {m['s/ratio']:>7.2f} {m['s/in_mean']:>8.4f} "
+              f"{m['s/out_mean']:>9.4f} {m['s/clean']:>7.3f}", flush=True)
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
