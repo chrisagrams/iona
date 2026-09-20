@@ -10,55 +10,64 @@ anyone's memory. Last updated: 2026-09-20.
 ## Where things stand
 
 ```
-LEGEND   [x] done   [~] running   [q] queued   [!] ready, awaiting your go-ahead
+LEGEND   [x] done   [~] running   [q] queued   [>] blocked on something above
          [X] dead, closed   [ ] not started
+
+
+IN FLIGHT RIGHT NOW
+──────────────────────────────────────────────────────────────────────────
+  [q] 200m denoise grid, 12 arms ... 8841992   capacity
+  [q] 400m denoise grid, 12 arms ... 8842147   capacity
+  [q] scratch ablation, 12 arms .... 8841984   capacity  is pretraining worth it?
+  [q] contrastive RANDOM control ... 8842288   debug     does the LOSS need pretraining?
 
 
 DENOISE  — the line that works
 ──────────────────────────────────────────────────────────────────────────
   [x] 50m grid, 216 arms ........... 0.9320   216/216
   [x] 100m grid, 12 arms ........... 0.9403
-  [x] 400m memory test ............. peak 9.87 GB of 68.7, clean
-  [q] 200m grid .................... 8841992   capacity
-  [q] 400m grid .................... 8842147   capacity
-  [q] from-scratch ablation ........ 8841984   capacity
-  [!] seed repetition (FT5) ........ 12 arms ready
-  [ ] final model on best config ... last step
-  [X] matched-checkpoint control ... dropped, normalising by compute budget
+  [q] 200m / 400m / scratch ........ above
+  [>] FT5 multi-seed, ALL scales ... BLOCKED: each scale repeats its OWN winner,
+        and 200m/400m have not named one yet. 4 scales x 6 seeds = 24 arms.
+        This is what decides whether 0.9403 > 0.9320 is real at all --
+        the 50m top-8 span 0.0023 and the 100m top-5 span 0.0012.
+  [>] final model on best config ... after FT5
 
 
-EMBEDDING — closed, except two live sweeps
+EMBEDDING — closed except the one live control
 ──────────────────────────────────────────────────────────────────────────
-  [x] random-init control .......... 1.35 = THE FLOOR
-        pretrained encoders score 1.35 / 1.36 / 1.35. Same as random.
+  [x] random-init FROZEN control ... 1.35 = THE FLOOR
+        pretrained 50m/100m/200m all score 1.35 / 1.36 / 1.35. Same as random.
 
   [X] read a different layer ....... noise on the floor
   [X] pool differently ............. noise on the floor
   [X] bigger encoder ............... no effect at matched steps
   [X] pretrain longer .............. at the floor from 50k steps on
+  [X] trained mixture over depths .. 1.52 vs 1.53 for picking one by hand. CLOSED
   [X] embedding -> reranker ........ -0.109 hit@1, harmful
 
-  [q] contrastive RE-RUN ........... 8842154   fixed scheduler, 12 arms
-        the 6.94 baseline was produced under a broken one
-  [q] layer-mix readout ............ 8842153   frozen / 0.3x / 1.0x
-  [ ] start from the 10k checkpoint . 1.67, the one reading above the floor
+  [x] contrastive training ......... 7.83 vs the 1.35 floor. The only real lever.
+        (was 6.94 before the scheduler fix)
+  [q] contrastive on RANDOM init ... 8842288  the control that asks how much of
+        the 7.83 the pretrained weights are actually worth
+  [ ] start from the 10k checkpoint . 1.67, the only frozen reading above the floor
 
 
 RERANKING
 ──────────────────────────────────────────────────────────────────────────
   [x] feature rescorer ............. hit@1 0.889, no neural embedding
-  [X] + embedding cosine ........... dropped
+  [X] + embedding cosine ........... dropped, made it worse
   [ ] cross-encoder ................ waiting on meaningful embeddings
 
 
 INFRASTRUCTURE & BUGS
 ──────────────────────────────────────────────────────────────────────────
-  [x] DeepSpeed ZeRO-2 ............. 21.4x, replaces the faulting DDP path
-  [x] staleness guard .............. all 8 grids; caught a live one today
-  [x] checkpoints frozen ........... copied by step number to your flare dir,
-                                     every config repointed, 0 chase final/
-  [x] FT10 scheduler fixed ......... warmup_ratio 0.06 in all 27 contrastive arms
-  [~] test suite ................... 192/297 so far, 0 failed
+  [x] checkpoints frozen ........... by step number, every config repointed
+  [x] FT10 scheduler ............... warmup was longer than the whole run
+  [x] validation gate .............. nothing reaches capacity unvalidated
+  [x] unknown-flag tests ........... templates AND generated arms
+  [x] encoder-in-checkpoint ........ SaveEncoderCallback, verified on hardware
+  [ ] MSDeltaForContrastive -> PreTrainedModel ... deferred, not worth it yet
   [~] FT9 12-tile align fault ...... parked for ALCF
   [ ] FT1 / FT3 / FT4 / FT8 ........ open, none blocking
 ```
