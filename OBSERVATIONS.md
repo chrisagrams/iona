@@ -229,6 +229,29 @@ guess, and both sit within 0.2 of a random network.
 That closes the loop on the frozen arm: it is a real measurement, it is just a small
 one, and it points the same way as everything else on this axis.
 
+## Denoise improves with scale, but the increments are shrinking faster than we can resolve
+
+| scale | best test AUROC | best F1 | gain over previous | top-cluster spread |
+| --- | --- | --- | --- | --- |
+| 50m | 0.9320 | 0.8632 | -- | 0.0023 over 8 arms |
+| 100m | 0.9403 | 0.8723 | +0.0083 | 0.0012 over 5 arms |
+| 200m | **0.9446** | **0.8778** | +0.0043 | **0.0010 over 5 arms** |
+
+The direction is consistent and the gains are real relative to the measurement so far.
+But each doubling buys about half what the previous one did while the within-grid spread
+stays near 0.001, so the trend and the noise are converging. Extrapolating, 400m would
+gain ~0.002 -- which is INSIDE the top-cluster spread of a single grid.
+
+That makes FT5 a precondition rather than a refinement at 400m. Without seeds we will
+not be able to say whether 400m beats 200m at all, and a "400m is best" claim would rest
+on one sample per scale with differences smaller than the spread between arms we already
+know are equivalent.
+
+One encouraging detail that is NOT about ranking: `lr2e4_es05_b12` is the top arm at both
+100m and 200m, and the same hyperparameters won at 50m. The individual ranking inside a
+grid's top cluster is arbitrary, but the hyperparameter choice appears to transfer across
+scale, which is what justified narrowing from 216 arms to 12.
+
 ## Denoise is the line that works; the reranker does not need a neural embedding
 
 50m grid best test AUROC **0.9320** over 216 arms; 100m best **0.9403** over 12. A
