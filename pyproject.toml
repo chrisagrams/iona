@@ -13,6 +13,7 @@ dependencies = [
     "pyyaml",
     "pyarrow>=24.0.0",
     "pyteomics>=4.7.5",
+    "lxml>=5.0",
     "scikit-learn>=1.8.0",
     "huggingface-hub>=1.20.1",
     "datasets>=4.0.0",
@@ -37,10 +38,12 @@ xpu = [
 [project.scripts]
 msdelta-train = "msdelta.train:main"
 msdelta-preprocess = "msdelta.preprocess:main"
+msdelta-denoise-mzml = "msdelta.denoise_mzml:main"
 
 [dependency-groups]
 dev = [
     "pre-commit",
+    "pytest",
     "ruff",
 ]
 
