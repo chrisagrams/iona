@@ -83,6 +83,36 @@ but 4.14 against 6.21 is the fair comparison, not 4.14 against 7.83.
 I predicted a genuine blend would land close to the final-layer result rather than beat
 it. It landed well below it. The direction was right and the magnitude was not.
 
+## The complete readout x encoder x init factorial: only ONE cell works
+
+Every combination of readout, encoder treatment and initialisation has now been run.
+Separation ratio, random-init floor 1.35:
+
+| readout | encoder | pretrained | random |
+| --- | --- | --- | --- |
+| final layer | frozen | 1.35 - 1.53 | **1.35** |
+| final layer | 1.0x trains | **7.83** | **1.35** |
+| depth mixture | frozen | 1.49 | **1.35** |
+| depth mixture | 0.3x | 2.18 | **1.35** |
+| depth mixture | 1.0x trains | 4.14 | **1.35** |
+
+Every random cell is 1.35. Not approximately -- exactly the floor, whatever the readout
+and whatever the encoder learning rate. Training the encoder does not help a random one,
+and neither does a trained mixture over its depths.
+
+On the pretrained side only ONE cell is interesting, and it is the plain one: final
+layer with the encoder training, 7.83. Every elaboration of the readout makes it worse.
+
+So both conditions are necessary and neither is sufficient:
+
+  pretrained weights WITHOUT encoder training ...... 1.35 to 1.53, near the floor
+  encoder training WITHOUT pretrained weights ...... 1.35, exactly the floor
+  both together .................................... 7.83
+
+That is the cleanest statement of the non-linearity finding. Pretraining deposits
+structure that no readout can extract and that training cannot create from scratch --
+it can only be unlocked, by fine-tuning the weights that hold it.
+
 ## Fine-tuning is about how much EXTRA training is needed, not about a ceiling
 
 Worth stating because the random-init control is easy to over-read. It does not show
