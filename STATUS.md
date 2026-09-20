@@ -5,32 +5,36 @@ what is *true right now*; `TODO.md` says what is *wrong and open*, and the two a
 to be read together.
 
 Regenerate the job table with `pbs/job_history.sh`, which reads the logs rather than
-anyone's memory. Last updated: 2026-09-19.
+anyone's memory. Last updated: 2026-09-20.
 
 ## Where things stand
 
 ```
-INFRASTRUCTURE ─────────────────────────────────────────────────── all green
+INFRASTRUCTURE ────────────────────────────────────────── green except FT9
   denoise, 1 tile ................. OK   8840190  test AUROC 0.8628
   denoise, 12 tiles DeepSpeed ..... OK   8840264  21.4x one tile
+  denoise 200m, 12 tiles .......... OK   8841966  peak 7.66 of 68.7 GB, 0 faults
   alignment, 1 tile ............... OK   8840304  full pipeline, saved
-  alignment, 12 tiles DeepSpeed ... NO   8840356  GPU fault, see FT9
-  grid, 72 arms, 1 tile ........... OK   8840232  72/72
-  grid, 216 arms, full pipeline ... ??   8840345  RUNNING  <- gates capacity
+  alignment, 12 tiles DeepSpeed ... NO   8840603  GPU fault, see FT9
+  grid launcher, full pipeline .... OK   8841345  12/12 arms incl. test split
 
-SCIENCE ───────────────────────────────────────── nothing real run yet
-  216-arm HP grid ................. blocked on 8840323  ~84 node-hrs / ~5 h
-  alignment, full 10 epochs ....... ready               ~35 min on 1 tile
-  denoise re-runs: 100m, scratch,
-    seeds ......................... unblocked, unsubmitted
+SCIENCE ─────────────────────────────── denoise delivering, embedding does not
+  50m  grid, 216 arms ............. DONE            best test AUROC 0.9320
+  100m grid, 12 arms .............. DONE            best test AUROC 0.9403
+  200m grid, 12 arms .............. QUEUED 8841992  memtest passed, ~4 h
+  from-scratch ablation, 12 arms .. QUEUED 8841984  isolates pretraining's worth
+  layer/scale readout probe ....... DONE   8841973  39 configs, ceiling 1.53
+  feature rescorer ................ DONE            hit@1 0.889, no embedding
+  neural embedding -> rescorer .... DEAD            -0.109 hit@1, 5 paired seeds
 
 BUGS (detail in TODO.md) ──────────────────────────────────────────────────
+  FT9  12-tile alignment fault .... 8 hypotheses dead, parked for ALCF
   FT7  GPU fault is DDP ........... worked around with DeepSpeed, NOT fixed
   FT4  32 stray labels ............ DDP gather only; absent under ZeRO-2
   FT3  failure reports "finished" . open
   FT1  >1024 peaks ................ open
-  FT5  seeds on the winner ........ waiting on the grid
-  FT6  from-scratch control ....... 8839946 is a v1 run, must be redone
+  FT5  seeds on the winner ........ ready, grid has a winner now
+  FT6  from-scratch control ....... running as 8841984
   FT8  encoder warm-up freeze ..... deferred, set to 0 everywhere
   FT2  ............................ closed, not a bug
 ```
@@ -129,6 +133,7 @@ Every lever tried, and what it did to the separation ratio (pretrained = 1.34):
 | intensity-weighted pooling, frozen | 1.43 -> 1.44, nothing |
 | denoiser P(signal) pooling, frozen | 1.34 -> **1.46**, the best readout available, and still nothing next to 6.94 |
 | reading layer 8 instead of the output | 1.43 -> **1.53**; the stack peaks at 8 and DROPS at 9 |
+| scaling the encoder 50m -> 100m -> 200m, frozen | output 1.43 -> 1.36 -> 1.35; best-block 1.53 -> 1.41 -> 1.44. Scale HURTS |
 | `mean` instead of `mean+max`, frozen | 1.34 -> 1.43, free but small |
 | contrastive teacher -> alignment | cross-modal hit@1 +79% |
 | that embedding -> reranker | **-0.109 hit@1**, five paired seeds |
@@ -153,21 +158,44 @@ cached teacher vector.
 **What works instead.** A hand-built feature rescorer reaches hit@1 0.889 on fragment
 coverage, mass error and spectrum quality, with no neural embedding at all.
 
-**Read from layer 8, not the output, if this is ever revisited.** Across the ten
-encoder blocks the separation ratio climbs monotonically -- 1.37, 1.38, 1.38, 1.41, 1.45,
-1.51, 1.51, 1.52, **1.53** -- and then FALLS to 1.43 at the final block. That is the
-classic signature of a last layer specialised for its pretraining head: predicting masked
-peak intensities is not the same objective as representing peptide identity, and layer 9
-has been optimised for the former. Every embedding measured in this repo has been read
-from the output. It is a free 7%, and it compounds with training rather than competing
-with it. Not acted on now because switching layers invalidates every embedding measured
-today for a gain that does not reach the reranker.
+**The readout axis, measured exhaustively: 39 configurations, 3 scales.** Every
+encoder block of the 50m, 100m and 200m pretrained checkpoints, plus four pooling modes
+on each output, all frozen and training-free. The probe validates itself: at every scale
+the last block's ratio equals the `mean`-pooled output ratio, as it must.
 
-Worth noting the whole readout axis together: layer choice, pooling mode and peak
-weighting combined move the frozen ratio from 1.34 to about 1.53, roughly +14%.
-Contrastive training moves it to 6.94, +418%. Every extraction trick available is about
-3% of what training buys, which is the clearest statement of where the information is
-not.
+| scale | blocks | output `mean` | best block | best ratio | depth of best |
+| --- | --- | --- | --- | --- | --- |
+| 50m  | 10 | 1.43 | 8  | **1.53** | 89% |
+| 100m | 13 | 1.36 | 11 | 1.41 | 92% |
+| 200m | 16 | 1.35 | 6  | 1.44 | 40% |
+
+Two things fall out, and the second is the one that matters.
+
+**The mid-stack hump is real and universal.** No scale peaks at its output. The ratio
+climbs through the stack and then drops in the last one to three blocks -- 50m
+1.37/1.38/1.38/1.41/1.45/1.51/1.51/1.52/**1.53**/1.43, 200m rising to **1.44** at block 6
+and sagging to 1.35 by block 15. That is the signature of a last layer specialised for
+its pretraining head: predicting masked peak intensities is not the same objective as
+representing peptide identity, and the final blocks have been optimised for the former.
+Reading one block earlier is free.
+
+**Scale makes the frozen embedding WORSE, not better.** The output-layer ratio falls
+monotonically with capacity -- 1.43, 1.36, 1.35 -- and the best-block ratio over the
+whole stack peaks at the SMALLEST model. Quadrupling parameters buys nothing here and
+costs a little. This is the opposite of the denoise result on the same checkpoints, where
+100m beats 50m (0.9403 vs 0.9320); the pretraining objective scales, the frozen
+replicate-identity structure does not. It rules out "use a bigger encoder" as a lever on
+the embedding, which was the last untested cheap idea on this axis.
+
+`clean` -- the fraction of groups whose every replicate is nearer to its own group than
+to anything outside it -- sits at 0.010 for essentially all 39 configurations, meaning 1
+of 99 groups, and at 0.000 for the earliest blocks. No layer of no model at no scale
+separates replicates.
+
+So the whole readout axis -- layer choice, pooling mode, peak weighting, and now model
+scale -- spans 1.29 to 1.53. Contrastive training reaches 6.94. Every extraction trick
+available, across three model sizes, is about 3% of what training buys, which is the
+clearest available statement of where the information is not.
 
 **What has not been tried.** The correlated-error structure is a property of the
 two-tower formulation, not of embedding quality, so no amount of better embedding fixes
@@ -242,21 +270,154 @@ and no reranking result exists yet.**
 
 ## Job history
 
-Regenerate with `pbs/job_history.sh`.
+Regenerate with `pbs/job_history.sh`. Full probe results in `results/`.
 
 ```
-JOB       TASK     PARALLELISM   OUTCOME                    NOTE
-8840154   denoise  12 tiles DDP  GPU FAULT at 168/700
-8840190   denoise  1 tile        COMPLETE 700/700           test AUROC 0.8628
-8840223   align    12 tiles DDP  GPU FAULT at 3/200
-8840232   grid     1 tile/arm    72/72 arms ok
-8840238   align    1 tile        GPU FAULT at 73/200        batch 16
-8840257   align    1 tile        ERROR in eval              bf16 vs fp32 fused kernel
-8840264   denoise  12 tiles DS   COMPLETE 300/300           21.4x, 0 faults
-8840277   align    1 tile        ERROR after eval           no eval_loss
-8840291   grid     12 tiles DS   refused: stale arms        guard worked
-8840304   align    1 tile        COMPLETE 400/400           eval_loss 0.048
-8840313   grid     12 tiles DS   refused: stale arms        guard worked
-8840323   grid     12 tiles DS   RUNNING                    216-arm full pipeline
-8840336   align    12 tiles DS   RUNNING                    does ZeRO-2 work here
+JOB       TASK     PARALLELISM OUTCOME                    NOTE
+8816450   denoise  8 tiles     ran to 40/40               
+8821044   denoise  ?           no training                
+8821246   denoise  8 tiles     ERROR: OSError: libmkl_intel_lp64.so.2: cannot  
+8821247   denoise  8 tiles     ERROR: OSError: libmkl_intel_lp64.so.2: cannot  
+8821248   denoise  8 tiles     ERROR: OSError: libmkl_intel_lp64.so.2: cannot  
+8821249   denoise  8 tiles     ERROR: OSError: libmkl_intel_lp64.so.2: cannot  
+8821250   denoise  8 tiles     ERROR: OSError: libmkl_intel_lp64.so.2: cannot  
+8821251   denoise  8 tiles     ERROR: OSError: libmkl_intel_lp64.so.2: cannot  
+8821272   denoise  8 tiles     ERROR: OSError: libmkl_intel_lp64.so.2: cannot  
+8821273   denoise  8 tiles     ERROR: OSError: libmkl_intel_lp64.so.2: cannot  
+8821275   denoise  8 tiles     ERROR: OSError: libmkl_intel_lp64.so.2: cannot  
+8821276   denoise  8 tiles     ERROR: OSError: libmkl_intel_lp64.so.2: cannot  
+8821277   denoise  8 tiles     ERROR: OSError: libmkl_intel_lp64.so.2: cannot  
+8821278   denoise  8 tiles     ERROR: OSError: libmkl_intel_lp64.so.2: cannot  
+8821285   denoise  8 tiles     ERROR: OSError: libmkl_intel_lp64.so.2: cannot  
+8821292   denoise  8 tiles     ERROR: OSError: libmkl_intel_lp64.so.2: cannot  
+8821293   denoise  8 tiles     ERROR: OSError: libmkl_intel_lp64.so.2: cannot  
+8821295   denoise  8 tiles     ERROR: OSError: libmkl_intel_lp64.so.2: cannot  
+8821296   denoise  8 tiles     ERROR: OSError: libmkl_intel_lp64.so.2: cannot  
+8821297   denoise  8 tiles     ERROR: OSError: libmkl_intel_lp64.so.2: cannot  
+8821309   denoise  8 tiles     ERROR: OSError: libmkl_intel_lp64.so.2: cannot  
+8821311   denoise  8 tiles     ERROR: OSError: libmkl_intel_lp64.so.2: cannot  
+8821312   denoise  8 tiles     ERROR: OSError: libmkl_intel_lp64.so.2: cannot  
+8821314   denoise  8 tiles     ERROR: OSError: libmkl_intel_lp64.so.2: cannot  
+8821315   denoise  8 tiles     ERROR: OSError: libmkl_intel_lp64.so.2: cannot  
+8821316   denoise  8 tiles     ERROR: OSError: libmkl_intel_lp64.so.2: cannot  
+8821326   denoise  8 tiles     ERROR: OSError: libmkl_intel_lp64.so.2: cannot  
+8821327   denoise  8 tiles     ERROR: OSError: libmkl_intel_lp64.so.2: cannot  
+8821328   denoise  8 tiles     ERROR: OSError: libmkl_intel_lp64.so.2: cannot  
+8821329   denoise  8 tiles     ERROR: OSError: libmkl_intel_lp64.so.2: cannot  
+8821330   denoise  8 tiles     ERROR: OSError: libmkl_intel_lp64.so.2: cannot  
+8821331   denoise  8 tiles     ERROR: OSError: libmkl_intel_lp64.so.2: cannot  
+8821345   denoise  8 tiles     ERROR: OSError: libmkl_intel_lp64.so.2: cannot  
+8821347   denoise  8 tiles     ERROR: OSError: libmkl_intel_lp64.so.2: cannot  
+8821349   denoise  8 tiles     ERROR: OSError: libmkl_intel_lp64.so.2: cannot  
+8821351   denoise  8 tiles     ERROR: OSError: libmkl_intel_lp64.so.2: cannot  
+8821352   denoise  8 tiles     ERROR: OSError: libmkl_intel_lp64.so.2: cannot  
+8821353   denoise  8 tiles     ERROR: OSError: libmkl_intel_lp64.so.2: cannot  
+8821363   denoise  8 tiles     ERROR: OSError: libmkl_intel_lp64.so.2: cannot  
+8821364   denoise  8 tiles     ERROR: OSError: libmkl_intel_lp64.so.2: cannot  
+8821365   denoise  8 tiles     ERROR: OSError: libmkl_intel_lp64.so.2: cannot  
+8821366   denoise  8 tiles     ERROR: OSError: libmkl_intel_lp64.so.2: cannot  
+8821368   denoise  8 tiles     ERROR: OSError: libmkl_intel_lp64.so.2: cannot  
+8821369   denoise  8 tiles     ERROR: OSError: libmkl_intel_lp64.so.2: cannot  
+8821376   denoise  8 tiles     ERROR: OSError: libmkl_intel_lp64.so.2: cannot  
+8821377   denoise  8 tiles     ERROR: OSError: libmkl_intel_lp64.so.2: cannot  
+8821378   denoise  8 tiles     ERROR: OSError: libmkl_intel_lp64.so.2: cannot  
+8821380   denoise  8 tiles     ERROR: OSError: libmkl_intel_lp64.so.2: cannot  
+8821381   denoise  8 tiles     ERROR: OSError: libmkl_intel_lp64.so.2: cannot  
+8821382   denoise  8 tiles     ERROR: OSError: libmkl_intel_lp64.so.2: cannot  
+8821403   denoise  8 tiles     ERROR: OSError: libmkl_intel_lp64.so.2: cannot  
+8821404   denoise  8 tiles     ERROR: OSError: libmkl_intel_lp64.so.2: cannot  
+8821405   denoise  8 tiles     ERROR: OSError: libmkl_intel_lp64.so.2: cannot  
+8821406   denoise  8 tiles     ERROR: OSError: libmkl_intel_lp64.so.2: cannot  
+8821407   denoise  8 tiles     ERROR: OSError: libmkl_intel_lp64.so.2: cannot  
+8821408   denoise  8 tiles     ERROR: OSError: libmkl_intel_lp64.so.2: cannot  
+8821428   denoise  ?           no training                
+8821434   denoise  ?           no training                
+8821438   denoise  ?           no training                
+8821439   denoise  ?           no training                
+8821469   denoise  ?           no training                
+8821504   denoise  ?           no training                
+8821931   denoise  ?           no training                
+8822208   denoise  ?           no training                
+8822209   denoise  ?           no training                
+8838696   denoise  ?           no training                
+8838813   denoise  ?           no training                
+8838858   denoise  ?           no training                
+8838985   denoise  ?           no training                
+8839072   denoise  ?           no training                
+8839122   denoise  ?           no training                
+8839139   denoise  8 tiles     no training                
+8839150   denoise  12 tiles    ERROR: RuntimeError: The device index is out of 
+8839166   denoise  12 tiles    GPU FAULT at 19/60         
+8839203   denoise  12 tiles    GPU FAULT at 2/103         
+8839579   denoise  12 tiles    ERROR: ValueError: multiclass format is not sup 
+8839683   denoise  12 tiles    COMPLETE 1/1               'test_auroc': 0.9354260932338447
+8839842   denoise  12 tiles    COMPLETE 1/1               'test_auroc': 0.9354279541485844
+8839881   denoise  12 tiles    COMPLETE 1/1               'test_auroc': 0.9401584363884974
+8839890   denoise  12 tiles    COMPLETE 1/1               'test_auroc': 0.9355479921240085
+8839920   denoise  ?           no training                
+8839937   grid                 4/4 arms ok                
+8839946   denoise  12 tiles    ERROR: RuntimeError: Expected to have finished  
+8839957   grid                 4/4 arms ok                
+8839997   grid     1 tile(s) each 4/4 arms ok                
+8840007   denoise  12 tiles    GPU FAULT at 107/2018      
+8840008   denoise  12 tiles    GPU FAULT at 26/2018       
+8840010   denoise  12 tiles    GPU FAULT at 107/2018      
+8840011   denoise  12 tiles    GPU FAULT at 29/2018       
+8840057   denoise  12 tiles    no training                
+8840058   denoise  12 tiles    no training                
+8840095   denoise  12 tiles    GPU FAULT at 29/60         
+8840120   denoise  12 tiles    GPU FAULT at 29/600        
+8840154   denoise  12 tiles    GPU FAULT at 168/700       
+8840190   denoise  1 tiles     COMPLETE 1/1               'test_auroc': 0.8628252912383914
+8840223   align    12 tiles    GPU FAULT at 3/200         
+8840232   grid     1 tile(s) each 72/72 arms ok              
+8840238   align    1 tiles     GPU FAULT at 73/200        
+8840257   align    1 tiles     ERROR: RuntimeError: expected scalar type BFloa 
+8840264   denoise  12 tiles DS COMPLETE 1/1               'test_auroc': 0.7296013323843181
+8840277   align    1 tiles     ERROR: KeyError: 'eval_loss' 
+8840291   denoise  ?           refused: stale arms        
+8840304   align    1 tiles     COMPLETE 400/400           'eval_loss': '0.04813'
+8840313   denoise  ?           refused: stale arms        
+8840323   denoise  ?           refused: stale arms        
+8840336   align    12 tiles DS ERROR: RuntimeError: expected scalar type Float 
+8840345   grid     12 tile(s) each 216/216 arms ok            'test_auroc': 0.5783115944609307
+8840356   align    12 tiles DS GPU FAULT at 56/300        'eval_loss': '0.6521'
+8840378   align    12 tiles    GPU FAULT at 1167/1167     
+8840403   align    12 tiles    GPU FAULT at 0/300         
+8840408   grid     12 tile(s) each 212/216 arms ok            'test_auroc': 0.8015630560943791
+8840431   denoise  ?           no training                
+8840444   denoise  ?           no training                
+8840469   align    12 tiles    GPU FAULT at 120/300       'eval_loss': '0.05669'
+8840487   denoise  ?           no training                
+8840498   align    12 tiles    GPU FAULT at 22/2390       
+8840516   align    12 tiles    GPU FAULT at 206/2390      
+8840529   align    1 tiles     COMPLETE 28630/28630       'eval_loss': '0.05461'
+8840537   align    12 tiles    GPU FAULT at 26/2390       
+8840581   denoise  1 tiles     ERROR:                     
+8840587   denoise  ?           no training                
+8840597   denoise  1 tiles     ERROR: AttributeError: 'MSDeltaForContrastive'  
+8840603   align    12 tiles    GPU FAULT at 802/2390      
+8840611   denoise  1 tiles     ERROR:                     
+8840621   denoise  1 tiles     ERROR:                     
+8840632   denoise  1 tiles     ERROR:                     
+8840651   denoise  1 tiles     COMPLETE 1/1               
+8840656   denoise  1 tiles     COMPLETE 1/1               
+8840665   denoise  ?           12/12 arms ok              
+8840693   denoise  ?           0/12 arms ok               
+8840715   denoise  ?           12/12 arms ok              
+8840739   align    1 tiles     COMPLETE 28630/28630       'eval_loss': '0.2432'
+8840792   denoise  ?           4/4 arms ok                
+8840898   denoise  ?           no training                
+8840907   denoise  ?           no training                
+8840927   denoise  ?           no training                
+8840941   denoise  ?           no training                
+8841066   denoise  ?           3/3 arms ok                
+8841165   denoise  ?           2/2 arms ok                
+8841255   denoise  ?           ERROR: TypeError: MSDeltaModel.forward() missin 
+8841270   denoise  ?           ran to 170/170             
+8841285   denoise  ?           ran to 172/172             
+8841310   denoise  ?           ran to 170/170             
+8841345   denoise  ?           12/12 arms ok              'test_auroc': 0.9360134693643527
+8841966   denoise  12 tiles    COMPLETE 1/1               'test_auroc': 0.8429291281565523
+8841973   denoise  ?           ran to 266/266
 ```

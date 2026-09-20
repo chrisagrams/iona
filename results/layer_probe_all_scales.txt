@@ -1,0 +1,64 @@
+# Training-free separation-ratio probe, every encoder block x 3 model scales
+# job 8841973 (debug-scaling), 1167 spectra / 99 replicate groups, frozen encoder
+# ratio = out-group mean distance / in-group mean distance; higher is better
+
+############ 50m  (/flare/UIC-HPC/homes/cgrams/msdelta-runs/msdelta-50m-production-01/final)
+[pool] 1167 spectra, 99 groups, frozen encoder, no training
+  pooling                    RATIO  in_mean  out_mean   clean
+  mean                        1.43   0.0544    0.0780   0.010
+  mean+max                    1.34   0.0742    0.0997   0.010
+  weighted_mean               1.44   0.0538    0.0777   0.010
+  weighted_mean+max           1.35   0.0742    0.0999   0.010
+  layer00/mean                1.37   0.0156    0.0214   0.000
+  layer01/mean                1.38   0.0128    0.0176   0.000
+  layer02/mean                1.38   0.0162    0.0224   0.000
+  layer03/mean                1.41   0.0222    0.0313   0.010
+  layer04/mean                1.45   0.0310    0.0448   0.010
+  layer05/mean                1.51   0.0412    0.0622   0.010
+  layer06/mean                1.51   0.0492    0.0745   0.010
+  layer07/mean                1.52   0.0578    0.0879   0.010
+  layer08/mean                1.53   0.0665    0.1015   0.010
+  layer09/mean                1.43   0.0645    0.0924   0.010
+############ 100m  (/flare/UIC-HPC/homes/cgrams/msdelta-runs/msdelta-100m-production-01/final)
+[pool] 1167 spectra, 99 groups, frozen encoder, no training
+  pooling                    RATIO  in_mean  out_mean   clean
+  mean                        1.36   0.0480    0.0650   0.010
+  mean+max                    1.31   0.0625    0.0820   0.010
+  weighted_mean               1.36   0.0470    0.0641   0.010
+  weighted_mean+max           1.31   0.0622    0.0818   0.010
+  layer00/mean                1.36   0.0073    0.0099   0.000
+  layer01/mean                1.37   0.0060    0.0082   0.000
+  layer02/mean                1.37   0.0057    0.0078   0.000
+  layer03/mean                1.38   0.0062    0.0086   0.000
+  layer04/mean                1.39   0.0078    0.0108   0.010
+  layer05/mean                1.40   0.0116    0.0162   0.010
+  layer06/mean                1.40   0.0177    0.0248   0.010
+  layer07/mean                1.40   0.0255    0.0358   0.010
+  layer08/mean                1.40   0.0343    0.0480   0.010
+  layer09/mean                1.40   0.0426    0.0596   0.010
+  layer10/mean                1.40   0.0527    0.0737   0.010
+  layer11/mean                1.41   0.0612    0.0865   0.010
+  layer12/mean                1.36   0.0553    0.0751   0.010
+############ 200m  (/flare/UIC-HPC/homes/cgrams/msdelta-runs/msdelta-200m-production-01/final)
+[pool] 1167 spectra, 99 groups, frozen encoder, no training
+  pooling                    RATIO  in_mean  out_mean   clean
+  mean                        1.35   0.0364    0.0491   0.010
+  mean+max                    1.29   0.0510    0.0656   0.010
+  weighted_mean               1.35   0.0357    0.0482   0.010
+  weighted_mean+max           1.29   0.0508    0.0654   0.010
+  layer00/mean                1.36   0.0072    0.0098   0.000
+  layer01/mean                1.36   0.0048    0.0065   0.000
+  layer02/mean                1.36   0.0044    0.0060   0.000
+  layer03/mean                1.37   0.0047    0.0064   0.000
+  layer04/mean                1.39   0.0055    0.0076   0.010
+  layer05/mean                1.41   0.0073    0.0103   0.010
+  layer06/mean                1.44   0.0104    0.0149   0.010
+  layer07/mean                1.43   0.0147    0.0210   0.010
+  layer08/mean                1.42   0.0201    0.0286   0.010
+  layer09/mean                1.42   0.0250    0.0354   0.010
+  layer10/mean                1.42   0.0305    0.0432   0.010
+  layer11/mean                1.41   0.0370    0.0523   0.010
+  layer12/mean                1.40   0.0429    0.0602   0.010
+  layer13/mean                1.39   0.0459    0.0638   0.010
+  layer14/mean                1.36   0.0451    0.0615   0.010
+  layer15/mean                1.35   0.0596    0.0803   0.010
