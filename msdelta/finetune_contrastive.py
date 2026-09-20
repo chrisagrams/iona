@@ -50,7 +50,13 @@ class ContrastiveDataArguments:
     validation_fraction: float = 0.1
     preprocessing_num_workers: int = 24
     max_samples: int = 0
-    groups_per_batch: int = field(default=12, metadata={"help": "P in the PK sampler"})
+    # P*K IS the batch size -- the PK sampler supplies whole batches, so
+    # per_device_train_batch_size is not consulted for training and is set to match only
+    # so the two do not disagree in the logs. DeltaMZBias is O(batch * peaks^2), which at
+    # 512 peaks is 12.9 GB for a batch of 48 and OOMed a 64 GB tile; 6x4 with gradient
+    # checkpointing fits. Contrastive wants the largest batch that fits, since every
+    # other row in it is a negative.
+    groups_per_batch: int = field(default=6, metadata={"help": "P in the PK sampler"})
     replicates: int = field(default=4, metadata={"help": "K in the PK sampler"})
 
 
