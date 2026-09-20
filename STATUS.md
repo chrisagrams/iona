@@ -24,7 +24,7 @@ SCIENCE ────────────────────────
   200m grid, 12 arms .............. QUEUED 8841992  memtest passed, ~4 h
   from-scratch ablation, 12 arms .. QUEUED 8841984  isolates pretraining's worth
   layer/scale readout probe ....... VOID   8841973  read a stale final/, withdrawn
-  readout probe along pretraining . RUN    8842038  50m flat after 100k; spike at 10k
+  readout probe along pretraining . DONE   8842038  no scale effect; all plateau by 50k
   feature rescorer ................ DONE            hit@1 0.889, no embedding
   neural embedding -> rescorer .... DEAD            -0.109 hit@1, 5 paired seeds
 
@@ -134,7 +134,7 @@ Every lever tried, and what it did to the separation ratio (pretrained = 1.34):
 | intensity-weighted pooling, frozen | 1.43 -> 1.44, nothing |
 | denoiser P(signal) pooling, frozen | 1.34 -> **1.46**, the best readout available, and still nothing next to 6.94 |
 | reading layer 8 instead of the output | 1.43 -> **1.53**; the stack peaks at 8 and DROPS at 9 |
-| scaling the encoder 50m -> 100m -> 200m, frozen | WITHDRAWN. `final/` is a stale export: 50m and 100m were read at ~135k steps, 200m at 193k. And one model's own step-to-step wobble (1.33-1.43) covers the whole claimed spread |
+| scaling the encoder 50m -> 100m -> 200m, frozen | NO EFFECT. At matched frontiers 1.35 / 1.36 / 1.35. The earlier "scale hurts" read a stale `final/` export |
 | `mean` instead of `mean+max`, frozen | 1.34 -> 1.43, free but small |
 | contrastive teacher -> alignment | cross-modal hit@1 +79% |
 | that embedding -> reranker | **-0.109 hit@1**, five paired seeds |
@@ -180,53 +180,60 @@ its pretraining head: predicting masked peak intensities is not the same objecti
 representing peptide identity, and the final blocks have been optimised for the former.
 Reading one block earlier is free.
 
-**WITHDRAWN: the cross-scale comparison compared different training points.** The
-39-config sweep read each scale's published `final/` directory. Those are not what they
-look like. Byte-comparing `final/model.safetensors` against every checkpoint in each run:
+**REFUTED, with the matched-step measurement: scale has no effect here, either way.**
+The original claim -- output ratio 1.43 / 1.36 / 1.35 falling with capacity -- came from
+reading each scale's published `final/`. Those are not the ends of training. Byte-
+comparing `final/model.safetensors` against every checkpoint in each run:
 
-| scale | `final/` is really | that run's last checkpoint | measured at |
+| scale | `final/` is really | that run's last checkpoint | so it was read at |
 | --- | --- | --- | --- |
-| 50m  | **checkpoint-133233** | 180000 | 74% of the way to its own frontier |
+| 50m  | **checkpoint-133233** | 180000 | 74% of its own frontier |
 | 100m | **checkpoint-138073** | 190000 | 73% |
-| 200m | **checkpoint-192799** | 192799 | 100%, the true end |
+| 200m | checkpoint-192799 | 192799 | 100% |
 
-`final/` is a periodically-refreshed export of a run that is still going, and for the 50m
-and 100m it lags its own last checkpoint by 21 and 6 hours. So "50m 1.43, 100m 1.36, 200m
-1.35" compared two models at ~135k steps against one at ~193k, and read the difference as
-capacity. It is not a scale comparison and should not be cited as one.
+`final/` is a periodically-refreshed export of a run still in progress, lagging its own
+last checkpoint by 21 hours at 50m and 6 at 100m. The sweep compared two models at ~135k
+steps against one at ~193k and read the difference as capacity.
 
-**And the effect it claimed is smaller than one model's own wobble.** Probing the 50m
-along its own trajectory (job 8842038):
+Job 8842038 then probed all three along their own trajectories. Compared at matched
+steps the effect disappears:
 
-| pretrain step | output `mean` ratio |
-| --- | --- |
-| 10,000 | **1.67** |
-| 50,000 | 1.33 |
-| 100,000 | 1.38 |
-| 133,233 (what `final/` is) | 1.43 |
-| 150,000 | 1.39 |
-| 180,000 | 1.35 |
+| pretrain step | 50m | 100m | 200m |
+| --- | --- | --- | --- |
+| 10,000 | **1.67** | 1.42 | 1.43 |
+| 50,000 | 1.33 | 1.34 | 1.42 |
+| 100,000 | 1.38 | 1.30 | 1.28 |
+| 150,000 | 1.39 | 1.34 | 1.38 |
+| each model's own frontier | **1.35** | **1.36** | **1.35** |
 
-After the first spike the curve is flat to within about +/-0.05 -- 1.33, 1.38, 1.43, 1.39,
-1.35, with no trend. The entire cross-scale spread was 1.35 to 1.43, which is that same
-+/-0.05. One model at different points in its own training varies as much as three models
-of different sizes did, so the scale comparison was never resolvable at this precision,
-independent of the stale-checkpoint problem.
+At their frontiers the three scales are identical to two decimal places. At the
+intermediate steps the ordering changes from row to row -- 50m highest at 100k, 200m
+highest at 50k, mixed at 150k -- which is what no effect looks like. Excluding the
+10,000-step point, all fifteen measurements lie in [1.28, 1.42], a spread of 0.14, and
+every between-model difference is smaller than that.
 
-It also answers the undertraining question for the 50m directly: the ratio is NOT still
-climbing at the frontier. It plateaued by 100,000 steps.
+So: quadrupling the encoder neither helps nor hurts the frozen embedding. The earlier
+"scale hurts" was an artefact of a stale export and is withdrawn. Note this is a
+different finding from the denoise result on the same checkpoints, where 100m genuinely
+does beat 50m (0.9403 vs 0.9320) -- fine-tuning uses the capacity, a frozen readout
+does not.
 
-**The one real feature is the spike at 10,000 steps**, 1.67 against ~1.38 later, and the
-best block there reaches 1.69 -- higher than anything in the 39-config sweep. Before
-reading that as "early pretraining carries peptide identity and later training destroys
-it", it needs its control: replicate spectra of one peptide have similar peaks, so an
-encoder that has learned nothing and merely passes its input through already separates
-them to some degree. `pooling_probe.py --random_init` supplies that zero. If a random
-encoder also sits near 1.7, the spike means pretraining has not yet destroyed input
-similarity, which points somewhere completely different from the other reading.
+It also answers the undertraining question directly: none of the three ratios is
+climbing at its frontier. All three plateau from about 50,000 steps onward, at roughly a
+third of the pretraining schedule. More pretraining will not supply this.
 
-The matched-step comparison the original sweep should have been is coming out of the same
-job: all three scales at 10k, 50k, 100k, 150k and their own last checkpoint.
+**The one real feature is the 50m at 10,000 steps**, 1.67 against ~1.36 everywhere else,
+with its best block at 1.69 -- higher than any of the 39 configurations in the original
+sweep. It is 50m-only: the 100m and 200m sit at 1.42 and 1.43 at the same step. Before
+reading it as "early pretraining carries peptide identity and later training erodes it",
+it needs its zero, because replicate spectra of one peptide have similar peaks and an
+encoder that has learned nothing and merely passes its input through would separate them
+too. `pooling_probe.py --random_init` supplies that, running as job 8842086. If a random
+50m also sits near 1.7, the spike means pretraining has not yet destroyed input
+similarity -- which points somewhere completely different.
+
+Raw numbers in `results/layer_probe_trajectory.txt`; regenerate with
+`sweeps/summarise_trajectory.py <log>`.
 
 `clean` -- the fraction of groups whose every replicate is nearer to its own group than
 to anything outside it -- sits at 0.010 for essentially all 39 configurations, meaning 1
