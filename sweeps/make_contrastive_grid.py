@@ -45,6 +45,9 @@ def arm_name(lr: str, kl: str, temperature: str) -> str:
             f"_t{temperature.replace('.', '')}")
 
 
+RANDOM_INIT = False    # set by --random in main()
+
+
 def render_arm(lr: str, kl: str, temperature: str) -> tuple[str, str]:
     name = arm_name(lr, kl, temperature)
     overrides = {
@@ -54,6 +57,8 @@ def render_arm(lr: str, kl: str, temperature: str) -> tuple[str, str]:
         "--run_name": f"{RUN_PREFIX}{name}",
         "--output_dir": f"./runs/{RUN_PREFIX}{name}",
     }
+    if RANDOM_INIT:
+        overrides["--random_init"] = "true"
     lines, seen = [], set()
     tokens = TEMPLATE.read_text().split()
     for flag, value in zip(tokens[::2], tokens[1::2]):
@@ -68,6 +73,22 @@ def render_arm(lr: str, kl: str, temperature: str) -> tuple[str, str]:
 def description(lr: str, kl: str, temperature: str) -> str:
     shared = TEMPLATE.parent / "DESCRIPTION.md"
     lead = " ".join(shared.read_text().split()) + " " if shared.exists() else ""
+    if RANDOM_INIT:
+        note = (" RANDOM INIT CONTROL: the encoder is the same architecture with NO "
+                "pretrained weights, so this arm asks whether contrastive training "
+                "needs the pretrained checkpoint at all. It is the natural follow-up to "
+                "job 8842086, which found the FROZEN pretrained embedding "
+                "indistinguishable from a random one (1.35 either way) -- if a random "
+                "encoder also reaches the ~7.8 the pretrained one does under this loss, "
+                "then pretraining contributes nothing to this objective either, and the "
+                "contrastive result is entirely the contrastive loss.")
+        if kl != "0":
+            note += (" NOTE this arm's KL term regularises toward a SEPARATE random "
+                     "model, which does not mean what it means for a pretrained "
+                     "encoder -- there is no prior behaviour to preserve. It is kept so "
+                     "the grid matches the pretrained one arm for arm; read the kl0 "
+                     "arms as the honest control.")
+        lead = lead + note + " "
     regulariser = ("KL regularisation DISABLED, so this is the clean test of whether the "
                    "contrastive term can separate replicates with nothing holding the "
                    "encoder back" if kl == "0" else
@@ -83,8 +104,19 @@ def description(lr: str, kl: str, temperature: str) -> str:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--check", action="store_true")
+    parser.add_argument("--random", action="store_true",
+                        help="the control grid: identical arms on a randomly "
+                             "initialised encoder, to ask whether contrastive training "
+                             "needs the pretrained weights at all")
     parser.add_argument("--clean", action="store_true")
     cli = parser.parse_args()
+
+    global RANDOM_INIT, OUT, STAMP, RUN_PREFIX
+    if cli.random:
+        RANDOM_INIT = True
+        OUT = REPO / "configs" / "sweep-contrastive-random"
+        STAMP = OUT / ".template"
+        RUN_PREFIX = "v2_conrand-"
 
     combos = list(itertools.product(LEARNING_RATES, KL_WEIGHTS, TEMPERATURES))
     if cli.check:

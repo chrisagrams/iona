@@ -365,3 +365,25 @@ def test_every_flag_is_one_the_parser_accepts(path):
         f"{path.parent.name}: no dataclass declares {unknown}. "
         f"Check the installed transformers rather than its docs."
     )
+
+
+def test_generated_sweep_arms_use_no_unknown_flags():
+    """(regression) Arms can carry flags their template never had.
+
+    args_files() deliberately excludes generated arms -- parsing 216 of them would only
+    re-test the generator. But a generator adds overrides, and an override that no
+    dataclass declares appears in NO template, so the per-config test above cannot see
+    it: `--random_init true` in the contrastive control grid is written by
+    make_contrastive_grid.py --random and exists nowhere else.
+
+    Checking the UNION of flags over every arm costs one pass and closes that gap.
+    """
+    known = _known_flags()
+    seen: dict[str, str] = {}
+    for grid in sorted((REPO / "configs").glob("sweep-*")):
+        for arm in sorted(grid.glob("*/training.args")):
+            for line in arm.read_text().splitlines():
+                if line.strip():
+                    seen.setdefault(line.split()[0], f"{grid.name}/{arm.parent.name}")
+    unknown = {f: where for f, where in seen.items() if f not in known}
+    assert not unknown, f"no dataclass declares these generated flags: {unknown}"
