@@ -143,18 +143,31 @@ saturate somewhere well before then. The honest statement is the measured one: >
 the gap is not closing fast enough for a 10x budget to matter.
 
 The denoise side tells the same story with a much smaller magnitude, which is the
-informative contrast:
+informative contrast -- but it has to be reported at MATCHED budget, because the two
+grids did not sweep the same epoch counts. Full breakdown, best arm at each setting:
 
-| objective | supervision available | pretrained | random, equal budget | gap |
-| --- | --- | --- | --- | --- |
-| denoise | 87k labelled peaks | 0.9320 | 0.9001 | +0.032 |
-| contrastive | 898 replicate groups | 7.83 | 1.35 | +6.5 |
+| epochs | pretrained 50m | scratch 50m |
+| --- | --- | --- |
+| 2 | 0.9272 (108 arms) | not run |
+| 4 | **0.9320** (108 arms) | 0.8856 (6 arms) |
+| 8 | **not run** | **0.9001** (6 arms) |
 
-Pretraining is a modest advantage where supervision is abundant and a near-total one
-where it is scarce -- consistent with pretraining substituting for labelled data. Note
-the scratch denoise grid's top five arms are ALL 8 epochs against the pretrained grid's
-fixed 4, so a random encoder wants more training on that objective too, and +0.032 is an
-upper bound on pretraining's value there rather than a settled figure.
+Two different comparisons, and both belong in any report:
+
+  MATCHED at 4 epochs ......... 0.9320 vs 0.8856, pretraining worth **+0.046**
+  scratch given DOUBLE budget . 0.9320 vs 0.9001, pretraining worth **+0.032**
+
+Quoting only the second understates pretraining, because it hands the random encoder
+twice the training. Quoting only the first ignores that the random encoder is still
+improving at the point its grid stops -- all five of its top arms are 8 epochs, and ep4
+to ep8 buys it +0.015 while ep2 to ep4 buys the pretrained model only +0.005.
+
+THE MISSING CELL is pretrained at 8 epochs, which nothing has run. Without it we cannot
+say whether the +0.032 figure is pretraining's true advantage at equal wall-clock or
+whether the pretrained model would also gain from the extra epochs and restore the gap.
+Given it gained only +0.005 going from 2 to 4 epochs it is probably close to saturated,
+so +0.032 is likely near the honest number at double budget -- but that is an inference,
+not a measurement, and the cell is cheap to fill.
 
 ## KL regularisation is not needed in general; it prevents collapse at high learning rates
 

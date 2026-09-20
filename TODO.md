@@ -567,3 +567,31 @@ inference, check the within-group version before drawing a conclusion.
       winner changes. The top eight of the 50m grid span 0.0023 pooled, so a small
       systematic difference could reorder them.
 - [ ] Backfill 200m and 400m winners the same way once those grids finish.
+
+## FT13. The pretrained-vs-scratch denoise comparison has an unmeasured cell — **Open, cheap**
+
+The two grids did not sweep the same epoch counts, so there are two valid comparisons
+and one gap:
+
+| epochs | pretrained 50m | scratch 50m |
+| --- | --- | --- |
+| 2 | 0.9272 | not run |
+| 4 | **0.9320** | 0.8856 |
+| 8 | **NOT RUN** | **0.9001** |
+
+  matched at 4 epochs ......... pretraining worth +0.046
+  scratch at double budget .... pretraining worth +0.032
+
+Both are honest and they answer different questions; reporting only one is misleading
+in a predictable direction. What is missing is pretrained at 8 epochs. Without it,
++0.032 cannot be called pretraining's advantage at equal wall-clock, because the
+pretrained model might gain from the extra epochs too.
+
+Probably it would not gain much -- ep2 to ep4 bought it only +0.005 against the random
+encoder's +0.015 from ep4 to ep8, which is what saturation looks like. But that is an
+inference and the measurement costs one 6-arm job.
+
+- [ ] Run the pretrained 50m winner at 8 epochs, ideally with seeds so it can be read
+      against FT5's spread rather than as a single number.
+- [ ] Report all three cells together; never quote +0.032 alone.
+- [ ] Same question applies at 100m/200m/400m if a scratch ablation is ever run there.
