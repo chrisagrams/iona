@@ -35,7 +35,24 @@ from msdelta.wandb_distributed import init_wandb_run
 @dataclass
 class ContrastiveModelArguments:
     pretrained_path: str = field(default="", metadata={"help": "encoder to start from"})
-    pooling: str = "mean+max"
+    pooling: str = field(
+        default="mean+max",
+        metadata={"help": "mean, mean+max, weighted_mean, weighted_mean+max, or "
+                          "layer_mix -- a trained convex mixture over every encoder "
+                          "depth, sequence-mean pooled to d_model."},
+    )
+    layer_mix_norm: bool = field(
+        default=True,
+        metadata={"help": "LayerNorm each depth before mixing. Off, the deepest blocks "
+                          "dominate by magnitude alone and the learned weights are "
+                          "decorative."},
+    )
+    encoder_lr_scale: float = field(
+        default=1.0,
+        metadata={"help": "Encoder learning rate as a multiple of the head's. 0 freezes "
+                          "the encoder outright, which is the control that says whether "
+                          "the readout or the encoder is doing the work."},
+    )
     temperature: float = field(default=0.07, metadata={"help": "SupCon temperature"})
     kl_weight: float = field(
         default=100.0,
@@ -84,12 +101,53 @@ class ContrastiveTrainer(Trainer):
     """Standard Trainer, with the PK sampler and the loss components surfaced."""
 
     def __init__(self, *args, groups=None, groups_per_batch=12, replicates=4,
-                 gradcache_chunk=0, **kwargs):
+                 gradcache_chunk=0, encoder_lr_scale=1.0, **kwargs):
         super().__init__(*args, **kwargs)
         self.groups = groups
         self.groups_per_batch = groups_per_batch
         self.replicates = replicates
         self.gradcache_chunk = gradcache_chunk
+        self.encoder_lr_scale = encoder_lr_scale
+
+    def create_optimizer(self):
+        """Encoder and readout in separate groups, so one can move slower than the other.
+
+        The point of the sweep this supports: with a trained layer mixture, is the gain
+        coming from the readout or from moving the encoder? Only comparing the same
+        readout at several encoder rates answers that.
+        """
+        if self.optimizer is not None or self.encoder_lr_scale == 1.0:
+            return super().create_optimizer()
+        optimizer_class, kwargs = type(self).get_optimizer_cls_and_kwargs(self.args, self.model)
+        kwargs.pop("lr", None)
+        encoder, readout = [], []
+        for name, parameter in self.model.named_parameters():
+            if not parameter.requires_grad:
+                continue
+            (encoder if name.startswith("model.") else readout).append(parameter)
+        groups = [{"params": readout, "lr": self.args.learning_rate}]
+        if encoder:
+            groups.insert(0, {"params": encoder,
+                              "lr": self.args.learning_rate * self.encoder_lr_scale})
+        self.optimizer = optimizer_class(groups, **kwargs)
+        return self.optimizer
+
+    def _log_layer_mix(self) -> None:
+        """Which depths the mixture actually chose -- the result, not a diagnostic.
+
+        A mixture that stays uniform means depth did not matter; one that concentrates
+        says where the peptide structure lives, and can be read against the frozen
+        layer probe that motivated this.
+        """
+        inner = self.model.module if hasattr(self.model, "module") else self.model
+        mixer = getattr(inner, "layer_mix", None)
+        if mixer is None:
+            return
+        weights = mixer.weights.detach().float().cpu()
+        self.log({f"mix/layer{i:02d}": float(w) for i, w in enumerate(weights)}
+                 | {"mix/argmax": int(weights.argmax()),
+                    "mix/entropy": float(-(weights * weights.clamp_min(1e-9).log()).sum()),
+                    "mix/gamma": float(mixer.gamma) if mixer.gamma is not None else 1.0})
 
     def _get_train_sampler(self, *args, **kwargs):
         # Random batches hold about one positive PAIR; the PK sampler guarantees
@@ -117,6 +175,7 @@ class ContrastiveTrainer(Trainer):
         if self.state.global_step % max(self.args.logging_steps, 1) == 0:
             self.log({"contrastive": float(outputs["contrastive"]),
                       "kl": float(outputs["kl"])})
+            self._log_layer_mix()
         return outputs["loss"].detach()
 
     def compute_loss(self, model, inputs, return_outputs=False, **kwargs):
@@ -126,6 +185,7 @@ class ContrastiveTrainer(Trainer):
         if self.state.global_step % max(self.args.logging_steps, 1) == 0:
             self.log({"contrastive": float(outputs["contrastive"]),
                       "kl": float(outputs["kl"])})
+            self._log_layer_mix()
         return (outputs["loss"], outputs) if return_outputs else outputs["loss"]
 
 
@@ -164,7 +224,16 @@ def main(argv: list[str] | None = None) -> int:
                  if model_args.kl_weight > 0 else None)
     model = MSDeltaForContrastive(encoder, reference, pooling=model_args.pooling,
                                   temperature=model_args.temperature,
-                                  kl_weight=model_args.kl_weight)
+                                  kl_weight=model_args.kl_weight,
+                                  layer_mix_norm=model_args.layer_mix_norm)
+    if model_args.encoder_lr_scale == 0:
+        # A zero learning rate would still let weight decay and any stateful optimizer
+        # move the encoder. Freezing is the thing being asked for, so freeze it.
+        encoder.requires_grad_(False)
+        if model.layer_mix is None:
+            raise SystemExit("a frozen encoder with a fixed pooling has nothing to "
+                             "train; use pooling=layer_mix or a non-zero "
+                             "encoder_lr_scale")
 
     training_args.run_description = training_args.run_description or load_description()
     description = (
@@ -223,7 +292,8 @@ def main(argv: list[str] | None = None) -> int:
             eval_dataset=datasets.get("validation"), data_collator=collator,
             groups=groups, groups_per_batch=data_args.groups_per_batch,
             replicates=data_args.replicates,
-            gradcache_chunk=data_args.gradcache_chunk)
+            gradcache_chunk=data_args.gradcache_chunk,
+            encoder_lr_scale=model_args.encoder_lr_scale)
         trainer.add_callback(MemoryProbe(every=50))
         trainer.train()
 
