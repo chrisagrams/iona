@@ -12,7 +12,7 @@
 --output_dir ./runs/v2_lmix-els03
 --learning_rate 2e-5
 --lr_scheduler_type cosine
---warmup_ratio 0.06
+--warmup_steps 5
 --weight_decay 0.01
 --adam_beta1 0.9
 --adam_beta2 0.95

@@ -1,0 +1,110 @@
+#!/bin/bash -l
+# Smoke one arm from each grid through the FULL pipeline before any of it reaches
+# capacity.
+#
+#   qsub -q debug -l select=1 -l walltime=00:55:00 \
+#        -v GRIDS="configs/sweep-denoise-200m configs/sweep-denoise-400m" \
+#        pbs/validate_grids.pbs
+#
+# Why this exists: config changes that look safe are not. Repointing every
+# --pretrained_path at frozen checkpoints and rewriting the scheduler touched 27 configs
+# at once, and two jobs then died at argument parsing because transformers 5.17 has no
+# --warmup_ratio field. Those were debug jobs, but the same edit reached three capacity
+# grids that had to be held. A grid is not ready for capacity until one of its arms has
+# gone end to end somewhere cheap.
+#
+# MAX_SAMPLES rather than MAX_STEPS on purpose: it caps ROWS and changes nothing else, so
+# the arm runs its real epochs and every end-of-training path actually executes --
+# periodic evaluation, ZeRO-2 checkpoint writes, save_total_limit rotation,
+# load_best_model_at_end, the test split, the final save. MAX_STEPS stops before all of
+# it. Two alignment bugs (8840257, 8840277) trained hundreds of steps before dying in
+# evaluation precisely because that path runs nowhere else.
+
+#PBS -N msdelta-validate
+#PBS -A UIC-HPC
+#PBS -l place=scatter
+#PBS -l filesystems=home:flare
+#PBS -j oe
+#PBS -o pbs/logs/
+
+set -uo pipefail
+REPO_DIR=${REPO_DIR:-${PBS_O_WORKDIR:-$PWD}}
+cd "$REPO_DIR"
+
+GRIDS=${GRIDS:?set GRIDS to a space-separated list of grid directories}
+MODULE=${MODULE:-msdelta.finetune_denoise}
+MAX_SAMPLES=${MAX_SAMPLES:-400}
+VENV_DIR=${VENV_DIR:-$REPO_DIR/.venv}
+PROJECT=${PROJECT:-UIC-HPC}
+SCRATCH_ROOT=${SCRATCH_ROOT:-/lus/flare/projects/$PROJECT/$USER/msdelta}
+XPUS_PER_HOST=${XPUS_PER_HOST:-12}
+
+set +u
+source /usr/share/lmod/lmod/init/bash
+module load "${FRAMEWORKS_MODULE:-frameworks/2025.3.1}"
+set -u
+
+export ONEAPI_DEVICE_SELECTOR=level_zero:gpu
+export ZE_FLAT_DEVICE_HIERARCHY=FLAT
+export ZE_AFFINITY_MASK=${ZE_AFFINITY_MASK:-$(seq -s, 0 $((XPUS_PER_HOST - 1)))}
+export OMP_NUM_THREADS=${OMP_NUM_THREADS:-4}
+export MKL_NUM_THREADS=${MKL_NUM_THREADS:-4}
+export CCL_PROCESS_LAUNCHER=pmix CCL_ATL_TRANSPORT=mpi CCL_KVS_MODE=mpi
+export FI_MR_CACHE_MONITOR=${FI_MR_CACHE_MONITOR:-userfaultfd}
+unset CCL_ZE_IPC; unset CCL_ZE_IPC_EXCHANGE
+export PYTHONPATH=$REPO_DIR${PYTHONPATH:+:$PYTHONPATH}
+export HF_HOME=${HF_HOME:-$SCRATCH_ROOT/huggingface}
+export HF_HUB_OFFLINE=${HF_HUB_OFFLINE:-1} HF_DATASETS_OFFLINE=${HF_DATASETS_OFFLINE:-1}
+ALCF_PROXY=${ALCF_PROXY:-http://proxy.alcf.anl.gov:3128}
+export HTTP_PROXY=${HTTP_PROXY:-$ALCF_PROXY} HTTPS_PROXY=${HTTPS_PROXY:-$ALCF_PROXY}
+export http_proxy=$HTTP_PROXY https_proxy=$HTTPS_PROXY
+export no_proxy=${no_proxy:-admin,localhost,*.cm.aurora.alcf.anl.gov,aurora-*,*.alcf.anl.gov},127.0.0.1
+export NO_PROXY="$no_proxy"
+
+HOSTFILE=$SCRATCH_ROOT/runs/.hostfile-validate-$PBS_JOBID
+sort -u "${PBS_NODEFILE:?}" | head -1 > "$HOSTFILE"
+export MASTER_ADDR=$(head -1 "$HOSTFILE") MASTER_PORT=${MASTER_PORT:-29500}
+export MSDELTA_XPUS_PER_HOST=$XPUS_PER_HOST MSDELTA_WORLD_SIZE=$XPUS_PER_HOST
+
+ok=0; total=0; failed=()
+for grid in $GRIDS; do
+    total=$(( total + 1 ))
+    # The heaviest arm, by name: biggest batch is the memory-hungriest, and if the
+    # cheapest arm is the only one validated the expensive ones are still unproven.
+    arm=$(ls "$grid" 2>/dev/null | grep -v '^\.' | sort | tail -1)
+    args=$grid/$arm/training.args
+    echo
+    echo "############ $grid :: $arm"
+    if [[ ! -f $args ]]; then echo "  no training.args"; failed+=("$grid"); continue; fi
+    grep -o -- '--pretrained_path [^ ]*' "$args" | sed 's/^/  /'
+    dir=$SCRATCH_ROOT/runs/validate-$(basename "$grid")-$PBS_JOBID
+    mkdir -p "$dir"
+    mpiexec --envall --pmi=pmix -n "$XPUS_PER_HOST" --ppn "$XPUS_PER_HOST" \
+        --cpu-bind depth --depth "${CPU_DEPTH:-8}" --hostfile="$HOSTFILE" \
+        "$REPO_DIR/pbs/rank_wrapper.sh" \
+        "$VENV_DIR/bin/python" -m "$MODULE" \
+            --args_file "$args" --output_dir "$dir" \
+            --max_samples "$MAX_SAMPLES" --eval_steps 10 --save_steps 10 \
+            --logging_steps 5 --report_to none \
+        > "$dir/validate.log" 2>&1
+    status=$?
+    if [[ $status -eq 0 ]]; then
+        ok=$(( ok + 1 ))
+        echo "  PASS"
+        grep -oE "\[denoise\] test: .{0,110}" "$dir/validate.log" | tail -1 | sed 's/^/    /'
+    else
+        echo "  FAIL exit $status -- $dir/validate.log"
+        grep -E 'Error|Traceback|not used by the HfArgumentParser|No such file' \
+            "$dir/validate.log" | tail -4 | sed 's/^/    /'
+        failed+=("$grid")
+    fi
+done
+
+echo
+echo "=== validated $ok/$total grids ==="
+if (( ok == total )); then
+    echo "SAFE TO RELEASE: qrls <jobids>"
+else
+    echo "DO NOT RELEASE. Failed: ${failed[*]}"
+fi
+[[ $ok -eq $total ]] || exit 1
