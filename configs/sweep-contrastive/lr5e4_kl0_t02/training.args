@@ -7,7 +7,7 @@
 --temperature 0.2
 --kl_weight 0
 --groups_per_batch 2
---replicates 4
+--replicates 2
 --run_name v2_con50m-lr5e4_kl0_t02
 --output_dir ./runs/v2_con50m-lr5e4_kl0_t02
 --learning_rate 5e-4
