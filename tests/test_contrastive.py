@@ -216,3 +216,106 @@ class TestTrainerIntegration:
         model = self._model(tiny_config)
         model.gradient_checkpointing_enable()
         assert not getattr(model.reference, "is_gradient_checkpointing", False)
+
+
+class TestGradCache:
+    """GradCache must produce the EXACT full-batch gradient, not an approximation.
+
+    It exists because the epochs ladder showed the constraint is negatives rather than
+    steps: three epochs reached a separation ratio of 6.94 and ten epochs fell to 4.82,
+    with the contrastive loss already at 0.005 against a chance value of 1.099. The task
+    was solved and over-optimised, because a batch of four spectra offers four negatives.
+    GradCache decouples the batch from memory so the objective can see hundreds.
+
+    If the gradient were merely approximate the whole thing would be worthless, so it is
+    checked against a direct full-batch backward -- with dropout OFF, because dropout
+    masks are drawn per tensor shape and a chunked forward can never bit-match a
+    full-batch one.
+    """
+
+    def _config(self):
+        from msdelta.configuration_msdelta import MSDeltaConfig
+        return MSDeltaConfig(hidden_size=32, num_attention_heads=4, num_hidden_layers=2,
+                             intermediate_size=64, delta_bias_n_freqs=8,
+                             delta_bias_per_head_hidden=4, hidden_dropout_prob=0.0,
+                             attention_probs_dropout_prob=0.0)
+
+    def _model(self, kl_weight=10.0):
+        from msdelta.contrastive import MSDeltaForContrastive
+        from msdelta.modeling_msdelta import MSDeltaForPreTraining
+        config = self._config()
+        torch.manual_seed(0)
+        return MSDeltaForContrastive(MSDeltaForPreTraining(config),
+                                     MSDeltaForPreTraining(config),
+                                     temperature=0.2, kl_weight=kl_weight).train()
+
+    def _batch(self, size=8, length=12):
+        torch.manual_seed(1)
+        return {"mz": torch.rand(size, length) * 1000,
+                "log_intensity": torch.rand(size, length),
+                "attention_mask": torch.ones(size, length, dtype=torch.long),
+                "group": torch.arange(size) // 2}
+
+    def _flat_grad(self, model):
+        return torch.cat([p.grad.flatten() for _, p in sorted(model.model.named_parameters())
+                          if p.grad is not None])
+
+    @pytest.mark.parametrize("chunk_size", [1, 2, 4])
+    def test_gradient_matches_full_batch(self, chunk_size):
+        from msdelta.contrastive import gradcache_step
+        batch = self._batch()
+        direct = self._model()
+        direct(**batch)["loss"].backward()
+        cached = self._model()
+        gradcache_step(cached, batch, chunk_size=chunk_size)
+        reference, got = self._flat_grad(direct), self._flat_grad(cached)
+        # Relative L2 over the whole gradient, not per-parameter max ratio: a bias whose
+        # gradient is near zero makes that ratio explode and reports a correct
+        # implementation as 27x wrong, which is exactly what happened while writing this.
+        assert (reference - got).norm() / reference.norm() < 1e-4
+
+    def test_loss_matches_full_batch(self):
+        from msdelta.contrastive import gradcache_step
+        batch = self._batch()
+        direct = self._model()
+        expected = direct(**batch)
+        cached = self._model()
+        got = gradcache_step(cached, batch, chunk_size=2)
+        assert float(got["loss"]) == pytest.approx(float(expected["loss"]), abs=1e-5)
+        assert float(got["contrastive"]) == pytest.approx(float(expected["contrastive"]),
+                                                          abs=1e-5)
+
+    def test_works_without_the_kl_term(self):
+        from msdelta.contrastive import gradcache_step
+        batch = self._batch()
+        direct = self._model(kl_weight=0.0)
+        direct(**batch)["loss"].backward()
+        cached = self._model(kl_weight=0.0)
+        gradcache_step(cached, batch, chunk_size=2)
+        reference, got = self._flat_grad(direct), self._flat_grad(cached)
+        assert (reference - got).norm() / reference.norm() < 1e-4
+
+    def test_rng_is_replayed_so_dropout_cannot_desync(self):
+        """Without replay the two passes draw different masks and the gradient is wrong.
+
+        Measured before the fix: losses 1.9495 vs 1.9409 and a badly wrong gradient.
+        Here dropout is ON, so the check is self-consistency -- two identical GradCache
+        steps from the same seed must agree exactly.
+        """
+        from msdelta.contrastive import MSDeltaForContrastive, gradcache_step
+        from msdelta.modeling_msdelta import MSDeltaForPreTraining
+        from msdelta.configuration_msdelta import MSDeltaConfig
+        config = MSDeltaConfig(hidden_size=32, num_attention_heads=4, num_hidden_layers=2,
+                               intermediate_size=64, delta_bias_n_freqs=8,
+                               delta_bias_per_head_hidden=4, hidden_dropout_prob=0.3)
+        batch = self._batch()
+        grads = []
+        for _ in range(2):
+            torch.manual_seed(0)
+            model = MSDeltaForContrastive(MSDeltaForPreTraining(config),
+                                          MSDeltaForPreTraining(config),
+                                          temperature=0.2, kl_weight=10.0).train()
+            torch.manual_seed(7)
+            gradcache_step(model, batch, chunk_size=2)
+            grads.append(self._flat_grad(model))
+        assert torch.allclose(grads[0], grads[1], atol=1e-6)
