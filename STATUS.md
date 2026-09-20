@@ -10,76 +10,78 @@ anyone's memory. Last updated: 2026-09-20.
 ## Where things stand
 
 ```
-LEGEND  [x] done   [~] RUNNING   [q] queued   [>] blocked   [X] closed   [ ] not started
+LEGEND  [x] done  [~] RUNNING  [q] queued  [>] blocked  [X] closed  [ ] not started
 
 
-RUNNING RIGHT NOW
+JOBS
 ──────────────────────────────────────────────────────────────────────────
-  [~] scratch ablation ......... 8841984  capacity  3/12 arms  32 min in
-  [~] 200m denoise grid ........ 8841992  capacity  0/12 arms  32 min in
-  [q] 400m denoise grid ........ 8842147  capacity  waiting on a capacity slot
-  [q] layer-mix v2, real blend . 8842351  debug-scaling
+  [~] 200m denoise grid .. 8841992  capacity   6/12 arms   2h20m   best 0.9443
+  [~] scratch 50m ........ 8841984  capacity   9/12 arms   2h20m   best 0.8960
+  [q] 400m denoise grid .. 8842147  capacity   0/12  waiting for a slot; capacity
+                                     runs 2 of mine at once, so ~1h then ~2.5h
+  [ ] layermix on RANDOM . configs/sweep-layermix-random ready, unsubmitted
+  [ ] random at 10x budget configs/sweep-random-budget ready, unsubmitted
 
 
-THE QUESTION BOTH ABLATIONS ASK: what is pretraining worth?
+TODAY'S TWO CHECKS -- both came back clean
 ──────────────────────────────────────────────────────────────────────────
-  CONTRASTIVE ..... answered. Pretraining is ESSENTIAL.
-      pretrained 7.83   random 1.35 (the floor, all 12 arms, no learning at all)
+  [x] is pooled AUROC hiding a within-spectrum failure?   NO
+        50m  pooled 0.9213  per-spectrum 0.9269
+        100m pooled 0.9331  per-spectrum 0.9377
+        Pooling was mildly DEFLATING. p10 > 0.85, so no failing subset.
+        Denoise holds on the axis the model is actually used on.
 
-  DENOISE ......... answering now, and it looks different.
-      pretrained 0.9320   random 0.8856 / 0.8701 / 0.8469  (3 of 12 arms)
-      Random LEARNS the task, just worse. Pretraining worth ~+0.046 so far.
-
-  The contrast is the interesting part: denoise has 87k labelled peaks and is
-  learnable from noise; replicate separation has 898 groups and is not.
+  [x] did training the depth mixture achieve anything?    A LITTLE
+        untrained uniform 1.43 -> trained 1.49 -> block 8 by hand 1.53
+        A trained linear reweighting of depth loses to a good guess.
 
 
 DENOISE  — the line that works
 ──────────────────────────────────────────────────────────────────────────
-  [x] 50m grid, 216 arms ....... 0.9320   216/216
-  [x] 100m grid, 12 arms ....... 0.9403
-  [~] 200m / 400m / scratch .... above
-  [>] FT5 multi-seed ALL scales  BLOCKED on 200m+400m naming their winners.
-        Decides whether 0.9403 > 0.9320 is real: top-8 span is only 0.0023.
-  [>] final model .............. after FT5
+  [x] 50m,  216 arms ..... 0.9320 auroc / 0.8632 f1
+  [x] 100m,  12 arms ..... 0.9403 / 0.8723
+  [~] 200m,  12 arms ..... 0.9443 / 0.8773  (partial, b48 half only)
+  [~] scratch 50m ........ 0.8960 / 0.8249  -> pretraining worth ~+0.036
+  [q] 400m,  12 arms
+  [>] FT5 multi-seed, all scales .. blocked on 200m + 400m naming winners.
+        The apparent 0.9320 -> 0.9403 -> 0.9443 trend is 0.008 and 0.004,
+        and the 50m top-8 span 0.0023 on one seed each. Unresolved until FT5.
 
 
-EMBEDDING  — the picture finally makes sense
+EMBEDDING  — one finding explains every failure on this axis
 ──────────────────────────────────────────────────────────────────────────
-  [x] THE FINDING: the pretrained representation is REAL but NON-LINEAR.
+  [x] THE FINDING: the pretrained representation is REAL but NON-LINEAR
         frozen            pretrained 1.35 == random 1.35
         after contrastive pretrained 7.83 >> random 1.35
-        No linear readout reaches it. Post-training makes it accessible.
-        -> frozen probes cannot rank checkpoints, layers or scales. Retired.
+        No linear readout reaches it; post-training makes it accessible.
 
-  [X] layer / pooling / scale / longer pretraining .. all noise on the floor
-  [X] embedding -> reranker ......................... -0.109 hit@1, harmful
-  [x] contrastive training .......................... 7.83 vs 1.35 floor
-  [~] layer-mix, GENUINE blend ...................... 8842351
-        v1 does not count: collapsed to one layer before epoch 1 of 3, and
-        softmax saturation makes that irreversible. v2 caps logit travel at
-        ~2.0 so it cannot reach the trap. Watch mix/entropy, not the ratio.
-  [ ] random encoder at 10x budget .................. configs ready
-  [ ] start from the 10k checkpoint ................. 1.67, above the floor
+  [X] layer / pooling / scale / longer pretraining .. noise on the floor
+  [X] trained mixture over depths .................. 1.49, loses to 1.53
+  [X] genuine blend vs one layer ................... blend is WORSE
+  [X] embedding -> reranker ........................ -0.109 hit@1
+  [x] contrastive training ......................... 7.83 vs 1.35 floor
+  [ ] start from the 10k checkpoint ................ 1.67, the one reading
+                                                     that ever beat the floor
 
 
 RERANKING
 ──────────────────────────────────────────────────────────────────────────
-  [x] feature rescorer ......... hit@1 0.889, no neural embedding
-  [ ] cross-encoder ............ waiting on meaningful embeddings
+  [x] feature rescorer ... hit@1 0.889, no neural embedding
+  [ ] cross-encoder ...... waiting on meaningful embeddings
 
 
 INFRA & BUGS
 ──────────────────────────────────────────────────────────────────────────
+  [x] per-spectrum AUROC now reported on every denoise run
   [x] checkpoints frozen by step number; nothing chases a moving final/
   [x] validation gate; nothing unvalidated reaches capacity
-  [x] unknown-flag tests, templates AND generated arms
-  [x] SaveEncoderCallback, verified on hardware
-  [X] FT10 RETRACTED -- warmup was never the bug; I read a smoke log as real
-  [ ] FT11 anti-collapse for the mixture .. contingent on 8842351's entropy
-  [ ] MSDeltaForContrastive -> PreTrainedModel .. deferred
-  [~] FT9 12-tile align fault .. parked for ALCF
-  [ ] FT1 / FT3 / FT4 / FT8 .... open, none blocking
+  [x] unknown-flag tests; SaveEncoderCallback; staleness guard on 10 grids
+  [X] FT10 RETRACTED -- warmup was never the bug, I read a smoke log as real
+  [X] FT11 closed unused -- the blend worked and was worse anyway
+  [ ] FT12 pooled-vs-within sign is unpredictable .. recorded, check applied
+  [ ] MSDeltaForContrastive -> PreTrainedModel ..... deferred
+  [~] FT9 12-tile align fault ..... parked for ALCF
+  [ ] FT1 / FT3 / FT4 / FT8 ....... open, none blocking
 ```
 
 Model scales are NOT compared against each other directly; figures normalise by
