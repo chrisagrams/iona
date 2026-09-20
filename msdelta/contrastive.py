@@ -138,15 +138,135 @@ def head_kl(logits: Tensor, reference_logits: Tensor, attention_mask: Tensor) ->
     return torch.where(valid, terms, torch.zeros_like(terms)).sum(-1).mean()
 
 
+class LayerMixPooler(nn.Module):
+    """One trainable scalar per depth, mixed into a single d_model embedding.
+
+    Every embedding this project has measured came off ONE layer -- almost always the
+    last. The layer probe (job 8841973) showed that is the wrong layer at every scale:
+    the separation ratio peaks mid-stack and sags in the final blocks, by 1.53 vs 1.43 at
+    50m and 1.44 vs 1.35 at 200m. Picking the best single layer is a discrete search over
+    a curve whose shape moves with scale. This learns the mixture instead, so the choice
+    of depth becomes a trained parameter rather than a hyperparameter.
+
+    Softmax over the scalars, ELMo-style, so the mix is a convex combination: the
+    weights read directly as "how much of each depth", and no layer can be up-weighted
+    without another giving way. `gamma` restores the overall scale that the softmax
+    removes, since a convex combination cannot change magnitude on its own.
+
+    PER-LAYER NORMALISATION IS ON BY DEFAULT, and it is not cosmetic. Raw block outputs
+    differ by an order of magnitude across depth -- the 200m probe measured in-group
+    distances of 0.0044 at block 2 against 0.0596 at block 15. Mixing those unnormalised
+    means the deepest layers dominate the sum no matter what the weights say, so the
+    "learned" mixture would be decided by scale before training started. A LayerNorm
+    without affine parameters puts every depth on comparable footing, costs no
+    parameters, and makes the learned weights mean what they appear to mean.
+
+    Output is d_model, not 2*d_model: a sequence mean only, no max concatenation.
+    """
+
+    def __init__(self, num_layers: int, hidden_size: int, normalise: bool = True,
+                 learn_scale: bool = True):
+        super().__init__()
+        if num_layers < 1:
+            raise ValueError(f"need at least one layer to mix, got {num_layers}")
+        # Zeros, so softmax starts uniform: the mixture begins as the mean of all depths
+        # and training moves it, rather than starting at some arbitrary preference.
+        self.mix = nn.Parameter(torch.zeros(num_layers))
+        self.gamma = nn.Parameter(torch.ones(())) if learn_scale else None
+        self.norm = (nn.LayerNorm(hidden_size, elementwise_affine=False)
+                     if normalise else None)
+
+    @property
+    def weights(self) -> Tensor:
+        """The mixture as it would be applied, for logging."""
+        return torch.softmax(self.mix, dim=0)
+
+    def forward(self, states: list[Tensor], attention_mask: Tensor) -> Tensor:
+        if len(states) != self.mix.numel():
+            raise ValueError(f"expected {self.mix.numel()} layer states, got {len(states)}")
+        stacked = torch.stack([self.norm(h) if self.norm is not None else h
+                               for h in states], dim=0)          # (L, B, S, D)
+        weights = torch.softmax(self.mix, dim=0).to(stacked.dtype)
+        mixed = (stacked * weights[:, None, None, None]).sum(0)   # (B, S, D)
+        mask = attention_mask.unsqueeze(-1).to(mixed.dtype)
+        pooled = (mixed * mask).sum(1) / mask.sum(1).clamp_min(1e-9)
+        if self.gamma is not None:
+            pooled = pooled * self.gamma
+        return pooled
+
+
+def encoder_layer_states(encoder: nn.Module, mz: Tensor, log_intensity: Tensor,
+                         attention_mask: Tensor) -> tuple[list[Tensor], Tensor]:
+    """Run the encoder and keep every block's output, plus the embedding it started from.
+
+    MSDeltaModel.forward returns only the final normalised state, so the intermediates
+    have to be captured. Forward hooks rather than a reimplemented forward: the block
+    loop carries the bias tensor, the padding mask and a gradient-checkpointing branch,
+    and a copy of it here would be a second thing to keep in step with the model.
+
+    The captured tensors are the real block outputs, so they carry gradients and the
+    mixture trains the encoder through every depth it draws on.
+
+    Gradient checkpointing is refused rather than silently mishandled: under it each
+    block runs twice, once under no_grad to find the boundaries and once to recompute,
+    so a hook fires twice per block and the first tensor is detached from the graph.
+    Taking the second is correct but depends on recompute order, which is not a thing to
+    rely on quietly.
+    """
+    if getattr(encoder, "gradient_checkpointing", False) and encoder.training:
+        raise RuntimeError(
+            "layer-mix pooling cannot read intermediate states under gradient "
+            "checkpointing; disable one of them"
+        )
+    captured: dict[int, Tensor] = {}
+    handles = [encoder.embed.register_forward_hook(
+        lambda _m, _i, out: captured.__setitem__(0, out))]
+    for index, block in enumerate(encoder.blocks, start=1):
+        handles.append(block.register_forward_hook(
+            lambda _m, _i, out, index=index: captured.__setitem__(index, out)))
+    try:
+        final = encoder(mz=mz, log_intensity=log_intensity,
+                        attention_mask=attention_mask).last_hidden_state
+    finally:
+        for handle in handles:
+            handle.remove()
+    expected = len(encoder.blocks) + 1
+    if len(captured) != expected:
+        raise RuntimeError(f"captured {len(captured)} of {expected} layer states")
+    return [captured[i] for i in range(expected)], final
+
+
+def layer_mix_width(model: nn.Module) -> int:
+    """d_model: a sequence mean, with no max concatenation."""
+    return _hidden_size(model)
+
+
+def _hidden_size(model: nn.Module) -> int:
+    hidden = getattr(getattr(model, "config", None), "hidden_size", None)
+    if hidden is None:
+        hidden = getattr(model.config.encoder, "hidden_size")
+    return hidden
+
+
 class MSDeltaForContrastive(nn.Module):
     """Spectrum encoder trained to separate peptides while still explaining peaks."""
 
     def __init__(self, model: nn.Module, reference: nn.Module | None = None,
                  pooling: str = "mean+max", temperature: float = 0.07,
-                 kl_weight: float = 1.0):
+                 kl_weight: float = 1.0, layer_mix_norm: bool = True):
         super().__init__()
         self.model = model
         self.reference = reference
+        # pooling="layer_mix" replaces the fixed readout with a trained one over depth.
+        # Built here rather than passed in so its size always matches this encoder.
+        self.layer_mix = None
+        if pooling == "layer_mix":
+            encoder = getattr(model, "msdelta", model)
+            self.layer_mix = LayerMixPooler(
+                num_layers=len(encoder.blocks) + 1,   # + the pre-block embedding
+                hidden_size=_hidden_size(model),
+                normalise=layer_mix_norm,
+            )
         if self.reference is not None:
             # Frozen AND in eval mode: dropout would make the regularisation target move
             # every step, and the encoder would chase noise instead of staying put.
@@ -180,11 +300,19 @@ class MSDeltaForContrastive(nn.Module):
 
     def embed(self, mz, log_intensity, attention_mask) -> tuple[Tensor, Tensor]:
         encoder = getattr(self.model, "msdelta", self.model)
-        hidden = encoder(mz=mz, log_intensity=log_intensity,
-                         attention_mask=attention_mask).last_hidden_state
-        pooled = F.normalize(pool_sequence(hidden, attention_mask, self.pooling).float(),
-                             dim=-1)
-        return pooled, hidden
+        if self.layer_mix is not None:
+            # `hidden` stays the FINAL state even when the embedding mixes every depth:
+            # it feeds the intensity head for the KL term, whose job is to hold the
+            # pretraining behaviour still. That behaviour lives at the output, so
+            # regularising a mixture there would constrain something the head never used.
+            states, hidden = encoder_layer_states(encoder, mz, log_intensity,
+                                                  attention_mask)
+            pooled = self.layer_mix(states, attention_mask)
+        else:
+            hidden = encoder(mz=mz, log_intensity=log_intensity,
+                             attention_mask=attention_mask).last_hidden_state
+            pooled = pool_sequence(hidden, attention_mask, self.pooling)
+        return F.normalize(pooled.float(), dim=-1), hidden
 
     def forward(self, mz, log_intensity, attention_mask, group,
                 reference_logits=None, return_dict: bool = True,
@@ -215,10 +343,9 @@ class MSDeltaForContrastive(nn.Module):
 
 
 def embedding_size(model: nn.Module, pooling: str = "mean+max") -> int:
-    hidden = getattr(getattr(model, "config", None), "hidden_size", None)
-    if hidden is None:
-        hidden = getattr(model.config.encoder, "hidden_size")
-    return pooled_width(hidden, pooling)
+    if pooling == "layer_mix":
+        return layer_mix_width(model)
+    return pooled_width(_hidden_size(model), pooling)
 
 
 @torch.no_grad()
