@@ -103,6 +103,7 @@ declare -A GRID_CHECK=(
     [configs/sweep-layermix]="sweeps/make_layermix_grid.py --check"
     [configs/sweep-contrastive]="sweeps/make_contrastive_grid.py --check"
     [configs/sweep-contrastive-random]="sweeps/make_contrastive_grid.py --random --check"
+    [configs/sweep-random-budget]="sweeps/make_random_budget_grid.py --check"
 )
 if [[ -z ${SKIP_GRID_CHECK:-} ]]; then
     check=${GRID_CHECK[${SWEEP_ROOT%/}]:-}

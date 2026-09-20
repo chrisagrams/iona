@@ -318,6 +318,114 @@ twelve-rank xccl dirty -- it is the gather, not the loss, the model or the data.
       both only appear once tensors cross ranks, so whichever is fixed first should be
       re-checked against the other.
 
+## FT10 — RETRACTED: warmup never exceeded the run — **Closed, was not a bug**
+
+The claim was that `--warmup_steps 100` exceeded the entire contrastive run, so the rate
+ramped from zero and training ended before cosine decay engaged. It was derived from
+`train_groups=60`, read out of job 8840665 -- a SMOKE run with `max_samples` applied.
+
+The real corpus has **898 training groups**. At `groups_per_batch 2` that is 449 batches
+an epoch and **1,347 optimizer steps** over 3 epochs, confirmed independently by the
+run's own `train_runtime 264s x 5.101 steps/s`. Warmup 100 is 7.4% of that: entirely
+normal, and never a bug.
+
+What actually happened: warmup was changed from 100 to 5 for a wrong reason, and the
+re-run scored 7.83 against the previous 6.94. That change is real but its explanation is
+not established -- 7.4% to 0.4% warmup is a modest change and there are no error bars on
+either number. Do not cite "the scheduler was broken" as the cause of the improvement.
+
+- [ ] Re-derive a sensible warmup for 1,347 steps (100, i.e. the original, is defensible)
+      and decide whether 5 is actually better, with seeds, rather than assuming.
+- [x] Corpus size verified against the dataset rather than a smoke log.
+
+See OBSERVATIONS.md, "Reading a smoke-run log as a real run cost three wrong
+conclusions", for the other two things this number broke.
+
+## FT5. Multi-seed denoise on every scale — **Open, deprioritised**
+
+Not urgent while the 200m, 400m and scratch grids are queued; those answer questions we
+do not have answers to at all, where this sharpens ones we do. Keep it on the list.
+
+WHY IT IS NOT OPTIONAL EVENTUALLY. Every grid ranks its arms on ONE seed each, and the
+gaps being ranked are tiny:
+
+  50m, 216 arms: the top eight span 0.0023 test AUROC, across three head widths and two
+                 encoder_lr_scales. h128/h256/h512 at the same lr and scale gave
+                 0.9319 / 0.9319 / 0.9320.
+  100m, 12 arms: the top five span 0.0012, across lr 5e-5 to 5e-4 and both batch sizes.
+
+If seed spread is comparable to those, the rankings are largely noise and each "winner"
+is whichever arm drew a good seed. The replication is what licenses the word winner. It
+also decides whether 100m's 0.9403 genuinely beats 50m's 0.9320 -- a gap of 0.0083, only
+about 4x the within-grid top-cluster spread.
+
+SHAPE. `sweeps/make_seed_grid.py --sizes ... --seeds N`, which now takes any set of
+scales. Scales x seeds wants to be a multiple of 12 to fill a node-wave exactly:
+
+  50m + 100m, 6 seeds     12 arms, one wave   <- generated and ready now
+  all four scales, 3 seeds 12 arms, one wave
+  all four scales, 6 seeds 24 arms, two waves <- the version worth having
+
+DEPENDENCY, and the reason it cannot just be run now: each scale must repeat its OWN
+winning configuration, and 200m and 400m have not got one yet -- their grids are 8841992
+and 8842147. Generating 200m/400m seed arms today would only repeat a guess. Run this
+after those land.
+
+What varies is `--seed` alone: head initialisation, data order, dropout. The
+train/validation/test split comes from the dataset, not the seed, so every arm is scored
+on identical rows and the spread measures training noise and nothing else.
+
+- [ ] After the 200m and 400m grids report, regenerate with all four scales.
+- [ ] Report mean +/- sd per scale, and say plainly whether the top group of each grid
+      is tied rather than ranked.
+- [ ] Only then compare scales to each other, normalised by compute budget
+      (`results/checkpoint_provenance.txt` has the pretraining step each started from).
+
+## FT2. Test metrics never reach W&B — **NOT A BUG (closed)**
+
+They were always there. HuggingFace's WandbCallback groups metrics into sections, so
+`test_auroc` is logged as `test/auroc`. The original report queried the underscore form,
+got None, and concluded the metrics were missing.
+
+    test/auroc = 0.9354279541485844   test/auprc = 0.96199889848495
+
+- [x] Verified: every `test/*` key is present in the run summary. No change needed.
+
+## FT3. A Python-level failure reports `finished` in W&B — **Open**
+
+Narrower than first written. W&B marks a run `crashed` by missing heartbeat, i.e. only
+when the process dies WITHOUT calling finish(). A hard crash is therefore labelled
+correctly -- 8839166 and 8839203 both died on a GPU page fault and both show `crashed`.
+
+The mislabelled case is an exception that propagates through the `finally` block, which
+calls finish() on the way out and stamps the run `finished`. 8839579 died on the metrics
+ValueError and is indistinguishable from a completed run.
+
+It matters at sweep scale: with 72 arms the W&B run list is the index. An arm that died
+at step 500 sits beside a completed one, carrying plausible partial metrics, with nothing
+to tell them apart.
+
+- [ ] Call `finish(exit_code=1)` when main() raises, and keep the bare finish() only on
+      the success path.
+
+## FT4. 32 stray label values survive the distributed gather — **Confirmed as the gather**
+
+`denoise_metrics` drops 32 labels per evaluation that are neither 0, 1 nor -100 —
+bf16-quantised floats in the 4.09-5.22 range, the same 32 every time. That is 0.0013% of
+2.5M peaks and has no measurable effect, but nothing should be writing those values into
+a label buffer. A single-process eval and a two-rank gloo eval are both clean, so it
+appears only at twelve ranks with bf16.
+
+Job 8840190 closes the loop on the diagnosis: one tile, no distributed gather, a full
+700-step train plus eval plus test over 1.68M peaks, and `label_dropped` / `label_extra`
+are both exactly **0**. Single process clean, two-rank gloo clean, one-tile xpu clean,
+twelve-rank xccl dirty -- it is the gather, not the loss, the model or the data.
+
+- [ ] Find the source. Suspect the padding index used when gathering variable-length
+      label tensors across ranks. Shares a root with [FT7](#ft7-the-gpu-page-fault-is-ddp-not-the-model--isolated-workaround-in-hand):
+      both only appear once tensors cross ranks, so whichever is fixed first should be
+      re-checked against the other.
+
 ## FT10 — warmup_steps exceeds the whole run in every contrastive config
 
 `configs/finetune-contrastive-50m/training.args` sets `--warmup_steps 100`. The

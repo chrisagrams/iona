@@ -37,5 +37,5 @@
 --wandb_project msdelta-finetune-contrastive
 --wandb_entity CS_Pharm
 --layer_mix_norm true
---layer_mix_lr 5e-2
+--layer_mix_lr 3e-3
 --encoder_lr_scale 0.0
