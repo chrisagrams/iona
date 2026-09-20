@@ -180,3 +180,39 @@ class TestContrastiveModel:
                                       kl_weight=1.0)
         with pytest.raises(ValueError, match="reference"):
             model(**spectra, group=torch.tensor([0, 0]))
+
+
+class TestTrainerIntegration:
+    """MSDeltaForContrastive is a plain nn.Module, so Trainer's hooks must be forwarded.
+
+    Trainer calls gradient_checkpointing_enable() on whatever model it is handed. A
+    PreTrainedModel has it; a bare nn.Module does not, and the run dies after data
+    loading with an AttributeError -- which is exactly how job 8840597 failed. And
+    checkpointing is not optional here: the PK sampler's batch of 24 spectra at 512
+    peaks needs it to fit on a tile.
+    """
+
+    def _model(self, tiny_config):
+        from msdelta.contrastive import MSDeltaForContrastive
+        from msdelta.modeling_msdelta import MSDeltaForPreTraining
+        return MSDeltaForContrastive(MSDeltaForPreTraining(tiny_config),
+                                     MSDeltaForPreTraining(tiny_config))
+
+    def test_gradient_checkpointing_hooks_exist(self, tiny_config):
+        model = self._model(tiny_config)
+        model.gradient_checkpointing_enable()
+        assert model.is_gradient_checkpointing
+        model.gradient_checkpointing_disable()
+        assert not model.is_gradient_checkpointing
+
+    def test_forward_works_with_checkpointing_on(self, tiny_config, spectra):
+        model = self._model(tiny_config)
+        model.gradient_checkpointing_enable()
+        out = model(**spectra, group=torch.tensor([0, 0]))
+        assert torch.isfinite(out["loss"])
+
+    def test_checkpointing_is_not_applied_to_the_reference(self, tiny_config):
+        """It runs under no_grad and stores no activations; checkpointing only costs."""
+        model = self._model(tiny_config)
+        model.gradient_checkpointing_enable()
+        assert not getattr(model.reference, "is_gradient_checkpointing", False)

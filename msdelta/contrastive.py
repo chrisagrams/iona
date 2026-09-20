@@ -157,6 +157,22 @@ class MSDeltaForContrastive(nn.Module):
             self.reference.eval()
         return self
 
+    # Trainer calls these on the model it is given, and this is a plain nn.Module rather
+    # than a PreTrainedModel, so they have to be forwarded by hand. Only the trainable
+    # encoder gets them: the reference runs under no_grad and stores no activations, so
+    # checkpointing it would add recomputation for no saving.
+    def gradient_checkpointing_enable(self, **kwargs):
+        if hasattr(self.model, "gradient_checkpointing_enable"):
+            self.model.gradient_checkpointing_enable(**kwargs)
+
+    def gradient_checkpointing_disable(self):
+        if hasattr(self.model, "gradient_checkpointing_disable"):
+            self.model.gradient_checkpointing_disable()
+
+    @property
+    def is_gradient_checkpointing(self) -> bool:
+        return bool(getattr(self.model, "is_gradient_checkpointing", False))
+
     def embed(self, mz, log_intensity, attention_mask) -> tuple[Tensor, Tensor]:
         encoder = getattr(self.model, "msdelta", self.model)
         hidden = encoder(mz=mz, log_intensity=log_intensity,
