@@ -35,6 +35,13 @@ def main() -> int:
     parser.add_argument("--split", default="validation")
     parser.add_argument("--max_rows", type=int, default=1200)
     parser.add_argument("--batch_size", type=int, default=8)
+    parser.add_argument("--random_init", action="store_true",
+                        help="same architecture, NO pretrained weights. The control the "
+                             "trajectory sweep needs: replicate spectra of one peptide "
+                             "have similar peaks, so an untrained encoder that merely "
+                             "passes its input through already separates them somewhat. "
+                             "Without this number, a high ratio early in pretraining "
+                             "cannot be told apart from not having learned anything yet.")
     parser.add_argument("--layers", action="store_true",
                         help="also sweep every encoder layer, not just the output")
     cli = parser.parse_args()
@@ -43,7 +50,16 @@ def main() -> int:
     from datasets import load_from_disk
     from msdelta.modeling_msdelta import MSDeltaForPreTraining
     rows = list(load_from_disk(str(Path(cli.cache) / cli.split)))[: cli.max_rows]
-    model = MSDeltaForPreTraining.from_pretrained(cli.pretrained).to(device).eval()
+    if cli.random_init:
+        # from_config, not from_pretrained-then-reinitialise: loading first would leave
+        # any buffer the init does not touch still carrying pretrained values.
+        from msdelta.configuration_msdelta import MSDeltaConfig
+        model = MSDeltaForPreTraining(
+            MSDeltaConfig.from_pretrained(cli.pretrained)).to(device).eval()
+        print(f"[pool] RANDOM INIT control: architecture of {cli.pretrained}, no weights",
+              flush=True)
+    else:
+        model = MSDeltaForPreTraining.from_pretrained(cli.pretrained).to(device).eval()
     encoder = getattr(model, "msdelta", model)
 
     denoiser = None

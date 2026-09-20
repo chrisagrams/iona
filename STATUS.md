@@ -133,7 +133,7 @@ Every lever tried, and what it did to the separation ratio (pretrained = 1.34):
 | intensity-weighted pooling, frozen | 1.43 -> 1.44, nothing |
 | denoiser P(signal) pooling, frozen | 1.34 -> **1.46**, the best readout available, and still nothing next to 6.94 |
 | reading layer 8 instead of the output | 1.43 -> **1.53**; the stack peaks at 8 and DROPS at 9 |
-| scaling the encoder 50m -> 100m -> 200m, frozen | output 1.43 -> 1.36 -> 1.35; best-block 1.53 -> 1.41 -> 1.44. No gain, but all three checkpoints are at ~1 epoch of a 3-epoch schedule, so this is confounded with undertraining |
+| scaling the encoder 50m -> 100m -> 200m, frozen | WITHDRAWN. `final/` is a stale export: 50m and 100m were read at ~135k steps, 200m at 193k. And one model's own step-to-step wobble (1.33-1.43) covers the whole claimed spread |
 | `mean` instead of `mean+max`, frozen | 1.34 -> 1.43, free but small |
 | contrastive teacher -> alignment | cross-modal hit@1 +79% |
 | that embedding -> reranker | **-0.109 hit@1**, five paired seeds |
@@ -179,42 +179,53 @@ its pretraining head: predicting masked peak intensities is not the same objecti
 representing peptide identity, and the final blocks have been optimised for the former.
 Reading one block earlier is free.
 
-**Scale does not help the frozen embedding, and MAY hurt it -- confounded.** The
-output-layer ratio falls monotonically with capacity (1.43, 1.36, 1.35) and the best
-block over the whole stack belongs to the smallest model. The tempting reading is "scale
-hurts". It is not supported yet, because all three checkpoints are `production-01`, and
-reading their pretraining state says why:
+**WITHDRAWN: the cross-scale comparison compared different training points.** The
+39-config sweep read each scale's published `final/` directory. Those are not what they
+look like. Byte-comparing `final/model.safetensors` against every checkpoint in each run:
 
-| scale | step | of schedule | epoch | pretrain loss | still falling? |
-| --- | --- | --- | --- | --- | --- |
-| 50m  | 180,000 | 33.3% | 1.00 | 0.0705 | yes, -0.0012 / 10% |
-| 100m | 190,000 | 35.2% | 1.06 | 0.0639 | yes, -0.0013 / 10% |
-| 200m | 192,799 | 35.7% | 1.07 | 0.0558 | yes, -0.0012 / 10% |
+| scale | `final/` is really | that run's last checkpoint | measured at |
+| --- | --- | --- | --- |
+| 50m  | **checkpoint-133233** | 180000 | 74% of the way to its own frontier |
+| 100m | **checkpoint-138073** | 190000 | 73% |
+| 200m | **checkpoint-192799** | 192799 | 100%, the true end |
 
-None of them is converged -- every one is about a third of the way through a 540,423-step
-schedule and still descending at the same rate. And the pretraining loss orders correctly
-by capacity, so the larger encoders are straightforwardly better at the objective they
-were trained on. A bigger model can be better at its objective while its frozen
-replicate-identity structure, which nothing ever optimised, has simply not emerged yet.
-Matched schedule FRACTION is not matched convergence, and larger models generally need
-more data to reach a given representation quality.
+`final/` is a periodically-refreshed export of a run that is still going, and for the 50m
+and 100m it lags its own last checkpoint by 21 and 6 hours. So "50m 1.43, 100m 1.36, 200m
+1.35" compared two models at ~135k steps against one at ~193k, and read the difference as
+capacity. It is not a scale comparison and should not be cited as one.
 
-So the honest statement is narrower: **at ~1 epoch of pretraining, scale buys nothing for
-the frozen embedding.** Whether it would at 3 epochs is untested.
+**And the effect it claimed is smaller than one model's own wobble.** Probing the 50m
+along its own trajectory (job 8842038):
 
-Two things settle it, and both are cheap:
+| pretrain step | output `mean` ratio |
+| --- | --- |
+| 10,000 | **1.67** |
+| 50,000 | 1.33 |
+| 100,000 | 1.38 |
+| 133,233 (what `final/` is) | 1.43 |
+| 150,000 | 1.39 |
+| 180,000 | 1.35 |
 
-  The checkpoint sweep. Every scale kept checkpoints from 10,000 to ~190,000, so the
-  same training-free probe can be run along the pretraining trajectory. If the ratio is
-  still climbing at the last checkpoint -- especially if the 200m is climbing faster --
-  the number above is an artefact of reading too early. If it is flat, it is not.
+After the first spike the curve is flat to within about +/-0.05 -- 1.33, 1.38, 1.43, 1.39,
+1.35, with no trend. The entire cross-scale spread was 1.35 to 1.43, which is that same
++/-0.05. One model at different points in its own training varies as much as three models
+of different sizes did, so the scale comparison was never resolvable at this precision,
+independent of the stale-checkpoint problem.
 
-  The 200m denoise grid (8841992, queued). Fine-tuning is the control the frozen probe
-  lacks. The 100m checkpoint already fine-tunes BETTER than the 50m (0.9403 vs 0.9320)
-  despite a worse frozen ratio, which alone shows the frozen readout is not measuring
-  encoder quality. If the 200m fine-tunes better again, the encoders are fine and only
-  the frozen readout degrades; if it fine-tunes worse, undertraining is real and reaches
-  the fine-tuned numbers too.
+It also answers the undertraining question for the 50m directly: the ratio is NOT still
+climbing at the frontier. It plateaued by 100,000 steps.
+
+**The one real feature is the spike at 10,000 steps**, 1.67 against ~1.38 later, and the
+best block there reaches 1.69 -- higher than anything in the 39-config sweep. Before
+reading that as "early pretraining carries peptide identity and later training destroys
+it", it needs its control: replicate spectra of one peptide have similar peaks, so an
+encoder that has learned nothing and merely passes its input through already separates
+them to some degree. `pooling_probe.py --random_init` supplies that zero. If a random
+encoder also sits near 1.7, the spike means pretraining has not yet destroyed input
+similarity, which points somewhere completely different from the other reading.
+
+The matched-step comparison the original sweep should have been is coming out of the same
+job: all three scales at 10k, 50k, 100k, 150k and their own last checkpoint.
 
 `clean` -- the fraction of groups whose every replicate is nearer to its own group than
 to anything outside it -- sits at 0.010 for essentially all 39 configurations, meaning 1

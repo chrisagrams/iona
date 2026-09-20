@@ -56,6 +56,24 @@ SIZES=${SIZES:-50m 100m 200m}
 # so the three curves end at their own frontier rather than a common truncation.
 STEPS=${STEPS:-10000 50000 100000 150000}
 
+# The zero of the scale. Replicate spectra of one peptide have similar peaks, so an
+# encoder that has learned nothing and merely passes its input through already separates
+# them to SOME degree. Without this number a high ratio at step 10,000 cannot be told
+# apart from "pretraining has not yet destroyed the input similarity", which is not the
+# same claim at all and points somewhere completely different.
+for size in $SIZES; do
+    root=/flare/UIC-HPC/homes/cgrams/msdelta-runs/msdelta-$size-production-01
+    echo
+    echo "############ $size step 0 RANDOM"
+    "$VENV_DIR/bin/python" -X faulthandler -u pbs/pooling_probe.py \
+        --pretrained "$root/final" --random_init \
+        --cache "$CACHE" --layers --max_rows "${MAX_ROWS:-1200}" \
+        || echo "  [$size random] FAILED"
+done
+
+# RANDOM_ONLY=1 runs just the control above, for when the trajectory is already known.
+[[ -n ${RANDOM_ONLY:-} ]] && exit 0
+
 for size in $SIZES; do
     root=/flare/UIC-HPC/homes/cgrams/msdelta-runs/msdelta-$size-production-01
     last=$(ls -d "$root"/checkpoint-* 2>/dev/null | sed 's/.*checkpoint-//' | sort -n | tail -1)
