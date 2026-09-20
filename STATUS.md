@@ -35,6 +35,46 @@ BUGS (detail in TODO.md) ──────────────────�
   FT2  ............................ closed, not a bug
 ```
 
+## Reranking: the causal chain, validated end to end
+
+The alignment tower was reaching only 2.3x chance at hit@1. The separation eval said why
+with a measurement rather than a theory: the frozen pretrained encoder does not separate
+peptides. Replicate spectra of one peptide sat at cosine 0.963 and spectra of DIFFERENT
+peptides at 0.950 -- an out/in distance ratio of 1.34, essentially no structure. Nothing
+in a masked-peak objective ever asked for peptide identity, so the student was imitating
+that space faithfully and there was nothing there to imitate.
+
+Fixing the TEACHER fixed retrieval, with no change to the student at all:
+
+| | pretrained teacher | contrastive teacher |
+| --- | --- | --- |
+| teacher out/in ratio | 1.34 | **7.49** |
+| cross-modal hit@1 | 0.0249 (2.3x chance) | **0.0446 (4.2x)** |
+| hit@5 | 0.1157 | **0.2288** |
+| MRR | 0.0991 | **0.1594** |
+
+`eval_loss` went UP, 0.055 to 0.243, which is the right direction: the old target space
+was easy to fit precisely because it was nearly collapsed. The loss was never the metric.
+
+Not yet a usable reranker -- 4.2x chance over 94 candidates is not a reranker -- but the
+mechanism is established and the levers are known:
+
+1. **GradCache.** The contrastive encoder trains at batch 4, which is 4 negatives per
+   step; a contrastive objective is largely a function of how many negatives it sees.
+   Decoupling that from memory is the single biggest lever and the ratio is what drives
+   the downstream number.
+2. **The tail.** `clean` is still 0.010: some replicate pairs of one peptide stay far
+   apart (`worst_in` 0.24 -> 0.84) even as the averages separate. Worth looking at
+   whether those spectra genuinely resemble each other before trying to force them
+   together.
+3. **The student.** Worth tuning now, since the teacher no longer bottlenecks it.
+
+Two findings from the sweep worth keeping. `kl_weight=10` beats `kl_weight=0` on the full
+corpus while all six `kl=0` arms won at 740 steps -- the regulariser earns its place only
+once there is enough training to overfit, and a smoke test would have locked in the wrong
+answer. And rank arms by RATIO, not margin: margin is a difference and rises when a model
+merely inflates the space, which one arm did.
+
 ## The one real number so far
 
 `test AUROC 0.8628` from a 700-step denoise run (8840190), against a free raw-intensity
