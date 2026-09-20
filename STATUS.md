@@ -19,11 +19,12 @@ INFRASTRUCTURE ─────────────────────�
   grid launcher, full pipeline .... OK   8841345  12/12 arms incl. test split
 
 SCIENCE ─────────────────────────────── denoise delivering, embedding does not
-  50m  grid, 216 arms ............. DONE            best test AUROC 0.9320
+  50m  grid, 216 arms ............. DONE   216/216  best test AUROC 0.9320
   100m grid, 12 arms .............. DONE            best test AUROC 0.9403
   200m grid, 12 arms .............. QUEUED 8841992  memtest passed, ~4 h
   from-scratch ablation, 12 arms .. QUEUED 8841984  isolates pretraining's worth
-  layer/scale readout probe ....... DONE   8841973  39 configs, ceiling 1.53
+  layer/scale readout probe ....... VOID   8841973  read a stale final/, withdrawn
+  readout probe along pretraining . RUN    8842038  50m flat after 100k; spike at 10k
   feature rescorer ................ DONE            hit@1 0.889, no embedding
   neural embedding -> rescorer .... DEAD            -0.109 hit@1, 5 paired seeds
 
@@ -33,7 +34,7 @@ BUGS (detail in TODO.md) ──────────────────�
   FT4  32 stray labels ............ DDP gather only; absent under ZeRO-2
   FT3  failure reports "finished" . open
   FT1  >1024 peaks ................ open
-  FT5  seeds on the winner ........ ready, grid has a winner now
+  FT5  seeds on the winner ........ configs/sweep-denoise-seeds ready, unsubmitted
   FT6  from-scratch control ....... running as 8841984
   FT8  encoder warm-up freeze ..... deferred, set to 0 everywhere
   FT2  ............................ closed, not a bug
@@ -461,3 +462,28 @@ JOB       TASK     PARALLELISM OUTCOME                    NOTE
 8841966   denoise  12 tiles    COMPLETE 1/1               'test_auroc': 0.8429291281565523
 8841973   denoise  ?           ran to 266/266
 ```
+
+## The 50m grid is complete at 216/216
+
+The four arms that finished training but never wrote a test number (the
+`load_best_model_at_end` failure, FT3's neighbour) were recovered by loading their final
+checkpoint and re-running the test pass -- `pbs/recover_test_metrics.pbs`, job 8842037,
+minutes rather than the ~79 node-hours a re-run would have cost.
+
+| arm | val auroc | test, FINAL weights | rank by val |
+| --- | --- | --- | --- |
+| lr1e5_es0_ep4_h512_b12 | 0.7798 | 0.7882 | 165 |
+| lr1e6_es01_ep4_h256_b12 | 0.8024 | 0.7995 | 129 |
+| lr2e4_es0_ep2_h128_b12 | 0.7899 | 0.7964 | 146 |
+| lr2e4_es10_ep4_h128_b12 | 0.9292 | 0.9230 | **8** |
+
+These carry `weights_selected_by=final` in their `test_results.json`; every other arm
+carries its best-validation weights. The difference is visible in the fourth row, which
+is the only one that mattered: at rank 8 by validation it was the one arm that could
+conceivably have displaced the winner, and at 0.9230 it does not -- the winner stays
+`lr2e4_es05_ep4_h512_b12` at 0.9320. Its 0.9292 validation against 0.9230 final-weights
+test also puts a number on what best-validation selection is worth here: about 0.006.
+
+Checked BEFORE running the recovery rather than after, because if that arm had been
+ranked first by validation the honest move would have been to re-run it properly rather
+than report a final-weights number beside 212 best-validation ones.
