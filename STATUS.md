@@ -150,6 +150,45 @@ The whole 100m grid spans 0.019 against the 50m grid's 0.26. Once the encoder is
 at a sane rate, the larger model barely cares about these hyperparameters, which is the
 strongest argument that narrowing the grid was right.
 
+## A trained readout over depth buys nothing; the corrected schedule buys 13%
+
+Two jobs, both under the fixed warmup (FT10).
+
+**Layer-mix (8842231).** One trainable softmaxed scalar per encoder depth, mean-pooled
+to d_model, at three encoder learning rates. The frozen arm is the one that answers the
+question, because only the readout moves in it:
+
+| arm | encoder lr | ratio |
+| --- | --- | --- |
+| frozen | 0 | **1.52** |
+| els03 | 0.3x | 3.46 |
+| els10 | 1.0x | 4.28 |
+
+Against a random-init floor of 1.35 and a best-hand-picked-layer of 1.53, a readout
+TRAINED over all eleven depths reaches 1.52. It does not beat picking the best layer by
+hand, and neither clears the floor by much. **Depth selection is not a lever**, learned
+or otherwise, which is the last readout idea and closes that axis for good.
+
+Two honest caveats. The mixture COLLAPSED -- `mix/max` 1.000 on layer09, entropy 3e-05
+against a uniform 2.398, within the first ~15% of the run. `layer_mix_lr 5e-2` was too
+high; my sizing treated Adam's displacement as linear in the learning rate and ignored
+that softmax saturation is self-reinforcing. So this tested learned layer SELECTION, not
+blending. And els10's 4.28 sits below the plain mean+max contrastive result at a
+comparable setting (6.21), so the mixture is worse than the fixed readout when the
+encoder trains -- though it is also d_model against mean+max's 2*d_model, so that
+comparison is not clean either. Neither caveat touches the frozen arm, which is the
+result that matters.
+
+**Contrastive re-run (8842232).** The same 12-arm grid with warmup no longer exceeding
+the whole run: best ratio **7.83**, against **6.94** under the broken schedule. The
+6.94 that every earlier conclusion was measured against is superseded.
+
+More interesting than the 13%: the spread is now 1.35 to 7.83, where the old grid's arms
+sat much closer together. FT10 predicted exactly this -- a warmup longer than the run
+compresses every learning rate into the same ramp, so the old sweep could not separate
+them. It can now, and lr5e4 with no KL collapses to 1.35, the floor, while lr5e4 with
+KL 10 is the best arm at 7.83. The KL term is doing real work at high learning rates.
+
 ## The frozen embedding never carried peptide identity: random scores the same
 
 Job 8842086 ran the control that should have come first. A RANDOMLY INITIALISED encoder

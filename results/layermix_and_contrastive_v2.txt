@@ -1,0 +1,17 @@
+# Layer-mix readout (job 8842231) and the contrastive re-run (8842232).
+# Both under the CORRECTED scheduler; ratios read against the random floor of 1.35.
+
+LAYER-MIX: a trained convex mixture over all 11 depths, mean-pooled to d_model
+  arm      encoder_lr   ratio   learned mixture
+  frozen   0.0 (fixed)  1.52    collapsed to layer09, weight 1.000
+  els03    0.3x         3.46    collapsed to layer09, weight 1.000
+  els10    1.0x         4.28    collapsed to layer09, weight 1.000
+
+CONTRASTIVE RE-RUN: fixed mean+max readout, corrected warmup
+  best 7.83 (lr5e4_kl10_t007); old broken schedule's best was 6.94
+  full spread 1.35 to 7.83 -- the lr axis separates now, it did not before
+
+REFERENCE POINTS
+  random-init encoder, any layer .......... 1.35   the floor
+  pretrained, best single layer (50m L08) . 1.53
+  trained mixture over depths, frozen ..... 1.52
