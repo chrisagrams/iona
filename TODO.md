@@ -94,62 +94,58 @@ or it silently becomes a different experiment. `freeze_encoder_steps=500` is 1.1
 **Nothing currently queued depends on DDP.** The grid runs one tile per arm and the
 alignment validation was resubmitted as 8840238 on one tile.
 
-## FT9. The alignment tower faults on twelve tiles under BOTH backends — **Open**
+## FT9. Twelve-tile alignment faults in the driver's scratch surface — **PARKED, for ALCF**
 
-Denoise runs clean on twelve tiles with DeepSpeed. Alignment does not, under either
-parallelism, so this is the model rather than the reducer and is NOT the same thing as
-FT7:
+Not our code, not worth more of our time, and a good bug report for people with
+driver-side tools. One tile runs the full ten epochs in seven minutes, so this is
+throughput rather than a blocker.
 
-| config | result |
+**What the fault is.** `Segmentation fault from GPU at 0xff0N_ffffe00000, NotPresent,
+level 1 (PDE), access 0 (Read)`, where N tracks the tile. That address is at the top of
+each tile's virtual address space, which is where Intel places **scratch / private
+memory** -- not user allocations. So no tensor of ours was ever the target: a kernel was
+reading its own private surface at an address that had stopped being mapped.
+
+**Every attempt, and how far it got:**
+
+| configuration | fault at step |
 | --- | --- |
-| align, 1 tile, batch 4 | clean, 400 steps + eval + cross-modal + save (8840304) |
-| align, 1 tile, batch 16 | GPU fault at step 73 (8840238) |
-| align, 12 tiles, DDP | GPU fault at step 3 (8840223) |
-| align, 12 tiles, DeepSpeed ZeRO-2 | GPU fault at step 56 (8840356) |
-| denoise, 12 tiles, DeepSpeed ZeRO-2 | clean (8840264) |
+| DDP, live teacher, batch 16 | 3 |
+| ZeRO-2, live teacher, batch 4 | 56 |
+| + targets precomputed | 22 |
+| + fixed-shape batches | 120 |
+| + stock optimizer | 206 |
+| + ALCF fabric environment | **802** |
+| one tile, any configuration | never |
 
-8840356 had 4 rows per tile -- the same per-tile batch as the clean single-tile run -- and
-peaked at 5.43 GB of 68.7, so it is not per-tile memory either. Three mechanisms have
-been proposed for these faults today and two were wrong, so no fourth is offered here.
+Every change pushes it later and none prevents it, which is what an ACCUMULATING cause
+looks like: each fix lowers allocation pressure and so delays whatever sweep unbinds the
+surface, without supplying the missing re-bind.
 
-**Act on the structural difference instead.** Alignment runs a frozen 49.81M-parameter
-teacher inside the training forward under `no_grad`; denoise has nothing of the kind. The
-teacher is frozen, so its embeddings are IDENTICAL every epoch, and recomputing them each
-step spends ~92% of the parameters and all of the 512-peak attention reproducing a
-constant.
+**Eight hypotheses, all dead.** The DDP reducer (fails under ZeRO-2 too), the frozen
+teacher in the graph (detached, still faults), bad hardware (three nodes), an
+`nn.TransformerEncoder` fused path (the bisect ran four layers and the full student
+clean), variable-shape batches (the working denoise job has them), abandoning the
+teacher on the device (bisect variant clean), oneDNN fused SDPA
+([pytorch#195319](https://github.com/pytorch/pytorch/issues/195319), MATH backend still
+faults), and the private-surface eviction workarounds from
+[intel/compute-runtime#973](https://github.com/intel/compute-runtime/issues/973) --
+`UR_L0_USE_IMMEDIATE_COMMANDLISTS=0` faults at address 0x0 on an atomic, which is
+unrelated breakage, and `MakeEachAllocationResident=2` still faults on a high-address
+read.
 
-**The teacher is not the cause.** Job 8840403 precomputed the embeddings, set
-`spectrum_model = None`, and faulted anyway at training step 0 with the 4.11M student as
-the entire wrapped module. Precomputing was still worth doing -- it is an order of
-magnitude cheaper and it is the right design for a frozen teacher -- but it is not the
-fix, and the hypothesis it was based on is dead.
+#973's MECHANISM still fits better than anything else -- a per-dispatch private surface
+declared resident only at allocation, unbound by `evictUnusedAllocations()`, then reused
+without re-binding -- and it explains the address, the accumulation and why less churn
+buys more steps. Its published workarounds simply do not help on this driver.
 
-The faults are deterministic but not node-specific: three different nodes
-(x4720c1s4b0n0, x4407c4s2b0n0, x4405c5s2b0n0), different ranks (5, 0, 8, 7), and a
-different address on each node -- but the SAME node gives the same rank and the same
-address every time. 8840378 and 8840403 are bit-identical failures. So it reproduces, and
-it is not bad hardware.
-
-What is left in the faulting module is small: three `nn.Embedding`, a `FourierFeatures`,
-some `nn.Linear`, and an `nn.TransformerEncoder`. The denoise model shares every one of
-those EXCEPT the `nn.TransformerEncoder` -- and torch's transformer is already responsible
-for one confirmed XPU bug today (the fused kernel whose autocast guard reads CUDA state).
-That is the obvious next suspect, though at step 0 in training mode grad is enabled and
-the fused path should not be reachable, so it is a suspect and not an answer.
-
-- [ ] Minimal reproducer: the student alone, twelve tiles, DeepSpeed, ten steps, nothing
-      else in the process. It is now a 4.11M-parameter model with six module types, which
-      is small enough to bisect by deletion.
-- [ ] Probes were enabled on 8840403 and none fired, which places the fault outside the
-      instrumented region -- most likely in DeepSpeed initialisation or the first forward,
-      before `student.in` is reached. Push a probe earlier than that.
-
-**This does not block anything.** One tile at batch 4 runs the full pipeline (8840304) in
-about 35 minutes, which fits the debug queue, and twelve-tile alignment is a throughput
-optimisation rather than a requirement.
-
-Until then the working path is one tile at batch 4: ~35 min for a full 10-epoch run,
-which fits the debug queue.
+- [ ] Report to ALCF support with: the address pattern, the step-count table above, and
+      the fact that the same model under a raw training loop on the same twelve tiles is
+      clean (`pbs/bisect_align.py`), so it needs the HF Trainer / accelerate stack to
+      appear. They have `gdb-oneapi` and driver instrumentation; we have bisection, and
+      bisection has run out.
+- [ ] Re-test if the frameworks module is updated. #973's fix (commit 3d7a21dca9,
+      2026-08-27) was unreleased as of that issue's last update.
 
 ## FT8. Is a warm-up freeze on the encoder worth anything? — **Open, deferred**
 
