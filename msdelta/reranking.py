@@ -119,10 +119,17 @@ def probe_index(where: str, name: str, index: Tensor, limit: int) -> None:
         )
 
 
-POOLING_MODES = ("mean", "mean+max")
+# "weighted" variants scale each peak's contribution before averaging. A mass spectrum
+# is mostly noise -- the denoise corpus is 53% noise by peak count -- so an unweighted
+# mean over 512 peaks is dominated by peaks that carry no identity, and the max is taken
+# over those same dimensions. Weights can be intensity (free, and intense fragments are
+# what identify a peptide) or a denoiser's P(signal), which is the same information
+# learned rather than assumed.
+POOLING_MODES = ("mean", "mean+max", "weighted_mean", "weighted_mean+max")
 
 
-def pool_sequence(tokens: Tensor, mask: Tensor, mode: str = "mean+max") -> Tensor:
+def pool_sequence(tokens: Tensor, mask: Tensor, mode: str = "mean+max",
+                  weights: Tensor | None = None) -> Tensor:
     """Reduce variable-length token embeddings to one vector.
 
     `mean` is the field's default -- sentence_transformers uses it for every encoder
@@ -138,8 +145,16 @@ def pool_sequence(tokens: Tensor, mask: Tensor, mode: str = "mean+max") -> Tenso
     if mode not in POOLING_MODES:
         raise ValueError(f"pooling must be one of {POOLING_MODES}, got {mode!r}")
     mask = mask.bool().unsqueeze(-1)
-    mean = (tokens * mask).sum(1) / mask.sum(1).clamp_min(1)
-    if mode == "mean":
+    if mode.startswith("weighted"):
+        if weights is None:
+            raise ValueError(f"pooling {mode!r} needs per-peak weights")
+        # Normalised so the result stays on the same scale as the unweighted mean;
+        # otherwise every downstream threshold and the L2 target space shift with it.
+        w = (weights.unsqueeze(-1) * mask).clamp_min(0)
+        mean = (tokens * w).sum(1) / w.sum(1).clamp_min(1e-9)
+    else:
+        mean = (tokens * mask).sum(1) / mask.sum(1).clamp_min(1)
+    if mode in ("mean", "weighted_mean"):
         return mean
     maximum = torch.nan_to_num(tokens.masked_fill(~mask, float("-inf")).max(1).values,
                                neginf=0.0)
@@ -148,7 +163,9 @@ def pool_sequence(tokens: Tensor, mask: Tensor, mode: str = "mean+max") -> Tenso
 
 def pooled_width(hidden_size: int, mode: str) -> int:
     """Width `pool_sequence` produces, so the projection can be sized without a forward."""
-    return hidden_size if mode == "mean" else 2 * hidden_size
+    # Keyed on whether a max is concatenated, not on an exact name, so the weighted
+    # variants size correctly too.
+    return 2 * hidden_size if mode.endswith("mean+max") else hidden_size
 
 
 def parse_peptide(peptide: str) -> tuple[list[int], list[float]]:
