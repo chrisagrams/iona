@@ -35,4 +35,4 @@ DENOISER=${DENOISER:-}
 echo "=== pooling probe: $(date -Is) ==="
 "$VENV_DIR/bin/python" -X faulthandler -u pbs/pooling_probe.py \
     --pretrained "$PRETRAINED" --cache "$CACHE" \
-    ${DENOISER:+--denoiser "$DENOISER"} --max_rows "${MAX_ROWS:-1200}"
+    ${DENOISER:+--denoiser "$DENOISER"} --max_rows "${MAX_ROWS:-1200}" ${LAYERS:+--layers}

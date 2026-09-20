@@ -87,6 +87,7 @@ Every lever tried, and what it did to the separation ratio (pretrained = 1.34):
 | more steps at batch 64 | 5.70 -> 5.35 -> 4.37 |
 | intensity-weighted pooling, frozen | 1.43 -> 1.44, nothing |
 | denoiser P(signal) pooling, frozen | 1.34 -> **1.46**, the best readout available, and still nothing next to 6.94 |
+| reading layer 8 instead of the output | 1.43 -> **1.53**; the stack peaks at 8 and DROPS at 9 |
 | `mean` instead of `mean+max`, frozen | 1.34 -> 1.43, free but small |
 | contrastive teacher -> alignment | cross-modal hit@1 +79% |
 | that embedding -> reranker | **-0.109 hit@1**, five paired seeds |
@@ -110,6 +111,22 @@ cached teacher vector.
 
 **What works instead.** A hand-built feature rescorer reaches hit@1 0.889 on fragment
 coverage, mass error and spectrum quality, with no neural embedding at all.
+
+**Read from layer 8, not the output, if this is ever revisited.** Across the ten
+encoder blocks the separation ratio climbs monotonically -- 1.37, 1.38, 1.38, 1.41, 1.45,
+1.51, 1.51, 1.52, **1.53** -- and then FALLS to 1.43 at the final block. That is the
+classic signature of a last layer specialised for its pretraining head: predicting masked
+peak intensities is not the same objective as representing peptide identity, and layer 9
+has been optimised for the former. Every embedding measured in this repo has been read
+from the output. It is a free 7%, and it compounds with training rather than competing
+with it. Not acted on now because switching layers invalidates every embedding measured
+today for a gain that does not reach the reranker.
+
+Worth noting the whole readout axis together: layer choice, pooling mode and peak
+weighting combined move the frozen ratio from 1.34 to about 1.53, roughly +14%.
+Contrastive training moves it to 6.94, +418%. Every extraction trick available is about
+3% of what training buys, which is the clearest statement of where the information is
+not.
 
 **What has not been tried.** The correlated-error structure is a property of the
 two-tower formulation, not of embedding quality, so no amount of better embedding fixes

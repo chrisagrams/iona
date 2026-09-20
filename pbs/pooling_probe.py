@@ -21,6 +21,7 @@ from pathlib import Path
 
 import numpy as np
 import torch
+from torch import Tensor
 
 from msdelta.reranking import (AlignmentCollator, group_separation_metrics, peptide_key,
                                pool_sequence)
@@ -34,6 +35,8 @@ def main() -> int:
     parser.add_argument("--split", default="validation")
     parser.add_argument("--max_rows", type=int, default=1200)
     parser.add_argument("--batch_size", type=int, default=8)
+    parser.add_argument("--layers", action="store_true",
+                        help="also sweep every encoder layer, not just the output")
     cli = parser.parse_args()
 
     device = "xpu" if torch.xpu.is_available() else "cpu"
@@ -48,6 +51,22 @@ def main() -> int:
         from msdelta.modeling_msdelta import MSDeltaForDenoising
         denoiser = MSDeltaForDenoising.from_pretrained(cli.denoiser).to(device).eval()
         print(f"[pool] denoiser from {cli.denoiser}", flush=True)
+
+    # Capture every block's output with forward hooks rather than modifying the model.
+    # The last layer of a masked-prediction encoder is specialised for predicting peak
+    # intensities, which is not the same thing as representing peptide identity, and in
+    # BERT-like models the most transferable representation usually sits in the middle.
+    # Nothing here has ever looked anywhere but the final normalised output.
+    layer_outputs: dict[int, Tensor] = {}
+    handles = []
+    if cli.layers:
+        def capture(index):
+            def hook(_module, _inputs, output):
+                layer_outputs[index] = output
+            return hook
+        for index, block in enumerate(encoder.blocks):
+            handles.append(block.register_forward_hook(capture(index)))
+        print(f"[pool] hooked {len(handles)} encoder layers", flush=True)
 
     collator = AlignmentCollator()
     modes = ["mean", "mean+max", "weighted_mean", "weighted_mean+max"]
@@ -88,9 +107,18 @@ def main() -> int:
                     pooled[f"{mode}/denoised"].append(
                         pool_sequence(hidden, batch["attention_mask"], mode,
                                       weights=signal).float().cpu())
+            for index, states in layer_outputs.items():
+                # `mean` only for the layer sweep: the +max variants were uniformly
+                # worse on the output layer and doubling the table would hide the axis
+                # being measured.
+                key = f"layer{index:02d}/mean"
+                pooled.setdefault(key, []).append(
+                    pool_sequence(states, batch["attention_mask"], "mean").float().cpu())
             if start % (cli.batch_size * 40) == 0:
                 print(f"[pool] {start}/{len(rows)}", flush=True)
 
+    for handle in handles:
+        handle.remove()
     groups = np.unique(np.array([peptide_key(r["peptide"], int(r.get("charge") or 0))
                                  for r in rows]), return_inverse=True)[1]
     print(f"\n[pool] {len(rows)} spectra, {len(set(groups.tolist()))} groups, "
