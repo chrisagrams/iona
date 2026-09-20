@@ -527,3 +527,43 @@ OPTIONS, cheapest first:
 - [ ] If acting: entropy penalty first, reparameterisation only if that is not enough.
 - [ ] Either way, record the entropy trajectory alongside the ratio so a collapsed arm
       is never reported as a blend again.
+
+## FT12. The sign of the pooled-vs-within AUROC gap is not predictable by reasoning — measure it
+
+Not a bug: a warning about how to treat the result of job 8842917, and about a class of
+claim that keeps going wrong here.
+
+Pooled AUROC ranks a peak against peaks from OTHER spectra; the model is used one
+spectrum at a time. A per-spectrum offset in the logits moves the pooled number without
+touching within-spectrum discrimination. WHICH WAY it moves depends on whether that
+offset correlates positively or negatively with the spectrum's noise fraction, and that
+is not something to settle by argument. Three constructions, all built while trying to
+demonstrate the SAME effect:
+
+| construction | pooled | within-spectrum | gap |
+| --- | --- | --- | --- |
+| one spectrum correct, one inverted and shifted up | 0.50 | 0.50 | none, they cancel |
+| mostly-signal low, mostly-noise high, ordering correct | 0.36 | 1.00 | pooled DEFLATED |
+| same logits, labels reversed so ordering is inverted | 0.64 | 0.00 | pooled INFLATED |
+
+The last is the committed regression test: a model useless inside every spectrum scoring
+0.64 on the headline metric. I reasoned about the sign three times and got it right once.
+
+CONSEQUENCE FOR READING 8842917: do not predict the direction, and do not treat
+"pooled and within agree" as the expected outcome or "they differ" as alarming. Read the
+numbers. The quantities to look at together are `auroc_per_spectrum`, its `_sd` and
+`_p10`, and `spectra_unscorable` -- a high mean with a low p10 means the model works on
+most spectra and fails badly on a subset, which a single average hides.
+
+WIDER POINT, worth remembering beyond this metric. This is the third time in this
+project a pooled measurement has been trusted where a within-group one was the relevant
+thing. The reranking embedding scored 0.846 pooled and cost 0.109 hit@1. The frozen
+separation ratio pooled over all peptide pairs and did not predict fine-tuned
+performance at all. Whenever a metric averages over a grouping the model does not see at
+inference, check the within-group version before drawing a conclusion.
+
+- [ ] Read 8842917 for the 50m and 100m winners; record both numbers in OBSERVATIONS.md.
+- [ ] If they diverge, re-rank the grids by `auroc_per_spectrum` and check whether the
+      winner changes. The top eight of the 50m grid span 0.0023 pooled, so a small
+      systematic difference could reorder them.
+- [ ] Backfill 200m and 400m winners the same way once those grids finish.
