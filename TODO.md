@@ -300,3 +300,23 @@ twelve-rank xccl dirty -- it is the gather, not the loss, the model or the data.
       label tensors across ranks. Shares a root with [FT7](#ft7-the-gpu-page-fault-is-ddp-not-the-model--isolated-workaround-in-hand):
       both only appear once tensors cross ranks, so whichever is fixed first should be
       re-checked against the other.
+
+## FT10 — warmup_steps exceeds the whole run in every contrastive config
+
+`configs/finetune-contrastive-50m/training.args` sets `--warmup_steps 100`. The
+replicate corpus has 60 training groups, so the PK sampler with `groups_per_batch 2`
+yields 30 batches an epoch, and `--num_train_epochs 3` is about 90 optimizer steps.
+
+The learning rate therefore ramps from zero and the run ends at ~90% of nominal. Cosine
+decay never engages, and the mean rate actually applied is roughly 0.45x the number in
+the config. Every contrastive result in this project was produced that way, including
+the 6.94 separation ratio, so the numbers stand -- but the `learning_rate` in those
+configs is not the rate that was used, and any lr sweep over them was compressed into
+the warmup ramp, which is a poor way to separate learning rates.
+
+Not fixed yet on purpose: changing it changes the encoder's effective rate and would
+break comparability with the 6.94 baseline that everything is measured against. Fix it
+deliberately, with the baseline re-run alongside, rather than as a side effect.
+
+Found while sizing `layer_mix_lr`, which had to be raised to 5e-2 to move at all inside
+90 warmup-damped steps.

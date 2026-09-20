@@ -61,7 +61,7 @@ RUN_PREFIX = "v2_lmix-"
 
 # name -> encoder learning rate as a multiple of the mixture's
 SCALES = {"frozen": "0.0", "els03": "0.3", "els10": "1.0"}
-LAYER_MIX_LR = "1e-3"
+LAYER_MIX_LR = "5e-2"
 
 
 def arm_name(scale: str, seed: str) -> str:
@@ -73,9 +73,14 @@ def render_arm(scale: str, seed: str) -> tuple[str, str]:
     overrides = {
         "--pooling": "layer_mix",
         "--layer_mix_norm": "true",
-        # Not the encoder's rate: see ContrastiveModelArguments.layer_mix_lr. At 2e-5
-        # the mixture stays uniform for the whole run and the arm silently measures an
-        # unweighted average of every layer.
+        # Not the encoder's rate, and much larger than looks reasonable, because this
+        # run is SHORT: the replicate corpus has 60 training groups, so P=2 gives 30
+        # batches an epoch and 3 epochs is ~90 optimizer steps. warmup_steps is 100,
+        # more than the whole run, so every rate here is still ramping when it ends
+        # (mean multiplier ~0.45). A mixture logit therefore travels lr * 90 * 0.45:
+        # 0.04 at 1e-3 and 0.41 at 1e-2, both indistinguishable from uniform. At 5e-2
+        # it travels ~2.0, which puts the top weight near 0.43 against a uniform 0.091
+        # -- concentrated enough to read, not so much that it collapses to one layer.
         "--layer_mix_lr": LAYER_MIX_LR,
         "--encoder_lr_scale": SCALES[scale],
         # See the module docstring: hooks cannot read intermediates under checkpointing.
