@@ -54,5 +54,5 @@ echo "  student : $STUDENT"
 # faulthandler turns a C-level crash into a Python stack.
 "$VENV_DIR/bin/python" -X faulthandler -u -m msdelta.run_rescoring \
     --target_cache "$TARGET_CACHE" --student "$STUDENT" --split "$SPLIT" \
-    --epochs "${EPOCHS:-40}" --seed "${SEED:-0}" \
+    --epochs "${EPOCHS:-40}" --seed "${SEED:-0}" --seeds "${SEEDS:-5}" \
     --out "$REPO_DIR/pbs/logs/rescoring-${PBS_JOBID%%.*}.json"

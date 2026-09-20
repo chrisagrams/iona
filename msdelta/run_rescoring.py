@@ -34,6 +34,11 @@ def main() -> int:
     parser.add_argument("--tolerance_ppm", type=float, default=20.0)
     parser.add_argument("--epochs", type=int, default=40)
     parser.add_argument("--seed", type=int, default=0)
+    parser.add_argument("--seeds", type=int, default=1,
+                        help="repeat both arms over this many seeds. A single seed "
+                             "cannot separate a real effect from training variance: "
+                             "hit@1 is measured on a few hundred spectra and adding a "
+                             "feature should not make a classifier worse.")
     parser.add_argument("--out", default="")
     cli = parser.parse_args()
 
@@ -106,19 +111,36 @@ def main() -> int:
           + ", ".join(f"{k}={kinds.count(k)}" for k in sorted(set(kinds)) if k != "true"),
           flush=True)
 
-    results = {}
-    for drop in (False, True):
-        out = train_rescorer(features, labels, groups, drop_embedding=drop,
-                             epochs=cli.epochs, seed=cli.seed)
-        out.pop("model")
-        results["without_embedding" if drop else "with_embedding"] = out
-        print(f"[rescore] {'without' if drop else 'with':>7} embedding: "
-              f"AUROC {out['auroc']:.4f}  hit@1 {out['hit@1']:.4f}  "
-              f"({out['features']} features, {out['spectra']} spectra)", flush=True)
+    results: dict[str, list[dict]] = {"with_embedding": [], "without_embedding": []}
+    for seed in range(cli.seed, cli.seed + cli.seeds):
+        for drop in (False, True):
+            out = train_rescorer(features, labels, groups, drop_embedding=drop,
+                                 epochs=cli.epochs, seed=seed)
+            out.pop("model")
+            key = "without_embedding" if drop else "with_embedding"
+            results[key].append(out)
+            print(f"[rescore] seed {seed} {'without' if drop else 'with':>7} embedding: "
+                  f"AUROC {out['auroc']:.4f}  hit@1 {out['hit@1']:.4f}", flush=True)
 
-    a, b = results["with_embedding"], results["without_embedding"]
-    print(f"\n[rescore] embedding contributes: AUROC {a['auroc']-b['auroc']:+.4f}  "
-          f"hit@1 {a['hit@1']-b['hit@1']:+.4f}", flush=True)
+    print(f"\n[rescore] over {cli.seeds} seed(s):", flush=True)
+    summary = {}
+    for key, runs in results.items():
+        for metric in ("auroc", "hit@1"):
+            values = np.array([r[metric] for r in runs])
+            summary[f"{key}/{metric}"] = {"mean": float(values.mean()),
+                                          "sd": float(values.std(ddof=1)) if len(values) > 1 else 0.0}
+            print(f"    {key:<18} {metric:<6} {values.mean():.4f} "
+                  f"+- {values.std(ddof=1) if len(values) > 1 else 0.0:.4f}", flush=True)
+    for metric in ("auroc", "hit@1"):
+        a = np.array([r[metric] for r in results["with_embedding"]])
+        b = np.array([r[metric] for r in results["without_embedding"]])
+        # Paired: both arms share a seed, hence the same split and initialisation, so
+        # the pairing removes most of the variance the comparison is fighting.
+        delta = a - b
+        spread = delta.std(ddof=1) if len(delta) > 1 else float("nan")
+        print(f"[rescore] embedding contributes {metric}: {delta.mean():+.4f} "
+              f"+- {spread:.4f} (paired over seeds)", flush=True)
+    results = {"runs": results, "summary": summary}
     if cli.out:
         Path(cli.out).write_text(json.dumps(results, indent=2))
     return 0

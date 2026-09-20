@@ -75,6 +75,36 @@ once there is enough training to overfit, and a smoke test would have locked in 
 answer. And rank arms by RATIO, not margin: margin is a difference and rises when a model
 merely inflates the space, which one arm did.
 
+## The embedding does not help the reranker, and hurts it
+
+Measured, five paired seeds, both arms sharing each seed's split and initialisation:
+
+| | with embedding | without | contribution |
+| --- | --- | --- | --- |
+| pairwise AUROC | 0.9061 | 0.9055 | **+0.0006 +- 0.0010** |
+| hit@1 | 0.7803 | **0.8893** | **-0.1090 +- 0.0271** |
+
+A hand-built feature rescorer reaches hit@1 0.889 on its own. Adding `embedding_cosine`
+leaves pooled AUROC untouched and costs eleven points of hit@1, in every seed.
+
+`embedding_cosine` is not weak on its own -- 0.846 AUROC separating true from decoy pairs.
+But AUROC pools all 5,541 pairs while hit@1 ranks WITHIN each spectrum, and the two come
+apart when a feature's errors are correlated within a spectrum. That is exactly this
+feature's shape: every candidate for one spectrum is scored against the SAME cached
+teacher vector, so when that vector is poor it misleads all of that spectrum's candidates
+together. Fragment features are computed against the observed peaks per candidate, and
+their errors do not line up that way.
+
+So the embedding injects spectrum-level noise into precisely the comparison reranking
+depends on. Whether the alignment tower can be rebuilt to avoid that is open; what is
+settled is that its current output should not be a reranker feature.
+
+**What this costs.** The contrastive work raised the separation ratio 1.34 -> 7.49 and
+cross-modal hit@1 by 79%, and none of it reaches the reranker. The feature classifier
+was already in the repo on `sweep/pairformer-aurora`, with `separation.py` stating the
+prerequisite question and `negatives.py` the hard-negative problem, before any of today's
+embedding work started.
+
 ## The one real number so far
 
 `test AUROC 0.8628` from a 700-step denoise run (8840190), against a free raw-intensity
