@@ -462,3 +462,56 @@ reason (~28,600 steps).
 Contrastive baseline re-run under the corrected schedule: job 8842154. Until it lands,
 every contrastive number in STATUS.md -- including the 6.94 -- was produced under the
 warmup-only schedule.
+
+## FT11. Make the layer mixture resist collapse structurally — **Contingent on 8842351**
+
+Only worth doing if the corrected layer-mix run lands ambiguously. Read `mix/entropy`
+at the end of each arm first (uniform over 11 depths is ln(11) = 2.398, one-hot is 0):
+
+| entropy | what happened | action |
+| --- | --- | --- |
+| ~0 | collapsed again despite the lower rate | do this ticket |
+| 0.5 - 1.5 | a genuine blend was trained | nothing needed, the result stands |
+| ~2.4 | never moved; 3e-3 is too low for this run | raise the rate, do not add machinery |
+
+WHY THE CURRENT FIX IS WEAK. `layer_mix_lr 3e-3` does not prevent collapse, it runs out
+of budget before reaching it. Adam displaces a parameter by about `lr` per step when the
+gradient sign is consistent, so total logit travel is bounded by
+`lr x steps x mean_schedule_multiplier` -- about 2.0 over this 1,347-step run, which
+caps the top weight near 0.43. That is pacing, not structure. It depends on the step
+count, which changes whenever epochs or the corpus change, and on an estimate that was
+wrong once already (it predicted 0.43 at 5e-2 and reality was 1.000 -- because the step
+count fed to it was 90 rather than 1,347; with the right count it retrodicts the
+collapse correctly, which is weak evidence it is calibrated, not proof).
+
+The band is narrow: 1e-2 still collapses, 1e-3 barely moves. Anything that shifts the
+run length walks out of it silently.
+
+OPTIONS, cheapest first:
+
+  Entropy penalty. Add `-lambda * H(w)` to the loss, so a mixture pays to concentrate
+  and collapse has to be earned rather than drifted into. One term, one hyperparameter,
+  and `mix/entropy` is already logged to tune it against. Downside: lambda is another
+  thing to get right, and a large one forbids the single-layer answer even when that
+  answer is correct.
+
+  Softmax temperature. `softmax(z / T)` with T > 1 flattens the mapping so the same
+  logit travel produces less concentration. Equivalent to rescaling the learning rate
+  for this purpose, so it fixes the same problem the same way -- prefer it only if a
+  fixed T is easier to keep right across run lengths than a fixed lr, which it is.
+
+  Report the trajectory, not the endpoint. Cheapest of all and worth doing regardless:
+  `mix/entropy` per step is already logged, so a mixture that collapsed at step 400 can
+  be told from one that annealed smoothly, and the arm can be judged accordingly rather
+  than silently averaged in. Currently only the final value is read.
+
+  Reparameterise away from softmax. Non-negative weights normalised by their sum, or
+  plain unconstrained weights with the scale absorbed by the LayerNorm, have no
+  saturating region and therefore no vanishing-gradient trap: a losing layer keeps a
+  gradient proportional to its usefulness rather than to its current weight. Biggest
+  change, and the only one that removes the failure mode rather than avoiding it.
+
+- [ ] Read `mix/entropy` from 8842351 and decide using the table above.
+- [ ] If acting: entropy penalty first, reparameterisation only if that is not enough.
+- [ ] Either way, record the entropy trajectory alongside the ratio so a collapsed arm
+      is never reported as a blend again.
