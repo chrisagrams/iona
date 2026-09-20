@@ -273,8 +273,14 @@ def denoise_metrics(prediction) -> dict[str, float]:
         precision_recall_curve, precision_score, recall_score, roc_auc_score,
     )
 
-    logits = np.asarray(prediction.predictions, dtype=np.float64).reshape(-1)
-    labels = np.asarray(prediction.label_ids, dtype=np.float64).reshape(-1)
+    # Keep the 2-D form before flattening: the head squeezes to (spectra, peaks), so
+    # spectrum boundaries are present here and reshape(-1) is the only thing that
+    # destroys them. per_spectrum_auroc needs them.
+    logits_2d = np.asarray(prediction.predictions, dtype=np.float64)
+    labels_2d = np.asarray(prediction.label_ids, dtype=np.float64)
+
+    logits = logits_2d.reshape(-1)
+    labels = labels_2d.reshape(-1)
     binary = (labels == 0.0) | (labels == 1.0)
     unexpected = ~binary & (labels != -100.0)
 
@@ -309,7 +315,61 @@ def denoise_metrics(prediction) -> dict[str, float]:
         "n_peaks": float(labels.size),
         "noise_fraction": float(labels.mean()),
     })
+    metrics.update(per_spectrum_auroc(logits_2d, labels_2d))
     return metrics
+
+
+def per_spectrum_auroc(logits_2d, labels_2d) -> dict[str, float]:
+    """AUROC computed WITHIN each spectrum, then averaged.
+
+    The pooled `auroc` asks: take a random noise peak and a random signal peak from
+    anywhere in the test set -- is the noise one ranked higher? Those two peaks usually
+    come from DIFFERENT spectra. The task asks something narrower: given one spectrum,
+    which of ITS peaks are noise. Every comparison that matters is within a spectrum.
+
+    Those come apart whenever the model carries a per-spectrum offset. If it can tell
+    that a spectrum is noisy overall -- plausible, the encoder sees the whole spectrum --
+    it can shift all of that spectrum's logits up. Noisy spectra contribute more noise
+    peaks, so the shift lands the right way round in the pooled ranking and INFLATES
+    pooled AUROC while doing nothing for within-spectrum discrimination.
+
+    This is not hypothetical in this project. The reranking embedding scored AUROC 0.846
+    pooled over all (spectrum, candidate) pairs and COST 0.109 hit@1, because hit@1
+    ranks within a spectrum and the errors were correlated inside each one. Same gap
+    between a pooled metric and a within-group one, and trusting the pooled side is what
+    went wrong.
+
+    Spectra that are entirely one class cannot be scored and are counted, not silently
+    dropped: if most spectra are unscorable the average is about a biased minority.
+    """
+    import numpy as np
+    from sklearn.metrics import roc_auc_score
+
+    if logits_2d.ndim != 2:
+        # A single-spectrum eval, or an upstream change to the output shape. Say so
+        # rather than reporting a number computed over the wrong axis.
+        return {"auroc_per_spectrum": float("nan"), "spectra_scored": 0.0,
+                "spectra_unscorable": 0.0}
+    scores, unscorable = [], 0
+    for row_logits, row_labels in zip(logits_2d, labels_2d):
+        keep = (row_labels == 0.0) | (row_labels == 1.0)
+        y, x = row_labels[keep], row_logits[keep]
+        if y.size < 2 or y.min() == y.max():
+            unscorable += 1
+            continue
+        scores.append(roc_auc_score(y.astype(np.int64), x))
+    if not scores:
+        return {"auroc_per_spectrum": float("nan"), "spectra_scored": 0.0,
+                "spectra_unscorable": float(unscorable)}
+    return {
+        "auroc_per_spectrum": float(np.mean(scores)),
+        # The spread says whether the mean describes the population or hides a split
+        # between spectra the model handles and spectra it does not.
+        "auroc_per_spectrum_sd": float(np.std(scores)),
+        "auroc_per_spectrum_p10": float(np.percentile(scores, 10)),
+        "spectra_scored": float(len(scores)),
+        "spectra_unscorable": float(unscorable),
+    }
 
 
 def build_denoising_model(
