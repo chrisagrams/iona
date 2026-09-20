@@ -1,0 +1,2 @@
+configs/finetune-denoise-50m-scratch-ds/training.args
+scratch

@@ -1,7 +1,7 @@
-"""Generate the 100m denoise grid, narrowed by what the 50m grid measured.
+"""Generate a narrowed denoise grid for a larger encoder.
 
-    python sweeps/make_denoise100m_grid.py --clean
-    python sweeps/make_denoise100m_grid.py --check
+    python sweeps/make_denoise_size_grid.py --size 100m --clean
+    python sweeps/make_denoise_size_grid.py --size 200m --check
 
 The 50m grid ran 216 arms across five axes. Two of them turned out not to matter, and
 re-sweeping those at twice the cost per arm would buy nothing:
@@ -31,6 +31,7 @@ import shutil
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
+SIZE = "100m"          # set by --size in main()
 TEMPLATE = REPO / "configs" / "finetune-denoise-100m-ds" / "training.args"
 OUT = REPO / "configs" / "sweep-denoise-100m"
 STAMP = OUT / ".template"
@@ -88,7 +89,17 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--check", action="store_true")
     parser.add_argument("--clean", action="store_true")
+    parser.add_argument("--size", default="100m", help="encoder size, e.g. 100m or 200m")
     cli = parser.parse_args()
+
+    global SIZE, TEMPLATE, OUT, STAMP, RUN_PREFIX
+    SIZE = cli.size
+    TEMPLATE = REPO / "configs" / f"finetune-denoise-{SIZE}-ds" / "training.args"
+    OUT = REPO / "configs" / f"sweep-denoise-{SIZE}"
+    STAMP = OUT / ".template"
+    RUN_PREFIX = f"v2_dn{SIZE}-"
+    if not TEMPLATE.exists():
+        raise SystemExit(f"no template at {TEMPLATE}")
     combos = list(itertools.product(LEARNING_RATES, ENCODER_SCALES, BATCHES))
 
     if cli.check:
@@ -109,7 +120,7 @@ def main() -> int:
         (OUT / name).mkdir(parents=True, exist_ok=True)
         (OUT / name / "training.args").write_text(text)
         (OUT / name / "DESCRIPTION.md").write_text(description(*combo))
-    STAMP.write_text(f"{TEMPLATE.relative_to(REPO)}\ndenoise100m\n")
+    STAMP.write_text(f"{TEMPLATE.relative_to(REPO)}\ndenoise{SIZE}\n")
     print(f"arms={len(combos)} under {OUT.relative_to(REPO)}/")
     for combo in combos:
         print(f"  {arm_name(*combo)}")

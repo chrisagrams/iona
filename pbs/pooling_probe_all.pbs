@@ -1,0 +1,54 @@
+#!/bin/bash -l
+# The training-free embedding probes, across every model scale and every layer.
+#
+#   qsub -q debug -l select=1 -l walltime=00:55:00 pbs/pooling_probe_all.pbs
+#
+# Nothing is trained. Each encoder is whatever it already is; only the layer the
+# embedding is read from and the way per-peak tokens are reduced to one vector change.
+# The 50m sweep found the stack peaks at layer 8 of 10 and DROPS at the final block,
+# which is what a last layer specialised for its pretraining head looks like. Whether
+# that shape holds at 100m and 200m -- and whether a larger encoder carries more peptide
+# structure at all -- costs one short job to find out.
+#
+# The align-targets cache supplies the spectra. Its cached teacher embeddings are built
+# from the 50m and are IGNORED here: the probe strips them and re-embeds with whichever
+# encoder it was given, so one cache serves all three scales.
+
+#PBS -N msdelta-poolall
+#PBS -A UIC-HPC
+#PBS -l place=scatter
+#PBS -l filesystems=home:flare
+#PBS -j oe
+#PBS -o pbs/logs/
+
+set -uo pipefail
+REPO_DIR=${REPO_DIR:-${PBS_O_WORKDIR:-$PWD}}
+cd "$REPO_DIR"
+VENV_DIR=${VENV_DIR:-$REPO_DIR/.venv}
+SCRATCH=/lus/flare/projects/UIC-HPC/$USER/msdelta
+
+set +u
+source /usr/share/lmod/lmod/init/bash
+module load "${FRAMEWORKS_MODULE:-frameworks/2025.3.1}"
+set -u
+export ONEAPI_DEVICE_SELECTOR=level_zero:gpu
+export ZE_FLAT_DEVICE_HIERARCHY=FLAT
+export ZE_AFFINITY_MASK=${ZE_AFFINITY_MASK:-0}
+export PYTHONPATH=$REPO_DIR${PYTHONPATH:+:$PYTHONPATH}
+export HF_HOME=${HF_HOME:-$SCRATCH/huggingface}
+export HF_HUB_OFFLINE=1 HF_DATASETS_OFFLINE=1
+
+CACHE=${CACHE:-$SCRATCH/align-targets-50m}
+DENOISER=${DENOISER:-}
+SIZES=${SIZES:-50m 100m 200m}
+
+for size in $SIZES; do
+    ckpt=/flare/UIC-HPC/homes/cgrams/msdelta-runs/msdelta-$size-production-01/final
+    echo
+    echo "############ $size  ($ckpt)"
+    [[ -r $ckpt/model.safetensors ]] || { echo "  unreadable, skipping"; continue; }
+    "$VENV_DIR/bin/python" -X faulthandler -u pbs/pooling_probe.py \
+        --pretrained "$ckpt" --cache "$CACHE" --layers \
+        ${DENOISER:+--denoiser "$DENOISER"} --max_rows "${MAX_ROWS:-1200}" \
+        || echo "  [$size] FAILED"
+done
