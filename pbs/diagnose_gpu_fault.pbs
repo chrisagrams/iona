@@ -1,0 +1,103 @@
+#!/bin/bash -l
+# Bisect the 0xff00.... GPU fault that kills contrastive at 200m/400m and pair-loss.
+#
+#   qsub -q debug -l select=1 -l walltime=00:55:00 pbs/diagnose_gpu_fault.pbs
+#
+# Each variant runs in its OWN process. A GPU fault aborts the process and can leave the
+# tile's context unusable, so a single long script would stop at the first failure and
+# tell us one bit. Separate processes give one bit per variant.
+#
+# WHAT IS KNOWN
+#   50m  batch 4  passes        100m batch 4  passes
+#   200m batch 4  faults        400m batch 4  faults      1 of 6 survived at each
+#   50m  batch 8  faults (pair loss), 50m batch 16 faults
+#   the 200m fault is preceded by: peak 27.54 GB, RESERVED 57.79 GB of 68.7
+#   MSDELTA_SDPA_MATH=1 does not prevent it (job 8845233, switch verified live)
+#
+# The reserved-to-peak ratio is over 2x, which is the signature of allocator
+# fragmentation rather than a model that genuinely needs 58 GB. So the leading
+# hypothesis is no longer an exotic scratch bug: the tile fills, and 0xff00.... is what
+# exhaustion looks like on this stack rather than a clean OOM.
+#
+# Variants are ordered so each isolates ONE thing against the baseline.
+
+#PBS -N msdelta-gpudiag
+#PBS -A UIC-HPC
+#PBS -l place=scatter
+#PBS -l filesystems=home:flare
+#PBS -j oe
+#PBS -o pbs/logs/
+
+set -uo pipefail
+REPO_DIR=${REPO_DIR:-${PBS_O_WORKDIR:-$PWD}}
+cd "$REPO_DIR"
+VENV_DIR=${VENV_DIR:-$REPO_DIR/.venv}
+SCRATCH=/lus/flare/projects/UIC-HPC/$USER/msdelta
+
+set +u
+source /usr/share/lmod/lmod/init/bash
+module load "${FRAMEWORKS_MODULE:-frameworks/2025.3.1}"
+set -u
+export ONEAPI_DEVICE_SELECTOR=level_zero:gpu
+export ZE_FLAT_DEVICE_HIERARCHY=FLAT
+export ZE_AFFINITY_MASK=${ZE_AFFINITY_MASK:-0}
+export OMP_NUM_THREADS=4
+export PYTHONPATH=$REPO_DIR${PYTHONPATH:+:$PYTHONPATH}
+export HF_HOME=${HF_HOME:-$SCRATCH/huggingface}
+export HF_HUB_OFFLINE=1 HF_DATASETS_OFFLINE=1
+export MSDELTA_XPUS_PER_HOST=1 MSDELTA_WORLD_SIZE=1
+
+C200=/flare/UIC-HPC/khuss/msdelta/pretrained/msdelta-200m-production-01-checkpoint-192799
+C100=/flare/UIC-HPC/khuss/msdelta/pretrained/msdelta-100m-production-01-checkpoint-138073
+OUT=$SCRATCH/runs/gpudiag-$PBS_JOBID
+mkdir -p "$OUT"
+
+# name | extra args | extra env
+run() {
+    local name=$1 ckpt=$2 extra=$3 envs=$4
+    printf "  %-28s " "$name"
+    ( export $envs 2>/dev/null
+      "$VENV_DIR/bin/python" -m msdelta.finetune_contrastive \
+        --args_file configs/finetune-contrastive-50m/training.args \
+        --pretrained_path "$ckpt" --output_dir "$OUT/$name" \
+        --max_steps 60 --save_strategy no --report_to none \
+        --logging_steps 10 $extra
+    ) > "$OUT/$name.log" 2>&1
+    local status=$?
+    local mem
+    mem=$(grep -oE 'peak [0-9.]+ GB reserved [0-9.]+ GB' "$OUT/$name.log" | tail -1)
+    if [[ $status -eq 0 ]]; then
+        echo "PASS   ${mem:-}"
+    elif grep -q 'Segmentation fault from GPU' "$OUT/$name.log"; then
+        echo "GPUFAULT  ${mem:-}  $(grep -oE 'at 0x[0-9a-f]+' "$OUT/$name.log" | tail -1)"
+    elif grep -qiE 'out of memory|OutOfMemory' "$OUT/$name.log"; then
+        echo "CLEAN OOM  ${mem:-}"
+    else
+        echo "FAIL($status)  ${mem:-}  $(grep -oE '[A-Za-z]*Error[^|]{0,60}' "$OUT/$name.log" | tail -1)"
+    fi
+}
+
+echo "=== baseline and boundary ==="
+run "100m_baseline"        "$C100" ""                                    "X=1"
+run "200m_baseline"        "$C200" ""                                    "X=1"
+
+echo "=== isolate the memory terms, one at a time, all at 200m ==="
+run "200m_peaks256"        "$C200" "--max_peaks 256"                     "X=1"
+run "200m_peaks128"        "$C200" "--max_peaks 128"                     "X=1"
+run "200m_kl0"             "$C200" "--kl_weight 0"                       "X=1"
+run "200m_kl0_peaks256"    "$C200" "--max_peaks 256 --kl_weight 0"       "X=1"
+run "200m_sgd"             "$C200" "--optim sgd"                         "X=1"
+
+echo "=== is it fragmentation rather than true demand? ==="
+run "200m_expandable"      "$C200" ""  "PYTORCH_ALLOC_CONF=expandable_segments:True"
+run "200m_xpu_expandable"  "$C200" ""  "PYTORCH_XPU_ALLOC_CONF=expandable_segments:True"
+
+echo "=== is it the training stack rather than the model? ==="
+run "200m_nockpt"          "$C200" "--gradient_checkpointing false"      "X=1"
+run "200m_tinybatch"       "$C200" "--groups_per_batch 2 --replicates 2 --max_peaks 256" "X=1"
+
+echo
+echo "=== full memory trace of the baseline failure ==="
+grep -oE '\[mem\] step [0-9]+: peak [0-9.]+ GB reserved [0-9.]+ GB' "$OUT/200m_baseline.log" | tail -8
+echo
+echo "logs under $OUT"
