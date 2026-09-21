@@ -12,8 +12,12 @@ gradient_accumulation_steps rather than from a batch that must fit at once, and 
 in-group/out-group balance becomes a dial (`positive_fraction`) instead of a
 consequence of P and K.
 
-SHAPE. 8 pairs per minibatch = 16 spectra, with gradient_accumulation_steps 8, so an
-optimizer step sees 64 pairs = 128 spectra at the memory of 16. The sampler reshuffles
+SHAPE. 4 pairs per minibatch = 8 spectra, with gradient_accumulation_steps 16, so an
+optimizer step still sees 64 pairs at the memory of 8 spectra. The first attempt used
+16 spectra and took a GPU scratch fault (job 8845056, the same 0xff00.... signature as
+FT9); shrinking the minibatch while raising accumulation keeps the breadth and is
+exactly the freedom a decomposable loss provides -- a softmax loss could not make that
+trade. The sampler reshuffles
 itself rather than waiting for set_epoch, which is the FT14 failure by construction.
 
 AXES, 12 arms:
@@ -57,8 +61,8 @@ RUN_PREFIX = "v2_pair-"
 POSITIVE_FRACTIONS = ("0.25", "0.5", "0.75")
 MARGINS = ("0.5", "1.0")
 LEARNING_RATES = ("2e-5", "1e-4")
-PAIRS_PER_BATCH = "8"
-ACCUMULATION = "8"
+PAIRS_PER_BATCH = "4"
+ACCUMULATION = "16"
 
 
 def arm_name(fraction: str, margin: str, lr: str) -> str:
