@@ -142,6 +142,8 @@ def denoise_mzml(
         tqdm(desc=source.name, unit="spectra", disable=not show_progress) as progress,
     ):
         for chunk in batched(rewriter.spectra(), chunk_size):
+            if progress.total is None and rewriter.spectrum_count is not None:
+                progress.reset(total=rewriter.spectrum_count)
             targets = [
                 spectrum
                 for spectrum in chunk

@@ -38,6 +38,7 @@ _PEAK_STATISTICS = {
 
 _SPECTRUM_START = re.compile(rb"<spectrum[\s>]")
 _SPECTRUM_END = b"</spectrum>"
+_SPECTRUM_LIST_COUNT = re.compile(rb"<spectrumList\b[^>]*\bcount\s*=\s*['\"](\d+)['\"]")
 _INDEXED_MZML_START = re.compile(rb"<indexedmzML(?:\s[^>]*)?>")
 _INDEX_LIST_START = re.compile(rb"<indexList[\s>]")
 _READ_SIZE = 4 << 20
@@ -199,6 +200,7 @@ class MzMLRewriter:
         self.destination = Path(destination)
         self._input: IO[bytes] | None = None
         self._output: IO[bytes] | None = None
+        self.spectrum_count: int | None = None
         self._read_count = 0
         self._written_count = 0
         self._trailer: bytes | None = None
@@ -246,6 +248,9 @@ class MzMLRewriter:
             end += len(_SPECTRUM_END)
             prefix += buffer[: match.start()]
             if self._read_count == 0:
+                count = _SPECTRUM_LIST_COUNT.search(prefix)
+                if count is not None:
+                    self.spectrum_count = int(count.group(1))
                 prefix = bytearray(_INDEXED_MZML_START.sub(b"", prefix, count=1))
             spectrum = _parse_spectrum(self._read_count, buffer[match.start() : end], bytes(prefix))
             prefix = bytearray()
