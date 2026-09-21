@@ -5,6 +5,48 @@ Things we believe and why, separate from `STATUS.md` (what is running) and `TODO
 
 ---
 
+## READ THIS FIRST: the contrastive separation ratio has sd 0.75 at a fixed seed
+
+Six runs of one configuration, nothing varied, same seed 0:
+
+    6.56  5.89  6.02  5.46  4.40  6.20      mean 5.75  sd 0.75  range 2.15
+
+So the headline figure quoted throughout this project -- **7.83** -- is 2.8 sd above the
+mean of its own configuration. It was a lucky draw, and it became the reference point
+for later comparisons. The honest number for contrastive training is **5.75 +/- 0.75**.
+
+The standard error on a difference between two SINGLE runs is 1.06. Applying that:
+
+| claim | gap | t | status |
+| --- | --- | --- | --- |
+| pretrained vs random encoder | 6.48 | 6.1 | **stands** |
+| every random cell of the factorial at the floor | ~4.4 | 4.1 | **stands** |
+| frozen readout vs trained encoder | ~4.3 | 4.0 | **stands** |
+| start point 133k vs 10k | 2.10 | 2.0 | suggestive only |
+| layer-mix vs final layer | 2.07 | 2.0 | suggestive only |
+| random budget 1.35 -> 2.73 | 1.38 | 1.3 | **not supported** |
+| scheduler fix 6.94 -> 7.83 | 0.89 | 0.8 | **not supported** |
+| which contrastive arm is best | 0.12 | 0.1 | **not supported** |
+
+WHAT THIS DOES AND DOES NOT TOUCH. Every structural conclusion survives, because they
+all rest on gaps of 4 or more: pretraining is necessary, fine-tuning is necessary,
+neither alone works, the representation is non-linear. What dies is every RANKING --
+which arm, which learning rate, which checkpoint, whether a change helped.
+
+WHY THIS METRIC IS SO NOISY. The separation ratio is computed over 99 replicate groups;
+denoise AUROC is computed over 1,680,125 peaks. Four orders of magnitude fewer units,
+on a model trained at lr 5e-4, which is the least stable setting in the grid -- its four
+arms span 1.35 to 7.83 including a collapse to the floor. Nondeterminism decides which
+side of that edge a run lands on.
+
+DOES DENOISE HAVE THE SAME PROBLEM? Unmeasured, and it is the obvious next worry since
+the denoise scaling gaps are 0.0083 and 0.0043. But the relative scales are not
+comparable: contrastive sd is 13% of its mean, while the denoise gaps are 0.88% and
+0.46% of theirs. For denoise rankings to fail the same way its run-to-run sd would have
+to be ~0.005 on a metric averaged over 1.68M peaks, which is implausible but not
+impossible. FT5 measures it. Until FT5, treat the denoise scaling trend as likely but
+unconfirmed -- which is what it was already labelled.
+
 ## The pretrained encoder learns a real representation, but a NON-LINEAR one that only
 ## becomes useful after post-training
 
