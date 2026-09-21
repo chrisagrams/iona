@@ -3,6 +3,10 @@
 Example:
     msdelta-denoise run.mzML --checkpoint runs/denoise-probes/step-190000 \\
         --output run.denoised.mzML
+
+Multi-GPU:
+    accelerate launch --num_processes 4 --module msdelta.denoise_mzml run.mzML \\
+        --checkpoint runs/denoise-probes/step-190000 --output run.denoised.mzML
 """
 
 from __future__ import annotations
@@ -19,6 +23,8 @@ from typing import Iterable
 
 import numpy as np
 import torch
+from accelerate import PartialState
+from accelerate.utils import gather_object
 from tqdm.auto import tqdm
 
 from msdelta.denoising import PeakBudgetBatchSampler
@@ -62,6 +68,7 @@ class SpectrumDenoiser:
         *,
         noise_threshold: float = 0.5,
         peak_pair_budget: int = 4_194_304,
+        distributed_state: PartialState | None = None,
     ):
         if not 0.0 < noise_threshold <= 1.0:
             raise ValueError("noise_threshold must be in (0, 1]")
@@ -71,6 +78,7 @@ class SpectrumDenoiser:
         self.processor = processor
         self.noise_threshold = noise_threshold
         self.peak_pair_budget = peak_pair_budget
+        self.distributed_state = distributed_state
         self.device = next(model.parameters()).device
 
     def _windows(self, length: int) -> list[slice]:
@@ -82,9 +90,9 @@ class SpectrumDenoiser:
         starts = np.linspace(0, length - max_peaks, count, dtype=int)
         return [slice(int(start), int(start) + max_peaks) for start in starts]
 
-    @torch.inference_mode()
-    def noise_probabilities(self, spectra: list[tuple[np.ndarray, np.ndarray]]) -> list[np.ndarray]:
-        """Return one noise probability per peak for each ``(mz, intensity)`` pair."""
+    def _local_noise_probabilities(
+        self, spectra: list[tuple[np.ndarray, np.ndarray]]
+    ) -> list[np.ndarray]:
         lengths = [mz.size for mz, _ in spectra]
         results: list[np.ndarray | None] = [None] * len(spectra)
         sampler = PeakBudgetBatchSampler(lengths, self.peak_pair_budget, seed=0)
@@ -99,7 +107,37 @@ class SpectrumDenoiser:
             probabilities = torch.sigmoid(logits.float()).cpu().numpy()
             for row, i in enumerate(batch):
                 results[i] = probabilities[row, : lengths[i]]
-        return results
+        if any(result is None for result in results):
+            raise RuntimeError("inference did not return every local spectrum window")
+        return [result for result in results if result is not None]
+
+    @torch.inference_mode()
+    def noise_probabilities(self, spectra: list[tuple[np.ndarray, np.ndarray]]) -> list[np.ndarray]:
+        """Return one noise probability per peak for each ``(mz, intensity)`` pair."""
+        indexed_spectra = list(enumerate(spectra))
+        state = self.distributed_state
+        if state is not None and state.num_processes > 1:
+            with state.split_between_processes(indexed_spectra) as local_items:
+                local_items = list(local_items)
+        else:
+            local_items = indexed_spectra
+
+        local_probabilities = self._local_noise_probabilities(
+            [spectrum for _, spectrum in local_items]
+        )
+        indexed_probabilities = [
+            (index, probability)
+            for (index, _), probability in zip(local_items, local_probabilities)
+        ]
+        if state is not None and state.num_processes > 1:
+            indexed_probabilities = gather_object(indexed_probabilities)
+
+        results: list[np.ndarray | None] = [None] * len(spectra)
+        for index, probability in indexed_probabilities:
+            results[index] = probability
+        if any(result is None for result in results):
+            raise RuntimeError("distributed inference did not return every spectrum window")
+        return [result for result in results if result is not None]
 
     def keep_masks(self, spectra: Iterable[Spectrum]) -> list[np.ndarray]:
         """Return a boolean keep mask for every spectrum's peaks."""
@@ -128,7 +166,7 @@ class SpectrumDenoiser:
 
 def denoise_mzml(
     source: Path,
-    destination: Path,
+    destination: Path | None,
     denoiser: SpectrumDenoiser,
     *,
     ms_levels: set[int] | None = None,
@@ -162,15 +200,20 @@ def load_denoiser(
     checkpoint: str,
     *,
     processor_path: str | None = None,
-    device: str | None = None,
+    device: str | torch.device | None = None,
+    distributed_state: PartialState | None = None,
     **kwargs,
 ) -> SpectrumDenoiser:
     """Load a denoising checkpoint and its processor onto ``device``."""
-    if device is None:
+    if distributed_state is not None and distributed_state.num_processes > 1:
+        if device is not None:
+            raise ValueError("--device cannot be used with distributed inference")
+        device = distributed_state.device
+    elif device is None:
         device = "cuda" if torch.cuda.is_available() else "cpu"
     model = MSDeltaForDenoising.from_pretrained(checkpoint, dtype="auto").to(device)
     processor = MSDeltaProcessor.from_pretrained(processor_path or checkpoint)
-    return SpectrumDenoiser(model, processor, **kwargs)
+    return SpectrumDenoiser(model, processor, distributed_state=distributed_state, **kwargs)
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -228,16 +271,19 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
+    state = PartialState()
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s")
     denoiser = load_denoiser(
         args.checkpoint,
         processor_path=args.processor,
         device=args.device,
+        distributed_state=state,
         noise_threshold=args.noise_threshold,
         peak_pair_budget=args.peak_pair_budget,
     )
-    if args.output_dir is not None:
+    if args.output_dir is not None and state.is_main_process:
         args.output_dir.mkdir(parents=True, exist_ok=True)
+    state.wait_for_everyone()
 
     summaries: dict[str, dict] = {}
     for source in args.inputs:
@@ -245,35 +291,40 @@ def main(argv: list[str] | None = None) -> int:
         if destination.resolve() == source.resolve():
             raise SystemExit(f"refusing to overwrite the input file {source}")
         if destination.exists() and not args.overwrite:
-            logger.info("skipping %s: %s exists", source, destination)
+            if state.is_main_process:
+                logger.info("skipping %s: %s exists", source, destination)
             continue
         started = time.perf_counter()
         partial = destination.with_name(destination.name + ".part")
         try:
             summary = denoise_mzml(
                 source,
-                partial,
+                partial if state.is_main_process else None,
                 denoiser,
                 ms_levels=set(args.ms_level),
                 chunk_size=args.chunk_size,
-                show_progress=not args.no_progress,
+                show_progress=not args.no_progress and state.is_main_process,
             )
-            partial.replace(destination)
+            if state.is_main_process:
+                partial.replace(destination)
+            state.wait_for_everyone()
         except BaseException:
-            partial.unlink(missing_ok=True)
+            if state.is_main_process:
+                partial.unlink(missing_ok=True)
             raise
-        summaries[str(source)] = asdict(summary)
-        logger.info(
-            "%s: %d/%d spectra denoised, %d -> %d peaks (%d noise) in %.1fs",
-            source.name,
-            summary.denoised_spectra,
-            summary.spectra,
-            summary.peaks_in,
-            summary.peaks_out,
-            summary.noise_peaks,
-            time.perf_counter() - started,
-        )
-    if args.summary is not None:
+        if state.is_main_process:
+            summaries[str(source)] = asdict(summary)
+            logger.info(
+                "%s: %d/%d spectra denoised, %d -> %d peaks (%d noise) in %.1fs",
+                source.name,
+                summary.denoised_spectra,
+                summary.spectra,
+                summary.peaks_in,
+                summary.peaks_out,
+                summary.noise_peaks,
+                time.perf_counter() - started,
+            )
+    if args.summary is not None and state.is_main_process:
         args.summary.parent.mkdir(parents=True, exist_ok=True)
         args.summary.write_text(json.dumps(summaries, indent=2) + "\n")
     return 0

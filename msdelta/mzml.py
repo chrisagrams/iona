@@ -192,12 +192,13 @@ class MzMLRewriter:
     Iterate :meth:`spectra` to read spectra in file order, and call :meth:`write`
     for every spectrum in that same order, passing a boolean mask of the peaks to
     keep. Spectra may be buffered between reading and writing, but every spectrum
-    must be written before the rewriter is closed.
+    must be written before the rewriter is closed. Pass ``destination=None`` on
+    distributed workers that only need to read and validate the stream.
     """
 
-    def __init__(self, source: str | Path, destination: str | Path):
+    def __init__(self, source: str | Path, destination: str | Path | None):
         self.source = Path(source)
-        self.destination = Path(destination)
+        self.destination = Path(destination) if destination is not None else None
         self._input: IO[bytes] | None = None
         self._output: IO[bytes] | None = None
         self.spectrum_count: int | None = None
@@ -207,7 +208,8 @@ class MzMLRewriter:
 
     def __enter__(self) -> MzMLRewriter:
         self._input = self.source.open("rb")
-        self._output = self.destination.open("wb")
+        if self.destination is not None:
+            self._output = self.destination.open("wb")
         return self
 
     def __exit__(self, exc_type, exc, tb) -> None:
@@ -263,10 +265,11 @@ class MzMLRewriter:
         """Write ``spectrum`` keeping only the peaks flagged in ``keep``."""
         if spectrum.index != self._written_count:
             raise ValueError("spectra must be written in the order they were read")
-        self._output.write(spectrum.prefix)
-        if keep is None:
-            keep = np.ones(spectrum.peak_count, dtype=bool)
-        self._output.write(filter_spectrum_peaks(spectrum, keep))
+        if self._output is not None:
+            self._output.write(spectrum.prefix)
+            if keep is None:
+                keep = np.ones(spectrum.peak_count, dtype=bool)
+            self._output.write(filter_spectrum_peaks(spectrum, keep))
         self._written_count += 1
 
     def close(self) -> None:
@@ -281,5 +284,6 @@ class MzMLRewriter:
         index_start = _INDEX_LIST_START.search(trailer)
         if index_start is not None:
             trailer = trailer[: index_start.start()]
-        self._output.write(trailer)
+        if self._output is not None:
+            self._output.write(trailer)
         self._trailer = None
