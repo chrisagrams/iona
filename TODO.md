@@ -580,8 +580,14 @@ and relates to cosine by d^2 = 2 - 2cos. The grid sweeps `pair_margin` over {0.5
 
 Both sampled values sit in the bottom half of the usable range. If 1.0 wins it will
 have won at the edge of the grid, which says the optimum is at or beyond it rather
-than located -- the same shape of result as the 400m probe, where encoder_lr_scale was
-monotone up to its largest sampled value of 0.5 and 1.0 was never tried.
+than located.
+
+But "at the edge" does not imply "beyond the edge is better", and assuming it does is
+a mistake this project has now made once. The 400m probe looked exactly like this --
+encoder_lr_scale rising monotonically to its largest sampled value of 0.5 -- and the
+inference that 1.0 would be better was wrong: 1.0 had already been run in the 400m HP
+grid and scores 0.9396 against 0.5's 0.9436. An edge result means the optimum is
+UNLOCATED, in either direction.
 
 - [ ] If margin 1.0 beats 0.5, extend to {1.0, 1.25, 1.5} before reading anything into
       the margin.
