@@ -113,6 +113,7 @@ declare -A GRID_CHECK=(
     # source of the 0xff00.... scratch fault. Copied, not generated, so it
     # is verified against the grid it came from rather than a generator.
     [configs/sweep-conscale-retry]="sweeps/verify_subset.py configs/sweep-conscale-retry configs/sweep-contrastive-scale"
+    [configs/sweep-conscale-big]="sweeps/verify_subset.py configs/sweep-conscale-big configs/sweep-contrastive-scale"
     [configs/sweep-contrastive]="sweeps/make_contrastive_grid.py --check"
     [configs/sweep-contrastive-random]="sweeps/make_contrastive_grid.py --random --check"
     [configs/sweep-random-budget]="sweeps/make_random_budget_grid.py --check"
@@ -152,10 +153,33 @@ mapfile -t HOSTS < <(sort -u "${PBS_NODEFILE:?PBS_NODEFILE is required}")
 # SLOTS_PER_NODE of them, each owning a disjoint set of tiles.
 NODES=()
 SLOT_TILES=()
+# TILE_STRIDE spreads slots across PHYSICAL CARDS rather than packing tiles.
+#
+# A node has 12 tiles but only 6 cards -- an Intel Max 1550 presents two tiles per card
+# and they SHARE that card's 128 GB of HBM. Each tile nonetheless reports 68.7 GB, so a
+# card's pair collectively claims 131 GB of a physical 128. Nothing enforces the budget:
+# when both siblings expand into it, one takes a GPU fault at 0xff00...., which reads
+# like a scratch-memory bug and is really over-subscription.
+#
+# Measured on 200m contrastive: 67.11 GB reserved per tile when 12 arms share a node
+# (1 of 6 arms survived), against 38.75 GB reserved and 200/200 steps clean for the same
+# arm alone on a tile. Same peak either way, 28.4 vs 28.5 GB -- the model always fitted;
+# the allocator was expanding into a card its sibling was also expanding into.
+#
+# TILE_STRIDE=2 therefore uses tiles 0,2,4,6,8,10: six arms, one per card, no sibling.
+# Halves the arms per node and costs nothing else. Leave it at 1 for models small enough
+# that two siblings fit -- 100m reserves 26 GB, so a pair is 52 GB and comfortable.
+TILE_STRIDE=${TILE_STRIDE:-1}
+if (( TILE_STRIDE > 1 )); then
+    SLOTS_PER_NODE=$(( XPUS_PER_HOST / (TILES_PER_ARM * TILE_STRIDE) ))
+    (( SLOTS_PER_NODE > 0 )) || { echo "TILE_STRIDE=$TILE_STRIDE leaves no slots" >&2; exit 2; }
+    echo "  TILE_STRIDE=$TILE_STRIDE: $SLOTS_PER_NODE arms per node, one per card"
+fi
 for host in "${HOSTS[@]}"; do
     for (( slot = 0; slot < SLOTS_PER_NODE; slot++ )); do
         NODES+=("$host")
-        SLOT_TILES+=("$(seq -s, $(( slot * TILES_PER_ARM )) $(( (slot + 1) * TILES_PER_ARM - 1 )))")
+        first=$(( slot * TILES_PER_ARM * TILE_STRIDE ))
+        SLOT_TILES+=("$(seq -s, "$first" "$TILE_STRIDE" $(( first + (TILES_PER_ARM - 1) * TILE_STRIDE )))")
     done
 done
 NUM_NODES=${#NODES[@]}
