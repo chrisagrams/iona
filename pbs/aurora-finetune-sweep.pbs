@@ -103,6 +103,7 @@ declare -A GRID_CHECK=(
     [configs/sweep-layermix]="sweeps/make_layermix_grid.py --check"
     [configs/sweep-layermix-random]="sweeps/make_layermix_grid.py --random --check"
     [configs/sweep-startpoint]="sweeps/make_startpoint_grid.py --check"
+    [configs/sweep-repeat]="sweeps/make_repeat_grid.py --check"
     [configs/sweep-contrastive]="sweeps/make_contrastive_grid.py --check"
     [configs/sweep-contrastive-random]="sweeps/make_contrastive_grid.py --random --check"
     [configs/sweep-random-budget]="sweeps/make_random_budget_grid.py --check"
