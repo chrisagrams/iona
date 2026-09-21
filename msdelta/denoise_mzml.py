@@ -19,6 +19,7 @@ from typing import Iterable
 
 import numpy as np
 import torch
+from tqdm.auto import tqdm
 
 from msdelta.denoising import PeakBudgetBatchSampler
 from msdelta.modeling_msdelta import MSDeltaForDenoising
@@ -132,10 +133,14 @@ def denoise_mzml(
     *,
     ms_levels: set[int] | None = None,
     chunk_size: int = 1024,
+    show_progress: bool = True,
 ) -> DenoisingSummary:
     """Write ``destination`` as a copy of ``source`` with noise peaks removed."""
     summary = DenoisingSummary()
-    with MzMLRewriter(source, destination) as rewriter:
+    with (
+        MzMLRewriter(source, destination) as rewriter,
+        tqdm(desc=source.name, unit="spectra", disable=not show_progress) as progress,
+    ):
         for chunk in batched(rewriter.spectra(), chunk_size):
             targets = [
                 spectrum
@@ -147,6 +152,7 @@ def denoise_mzml(
                 keep = masks.get(spectrum.index)
                 summary.record(spectrum.peak_count, keep)
                 rewriter.write(spectrum, keep)
+                progress.update()
     return summary
 
 
@@ -211,6 +217,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--overwrite", action="store_true", help="replace outputs that already exist"
     )
+    parser.add_argument("--no-progress", action="store_true", help="disable progress bars")
     args = parser.parse_args(argv)
     if args.output is not None and len(args.inputs) != 1:
         parser.error("--output accepts exactly one input; use --output-dir for several")
@@ -247,6 +254,7 @@ def main(argv: list[str] | None = None) -> int:
                 denoiser,
                 ms_levels=set(args.ms_level),
                 chunk_size=args.chunk_size,
+                show_progress=not args.no_progress,
             )
             partial.replace(destination)
         except BaseException:

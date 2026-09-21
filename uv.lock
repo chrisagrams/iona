@@ -1399,6 +1399,7 @@ dependencies = [
     { name = "scikit-learn" },
     { name = "scipy" },
     { name = "sentence-transformers" },
+    { name = "tqdm" },
     { name = "transformers" },
     { name = "wandb" },
 ]
@@ -1439,6 +1440,7 @@ requires-dist = [
     { name = "sentence-transformers", specifier = ">=6.0.0" },
     { name = "torch", marker = "extra == 'cuda'", specifier = ">=2.10,<2.12", index = "https://download.pytorch.org/whl/cu128", conflict = { package = "msdelta", extra = "cuda" } },
     { name = "torch", marker = "extra == 'xpu'", specifier = ">=2.10,<2.12", index = "https://download.pytorch.org/whl/xpu", conflict = { package = "msdelta", extra = "xpu" } },
+    { name = "tqdm" },
     { name = "transformers", specifier = ">=4.46.0" },
     { name = "triton-xpu", marker = "extra == 'xpu'", index = "https://download.pytorch.org/whl/xpu", conflict = { package = "msdelta", extra = "xpu" } },
     { name = "wandb" },

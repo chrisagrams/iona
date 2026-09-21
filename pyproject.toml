@@ -22,6 +22,7 @@ dependencies = [
     "deepspeed>=0.15.0; sys_platform == 'linux'",
     "pytorch-metric-learning>=2.9.0",
     "sentence-transformers>=6.0.0",
+    "tqdm",
     "faiss-gpu-cu12>=1.14.1; sys_platform == 'linux' and platform_machine == 'x86_64' and python_version < '3.14'",
     "faiss-cpu>=1.14.1; sys_platform != 'linux' or platform_machine != 'x86_64' or python_version >= '3.14'",
 ]
