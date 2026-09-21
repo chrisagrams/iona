@@ -13,9 +13,9 @@ import logging
 import sys
 import time
 from dataclasses import asdict, dataclass
-from itertools import islice
+from itertools import batched
 from pathlib import Path
-from typing import Iterable, Iterator
+from typing import Iterable
 
 import numpy as np
 import torch
@@ -113,11 +113,6 @@ class SpectrumDenoiser:
         return masks
 
 
-def _chunks(iterator: Iterator[Spectrum], size: int) -> Iterator[list[Spectrum]]:
-    while chunk := list(islice(iterator, size)):
-        yield chunk
-
-
 def denoise_mzml(
     source: Path,
     destination: Path,
@@ -129,7 +124,7 @@ def denoise_mzml(
     """Write ``destination`` as a copy of ``source`` with noise peaks removed."""
     summary = DenoisingSummary()
     with MzMLRewriter(source, destination) as rewriter:
-        for chunk in _chunks(rewriter.spectra(), chunk_size):
+        for chunk in batched(rewriter.spectra(), chunk_size):
             targets = [
                 spectrum
                 for spectrum in chunk
