@@ -154,22 +154,30 @@ mapfile -t HOSTS < <(sort -u "${PBS_NODEFILE:?PBS_NODEFILE is required}")
 # SLOTS_PER_NODE of them, each owning a disjoint set of tiles.
 NODES=()
 SLOT_TILES=()
-# TILE_STRIDE spreads slots across PHYSICAL CARDS rather than packing tiles.
+# TILE_STRIDE spreads slots across PHYSICAL CARDS rather than packing tiles: a node has
+# 12 tiles but only 6 Intel Max 1550 cards, two tiles each. TILE_STRIDE=2 uses tiles
+# 0,2,4,6,8,10 -- six arms, one per card, no sibling -- at half the arms per node.
 #
-# A node has 12 tiles but only 6 cards -- an Intel Max 1550 presents two tiles per card
-# and they SHARE that card's 128 GB of HBM. Each tile nonetheless reports 68.7 GB, so a
-# card's pair collectively claims 131 GB of a physical 128. Nothing enforces the budget:
-# when both siblings expand into it, one takes a GPU fault at 0xff00...., which reads
-# like a scratch-memory bug and is really over-subscription.
+# THIS KNOB DOES NOT FIX THE 0xff00.... GPU FAULT, whatever an earlier version of this
+# comment claimed. It was added on the theory that a card's two tiles each report
+# 68.7 GB against a shared physical 128 GB, so a sibling pair over-subscribes the card
+# and one of them faults. That theory was tested and is FALSE:
 #
-# Measured on 200m contrastive: 67.11 GB reserved per tile when 12 arms share a node
-# (1 of 6 arms survived), against 38.75 GB reserved and 200/200 steps clean for the same
-# arm alone on a tile. Same peak either way, 28.4 vs 28.5 GB -- the model always fitted;
-# the allocator was expanding into a card its sibling was also expanding into.
+#   same-card pairs        clean, 38.75 GB reserved on each tile
+#   1 / 2 / 4 / 8 / 12 arms per node   all clean at 38.73 GB
+#   TILE_STRIDE=2 rerun    faulted anyway
 #
-# TILE_STRIDE=2 therefore uses tiles 0,2,4,6,8,10: six arms, one per card, no sibling.
-# Halves the arms per node and costs nothing else. Leave it at 1 for models small enough
-# that two siblings fit -- 100m reserves 26 GB, so a pair is 52 GB and comfortable.
+# The real cause was in the collator, not the hardware: AlignmentCollator padded each
+# batch to the longest spectrum IN THAT BATCH, and DeltaMZBias is O(batch * width^2), so
+# memory depended on which spectra the sampler happened to draw together -- 38.75 GB at
+# seed 0 and 67.14 GB at seed 3 for one identical config. Every interactive test used
+# the default seed 0, the one value that hides it. Fixed by padding to max_peaks; see
+# msdelta/reranking.py and TODO FT7/FT12. Verified in job 8845623: 12/12 arms, 0 faults,
+# 29.64 GB at every 200m seed and 37.28 GB at every 400m seed.
+#
+# So reach for TILE_STRIDE only to give one arm more of a card's bandwidth, never as a
+# remedy for a fault. A fault now means something new, and pinning it on sibling tiles
+# would be repeating a refuted diagnosis.
 TILE_STRIDE=${TILE_STRIDE:-1}
 if (( TILE_STRIDE > 1 )); then
     SLOTS_PER_NODE=$(( XPUS_PER_HOST / (TILES_PER_ARM * TILE_STRIDE) ))

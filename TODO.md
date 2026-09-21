@@ -722,8 +722,6 @@ rather than shown; 8845596 decides it.
 - [ ] If it passes, instrument a real failing sweep instead of reproducing beside one:
       dump the full environment and cgroup state from inside a faulting arm.
 
-### REFUTED: two tiles share one card's HBM
-
 ### REFUTED: two tiles share one card's HBM and both over-report it
 
 A node presents 12 tiles and has 6 physical cards. An Intel Max 1550 exposes two tiles
@@ -756,9 +754,17 @@ Note also that the grid reserved 67.11 GB where this same config reserves 38.75 
 alone: the allocator grows MORE aggressively under contention, so the failure compounds
 rather than merely being tight.
 
-WHEN IT IS NEEDED: only when a pair would exceed 128 GB. Denoise under ZeRO-2 reserves
-7.7 GB/tile, contrastive at 100m reserves 26 GB; both are fine at stride 1. Contrastive
-at 200m+ reserves 67 GB and needs stride 2.
+WHEN IT IS NEEDED: never, for this. The paragraph that stood here said contrastive at
+200m+ "reserves 67 GB and needs stride 2", and that was the refuted theory giving
+operational advice. The 67 GB was not a property of 200m: it was the collator padding
+each batch to its widest spectrum, so the figure moved with the seed (38.75 GB at seed
+0, 67.14 GB at seed 3, one identical config). Under fixed-width padding the same arms
+reserve 29.64 GB at every 200m seed and 37.28 GB at every 400m seed, and 12 per node at
+stride 1 is clean -- job 8845623, 12/12 arms, 0 faults.
+
+TILE_STRIDE remains a legitimate knob for giving one arm more of a card's bandwidth. It
+is not a remedy for a fault, and a fault that appears now is something new rather than
+a sibling-tile collision.
 
 DO NOT RETRY: `PYTORCH_ALLOC_CONF=expandable_segments:True` would have let the allocator
 give memory back and kept 12 arms per node. It is NOT SUPPORTED on this XPU build --
