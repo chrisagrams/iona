@@ -106,6 +106,7 @@ declare -A GRID_CHECK=(
     [configs/sweep-repeat]="sweeps/make_repeat_grid.py --check"
     [configs/sweep-seedvar]="sweeps/make_seedvar_grid.py --check"
     [configs/sweep-contrastive-scale]="sweeps/make_contrastive_scale_grid.py --check"
+    [configs/sweep-pairloss]="sweeps/make_pairloss_grid.py --check"
     [configs/sweep-contrastive]="sweeps/make_contrastive_grid.py --check"
     [configs/sweep-contrastive-random]="sweeps/make_contrastive_grid.py --random --check"
     [configs/sweep-random-budget]="sweeps/make_random_budget_grid.py --check"
