@@ -36,16 +36,7 @@ class DenoisingSummary:
     peaks_in: int = 0
     peaks_out: int = 0
     noise_peaks: int = 0
-    unscored_peaks: int = 0
     emptied_spectra: int = 0
-
-
-def select_model_peaks(intensity: np.ndarray, max_peaks: int) -> np.ndarray:
-    """Return indices of the most intense peaks, in their original order."""
-    if intensity.size <= max_peaks:
-        return np.arange(intensity.size)
-    top = np.argpartition(intensity, intensity.size - max_peaks)[-max_peaks:]
-    return np.sort(top)
 
 
 class SpectrumDenoiser:
@@ -58,7 +49,6 @@ class SpectrumDenoiser:
         *,
         noise_threshold: float = 0.5,
         peak_pair_budget: int = 4_194_304,
-        keep_unscored: bool = False,
     ):
         if not 0.0 < noise_threshold <= 1.0:
             raise ValueError("noise_threshold must be in (0, 1]")
@@ -68,8 +58,16 @@ class SpectrumDenoiser:
         self.processor = processor
         self.noise_threshold = noise_threshold
         self.peak_pair_budget = peak_pair_budget
-        self.keep_unscored = keep_unscored
         self.device = next(model.parameters()).device
+
+    def _windows(self, length: int) -> list[slice]:
+        """Cover a peak sequence with the minimum number of evenly overlapping windows."""
+        max_peaks = self.processor.max_peaks
+        if length <= max_peaks:
+            return [slice(0, length)]
+        count = int(np.ceil(length / max_peaks))
+        starts = np.linspace(0, length - max_peaks, count, dtype=int)
+        return [slice(int(start), int(start) + max_peaks) for start in starts]
 
     @torch.inference_mode()
     def noise_probabilities(self, spectra: list[tuple[np.ndarray, np.ndarray]]) -> list[np.ndarray]:
@@ -94,22 +92,24 @@ class SpectrumDenoiser:
         """Return a boolean keep mask for every spectrum's peaks."""
         spectra = list(spectra)
         masks = [np.ones(spectrum.peak_count, dtype=bool) for spectrum in spectra]
-        scored: list[int] = []
-        selected: list[np.ndarray] = []
+        windows: list[tuple[int, slice]] = []
         for i, spectrum in enumerate(spectra):
             if spectrum.peak_count == 0 or spectrum.intensity.max() <= 0:
                 continue
-            indices = select_model_peaks(spectrum.intensity, self.processor.max_peaks)
-            if not self.keep_unscored:
-                masks[i][:] = False
-                masks[i][indices] = True
-            scored.append(i)
-            selected.append(indices)
+            windows.extend((i, window) for window in self._windows(spectrum.peak_count))
         probabilities = self.noise_probabilities(
-            [(spectra[i].mz[idx], spectra[i].intensity[idx]) for i, idx in zip(scored, selected)]
+            [(spectra[i].mz[window], spectra[i].intensity[window]) for i, window in windows]
         )
-        for i, indices, noise in zip(scored, selected, probabilities):
-            masks[i][indices] = noise < self.noise_threshold
+        probability_sums = [np.zeros(spectrum.peak_count, dtype=np.float32) for spectrum in spectra]
+        prediction_counts = [np.zeros(spectrum.peak_count, dtype=np.int32) for spectrum in spectra]
+        for (i, window), noise in zip(windows, probabilities):
+            probability_sums[i][window] += noise
+            prediction_counts[i][window] += 1
+        for i, counts in enumerate(prediction_counts):
+            scored = counts > 0
+            masks[i][scored] = (
+                probability_sums[i][scored] / counts[scored] < self.noise_threshold
+            )
         return masks
 
 
@@ -146,11 +146,7 @@ def denoise_mzml(
                 summary.denoised_spectra += 1
                 summary.peaks_in += n_in
                 summary.peaks_out += n_out
-                n_unscored = 0
-                if not denoiser.keep_unscored:
-                    n_unscored = min(max(n_in - denoiser.processor.max_peaks, 0), n_in - n_out)
-                summary.unscored_peaks += n_unscored
-                summary.noise_peaks += n_in - n_out - n_unscored
+                summary.noise_peaks += n_in - n_out
                 summary.emptied_spectra += int(n_in > 0 and n_out == 0)
                 rewriter.write(spectrum, keep)
     return summary
@@ -199,12 +195,6 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="remove peaks whose noise probability is at least this value (default: 0.5)",
     )
     parser.add_argument(
-        "--keep-unscored",
-        action="store_true",
-        help="keep peaks beyond the processor's max_peaks most intense peaks instead of "
-        "dropping them; the model never scores those peaks",
-    )
-    parser.add_argument(
         "--peak-pair-budget",
         type=int,
         default=4_194_304,
@@ -238,7 +228,6 @@ def main(argv: list[str] | None = None) -> int:
         device=args.device,
         noise_threshold=args.noise_threshold,
         peak_pair_budget=args.peak_pair_budget,
-        keep_unscored=args.keep_unscored,
     )
     if args.output_dir is not None:
         args.output_dir.mkdir(parents=True, exist_ok=True)
@@ -267,14 +256,13 @@ def main(argv: list[str] | None = None) -> int:
             raise
         summaries[str(source)] = asdict(summary)
         logger.info(
-            "%s: %d/%d spectra denoised, %d -> %d peaks (%d noise, %d unscored) in %.1fs",
+            "%s: %d/%d spectra denoised, %d -> %d peaks (%d noise) in %.1fs",
             source.name,
             summary.denoised_spectra,
             summary.spectra,
             summary.peaks_in,
             summary.peaks_out,
             summary.noise_peaks,
-            summary.unscored_peaks,
             time.perf_counter() - started,
         )
     if args.summary is not None:
