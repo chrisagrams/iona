@@ -86,6 +86,132 @@ class GroupBatchSampler(Sampler[list[int]]):
             yield batch
 
 
+class PairBatchSampler(Sampler[list[int]]):
+    """Batches of PAIRS: half same-peptide, half different, ratio under direct control.
+
+    The alternative to PK sampling. PK builds a batch of P peptides x K spectra and
+    hands the whole thing to a softmax loss, which couples every row to every other --
+    so the batch cannot be split, and memory caps how many peptides a single step can
+    see. DeltaMZBias is O(batch * peaks^2), which is what forced P=2, K=2 and left every
+    anchor with one positive and two negatives.
+
+    A pair loss decomposes: each pair contributes independently, so a step can be made
+    of as many small minibatches as you like via ordinary gradient accumulation, and the
+    number of distinct peptides a step sees stops being a memory question. That is the
+    whole point of the formulation.
+
+    Each yielded batch is 2 * pairs_per_batch row indices, arranged so that rows
+    (2i, 2i+1) are a pair. `positive_fraction` of them are same-peptide.
+
+    RESHUFFLES BY ITSELF. The epoch counter advances inside __iter__ rather than waiting
+    for set_epoch, because GroupBatchSampler took its epoch from a setter that nothing
+    ever called (FT14) and consequently replayed identical batches for entire runs. A
+    sampler that can only be correct if the caller remembers something is a sampler that
+    will eventually be wrong.
+    """
+
+    def __init__(self, groups, pairs_per_batch: int = 8,
+                 positive_fraction: float = 0.5, seed: int = 0,
+                 batches_per_epoch: int | None = None):
+        if not 0.0 < positive_fraction < 1.0:
+            raise ValueError("positive_fraction must be strictly between 0 and 1: at 0 "
+                             "nothing is ever pulled together, at 1 nothing is pushed "
+                             "apart, and either way the loss is degenerate")
+        if pairs_per_batch < 1:
+            raise ValueError("pairs_per_batch must be >= 1")
+        groups = np.asarray(groups)
+        self.members: dict[int, np.ndarray] = {}
+        for group in np.unique(groups):
+            index = np.flatnonzero(groups == group)
+            # A group with one spectrum can never supply a positive pair. It can still
+            # serve as a negative, so it is kept for that and excluded from positives.
+            self.members[int(group)] = index
+        self.positive_pool = [g for g, m in self.members.items() if len(m) >= 2]
+        if len(self.members) < 2:
+            raise ValueError("need at least two groups to form a negative pair")
+        if not self.positive_pool:
+            raise ValueError("no group has two spectra, so no positive pair exists")
+        self.pairs_per_batch = pairs_per_batch
+        self.positive_fraction = positive_fraction
+        self.seed = seed
+        self.epoch = 0
+        total_rows = int(sum(len(m) for m in self.members.values()))
+        # Default epoch length covers the corpus once in expectation, so "epochs" means
+        # roughly what it means elsewhere rather than one pass over groups.
+        self.batches_per_epoch = batches_per_epoch or max(
+            1, total_rows // (2 * pairs_per_batch))
+
+    def __len__(self) -> int:
+        return self.batches_per_epoch
+
+    def set_epoch(self, epoch: int) -> None:
+        self.epoch = epoch
+
+    def __iter__(self):
+        rng = np.random.default_rng([self.seed, self.epoch])
+        n_positive = max(1, min(self.pairs_per_batch - 1,
+                                round(self.pairs_per_batch * self.positive_fraction)))
+        groups = list(self.members)
+        for _ in range(self.batches_per_epoch):
+            batch: list[int] = []
+            for _ in range(n_positive):
+                pool = self.members[int(rng.choice(self.positive_pool))]
+                batch.extend(int(i) for i in rng.choice(pool, size=2, replace=False))
+            for _ in range(self.pairs_per_batch - n_positive):
+                a, b = rng.choice(groups, size=2, replace=False)
+                batch.append(int(rng.choice(self.members[int(a)])))
+                batch.append(int(rng.choice(self.members[int(b)])))
+            yield batch
+        # Advance regardless of whether anyone calls set_epoch. See the class docstring.
+        self.epoch += 1
+
+
+def pair_contrastive_loss(embeddings: Tensor, groups: Tensor, margin: float = 1.0,
+                          positive_weight: float = 1.0) -> dict[str, Tensor]:
+    """Contrastive loss over adjacent PAIRS (Hadsell et al., 2006), not in-batch softmax.
+
+    Rows arrive as (2i, 2i+1) pairs from PairBatchSampler. Same peptide: pull together.
+    Different: push apart until they are at least `margin` apart, then stop caring.
+
+    Embeddings are L2-normalised upstream, so the distance lives in [0, 2] and relates
+    to cosine by d^2 = 2 - 2cos. A margin of 1.0 therefore asks different peptides to
+    reach cosine 0.5 or below, which is a real separation without demanding
+    orthogonality from spectra that genuinely share fragments.
+
+    `positive_weight` rebalances the two terms when the sampler's ratio is not 1:1, so
+    the mix can be tuned without the loss silently following it.
+
+    WHAT THIS GIVES UP, stated because it is the reason not to default to it: a softmax
+    loss puts every negative in one denominator, so the hardest negative automatically
+    receives the most gradient. Independent pair terms weight every negative equally and
+    contribute exactly zero once past the margin. The compensation is that pairs
+    decompose, so batch size stops being bounded by memory.
+    """
+    if embeddings.shape[0] % 2:
+        raise ValueError(f"pair loss needs an even number of rows, got "
+                         f"{embeddings.shape[0]}")
+    left, right = embeddings[0::2], embeddings[1::2]
+    same = groups[0::2] == groups[1::2]
+    distance = (left - right).norm(dim=-1)
+    positive = distance.pow(2)
+    negative = F.relu(margin - distance).pow(2)
+    loss = torch.where(same, positive_weight * positive, negative).mean()
+    return {
+        "loss": loss,
+        # Reported separately: a run where the positive term collapses while the
+        # negative term does nothing looks identical in the total.
+        "pair_positive": positive[same].mean().detach() if same.any()
+                         else embeddings.new_zeros(()),
+        "pair_negative": negative[~same].mean().detach() if (~same).any()
+                         else embeddings.new_zeros(()),
+        "pair_positive_fraction": same.float().mean().detach(),
+        "pair_distance_same": distance[same].mean().detach() if same.any()
+                              else embeddings.new_zeros(()),
+        "pair_distance_diff": distance[~same].mean().detach() if (~same).any()
+                              else embeddings.new_zeros(()),
+    }
+
+
 def supervised_contrastive_loss(embeddings: Tensor, groups: Tensor,
                                 temperature: float = 0.07) -> Tensor:
     """SupCon: every same-group pair is a positive, not just one.
@@ -253,7 +379,9 @@ class MSDeltaForContrastive(nn.Module):
 
     def __init__(self, model: nn.Module, reference: nn.Module | None = None,
                  pooling: str = "mean+max", temperature: float = 0.07,
-                 kl_weight: float = 1.0, layer_mix_norm: bool = True):
+                 kl_weight: float = 1.0, layer_mix_norm: bool = True,
+                 pair_loss: bool = False, pair_margin: float = 1.0,
+                 pair_positive_weight: float = 1.0):
         super().__init__()
         self.model = model
         self.reference = reference
@@ -275,6 +403,12 @@ class MSDeltaForContrastive(nn.Module):
         self.pooling = pooling
         self.temperature = temperature
         self.kl_weight = kl_weight
+        # Pair mode replaces the in-batch softmax with independent per-pair terms; see
+        # pair_contrastive_loss. It expects rows arranged as (2i, 2i+1) pairs, which is
+        # what PairBatchSampler yields, so the two must be switched on together.
+        self.pair_loss = pair_loss
+        self.pair_margin = pair_margin
+        self.pair_positive_weight = pair_positive_weight
 
     def train(self, mode: bool = True):
         super().train(mode)
@@ -318,7 +452,15 @@ class MSDeltaForContrastive(nn.Module):
                 reference_logits=None, return_dict: bool = True,
                 return_loss: bool = True):
         embeddings, hidden = self.embed(mz, log_intensity, attention_mask)
-        contrastive = supervised_contrastive_loss(embeddings, group, self.temperature)
+        extra: dict[str, Tensor] = {}
+        if self.pair_loss:
+            pair = pair_contrastive_loss(embeddings, group, self.pair_margin,
+                                         self.pair_positive_weight)
+            contrastive = pair.pop("loss")
+            extra = pair
+        else:
+            contrastive = supervised_contrastive_loss(embeddings, group,
+                                                      self.temperature)
 
         kl = embeddings.new_zeros(())
         if self.kl_weight > 0:
@@ -339,7 +481,7 @@ class MSDeltaForContrastive(nn.Module):
         if not return_dict:
             return (loss, embeddings)
         return {"loss": loss, "contrastive": contrastive.detach(), "kl": kl.detach(),
-                "embeddings": embeddings}
+                "embeddings": embeddings, **extra}
 
 
 def embedding_size(model: nn.Module, pooling: str = "mean+max") -> int:

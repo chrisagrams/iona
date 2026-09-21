@@ -23,6 +23,7 @@ from transformers import (HfArgumentParser, Trainer, TrainerCallback, TrainingAr
                           set_seed)
 
 from msdelta.contrastive import (GroupBatchSampler, MSDeltaForContrastive,
+                                 PairBatchSampler,
                                  gradcache_step,
                                  embedding_size, group_separation_summary,
                                  subset_by_group)
@@ -52,6 +53,28 @@ class ContrastiveModelArguments:
                           "(1.35 either way), so if a random encoder also reaches ~7.8 "
                           "under this loss, pretraining contributes nothing to this "
                           "objective either."},
+    )
+    pair_loss: bool = field(
+        default=False,
+        metadata={"help": "Replace the in-batch softmax with independent per-pair "
+                          "terms: same peptide pulls together, different pushes apart "
+                          "past a margin. Because pairs decompose, the number of "
+                          "peptides a step sees stops being bounded by memory -- "
+                          "gradient accumulation does the work GradCache does for the "
+                          "softmax loss. Requires the pair sampler, switched on by the "
+                          "same flag."},
+    )
+    pair_margin: float = field(
+        default=1.0,
+        metadata={"help": "Different-peptide pairs are pushed to at least this "
+                          "distance and then ignored. Embeddings are unit-norm so "
+                          "distance is in [0,2] and d^2 = 2-2cos; 1.0 asks for cosine "
+                          "<= 0.5."},
+    )
+    pair_positive_weight: float = field(
+        default=1.0,
+        metadata={"help": "Rebalances the two terms when the sampler's positive "
+                          "fraction is not 0.5."},
     )
     layer_mix_norm: bool = field(
         default=True,
@@ -116,6 +139,19 @@ class ContrastiveDataArguments:
     # 512 peaks is 12.9 GB for a batch of 48 and OOMed a 64 GB tile; 6x4 with gradient
     # checkpointing fits. Contrastive wants the largest batch that fits, since every
     # other row in it is a negative.
+    pairs_per_batch: int = field(
+        default=8,
+        metadata={"help": "Pair sampler only: pairs per minibatch. The batch is 2x "
+                          "this many spectra, kept small on purpose -- pair terms are "
+                          "independent, so breadth comes from "
+                          "gradient_accumulation_steps rather than from a batch that "
+                          "has to fit in memory all at once."},
+    )
+    positive_fraction: float = field(
+        default=0.5,
+        metadata={"help": "Pair sampler only: fraction of pairs drawn from the same "
+                          "peptide."},
+    )
     groups_per_batch: int = field(default=6, metadata={"help": "P in the PK sampler"})
     replicates: int = field(default=4, metadata={"help": "K in the PK sampler"})
     gradcache_chunk: int = field(
@@ -182,6 +218,7 @@ class ContrastiveTrainer(Trainer):
 
     def __init__(self, *args, groups=None, groups_per_batch=12, replicates=4,
                  gradcache_chunk=0, encoder_lr_scale=1.0, layer_mix_lr=None,
+                 pair_loss=False, pairs_per_batch=8, positive_fraction=0.5,
                  **kwargs):
         super().__init__(*args, **kwargs)
         self.groups = groups
@@ -190,6 +227,9 @@ class ContrastiveTrainer(Trainer):
         self.gradcache_chunk = gradcache_chunk
         self.encoder_lr_scale = encoder_lr_scale
         self.layer_mix_lr = layer_mix_lr
+        self.pair_loss = pair_loss
+        self.pairs_per_batch = pairs_per_batch
+        self.positive_fraction = positive_fraction
 
     def create_optimizer(self):
         """Encoder and readout in separate groups, so one can move slower than the other.
@@ -253,8 +293,12 @@ class ContrastiveTrainer(Trainer):
 
     def get_train_dataloader(self):
         from torch.utils.data import DataLoader
-        sampler = GroupBatchSampler(self.groups, self.groups_per_batch, self.replicates,
-                                    seed=self.args.seed)
+        if self.pair_loss:
+            sampler = PairBatchSampler(self.groups, self.pairs_per_batch,
+                                       self.positive_fraction, seed=self.args.seed)
+        else:
+            sampler = GroupBatchSampler(self.groups, self.groups_per_batch,
+                                        self.replicates, seed=self.args.seed)
         return DataLoader(self.train_dataset, batch_sampler=sampler,
                           collate_fn=self.data_collator,
                           num_workers=self.args.dataloader_num_workers,
@@ -338,7 +382,10 @@ def main(argv: list[str] | None = None) -> int:
     model = MSDeltaForContrastive(encoder, reference, pooling=model_args.pooling,
                                   temperature=model_args.temperature,
                                   kl_weight=model_args.kl_weight,
-                                  layer_mix_norm=model_args.layer_mix_norm)
+                                  layer_mix_norm=model_args.layer_mix_norm,
+                                  pair_loss=model_args.pair_loss,
+                                  pair_margin=model_args.pair_margin,
+                                  pair_positive_weight=model_args.pair_positive_weight)
     if model_args.encoder_lr_scale == 0:
         # A zero learning rate would still let weight decay and any stateful optimizer
         # move the encoder. Freezing is the thing being asked for, so freeze it.
@@ -408,7 +455,10 @@ def main(argv: list[str] | None = None) -> int:
             gradcache_chunk=data_args.gradcache_chunk,
             encoder_lr_scale=model_args.encoder_lr_scale,
             layer_mix_lr=(model_args.layer_mix_lr
-                          if model_args.pooling == "layer_mix" else None))
+                          if model_args.pooling == "layer_mix" else None),
+            pair_loss=model_args.pair_loss,
+            pairs_per_batch=data_args.pairs_per_batch,
+            positive_fraction=data_args.positive_fraction)
         trainer.add_callback(MemoryProbe(every=50))
         trainer.add_callback(SaveEncoderCallback(model, processor))
         trainer.train()
