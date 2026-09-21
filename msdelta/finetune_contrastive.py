@@ -477,7 +477,11 @@ def main(argv: list[str] | None = None) -> int:
             positive_fraction=data_args.positive_fraction)
         trainer.add_callback(MemoryProbe(every=50))
         trainer.add_callback(SaveEncoderCallback(model, processor))
-        trainer.train()
+        # Pass it explicitly. Trainer.train() defaults resume_from_checkpoint to None
+        # and never falls back to args.resume_from_checkpoint, so the CLI flag parses
+        # cleanly and is then IGNORED -- the run restarts from scratch while looking as
+        # though it resumed. See pbs/aurora-finetune-sweep.pbs RESUME_JOB.
+        trainer.train(resume_from_checkpoint=training_args.resume_from_checkpoint)
 
         # The number this whole exercise exists to move: does the space separate peptides?
         if datasets.get("validation") is not None:

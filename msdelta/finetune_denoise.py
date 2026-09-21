@@ -642,7 +642,11 @@ def main(argv: list[str] | None = None) -> int:
             use_peak_budget_batching=training_args.use_peak_budget_batching,
         )
         trainer.add_callback(MemoryProbe(every=10))
-        trainer.train()
+        # Pass it explicitly. Trainer.train() defaults resume_from_checkpoint to None
+        # and never falls back to args.resume_from_checkpoint, so the CLI flag parses
+        # cleanly and is then IGNORED -- the run restarts from scratch while looking as
+        # though it resumed. See pbs/aurora-finetune-sweep.pbs RESUME_JOB.
+        trainer.train(resume_from_checkpoint=training_args.resume_from_checkpoint)
 
         if training_args.eval_test_split and datasets.get("test") is not None:
             metrics = trainer.evaluate(datasets["test"], metric_key_prefix="test")
