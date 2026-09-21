@@ -119,11 +119,24 @@ def main() -> int:
                              "have finished and named a winner; 200m and 400m can only "
                              "join once theirs do, because the point is to repeat each "
                              "scale's OWN winning configuration.")
+    parser.add_argument("--epochs", default="4",
+                        help="FT13 needs the pretrained winner at 8 epochs: the "
+                             "scratch grid ran 8 and the pretrained one did not, "
+                             "so +0.032 at double budget cannot be attributed to "
+                             "pretraining until the pretrained model has had the "
+                             "same budget. A non-default value writes to its own "
+                             "directory so it cannot overwrite the 4-epoch grid "
+                             "it exists to be compared against.")
     parser.add_argument("--seeds", type=int, default=6,
                         help="repetitions per scale. scales x seeds should be a "
                              "multiple of 12 to fill a node-wave exactly.")
-    global SIZES, SEEDS
     cli = parser.parse_args()
+    global SIZES, SEEDS, EPOCHS, OUT, STAMP, RUN_PREFIX
+    EPOCHS = cli.epochs
+    if EPOCHS != "4":
+        OUT = REPO / "configs" / f"sweep-denoise-seeds-ep{EPOCHS}"
+        STAMP = OUT / ".template"
+        RUN_PREFIX = f"v2_dnseed{EPOCHS}-"
     SIZES = tuple(x.strip() for x in cli.sizes.split(",") if x.strip())
     SEEDS = tuple(str(i + 1) for i in range(cli.seeds))
 
