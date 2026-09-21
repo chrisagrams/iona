@@ -47,6 +47,44 @@ to be ~0.005 on a metric averaged over 1.68M peaks, which is implausible but not
 impossible. FT5 measures it. Until FT5, treat the denoise scaling trend as likely but
 unconfirmed -- which is what it was already labelled.
 
+## WITHDRAWN: "more negatives do not help". The GradCache verdict was wrong three ways
+
+Recorded in the levers table as a failed idea: "more negatives (GradCache, batch 64):
+best 5.70, BELOW the batch-4 best". All five GradCache runs, jobs 8841066 and 8841165:
+
+    gc_ep3 5.70 | gc_ep10 5.35 | gc_ep30 4.37 | gc_ep60 4.34 | gc_ep100 3.35
+
+Three separate errors in reading them:
+
+  WRONG REFERENCE. 5.70 was compared against the batch-4 BEST, 6.94 at the time and
+  later 7.83. Both are single draws from a distribution whose mean is 5.75 with sd 0.75
+  (job 8844111). Against the mean, 5.70 is a dead heat.
+
+  CONFOUNDED. The GradCache config runs temperature 0.2; the batch-4 arm it was compared
+  against runs 0.07. That is not an A/B on batch size, and temperature is not a small
+  axis here -- at lr 5e-4 / KL 10 the two temperatures gave 7.83 and 4.33.
+
+  MATCHED COMPARISON REVERSES IT. Holding lr, KL, temperature and epochs fixed and
+  varying only the batch:
+
+      batch 4,  lr5e4 kl10 t0.2 ......... 4.33
+      batch 64, lr5e4 kl10 t0.2 (gc_ep3)  5.70      +1.37, t = 1.3
+
+  Suggestive that more negatives HELP, which is the opposite of what was recorded.
+  Not significant at t = 1.3, so the honest statement is that the effect of batch size
+  has never been measured well enough to say either way.
+
+The 5.70 -> 3.35 decline across 3 to 100 epochs is FT14, not a property of GradCache:
+with `set_epoch` never called the batches are fixed, so extra epochs replay the same 15
+negative groups instead of sampling new ones. That is overfitting a frozen set of
+contrasts.
+
+WHAT THIS MEANS FOR THE PLAN. GradCache at P=16/K=4 was the obvious next thing to try
+and it was crossed off the list on a misreading. It goes back on, and it should be run
+AFTER FT14 is fixed, since fixed batches are precisely what neutralises extra negatives:
+60 negatives drawn fresh each epoch is a different proposition from the same 60 every
+time.
+
 ## The pretrained encoder learns a real representation, but a NON-LINEAR one that only
 ## becomes useful after post-training
 
