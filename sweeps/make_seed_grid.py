@@ -119,6 +119,13 @@ def main() -> int:
                              "have finished and named a winner; 200m and 400m can only "
                              "join once theirs do, because the point is to repeat each "
                              "scale's OWN winning configuration.")
+    parser.add_argument("--out-name", default=None,
+                        help="override the output directory name. Needed because the "
+                             "directory is derived from --epochs alone, so a second "
+                             "8-epoch grid at different scales would land on top of the "
+                             "first -- and a QUEUED job globs its grid directory at job "
+                             "start, not at submission, so overwriting one silently "
+                             "changes what an already-submitted job will run.")
     parser.add_argument("--epochs", default="4",
                         help="FT13 needs the pretrained winner at 8 epochs: the "
                              "scratch grid ran 8 and the pretrained one did not, "
@@ -133,10 +140,19 @@ def main() -> int:
     cli = parser.parse_args()
     global SIZES, SEEDS, EPOCHS, OUT, STAMP, RUN_PREFIX
     EPOCHS = cli.epochs
-    if EPOCHS != "4":
-        OUT = REPO / "configs" / f"sweep-denoise-seeds-ep{EPOCHS}"
+    if EPOCHS != "4" or cli.out_name:
+        OUT = REPO / "configs" / (cli.out_name
+                                  or f"sweep-denoise-seeds-ep{EPOCHS}")
         STAMP = OUT / ".template"
+        # Keep the default prefix exactly as it was. Deriving it from --out-name
+        # unconditionally rewrote run_name and output_dir in the DEFAULT grid too,
+        # which made its --check report stale against files already on disk -- and
+        # the sweep runner refuses a stale grid, so that would have blocked the
+        # already-queued 8846027 at startup.
         RUN_PREFIX = f"v2_dnseed{EPOCHS}-"
+        if cli.out_name:
+            tail = cli.out_name.rsplit("-", 1)[-1]
+            RUN_PREFIX = f"v2_dnseed{EPOCHS}{tail}-"
     SIZES = tuple(x.strip() for x in cli.sizes.split(",") if x.strip())
     SEEDS = tuple(str(i + 1) for i in range(cli.seeds))
 
