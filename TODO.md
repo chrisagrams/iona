@@ -596,7 +596,7 @@ inference and the measurement costs one 6-arm job.
 - [ ] Report all three cells together; never quote +0.032 alone.
 - [ ] Same question applies at 100m/200m/400m if a scratch ablation is ever run there.
 
-## FT14. The PK sampler never reshuffles — every epoch replays identical batches — **Open, real**
+## FT14. The PK sampler never reshuffles — every epoch replays identical batches — **FIXED**
 
 `GroupBatchSampler.__iter__` builds its RNG as `default_rng(self.seed + self.epoch)`,
 and `set_epoch` is **never called anywhere in the codebase**. HuggingFace's Trainer calls
@@ -618,13 +618,30 @@ That plausibly explains the earlier finding that MORE epochs made the ratio WORS
 (6.94 at 3 epochs, 4.82 at 10, 4.46 at 50) -- more passes over an identical batch
 sequence is overfitting to a fixed set of contrasts, not additional learning.
 
-- [ ] Call `set_epoch` from `ContrastiveTrainer`, or seed from a counter incremented in
-      `__iter__`. The second is more robust since it cannot be forgotten by a caller.
-- [ ] Re-run the epochs sweep afterwards: the "more epochs hurts" result is suspect and
-      may reverse.
-- [ ] Every contrastive number on record was produced under this, so none of them are
-      wrong as measurements -- they just measure a weaker training procedure than
-      intended.
+- [x] **Fixed.** `__iter__` advances `self.epoch` itself after yielding its last batch,
+      so reshuffling cannot be forgotten by a caller. `set_epoch` still works and
+      overrides it. The RNG is also seeded as the PAIR `[seed, epoch]` rather than the
+      SUM: under `seed + epoch`, seed 0 epoch 1 drew exactly the batches of seed 1
+      epoch 0, so a seed sweep would have been a relabelling of one trajectory. Both
+      failure modes now have tests that were confirmed to FAIL on the old code
+      (`test_reshuffles_without_anyone_calling_set_epoch`,
+      `test_more_epochs_reach_more_of_the_corpus`, `test_seed_and_epoch_do_not_collide`).
+      `PairBatchSampler` was written self-advancing from the start and needed no change.
+
+      MEASURED COST ON THE REAL CORPUS (898 train groups x ~13 replicates = 11,674 rows,
+      at the grid's P=2 K=2 x 3 epochs):
+
+        before ... 1,796 rows = 15.4%, and the SAME 1,796 all three epochs
+        after .... 4,651 rows = 39.8%
+        coverage by epoch, fixed: 15% 29% 40% 49% 57% 64% 69% 74% 78% 82% 85% 87%
+
+- [ ] Re-run the epochs sweep: the "more epochs hurts" result (6.94 at 3, 4.82 at 10,
+      4.46 at 50) is exactly what replaying one fixed batch sequence would produce, and
+      may reverse now that epoch 10 sees 82% of the corpus instead of 15%.
+- [ ] Re-measure the contrastive SCALE curve (5.86 / 7.00 / 7.02 / 6.74). Not wrong as a
+      measurement, but taken in a 15%-of-data regime; the fix changes the training
+      distribution enough that the curve has to be re-taken before it means anything
+      about scale.
 
 ## FT15. Contrastive results are not reproducible run to run — **Open, measuring**
 
@@ -632,7 +649,8 @@ Byte-identical config and seed, two runs, 7.83 (job 8842232) and 6.01 (job 88438
 
 SOURCES RULED OUT by inspection:
   train/validation split .. seeded explicitly via `seed=training_args.seed`
-  PK sampler .............. deterministic, and fixed across epochs (FT14)
+  PK sampler .............. deterministic; was also fixed across epochs until FT14 was
+                            repaired, so it was never the source of run-to-run spread
   separation metric ....... `list(dataset)[:max_rows]`, a prefix, not a sample
 
 REMAINING SOURCE: the training compute itself. Nothing in this repo sets
