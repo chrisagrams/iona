@@ -107,6 +107,11 @@ declare -A GRID_CHECK=(
     [configs/sweep-seedvar]="sweeps/make_seedvar_grid.py --check"
     [configs/sweep-contrastive-scale]="sweeps/make_contrastive_scale_grid.py --check"
     [configs/sweep-pairloss]="sweeps/make_pairloss_grid.py --check"
+    # A hand-picked subset of sweep-contrastive-scale arms, re-run with
+    # MSDELTA_SDPA_MATH=1 to test whether the fused SDPA kernel is the
+    # source of the 0xff00.... scratch fault. Copied, not generated, so it
+    # is verified against the grid it came from rather than a generator.
+    [configs/sweep-conscale-retry]="sweeps/verify_subset.py configs/sweep-conscale-retry configs/sweep-contrastive-scale"
     [configs/sweep-contrastive]="sweeps/make_contrastive_grid.py --check"
     [configs/sweep-contrastive-random]="sweeps/make_contrastive_grid.py --random --check"
     [configs/sweep-random-budget]="sweeps/make_random_budget_grid.py --check"
