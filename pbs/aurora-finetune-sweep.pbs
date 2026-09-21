@@ -125,6 +125,8 @@ declare -A GRID_CHECK=(
     # QUEUED job globs its grid at job start, so extending that directory would
     # have changed what 8846027 runs after it was already submitted.
     [configs/sweep-denoise-seeds-ep8-mid]="sweeps/make_seed_grid.py --sizes 100m,200m --seeds 6 --epochs 8 --out-name sweep-denoise-seeds-ep8-mid --check"
+    # The pretraining ablation at 100m/200m/400m, plus 50m at 16 epochs.
+    [configs/sweep-denoise-scratch-scale]="sweeps/make_scratch_scale_grid.py --check"
 )
 if [[ -z ${SKIP_GRID_CHECK:-} ]]; then
     check=${GRID_CHECK[${SWEEP_ROOT%/}]:-}
