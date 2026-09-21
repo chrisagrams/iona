@@ -1,0 +1,1 @@
+Baseline per-peak denoiser. Fine-tunes the 50m pretrained encoder to label each peak noise or signal, one logit per peak under BCE. The reference point every other denoise run is compared against, and the template the sweep grid is generated from. Single tile: twelve-way DDP takes a GPU page fault (TODO.md FT7).
