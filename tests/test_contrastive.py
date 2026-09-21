@@ -475,3 +475,97 @@ class TestSaveEncoderCallback:
     def test_tolerates_a_model_with_no_save_pretrained(self, tmp_path):
         from msdelta.finetune_contrastive import SaveEncoderCallback
         self._fire(SaveEncoderCallback(torch.nn.Linear(2, 2)), tmp_path)  # must not raise
+
+
+class TestPairSamplerAndLoss:
+    """The pair formulation: independent per-pair terms instead of in-batch softmax.
+
+    Pairs decompose, so gradient accumulation gives breadth that PK sampling could only
+    get from a batch that fits in memory all at once.
+    """
+
+    def _groups(self, n_groups=40, per_group=5):
+        return np.repeat(np.arange(n_groups), per_group)
+
+    def test_batches_are_pairs_with_the_requested_positive_fraction(self):
+        from msdelta.contrastive import PairBatchSampler
+        groups = self._groups()
+        s = PairBatchSampler(groups, pairs_per_batch=8, positive_fraction=0.5, seed=0)
+        batch = next(iter(s))
+        assert len(batch) == 16, "a batch is 2 rows per pair"
+        same = [groups[batch[2 * i]] == groups[batch[2 * i + 1]] for i in range(8)]
+        assert sum(same) == 4, f"expected 4 positive pairs, got {sum(same)}"
+
+    def test_positive_fraction_is_actually_controllable(self):
+        """The thing PK sampling could not do: set the in/out balance directly."""
+        from msdelta.contrastive import PairBatchSampler
+        groups = self._groups()
+        for fraction, expected in ((0.25, 2), (0.5, 4), (0.75, 6)):
+            s = PairBatchSampler(groups, pairs_per_batch=8,
+                                 positive_fraction=fraction, seed=0)
+            batch = next(iter(s))
+            same = sum(groups[batch[2 * i]] == groups[batch[2 * i + 1]]
+                       for i in range(8))
+            assert same == expected, f"{fraction} gave {same}, expected {expected}"
+
+    def test_positive_pairs_are_two_DISTINCT_rows(self):
+        """Pairing a spectrum with itself makes the positive term identically zero."""
+        from msdelta.contrastive import PairBatchSampler
+        groups = self._groups()
+        s = PairBatchSampler(groups, pairs_per_batch=8, positive_fraction=0.9, seed=0)
+        for batch in list(s)[:20]:
+            for i in range(0, len(batch), 2):
+                if groups[batch[i]] == groups[batch[i + 1]]:
+                    assert batch[i] != batch[i + 1]
+
+    def test_it_reshuffles_without_anyone_calling_set_epoch(self):
+        """(regression) FT14: GroupBatchSampler replayed identical batches all run."""
+        from msdelta.contrastive import PairBatchSampler
+        s = PairBatchSampler(self._groups(), pairs_per_batch=4, seed=0)
+        assert list(s) != list(s), "consecutive epochs must differ"
+
+    def test_degenerate_balances_are_refused(self):
+        from msdelta.contrastive import PairBatchSampler
+        for bad in (0.0, 1.0):
+            with pytest.raises(ValueError, match="positive_fraction"):
+                PairBatchSampler(self._groups(), positive_fraction=bad)
+
+    def test_loss_pulls_positives_together_and_pushes_negatives_apart(self):
+        from msdelta.contrastive import pair_contrastive_loss
+        groups = torch.tensor([0, 0, 1, 2])          # pair0 same, pair1 different
+        far = torch.tensor([[1.0, 0.0], [-1.0, 0.0],   # same peptide, far apart: bad
+                            [1.0, 0.0], [0.99, 0.14]])  # different, close: bad
+        near = torch.tensor([[1.0, 0.0], [1.0, 0.0],   # same, together: good
+                             [1.0, 0.0], [-1.0, 0.0]])  # different, apart: good
+        assert pair_contrastive_loss(far, groups)["loss"] > \
+               pair_contrastive_loss(near, groups)["loss"]
+
+    def test_margin_stops_pushing_once_far_enough(self):
+        """Past the margin a negative contributes nothing -- the defining property."""
+        from msdelta.contrastive import pair_contrastive_loss
+        groups = torch.tensor([0, 1])
+        at = torch.tensor([[1.0, 0.0], [0.0, 1.0]])            # distance sqrt(2) > 1.0
+        got = pair_contrastive_loss(at, groups, margin=1.0)
+        assert float(got["loss"]) == pytest.approx(0.0)
+        assert float(pair_contrastive_loss(at, groups, margin=1.9)["loss"]) > 0
+
+    def test_reports_the_two_terms_separately(self):
+        """A run where positives collapse and negatives idle looks fine in the total."""
+        from msdelta.contrastive import pair_contrastive_loss
+        got = pair_contrastive_loss(torch.randn(8, 4),
+                                    torch.tensor([0, 0, 1, 2, 3, 3, 4, 5]))
+        for key in ("pair_positive", "pair_negative", "pair_positive_fraction",
+                    "pair_distance_same", "pair_distance_diff"):
+            assert key in got
+        assert float(got["pair_positive_fraction"]) == pytest.approx(0.5)
+
+    def test_odd_row_count_is_refused_not_truncated(self):
+        from msdelta.contrastive import pair_contrastive_loss
+        with pytest.raises(ValueError, match="even number"):
+            pair_contrastive_loss(torch.randn(5, 4), torch.zeros(5, dtype=torch.long))
+
+    def test_gradient_flows_to_both_members_of_a_pair(self):
+        from msdelta.contrastive import pair_contrastive_loss
+        z = torch.randn(4, 8, requires_grad=True)
+        pair_contrastive_loss(z, torch.tensor([0, 0, 1, 2]))["loss"].backward()
+        assert z.grad is not None and bool((z.grad != 0).any())
