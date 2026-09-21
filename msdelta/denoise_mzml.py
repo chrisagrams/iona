@@ -38,6 +38,18 @@ class DenoisingSummary:
     noise_peaks: int = 0
     emptied_spectra: int = 0
 
+    def record(self, peak_count: int, keep: np.ndarray | None) -> None:
+        """Accumulate counts for one copied or denoised spectrum."""
+        self.spectra += 1
+        if keep is None:
+            return
+        kept = int(keep.sum())
+        self.denoised_spectra += 1
+        self.peaks_in += peak_count
+        self.peaks_out += kept
+        self.noise_peaks += peak_count - kept
+        self.emptied_spectra += int(peak_count > 0 and kept == 0)
+
 
 class SpectrumDenoiser:
     """Score peaks as noise with ``MSDeltaForDenoising`` and build keep masks."""
@@ -132,17 +144,8 @@ def denoise_mzml(
             ]
             masks = dict(zip((s.index for s in targets), denoiser.keep_masks(targets)))
             for spectrum in chunk:
-                summary.spectra += 1
                 keep = masks.get(spectrum.index)
-                if keep is None:
-                    rewriter.write(spectrum)
-                    continue
-                n_in, n_out = spectrum.peak_count, int(keep.sum())
-                summary.denoised_spectra += 1
-                summary.peaks_in += n_in
-                summary.peaks_out += n_out
-                summary.noise_peaks += n_in - n_out
-                summary.emptied_spectra += int(n_in > 0 and n_out == 0)
+                summary.record(spectrum.peak_count, keep)
                 rewriter.write(spectrum, keep)
     return summary
 
