@@ -482,7 +482,7 @@ UNLOCATED, in either direction.
       positive pair is DRAWN and lets the loss weighting follow. That is the intended
       question -- sampling balance -- but the two are not separated by this grid.
 
-## FT13. The pretrained-vs-scratch denoise comparison has an unmeasured cell — **Open, cheap**
+## FT13. The pretrained-vs-scratch denoise comparison has an unmeasured cell — **SUBMITTED (job 8846027)**
 
 The two grids did not sweep the same epoch counts, so there are two valid comparisons
 and one gap:
@@ -501,12 +501,18 @@ in a predictable direction. What is missing is pretrained at 8 epochs. Without i
 +0.032 cannot be called pretraining's advantage at equal wall-clock, because the
 pretrained model might gain from the extra epochs too.
 
-Probably it would not gain much -- ep2 to ep4 bought it only +0.005 against the random
-encoder's +0.015 from ep4 to ep8, which is what saturation looks like. But that is an
-inference and the measurement costs one 6-arm job.
+I guessed here that it would not gain much -- ep2 to ep4 bought the pretrained model
+only +0.005 against the random encoder's +0.015 from ep4 to ep8, which is what
+saturation looks like. TREAT THAT GUESS AS UNSAFE. The 400m probe (job 8845252) has a
+pretrained encoder still gaining at 4 epochs, +0.0021 from ep2 to ep4 against a seed
+noise of 0.0005, so "extra epochs do nothing once pretrained" is not a safe default at
+any scale. The measurement costs one 6-arm job, which is why it is being made rather
+than argued.
 
-- [ ] Run the pretrained 50m winner at 8 epochs, ideally with seeds so it can be read
-      against FT5's spread rather than as a single number.
+- [x] Run the pretrained 50m winner at 8 epochs with seeds, so it reads against FT5's
+      spread rather than as a single number. SUBMITTED as 8846027: six seeds, arms
+      differing from the running 4-epoch grid (8845262) by exactly --num_train_epochs.
+      Validated on debug as 8846010.
 - [ ] Report all three cells together; never quote +0.032 alone.
 - [ ] Same question applies at 100m/200m/400m if a scratch ablation is ever run there.
 
