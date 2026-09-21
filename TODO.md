@@ -702,9 +702,19 @@ give memory back and kept 12 arms per node. It is NOT SUPPORTED on this XPU buil
 it fails immediately with "RuntimeError: could not create a memory". Tested, job on
 node x4407c2s0b0n0.
 
-- [ ] Check whether FT9 (the 12-tile alignment fault, parked for ALCF) is the same
-      thing. It has the same 0xff00.... signature and also ran 12 tiles on 6 cards. If
-      so, FT9 closes too and does not need ALCF.
+- [x] FT9 is NOT the same bug -- checked, and the addresses rule it out:
+
+        FT9         0xff00ffffffe00000  access 0 (Read)   top of space, tile field
+                                                          varies 00/02/04 with the tile
+        contrastive 0xff0000023a2ae000  access 1 (Write)  low in range, tile field
+                                                          always 00
+
+      FT9 is a READ at the very top of each tile's virtual address space, which is the
+      scratch/private surface and exactly what it was originally diagnosed as. This one
+      is a WRITE to a low address. Different access, different region, different
+      structure. FT9 stays parked for ALCF; TILE_STRIDE does not touch it. The shared
+      0xff00 prefix is just the region tag and is not evidence of a common cause --
+      nearly closing FT9 on that similarity would have been wrong.
 - [ ] The 50m pair-loss validation faulted while running single-tile with
       XPUS_PER_HOST=1, which this does not explain. Either a second cause or the tile
       assignment was not what the script intended. Check before trusting pair-loss runs.
