@@ -20,8 +20,8 @@ SHOULD hurt. With the sampler fixed, coverage grows:
 so epochs and data are no longer independent knobs, and the old answer cannot carry over.
 
 DESIGN. lr 2e-5 / temperature 0.07 / KL 10 -- the stable configuration used by
-`sweep-contrastive-scale`, not the 5e-4 that collapsed. Four seeds per epoch count puts
-the standard error of an epoch-to-epoch difference at 0.75*sqrt(2/4) = 0.53, against an
+`sweep-contrastive-scale`, not the 5e-4 that collapsed. Six seeds per epoch count put
+the standard error of an epoch-to-epoch difference at 0.75*sqrt(2/6) = 0.43, against an
 old claimed effect of 2.5.
 
 THE 3-EPOCH ARM IS A CONTROL, NOT A DATA POINT. It is the scale grid's 50m arm with one
@@ -50,7 +50,7 @@ FROZEN = "/flare/UIC-HPC/khuss/msdelta/pretrained"
 CHECKPOINT = f"{FROZEN}/msdelta-50m-production-01-checkpoint-133233"
 
 LEARNING_RATE, KL_WEIGHT, TEMPERATURE = "2e-5", "10", "0.07"
-SEEDS = ("0", "1", "2", "3")
+SEEDS = ("0", "1", "2", "3", "4", "5")
 EPOCHS = ("3", "10", "30", "100")
 # Measured: 268 s for 3 epochs at 50m (job 8845057), so ~89 s/epoch.
 SECONDS_PER_EPOCH = 89
@@ -98,8 +98,8 @@ def description(epochs: str, seed: str) -> str:
             f"draws from a wide distribution, not a measurement. It also predates the "
             f"FT14 fix, under which every epoch replayed the identical 15.4% of the "
             f"corpus; epochs now buy data (3 epochs sees 40%, 10 sees 82%), so the old "
-            f"answer cannot carry over. Four seeds put the standard error of an "
-            f"epoch-to-epoch difference at 0.53.\n{control}")
+            f"answer cannot carry over. Six seeds put the standard error of an "
+            f"epoch-to-epoch difference at 0.43.\n{control}")
 
 
 def main() -> int:
