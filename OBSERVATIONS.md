@@ -354,7 +354,11 @@ guess, and both sit within 0.2 of a random network.
 That closes the loop on the frozen arm: it is a real measurement, it is just a small
 one, and it points the same way as everything else on this axis.
 
-## Contrastive scaling saturates at 100m -- earlier than denoise, and with error bars
+## Contrastive scaling saturates at 100m -- MEASURED UNDER FT14, needs re-taking
+<!-- Every arm trained on 15.4% of the corpus, the same 15.4% each epoch, because
+     the PK sampler never reshuffled. The shape probably survives since the handicap
+     applied at every scale, but the levels are depressed: the 50m cell rises from
+     5.86 to 6.59 once the sampler is fixed. -->
 
 Six seeds per scale, so these are means rather than draws:
 
@@ -386,7 +390,9 @@ out of attention, so the computation should be identical and only memory differs
 that is an argument, not a measurement. Re-running 50m and 100m under fixed width would
 settle it, and is cheap.
 
-## Denoise scaling saturates at 200m; 400m buys nothing
+## SUPERSEDED: "denoise scaling saturates at 200m; 400m buys nothing"
+<!-- 400m is not a plateau, it is a regression. See "The denoise scale curve turns
+     over at 400m (FT5, complete)" below for the six-seed measurement. -->
 
 All four grids are complete, 12 arms each except the 216-arm 50m:
 
@@ -442,199 +448,10 @@ for ranking them, and the plateau claim itself rests on single runs. After what 
 contrastive metric turned out to hide -- sd 0.75, and a headline figure 2.8 sd above its
 own mean -- assuming denoise is quieter without measuring it is exactly the mistake to
 not repeat.
-
-## The complete readout x encoder x init factorial: only ONE cell works
-
-Every combination of readout, encoder treatment and initialisation has now been run.
-Separation ratio, random-init floor 1.35:
-
-| readout | encoder | pretrained | random |
-| --- | --- | --- | --- |
-| final layer | frozen | 1.35 - 1.53 | **1.35** |
-| final layer | 1.0x trains | **7.83** | **1.35** |
-| depth mixture | frozen | 1.49 | **1.35** |
-| depth mixture | 0.3x | 2.18 | **1.35** |
-| depth mixture | 1.0x trains | 4.14 | **1.35** |
-
-Every random cell is 1.35. Not approximately -- exactly the floor, whatever the readout
-and whatever the encoder learning rate. Training the encoder does not help a random one,
-and neither does a trained mixture over its depths.
-
-On the pretrained side only ONE cell is interesting, and it is the plain one: final
-layer with the encoder training, 7.83. Every elaboration of the readout makes it worse.
-
-So both conditions are necessary and neither is sufficient:
-
-  pretrained weights WITHOUT encoder training ...... 1.35 to 1.53, near the floor
-  encoder training WITHOUT pretrained weights ...... 1.35, exactly the floor
-  both together .................................... 7.83
-
-That is the cleanest statement of the non-linearity finding. Pretraining deposits
-structure that no readout can extract and that training cannot create from scratch --
-it can only be unlocked, by fine-tuning the weights that hold it.
-
-## Pretraining is worth more than 10x the fine-tuning budget, and probably far more
-
-The value of pretraining is measured in extra training saved, not in a ceiling a random
-encoder could never reach. Job 8843262 put numbers on it by varying only the budget on a
-random encoder, at the best pretrained arm's hyperparameters:
-
-| budget | steps | random encoder | pretrained |
-| --- | --- | --- | --- |
-| 3 epochs | 1,347 | **1.35** (the floor) | **7.83** |
-| 10 epochs | 4,490 | 2.10 | -- |
-| 30 epochs | 13,470 | **2.73** | -- |
-
-A random encoder DOES learn. At 10x the budget it reaches 2.73, well clear of the 1.35
-floor. So the earlier statement that "the contrastive loss achieves literally nothing on
-a random encoder" was a claim about 1,347 steps and not about random encoders, and it
-was over-claimed on a single budget point.
-
-What the curve actually says. The ratio climbs roughly linearly in log(steps) at about
-1.38 per decade, and the increments are already shrinking (+1.43 then +1.32 per decade).
-Pretrained reaches 7.83 at 1,347 steps; random is at 2.73 after ten times that. So
-pretraining is worth MORE THAN 10x the fine-tuning budget, which is the number this
-experiment establishes.
-
-A naive log-linear extrapolation says random would need ~7e7 steps -- around 50,000x --
-to reach 7.83. DO NOT USE THAT NUMBER. Log-linear scaling has no reason to hold four
-decades past the data, and the corpus has only 898 training groups, so the curve will
-saturate somewhere well before then. The honest statement is the measured one: >10x, and
-the gap is not closing fast enough for a 10x budget to matter.
-
-The denoise side tells the same story with a much smaller magnitude, which is the
-informative contrast -- but it has to be reported at MATCHED budget, because the two
-grids did not sweep the same epoch counts. Full breakdown, best arm at each setting:
-
-| epochs | pretrained 50m | scratch 50m |
-| --- | --- | --- |
-| 2 | 0.9272 (108 arms) | not run |
-| 4 | **0.9320** (108 arms) | 0.8856 (6 arms) |
-| 8 | **not run** | **0.9001** (6 arms) |
-
-Two different comparisons, and both belong in any report:
-
-  MATCHED at 4 epochs ......... 0.9320 vs 0.8856, pretraining worth **+0.046**
-  scratch given DOUBLE budget . 0.9320 vs 0.9001, pretraining worth **+0.032**
-
-Quoting only the second understates pretraining, because it hands the random encoder
-twice the training. Quoting only the first ignores that the random encoder is still
-improving at the point its grid stops -- all five of its top arms are 8 epochs, and ep4
-to ep8 buys it +0.015 while ep2 to ep4 buys the pretrained model only +0.005.
-
-THE MISSING CELL is pretrained at 8 epochs, which nothing has run. Without it we cannot
-say whether the +0.032 figure is pretraining's true advantage at equal wall-clock or
-whether the pretrained model would also gain from the extra epochs and restore the gap.
-Given it gained only +0.005 going from 2 to 4 epochs it is probably close to saturated,
-so +0.032 is likely near the honest number at double budget -- but that is an inference,
-not a measurement, and the cell is cheap to fill.
-
-## KL regularisation is not needed in general; it prevents collapse at high learning rates
-
-An earlier note of mine said "the KL term is doing real work", which was too broad. What
-the corrected contrastive grid actually shows:
-
-| learning rate | KL 0 | KL 10 |
-| --- | --- | --- |
-| 2e-5 | **7.71** | 6.69 |
-| 1e-4 | 6.41 | 7.14 |
-| 5e-4 | **1.35** (collapsed) | **7.83** (best) |
-
-At 2e-5 the best arm has NO KL at all. At 5e-4, KL 0 collapses to the floor while KL 10
-gives the best result in the grid. So KL is a stabiliser that buys usable behaviour at
-learning rates that would otherwise diverge, not a term the objective needs. If you run
-at a low learning rate you can drop it.
-
----
-
-## `final/` is a moving target, and reading one as a fixed checkpoint has cost us twice
-
-The published `final/` directory of a pretraining run is a periodically refreshed export
-of a run still in progress. It is not the end of training and it changes under you. The
-50m `final/` was checkpoint-133233 against a last checkpoint of 180000.
-
-This produced a wrong published conclusion -- "scale hurts the frozen embedding" --
-which was really two models read at ~135k steps compared against one at ~193k. Withdrawn
-after a matched-step probe showed no effect at all.
-
-Everything now points at frozen copies under `/flare/UIC-HPC/khuss/msdelta/pretrained/`,
-named by step number, with `results/checkpoint_provenance.txt` recording which is which.
-
----
-
-## Reading a smoke-run log as a real run cost three wrong conclusions
-
-Recorded because the failure mode is subtle and will recur. Job 8840665 was a contrastive
-smoke run with `max_samples` applied; its log says `train_groups=60`. The real corpus has
-**898 training groups**, so a 3-epoch run is **1,347 optimizer steps**, not the 90 that
-60 groups implies. Three things were derived from the wrong number:
-
-  FT10, "warmup_steps 100 exceeds the whole run" -- false. 100 of 1,347 is 7.4%, normal.
-  `layer_mix_lr 5e-2`, sized for 90 steps, overshoots ~15x at 1,347. It is why the
-    mixture collapsed onto one layer immediately instead of learning a blend.
-  The random-init caveat, stated as "only 90 steps so random had no chance" -- it had
-    1,347 and still did not move.
-
-LESSON: a run's own log reports the corpus it actually loaded. Check that number against
-the dataset before deriving anything from it, and never carry a figure across jobs.
-
----
-
-## Pooled and within-spectrum AUROC agree on denoise; the headline numbers hold
-
-Job 8842917 re-scored the finished winners with AUROC computed inside each spectrum and
-averaged, alongside the pooled figure. Both from the same evaluation, so they are
-directly comparable:
-
-| winner | pooled | per-spectrum | sd | p10 | unscorable |
-| --- | --- | --- | --- | --- | --- |
-| 50m lr2e4_es05_ep4_h512_b12 | 0.9213 | **0.9269** | 0.067 | 0.856 | 17 of 8584 |
-| 100m lr2e4_es05_b12 | 0.9331 | **0.9377** | 0.070 | 0.878 | 17 of 8584 |
-
-Per-spectrum is slightly HIGHER than pooled, by 0.006 in both cases -- so pooling was
-mildly deflating the number, not inflating it. The feared mechanism, a per-spectrum
-offset propping up the pooled figure, is not operating. The ordering is preserved too:
-100m beats 50m by the same ~0.011 on either metric.
-
-The distribution is tight rather than a hidden split. sd around 0.07, and the 10th
-percentile still above 0.85, so there is no substantial subset of spectra the model
-fails on while the average looks fine. Only 17 spectra of 8,584 are unscorable for
-being single-class.
-
-So the denoise result stands on the axis the model is actually used on. Worth having
-checked -- the direction was not predictable, see TODO FT12 -- but the answer is that
-nothing was wrong.
-
-NOTE ON THE ABSOLUTE NUMBERS: these are FINAL-weights evaluations (0.9213, 0.9331)
-against the grids' best-validation figures (0.9320, 0.9403). The ~0.008-0.011 gap is
-best-vs-final selection, measured earlier at ~0.006, and is not a discrepancy. The
-pooled-vs-per-spectrum comparison above is unaffected because both come from the same
-evaluation pass.
-
----
-
-## Training the depth mixture beats a uniform average, and loses to picking one layer
-
-The baseline the frozen layer-mix arm was missing, measured training-free at the same
-checkpoint the arm used (job 8842806):
-
-| readout on the frozen 50m | ratio |
-| --- | --- |
-| uniform mixture over all 11 depths, UNTRAINED | 1.43 |
-| the same mixture after contrastive training | 1.49 |
-| block 8 alone, picked by hand off the layer probe | **1.53** |
-| mean pooling of the output layer | 1.43 |
-| random-init floor | 1.35 |
-
-So training those twelve weights did achieve something, +0.06 over the uniform average,
-which the earlier report could not establish either way. And it still loses to reading
-one layer chosen by eye. A trained linear reweighting of depths is worse than a good
-guess, and both sit within 0.2 of a random network.
-
-That closes the loop on the frozen arm: it is a real measurement, it is just a small
-one, and it points the same way as everything else on this axis.
-
-## Denoise improves with scale, but the increments are shrinking faster than we can resolve
+## SUPERSEDED: "increments shrinking faster than we can resolve"
+<!-- They are resolvable. Seed noise at a fixed configuration is sd ~0.0005 and the
+     scale steps run t=30-53. The "cannot resolve" judgement used each grid's
+     internal arm spread as the error bar, which overstates noise. -->
 
 | scale | best test AUROC | best F1 | gain over previous | top-cluster spread |
 | --- | --- | --- | --- | --- |
@@ -748,3 +565,75 @@ probe arms at 400m -- is what separates them.
 WHAT WOULD OVERTURN IT: 400m at 8 epochs reaching or passing 200m at 8 epochs, which
 would make the turnover an artefact of under-training the larger model rather than a
 property of scale. That is a live possibility, not a hedge.
+
+## Denoise has two variances and they differ by 2x; use the right one
+
+Measured separately rather than assumed:
+
+    fixed-seed   400m, 4 byte-identical configs INCLUDING --seed   sd 0.00022
+                 0.9434 0.9435 0.9436 0.9439 (job 8845252 repeats)
+                 XPU reduction nondeterminism alone -- nothing else varies.
+
+    across-seed  each scale, 6 seeds                               sd ~0.00050
+                 50m 0.00055, 100m 0.00029, 200m 0.00025, 400m 0.00045
+                 adds head initialisation, data order and dropout.
+
+Use across-seed for anything compared across configurations, which is almost
+everything. Fixed-seed is only the right bar for "I re-ran the identical thing".
+
+FOR SCALE: denoise is ~0.06% relative, contrastive is ~13% (sd 0.75 on a mean of
+5.75). The two lines need completely different sample sizes, and intuitions carried
+from one to the other will be wrong by a factor of 200. Most of the "within noise"
+judgements this project got wrong on denoise came from importing contrastive caution.
+
+WHAT WOULD OVERTURN IT: a scale whose six-seed sd lands far outside 0.0002-0.0006.
+
+## Fixing the sampler (FT14) raised contrastive separation by ~13%
+
+The PK sampler never advanced its epoch counter, so every epoch replayed identical
+batches and one run only ever saw 15.4% of the corpus. With it fixed, three epochs
+reach 39.8%. The same configuration, six seeds either side (the 50m cell of the scale
+grid, against job 8845871 ep003):
+
+    before fix, 15.4% of data    5.86 +/- 0.63
+    after  fix, 39.8% of data    6.59 +/- 0.43
+    difference +0.73    Welch t=2.37  df=8.8  p=0.043
+
+STATED AT THE STRENGTH IT HAS: p=0.043 is suggestive, not settled, and it is one
+grid. It is a different evidentiary regime from the denoise results in this file,
+which run t=30-53. What corroborates it is the variance: sd falls 0.63 -> 0.43, which
+is what more distinct spectra per run should do and is not something a lucky draw
+produces.
+
+CONSEQUENCE: every contrastive number in this project was measured under the
+handicap. The handicap applied at every scale, so curve SHAPES probably survive, but
+levels are depressed and no contrastive figure should be quoted as final until
+re-taken.
+
+WHAT WOULD OVERTURN IT: a repeat where the two distributions overlap, which at
+p=0.043 is perfectly possible.
+
+## "More contrastive epochs hurts" does not replicate
+
+The cited record was 6.94 / 4.82 / 4.46 at 3 / 10 / 50 epochs -- an apparently clean
+monotone decline that shaped how this project budgeted contrastive training. Six seeds
+per point, at the stable lr 2e-5 and with the sampler fixed (job 8845871):
+
+    epochs   mean   sd     old single run
+    3        6.60   0.43   6.94
+    10       6.65   0.29   4.82
+    3 -> 10  +0.06  se 0.21  t=+0.27  p=0.79
+
+Flat. The old 3 -> 10 step of -2.12 does not reproduce, and the old ep10 value of 4.82
+sits about 6 sd below the new ep10 distribution -- a low draw, not a trend.
+
+TWO CAUSES COMPOUNDED, and either alone would have been enough. The old points were
+n=1 at lr 5e-4, the one rate whose other arms span 1.35 (total collapse) to 7.83. And
+they predate FT14, so "more epochs" meant more passes over one frozen 15.4% slice,
+which is precisely the setup in which more epochs SHOULD hurt.
+
+Note the spread tightens with epochs, 0.43 -> 0.29, consistent with coverage: 3 epochs
+now reaches 40% of the corpus and 10 reaches 82%.
+
+WHAT IS NOT YET MEASURED: ep30 and ep100 are still running. "Flat from 3 to 10" and
+"flat forever" are different claims and only the first is established.
