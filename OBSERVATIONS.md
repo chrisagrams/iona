@@ -652,3 +652,51 @@ scored against one shared cached vector, so its errors correlate within a spectr
 
 Neither grid ranking is known to be real yet: the 50m top eight span 0.0023 test AUROC
 and the 100m top five span 0.0012, on one seed each. FT5 is what settles that.
+
+## The same hyperparameter point wins at every scale
+
+All four denoise HP grids independently ranked `lr2e4_es05_b12` first -- lr 2e-4,
+encoder_lr_scale 0.5, effective batch 12:
+
+    50m   0.9320      200m  0.9446
+    100m  0.9403      400m  0.9436
+
+This matters for FT5. The seed grid repeats one shared configuration at all four
+scales, and that would confound scale with "how well 50m's hyperparameters transfer"
+if the scales disagreed about the best point. They do not, so the scale curve is each
+scale at its own optimum.
+
+The weaker half of the claim: within each grid the top three arms span 0.0003-0.0008,
+against a seed noise of ~0.0005. So "lr2e4_es05_b12 is best" is not resolved at any
+single scale -- it is the same point landing at or near the top four times
+independently, which is better evidence than any one grid provides.
+
+WHAT WOULD OVERTURN IT: a scale whose grid picks a materially different point, or a
+repeat of one grid whose top arm changes identity. The second is likely for the runner-
+up ordering and would not disturb the claim; a change in the winner would.
+
+## encoder_lr_scale peaks at 0.5 at 400m -- it is not monotone
+
+    400m, lr 2e-4          es 0.1   es 0.25   es 0.5   es 1.0
+    effective batch 12     0.9259*  0.9384*   0.9436   0.9396
+    (* from the ep2 probe arms, which are 2 epochs rather than 4)
+
+Reading only the probe, which sampled 0.1 / 0.25 / 0.5, the trend is monotone
+increasing and the natural inference is that 1.0 would be better still. It is not:
+0.9396 against 0.9436, worse by 0.0040, which is eight times the seed noise. The curve
+is an inverted U and the probe sampled its rising half.
+
+There is an interaction with batch size, so the peak is not at 0.5 unconditionally:
+
+    effective batch 48     es 0.5 -> 0.9423    es 1.0 -> 0.9434
+
+At the larger batch the ordering reverses. Both differences clear the noise, so this is
+a real interaction rather than two noisy draws.
+
+WHY IT IS RECORDED AS A LESSON AND NOT JUST A NUMBER: the error was extrapolating a
+trend past the last sampled point, and the refuting measurement already existed
+elsewhere in the project. Before extending a grid at its edge, check whether that point
+has been run somewhere else first.
+
+WHAT WOULD OVERTURN IT: es 0.75 at batch 12 landing above 0.9436, which would make the
+peak a plateau rather than a maximum at 0.5.

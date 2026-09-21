@@ -585,6 +585,14 @@ monotone up to its largest sampled value of 0.5 and 1.0 was never tried.
 
 - [ ] If margin 1.0 beats 0.5, extend to {1.0, 1.25, 1.5} before reading anything into
       the margin.
+- [ ] But check the wider grid first. The analogous worry about the 400m probe -- that
+      encoder_lr_scale was monotone up to its largest sampled value and 1.0 was never
+      tried -- was WRONG: the 400m HP grid had already tested es 1.0, and at fixed
+      effective batch 12 it scores 0.9396 against es 0.5's 0.9436, worse by 0.0040 or
+      eight times the seed noise. encoder_lr_scale is an inverted U peaking at 0.5; the
+      probe sampled only its rising half. Extrapolating a trend past the last sampled
+      point is what produced that error, so before extending any grid edge, look for the
+      point already measured somewhere else in the project.
 - [ ] Do not read `positive_fraction` as a loss-balance knob here: `pair_positive_weight`
       is left at its 1.0 default across all twelve arms, so the sweep varies how often a
       positive pair is DRAWN and lets the loss weighting follow. That is the intended
