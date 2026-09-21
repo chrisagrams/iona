@@ -98,6 +98,16 @@ class ContrastiveDataArguments:
     processor_name_or_path: str | None = None
     max_peaks: int = 512
     validation_fraction: float = 0.1
+    split_seed: int = field(
+        default=0,
+        metadata={"help": "Seed for the train/validation split ONLY, deliberately "
+                          "decoupled from training_args.seed. The split used to move "
+                          "with the training seed, which meant a seed sweep scored "
+                          "every arm on DIFFERENT held-out data and no two runs were "
+                          "comparable. Hold this fixed and vary --seed to measure "
+                          "training variance; vary this to measure split variance. "
+                          "They are different questions."},
+    )
     preprocessing_num_workers: int = 24
     max_samples: int = 0
     # P*K IS the batch size -- the PK sampler supplies whole batches, so
@@ -368,7 +378,7 @@ def main(argv: list[str] | None = None) -> int:
                 data_args.dataset_repo, processor,
                 num_proc=data_args.preprocessing_num_workers or None,
                 validation_fraction=data_args.validation_fraction,
-                seed=training_args.seed)
+                seed=data_args.split_seed)
         if data_args.max_samples:
             # By group, not by row: see subset_by_group. A contiguous slice of this
             # corpus yields groups of about two, which makes the PK sampler draw
