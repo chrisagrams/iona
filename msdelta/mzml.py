@@ -2,14 +2,13 @@
 
 Everything outside ``<spectrum>`` elements is copied byte-for-byte, so run,
 instrument, chromatogram, and precursor metadata survive unchanged. Only the
-binary peak arrays and the peak-derived spectrum attributes are rewritten, and
-the ``indexedmzML`` index and checksum are regenerated for the new offsets.
+binary peak arrays and the peak-derived spectrum attributes are rewritten.
+Indexed inputs are written as ordinary mzML files without their index wrapper.
 """
 
 from __future__ import annotations
 
 import base64
-import hashlib
 import re
 import zlib
 from dataclasses import dataclass, field
@@ -39,7 +38,7 @@ _PEAK_STATISTICS = {
 
 _SPECTRUM_START = re.compile(rb"<spectrum[\s>]")
 _SPECTRUM_END = b"</spectrum>"
-_CHROMATOGRAM_START = re.compile(rb"<chromatogram\s[^>]*?\bid=\"([^\"]*)\"")
+_INDEXED_MZML_START = re.compile(rb"<indexedmzML(?:\s[^>]*)?>")
 _INDEX_LIST_START = re.compile(rb"<indexList[\s>]")
 _READ_SIZE = 4 << 20
 
@@ -190,20 +189,6 @@ def filter_spectrum_peaks(spectrum: Spectrum, keep: np.ndarray) -> bytes:
     return etree.tostring(element)
 
 
-class _HashingWriter:
-    """Write bytes to a stream while tracking the offset and SHA-1 digest."""
-
-    def __init__(self, stream: IO[bytes]):
-        self.stream = stream
-        self.offset = 0
-        self.sha1 = hashlib.sha1()
-
-    def write(self, data: bytes) -> None:
-        self.stream.write(data)
-        self.sha1.update(data)
-        self.offset += len(data)
-
-
 class MzMLRewriter:
     """Copy an mzML file while replacing the peak arrays of its spectra.
 
@@ -217,17 +202,14 @@ class MzMLRewriter:
         self.source = Path(source)
         self.destination = Path(destination)
         self._input: IO[bytes] | None = None
-        self._output: _HashingWriter | None = None
-        self._indexed = False
-        self._spectrum_offsets: list[tuple[str, int]] = []
-        self._chromatogram_offsets: list[tuple[str, int]] = []
+        self._output: IO[bytes] | None = None
         self._read_count = 0
         self._written_count = 0
         self._trailer: bytes | None = None
 
     def __enter__(self) -> MzMLRewriter:
         self._input = self.source.open("rb")
-        self._output = _HashingWriter(self.destination.open("wb"))
+        self._output = self.destination.open("wb")
         return self
 
     def __exit__(self, exc_type, exc, tb) -> None:
@@ -238,7 +220,7 @@ class MzMLRewriter:
             if self._input is not None:
                 self._input.close()
             if self._output is not None:
-                self._output.stream.close()
+                self._output.close()
 
     def _read_more(self, buffer: bytes) -> tuple[bytes, bool]:
         chunk = self._input.read(_READ_SIZE)
@@ -268,7 +250,7 @@ class MzMLRewriter:
             end += len(_SPECTRUM_END)
             prefix += buffer[: match.start()]
             if self._read_count == 0:
-                self._indexed = b"<indexedmzML" in prefix
+                prefix = bytearray(_INDEXED_MZML_START.sub(b"", prefix, count=1))
             spectrum = _parse_spectrum(self._read_count, buffer[match.start() : end], bytes(prefix))
             prefix = bytearray()
             buffer = buffer[end:]
@@ -281,51 +263,22 @@ class MzMLRewriter:
         if spectrum.index != self._written_count:
             raise ValueError("spectra must be written in the order they were read")
         self._output.write(spectrum.prefix)
-        self._spectrum_offsets.append((spectrum.id, self._output.offset))
         if keep is None:
             keep = np.ones(spectrum.peak_count, dtype=bool)
         self._output.write(filter_spectrum_peaks(spectrum, keep))
         self._written_count += 1
 
     def close(self) -> None:
-        """Copy the remainder of the file and append a fresh index."""
+        """Copy the remainder of the file, omitting any indexed mzML wrapper."""
         if self._trailer is None:
             raise ValueError("all spectra must be read before closing the rewriter")
         if self._written_count != self._read_count:
             raise ValueError("every spectrum read must be written before closing")
         trailer = self._trailer
         if self._read_count == 0:
-            self._indexed = b"<indexedmzML" in trailer
+            trailer = _INDEXED_MZML_START.sub(b"", trailer, count=1)
         index_start = _INDEX_LIST_START.search(trailer)
         if index_start is not None:
             trailer = trailer[: index_start.start()]
-        base = self._output.offset
-        for match in _CHROMATOGRAM_START.finditer(trailer):
-            self._chromatogram_offsets.append(
-                (match.group(1).decode("utf-8"), base + match.start())
-            )
         self._output.write(trailer)
-        if self._indexed:
-            self._write_index()
         self._trailer = None
-
-    def _write_index(self) -> None:
-        out = self._output
-        index_offset = out.offset
-        indexes = [
-            ("spectrum", self._spectrum_offsets),
-            ("chromatogram", self._chromatogram_offsets),
-        ]
-        indexes = [(name, offsets) for name, offsets in indexes if offsets]
-        out.write(f'<indexList count="{len(indexes)}">\n'.encode())
-        for name, offsets in indexes:
-            out.write(f'  <index name="{name}">\n'.encode())
-            for identifier, offset in offsets:
-                escaped = identifier.replace("&", "&amp;").replace('"', "&quot;")
-                out.write(f'    <offset idRef="{escaped}">{offset}</offset>\n'.encode())
-            out.write(b"  </index>\n")
-        out.write(b"</indexList>\n")
-        out.write(f"<indexListOffset>{index_offset}</indexListOffset>\n".encode())
-        out.write(b"<fileChecksum>")
-        out.write(out.sha1.hexdigest().encode())
-        out.write(b"</fileChecksum>\n</indexedmzML>\n")
