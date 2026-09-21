@@ -127,6 +127,9 @@ declare -A GRID_CHECK=(
     [configs/sweep-denoise-seeds-ep8-mid]="sweeps/make_seed_grid.py --sizes 100m,200m --seeds 6 --epochs 8 --out-name sweep-denoise-seeds-ep8-mid --check"
     # The pretraining ablation at 100m/200m/400m, plus 50m at 16 epochs.
     [configs/sweep-denoise-scratch-scale]="sweeps/make_scratch_scale_grid.py --check"
+    # Does the contrastive HP choice transfer across scale? 50m re-run alongside
+    # 100m because the existing 50m grid predates the FT14 fix and is n=1.
+    [configs/sweep-contrastive-hp]="sweeps/make_contrastive_hp_grid.py --check"
 )
 if [[ -z ${SKIP_GRID_CHECK:-} ]]; then
     check=${GRID_CHECK[${SWEEP_ROOT%/}]:-}
