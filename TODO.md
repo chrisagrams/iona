@@ -595,3 +595,68 @@ inference and the measurement costs one 6-arm job.
       against FT5's spread rather than as a single number.
 - [ ] Report all three cells together; never quote +0.032 alone.
 - [ ] Same question applies at 100m/200m/400m if a scratch ablation is ever run there.
+
+## FT14. The PK sampler never reshuffles — every epoch replays identical batches — **Open, real**
+
+`GroupBatchSampler.__iter__` builds its RNG as `default_rng(self.seed + self.epoch)`,
+and `set_epoch` is **never called anywhere in the codebase**. HuggingFace's Trainer calls
+`set_epoch` on a DistributedSampler, not on a `batch_sampler`, and `get_train_dataloader`
+passes this in as `batch_sampler=`. So `self.epoch` stays 0 for the whole run and every
+epoch draws the identical permutation and the identical `rng.choice` replicates.
+
+Verified directly: three consecutive iterations of the sampler produce byte-identical
+batch lists, and `set_epoch(1)` does change them.
+
+WHY IT MATTERS MORE HERE THAN IT WOULD ELSEWHERE. For ordinary supervised training,
+replaying a fixed order costs some regularisation. For a PK sampler under a contrastive
+loss it costs the objective itself: the point is that each epoch pairs different groups
+against each other, so every group meets new negatives. Fixed batches mean a group only
+ever sees the same 5 negatives, for all 3 epochs. "3 epochs" is closer to 1 epoch of
+unique comparisons repeated three times.
+
+That plausibly explains the earlier finding that MORE epochs made the ratio WORSE
+(6.94 at 3 epochs, 4.82 at 10, 4.46 at 50) -- more passes over an identical batch
+sequence is overfitting to a fixed set of contrasts, not additional learning.
+
+- [ ] Call `set_epoch` from `ContrastiveTrainer`, or seed from a counter incremented in
+      `__iter__`. The second is more robust since it cannot be forgotten by a caller.
+- [ ] Re-run the epochs sweep afterwards: the "more epochs hurts" result is suspect and
+      may reverse.
+- [ ] Every contrastive number on record was produced under this, so none of them are
+      wrong as measurements -- they just measure a weaker training procedure than
+      intended.
+
+## FT15. Contrastive results are not reproducible run to run — **Open, measuring**
+
+Byte-identical config and seed, two runs, 7.83 (job 8842232) and 6.01 (job 8843838).
+
+SOURCES RULED OUT by inspection:
+  train/validation split .. seeded explicitly via `seed=training_args.seed`
+  PK sampler .............. deterministic, and fixed across epochs (FT14)
+  separation metric ....... `list(dataset)[:max_rows]`, a prefix, not a sample
+
+REMAINING SOURCE: the training compute itself. Nothing in this repo sets
+`torch.use_deterministic_algorithms`, and XPU reductions use atomics whose accumulation
+order varies run to run. Small float differences then get amplified by the optimisation.
+
+WHY THE AMPLIFICATION IS LARGE HERE, and this is the part worth acting on. The best arm
+sits at lr 5e-4, which is the least stable setting in the grid:
+
+  lr 2e-5 .. arms span 5.33 - 7.71   spread 2.38
+  lr 1e-4 .. arms span 5.66 - 7.14   spread 1.48
+  lr 5e-4 .. arms span 1.35 - 7.83   spread 6.48   <- includes a total collapse
+
+At 5e-4 one arm reaches the best score in the grid and another collapses to the floor.
+That is the signature of training at the edge of stability, where a float-level
+difference decides which side of the edge a run lands on. So "lr 5e-4 is best" may mean
+"lr 5e-4 has the highest variance and we sampled its upper tail once".
+
+- [ ] Read job 8844111: the same config six times, nothing varied. That gives the error
+      bar and says whether variance scales with the mean.
+- [ ] If variance is lr-dependent as suspected, repeat a 2e-5 arm too and prefer the
+      configuration with the best MEAN, not the best single draw.
+- [ ] Consider `dataloader_num_workers 0` and `torch.use_deterministic_algorithms(True)`
+      for comparison runs specifically; both cost throughput and neither is wanted for
+      production training.
+- [ ] Re-read every contrastive comparison in STATUS.md and OBSERVATIONS.md against the
+      measured bar. Gaps under ~2 are currently unsupported.
