@@ -679,6 +679,20 @@ Peak was 28.4 vs 28.5 GB either way, so the model always fitted in 68.7 GB.
 FIX: `TILE_STRIDE=2` in pbs/aurora-finetune-sweep.pbs uses tiles 0,2,4,6,8,10 -- six
 arms per node, one per card. Verified in job 8845548.
 
+MEASURED LEVERS, same arm alone on a tile for 200 steps:
+
+  max_peaks 512 .. peak 28.50 GB, reserved 38.75 GB -> a pair is 77.5 GB
+  max_peaks 256 .. peak  9.89 GB, reserved 24.82 GB -> a pair is 49.6 GB
+
+So halving the sequence length would also fit two siblings on a card and keep 12 arms
+per node -- but it discards every spectrum over 256 peaks, and 512 already costs 19.4%
+of the alignment pairs. TILE_STRIDE buys the same safety for free. Keep max_peaks 256
+as the fallback only if a job genuinely needs all twelve tiles.
+
+Note also that the grid reserved 67.11 GB where this same config reserves 38.75 GB
+alone: the allocator grows MORE aggressively under contention, so the failure compounds
+rather than merely being tight.
+
 WHEN IT IS NEEDED: only when a pair would exceed 128 GB. Denoise under ZeRO-2 reserves
 7.7 GB/tile, contrastive at 100m reserves 26 GB; both are fine at stride 1. Contrastive
 at 200m+ reserves 67 GB and needs stride 2.
