@@ -121,6 +121,19 @@ class ContrastiveDataArguments:
     processor_name_or_path: str | None = None
     max_peaks: int = 512
     validation_fraction: float = 0.1
+    fixed_width_batches: bool = field(
+        default=True,
+        metadata={"help": "Pad every spectrum batch to max_peaks instead of to the "
+                          "longest spectrum in the batch. DeltaMZBias is O(batch * "
+                          "width^2), so padding to the batch maximum makes memory "
+                          "depend on which spectra the sampler happened to draw: the "
+                          "same 200m config reserved 38.75 GB at seed 0 and 67.14 GB "
+                          "at seed 3, and the wide draws took a GPU page fault at 200m "
+                          "and 400m. Fixed width costs padding on narrow batches and "
+                          "buys a memory figure that can be measured once and trusted. "
+                          "Default on: an unpredictable crash is worse than a "
+                          "predictable cost."},
+    )
     split_seed: int = field(
         default=0,
         metadata={"help": "Seed for the train/validation split ONLY, deliberately "
@@ -446,7 +459,10 @@ def main(argv: list[str] | None = None) -> int:
             print(f"[contrastive] " + " ".join(f"{k}={len(v):,}" for k, v in datasets.items())
                   + f" train_groups={len(set(groups.tolist())):,}", flush=True)
 
-        collator = ContrastiveCollator(max_peptide_length=64)
+        collator = ContrastiveCollator(
+            max_peptide_length=64,
+            pad_spectra_to=(data_args.max_peaks
+                            if data_args.fixed_width_batches else 0))
         trainer = ContrastiveTrainer(
             model=model, args=training_args, train_dataset=datasets["train"],
             eval_dataset=datasets.get("validation"), data_collator=collator,

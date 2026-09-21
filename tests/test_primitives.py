@@ -186,3 +186,41 @@ class TestProbes:
         import msdelta.reranking as r
         monkeypatch.setattr(r, "PROBES", True)
         r.probe_index("stage", "residues", torch.tensor([0, 22]), 23)
+
+
+class TestFixedWidthSpectrumPadding:
+    """(regression) Padding to the batch maximum makes memory data-dependent.
+
+    DeltaMZBias is O(batch * width^2), so a batch holding one wide spectrum costs
+    several times one holding only narrow ones. Which spectra land together is the
+    sampler's choice, so the same model and config reserved 38.75 GB at seed 0 and
+    67.14 GB at seed 3, and at 200m/400m the wide draws took a GPU page fault. Every
+    seed-0 arm survived; every other seed died, at every scale.
+    """
+
+    def _features(self, lengths):
+        return [{"mz": [100.0 + i for i in range(n)],
+                 "log_intensity": [1.0] * n,
+                 "peptide": "PEPTIDE", "charge": 2} for n in lengths]
+
+    def test_default_still_pads_to_the_batch_maximum(self):
+        out = AlignmentCollator()(self._features([3, 7, 5]))
+        assert out["mz"].shape == (3, 7)
+
+    def test_fixed_width_makes_the_shape_independent_of_the_data(self):
+        wide = AlignmentCollator(pad_spectra_to=64)(self._features([3, 7, 5]))
+        narrow = AlignmentCollator(pad_spectra_to=64)(self._features([1, 2, 1]))
+        assert wide["mz"].shape == narrow["mz"].shape == (3, 64), \
+            "a fixed width must not depend on which spectra landed in the batch"
+
+    def test_fixed_width_still_masks_the_padding(self):
+        out = AlignmentCollator(pad_spectra_to=16)(self._features([3, 5]))
+        assert out["attention_mask"].sum().item() == 8
+        assert out["attention_mask"][0, 3:].sum().item() == 0
+        assert out["attention_mask"][1, 5:].sum().item() == 0
+
+    def test_fixed_width_preserves_the_values(self):
+        out = AlignmentCollator(pad_spectra_to=16)(self._features([3]))
+        assert torch.allclose(out["mz"][0, :3],
+                              torch.tensor([100.0, 101.0, 102.0]))
+        assert out["mz"][0, 3:].abs().sum().item() == 0
