@@ -45,6 +45,16 @@ class GroupBatchSampler(Sampler[list[int]]):
     Groups with fewer than K members are sampled with replacement: dropping them would
     quietly bias training toward peptides that happen to be observed often, which is
     exactly the population the metric is then evaluated on.
+
+    RESHUFFLES BY ITSELF. The epoch counter advances inside __iter__ rather than waiting
+    for set_epoch (FT14). HF Trainer builds this dataloader once and never calls
+    set_epoch on a custom batch_sampler -- accelerate forwards set_epoch to
+    `batch_sampler.sampler`, an attribute this class does not have -- so the counter sat
+    at 0 and every epoch replayed byte-identical batches. With K replicates drawn from
+    each group, one epoch touches K/mean_group_size of the corpus (K=2 over ~13
+    replicates is 15.6%), and without reshuffling that same 15.6% was the ONLY data the
+    model ever saw, no matter how many epochs were run. set_epoch still works and
+    overrides the counter; nothing depends on the caller remembering to use it.
     """
 
     def __init__(self, groups, groups_per_batch: int = 12, replicates: int = 4,
@@ -73,7 +83,10 @@ class GroupBatchSampler(Sampler[list[int]]):
         self.epoch = epoch
 
     def __iter__(self):
-        rng = np.random.default_rng(self.seed + self.epoch)
+        # Seed as a pair, not a sum: seed+epoch collides (seed 0 epoch 1 would draw the
+        # same batches as seed 1 epoch 0), which would make a seed sweep partly a
+        # relabelling of one trajectory rather than independent runs.
+        rng = np.random.default_rng([self.seed, self.epoch])
         order = rng.permutation(list(self.members))
         for start in range(0, len(order) - self.groups_per_batch + 1,
                            self.groups_per_batch):
@@ -84,6 +97,8 @@ class GroupBatchSampler(Sampler[list[int]]):
                                   replace=len(pool) < self.replicates)
                 batch.extend(int(i) for i in take)
             yield batch
+        # Advance regardless of whether anyone calls set_epoch. See the class docstring.
+        self.epoch += 1
 
 
 class PairBatchSampler(Sampler[list[int]]):

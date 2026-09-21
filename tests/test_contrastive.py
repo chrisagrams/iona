@@ -115,6 +115,48 @@ class TestGroupBatchSampler:
         sampler.set_epoch(1)
         assert next(iter(sampler)) != first
 
+    def test_reshuffles_without_anyone_calling_set_epoch(self):
+        """FT14. The test above passed throughout the bug because it called set_epoch.
+
+        Nothing in the real path does: HF Trainer builds the dataloader once, and
+        accelerate forwards set_epoch to `batch_sampler.sampler`, which this class does
+        not have. So the counter stayed at 0 and every epoch replayed identical batches.
+        A sampler must reshuffle when iterated, not when asked nicely.
+        """
+        groups = np.repeat(np.arange(40), 13)
+        sampler = GroupBatchSampler(groups, groups_per_batch=6, replicates=4, seed=0)
+        first = list(sampler)
+        second = list(sampler)
+        assert len(first) == len(second) > 1
+        assert first != second
+
+    def test_more_epochs_reach_more_of_the_corpus(self):
+        """Why FT14 mattered: one epoch touches only K of each group's ~13 replicates.
+
+        Frozen batches meant that first slice -- 28% here, 15.6% in the real corpus at
+        K=2 -- was the only data the model ever saw, however long it trained.
+        Reshuffling has to make coverage grow.
+        """
+        groups = np.repeat(np.arange(40), 13)
+        sampler = GroupBatchSampler(groups, groups_per_batch=6, replicates=4, seed=0)
+        seen, coverage = set(), []
+        for _ in range(8):
+            for batch in sampler:
+                seen.update(batch)
+            coverage.append(len(seen) / len(groups))
+        assert coverage[0] < 0.4, coverage[0]
+        assert coverage[-1] > 0.9, coverage
+        assert coverage == sorted(coverage)
+
+    def test_seed_and_epoch_do_not_collide(self):
+        """seed + epoch made seed 0 epoch 1 identical to seed 1 epoch 0, so a seed
+        sweep would have been a relabelling of one trajectory, not independent runs."""
+        groups = np.repeat(np.arange(40), 13)
+        a = GroupBatchSampler(groups, groups_per_batch=6, replicates=4, seed=0)
+        list(a)                     # advances a to epoch 1
+        b = GroupBatchSampler(groups, groups_per_batch=6, replicates=4, seed=1)
+        assert list(a) != list(b)
+
 
 class TestSubsetByGroup:
     def test_keeps_whole_groups(self):
