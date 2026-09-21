@@ -34,6 +34,18 @@ cd "$REPO_DIR"
 GRIDS=${GRIDS:?set GRIDS to a space-separated list of grid directories}
 MODULE=${MODULE:-msdelta.finetune_denoise}
 MAX_SAMPLES=${MAX_SAMPLES:-400}
+# Cadence of the smoke run, not of the real job. The defaults suit a few hundred
+# steps; a grid whose arms run tens of thousands would spend the whole slot in
+# evaluation at eval_steps=10, so they are overridable.
+EVAL_STEPS=${EVAL_STEPS:-10}
+SAVE_STEPS=${SAVE_STEPS:-10}
+LOGGING_STEPS=${LOGGING_STEPS:-5}
+# Which arm to smoke. Default is the last by name, chosen because for most grids
+# the biggest batch sorts last and memory is what goes wrong. Override it where
+# that rule picks the wrong arm -- sweep-contrastive-epochs-v2's arms all have
+# IDENTICAL batch shape and differ only in duration, so its last arm is the
+# slowest rather than the heaviest and tests nothing extra about memory.
+VALIDATE_ARM=${VALIDATE_ARM:-}
 VENV_DIR=${VENV_DIR:-$REPO_DIR/.venv}
 PROJECT=${PROJECT:-UIC-HPC}
 SCRATCH_ROOT=${SCRATCH_ROOT:-/lus/flare/projects/$PROJECT/$USER/msdelta}
@@ -64,14 +76,27 @@ export NO_PROXY="$no_proxy"
 HOSTFILE=$SCRATCH_ROOT/runs/.hostfile-validate-$PBS_JOBID
 sort -u "${PBS_NODEFILE:?}" | head -1 > "$HOSTFILE"
 export MASTER_ADDR=$(head -1 "$HOSTFILE") MASTER_PORT=${MASTER_PORT:-29500}
-export MSDELTA_XPUS_PER_HOST=$XPUS_PER_HOST MSDELTA_WORLD_SIZE=$XPUS_PER_HOST
+
+# Each grid launches at THE SHAPE ITS SWEEP WILL USE, not at a fixed 12 ranks.
+# aurora-finetune-sweep.pbs defaults TILES_PER_ARM=1 and refuses anything higher for
+# a grid whose arms name no --deepspeed, because multi-tile without DeepSpeed goes
+# through the DDP reducer (FT7). Validating at 12 ranks therefore exercised a launch
+# mode those grids never run in: sweep-contrastive-epochs-v2 failed here with
+# "parameters that were not used in producing loss", a DDP-reducer complaint that
+# cannot arise on one tile. A false DO NOT RELEASE is the harmless direction of that
+# mismatch -- the same gap would just as readily pass a grid at 12 ranks that breaks
+# at 1, which is the whole failure this script exists to catch.
+tiles_for_arm() {
+    if [[ -n ${TILES_PER_ARM:-} ]]; then echo "$TILES_PER_ARM"; return; fi
+    if grep -q -- '--deepspeed' "$1"; then echo "$XPUS_PER_HOST"; else echo 1; fi
+}
 
 ok=0; total=0; failed=()
 for grid in $GRIDS; do
     total=$(( total + 1 ))
     # The heaviest arm, by name: biggest batch is the memory-hungriest, and if the
     # cheapest arm is the only one validated the expensive ones are still unproven.
-    arm=$(ls "$grid" 2>/dev/null | grep -v '^\.' | sort | tail -1)
+    arm=${VALIDATE_ARM:-$(ls "$grid" 2>/dev/null | grep -v '^\.' | sort | tail -1)}
     args=$grid/$arm/training.args
     echo
     echo "############ $grid :: $arm"
@@ -79,19 +104,24 @@ for grid in $GRIDS; do
     grep -o -- '--pretrained_path [^ ]*' "$args" | sed 's/^/  /'
     dir=$SCRATCH_ROOT/runs/validate-$(basename "$grid")-$PBS_JOBID
     mkdir -p "$dir"
-    mpiexec --envall --pmi=pmix -n "$XPUS_PER_HOST" --ppn "$XPUS_PER_HOST" \
+    tiles=$(tiles_for_arm "$args")
+    echo "  $tiles tile(s) -- the shape aurora-finetune-sweep.pbs will use"
+    export MSDELTA_XPUS_PER_HOST=$tiles MSDELTA_WORLD_SIZE=$tiles
+    export ZE_AFFINITY_MASK=$(seq -s, 0 $(( tiles - 1 )))
+    mpiexec --envall --pmi=pmix -n "$tiles" --ppn "$tiles" \
         --cpu-bind depth --depth "${CPU_DEPTH:-8}" --hostfile="$HOSTFILE" \
         "$REPO_DIR/pbs/rank_wrapper.sh" \
         "$VENV_DIR/bin/python" -m "$MODULE" \
             --args_file "$args" --output_dir "$dir" \
-            --max_samples "$MAX_SAMPLES" --eval_steps 10 --save_steps 10 \
-            --logging_steps 5 --report_to none \
+            --max_samples "$MAX_SAMPLES" --eval_steps "$EVAL_STEPS" \
+            --save_steps "$SAVE_STEPS" --logging_steps "$LOGGING_STEPS" \
+            --report_to none \
         > "$dir/validate.log" 2>&1
     status=$?
     if [[ $status -eq 0 ]]; then
         ok=$(( ok + 1 ))
         echo "  PASS"
-        grep -oE "\[denoise\] test: .{0,110}" "$dir/validate.log" | tail -1 | sed 's/^/    /'
+        grep -oE "\[denoise\] test: .{0,110}|sep_spectrum/ratio[^,}]{0,24}" "$dir/validate.log" | tail -1 | sed 's/^/    /'
     else
         echo "  FAIL exit $status -- $dir/validate.log"
         grep -E 'Error|Traceback|not used by the HfArgumentParser|No such file' \
