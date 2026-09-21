@@ -660,3 +660,37 @@ difference decides which side of the edge a run lands on. So "lr 5e-4 is best" m
       production training.
 - [ ] Re-read every contrastive comparison in STATUS.md and OBSERVATIONS.md against the
       measured bar. Gaps under ~2 are currently unsupported.
+
+## FT16. Two tiles share one card's HBM and both over-report it — **Diagnosed, fix in the launcher**
+
+A node presents 12 tiles and has 6 physical cards. An Intel Max 1550 exposes two tiles
+per card which SHARE that card's 128 GB of HBM, and each tile reports 68.7 GB
+independently. A card's pair therefore claims 131 GB of a physical 128, with nothing
+enforcing the real budget. When both siblings expand into it one takes a GPU fault at
+0xff00...., which looks like a scratch-memory bug and is over-subscription.
+
+Measured on the same 200m contrastive arm:
+
+  12 arms per node (sibling active) .. reserved 67.11 GB/tile, 1 of 6 arms survived
+  alone on a tile ..................... reserved 38.75 GB, 200/200 steps clean
+
+Peak was 28.4 vs 28.5 GB either way, so the model always fitted in 68.7 GB.
+
+FIX: `TILE_STRIDE=2` in pbs/aurora-finetune-sweep.pbs uses tiles 0,2,4,6,8,10 -- six
+arms per node, one per card. Verified in job 8845548.
+
+WHEN IT IS NEEDED: only when a pair would exceed 128 GB. Denoise under ZeRO-2 reserves
+7.7 GB/tile, contrastive at 100m reserves 26 GB; both are fine at stride 1. Contrastive
+at 200m+ reserves 67 GB and needs stride 2.
+
+DO NOT RETRY: `PYTORCH_ALLOC_CONF=expandable_segments:True` would have let the allocator
+give memory back and kept 12 arms per node. It is NOT SUPPORTED on this XPU build --
+it fails immediately with "RuntimeError: could not create a memory". Tested, job on
+node x4407c2s0b0n0.
+
+- [ ] Check whether FT9 (the 12-tile alignment fault, parked for ALCF) is the same
+      thing. It has the same 0xff00.... signature and also ran 12 tiles on 6 cards. If
+      so, FT9 closes too and does not need ALCF.
+- [ ] The 50m pair-loss validation faulted while running single-tile with
+      XPUS_PER_HOST=1, which this does not explain. Either a second cause or the tile
+      assignment was not what the script intended. Check before trusting pair-loss runs.
