@@ -118,6 +118,9 @@ declare -A GRID_CHECK=(
     [configs/sweep-contrastive-random]="sweeps/make_contrastive_grid.py --random --check"
     [configs/sweep-random-budget]="sweeps/make_random_budget_grid.py --check"
     [configs/sweep-contrastive-epochs-v2]="sweeps/make_contrastive_epochs_grid.py --check"
+    # FT13: the pretrained winner at the scratch grid's 8 epochs, so "+0.032 at
+    # double budget" can be attributed to pretraining rather than to the budget.
+    [configs/sweep-denoise-seeds-ep8]="sweeps/make_seed_grid.py --sizes 50m --seeds 6 --epochs 8 --check"
 )
 if [[ -z ${SKIP_GRID_CHECK:-} ]]; then
     check=${GRID_CHECK[${SWEEP_ROOT%/}]:-}
