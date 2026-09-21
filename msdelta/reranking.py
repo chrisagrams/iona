@@ -648,6 +648,10 @@ class AlignmentCollator:
     # shape; with a live teacher the spectra dominate and vary anyway.
     fixed_shapes: bool = True
 
+    # 0 keeps the historical behaviour of padding to the batch maximum. Set it to
+    # max_peaks to make activation memory deterministic; see __call__.
+    pad_spectra_to: int = 0
+
     def __post_init__(self):
         self.peptides = PeptideCollator(max_length=self.max_peptide_length)
         self.padded = PeptideCollator(max_length=self.max_peptide_length, pad_to_max=True)
@@ -656,7 +660,19 @@ class AlignmentCollator:
         if not features:
             raise ValueError("features must not be empty")
         lengths = [len(f["mz"]) for f in features]
-        width = max(max(lengths), 1)
+        # Fixed width when asked for, otherwise the longest spectrum in the batch.
+        #
+        # Padding to the batch maximum makes MEMORY DATA-DEPENDENT, and DeltaMZBias is
+        # O(batch * width^2), so one wide spectrum quadruples a batch's cost against a
+        # narrow one. Which spectra land together is decided by the sampler's seed, so
+        # the same model and config reserved 38.75 GB at seed 0 and 67.14 GB at seed 3
+        # -- and at 200m and 400m the wide draws exceeded the tile and took a GPU page
+        # fault. Every seed-0 arm survived and every other seed died, at every scale.
+        #
+        # A fixed width costs the padding on narrow batches and buys a memory figure
+        # that can be measured once and trusted. FT9 saw the same effect from the other
+        # side: fixed-shape batches moved its fault from step 22 to step 120.
+        width = self.pad_spectra_to or max(max(lengths), 1)
         batch = len(features)
         mz = torch.zeros(batch, width, dtype=torch.float32)
         log_intensity = torch.zeros_like(mz)
