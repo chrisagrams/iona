@@ -20,6 +20,7 @@ from typing import Iterable, Iterator
 import numpy as np
 import torch
 
+from msdelta.denoising import PeakBudgetBatchSampler
 from msdelta.modeling_msdelta import MSDeltaForDenoising
 from msdelta.mzml import MzMLRewriter, Spectrum
 from msdelta.processing_msdelta import MSDeltaProcessor
@@ -37,21 +38,6 @@ class DenoisingSummary:
     noise_peaks: int = 0
     unscored_peaks: int = 0
     emptied_spectra: int = 0
-
-
-def peak_budget_batches(lengths: list[int], peak_pair_budget: int) -> list[list[int]]:
-    """Group indices so each batch's padded pairwise-attention size stays in budget."""
-    indices = sorted(range(len(lengths)), key=lengths.__getitem__)
-    batches: list[list[int]] = []
-    batch: list[int] = []
-    for index in indices:
-        if batch and (len(batch) + 1) * lengths[index] ** 2 > peak_pair_budget:
-            batches.append(batch)
-            batch = []
-        batch.append(index)
-    if batch:
-        batches.append(batch)
-    return batches
 
 
 def select_model_peaks(intensity: np.ndarray, max_peaks: int) -> np.ndarray:
@@ -90,7 +76,8 @@ class SpectrumDenoiser:
         """Return one noise probability per peak for each ``(mz, intensity)`` pair."""
         lengths = [mz.size for mz, _ in spectra]
         results: list[np.ndarray | None] = [None] * len(spectra)
-        for batch in peak_budget_batches(lengths, self.peak_pair_budget):
+        sampler = PeakBudgetBatchSampler(lengths, self.peak_pair_budget, seed=0)
+        for batch in sampler:
             inputs = self.processor(
                 [spectra[i][0] for i in batch],
                 [spectra[i][1] for i in batch],
