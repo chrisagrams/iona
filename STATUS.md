@@ -24,9 +24,22 @@ DENOISE  — the line that works
   [x] 50m,  216 arms ..... 0.9320 auroc / 0.8632 f1
   [x] 100m,  12 arms ..... 0.9403 / 0.8723      (+0.0083)
   [x] 200m,  12 arms ..... 0.9446 / 0.8778      (+0.0043)
-  [~] 400m,  12 arms ..... running
-        Gains are HALVING while the within-grid spread holds at ~0.001.
-        400m is predicted +0.002, which is inside that spread.
+  [x] 400m,  12 arms ..... 0.9436 / 0.8768      (-0.0010)
+
+        The prediction that stood here -- "+0.002, inside the ~0.001 within-grid
+        spread" -- was wrong in both parts. 400m came in BELOW 200m, and the
+        within-grid spread is not the error bar: it mixes real hyperparameter
+        effects with noise, so it overstates noise and dismisses real effects.
+        Measured seed noise at a fixed configuration is sd ~0.0005 (FT5, six
+        seeds per scale, job 8845262):
+
+              50m   0.9317 +/- 0.00055        200m  0.9447 +/- 0.00025
+              100m  pending                   400m  0.9434 +/- 0.00045
+
+        200m -> 400m is -0.0013 at t = -6.3, a regression and not a plateau.
+        AT THIS FINE-TUNING BUDGET: the 400m probe (8845252) has 400m still
+        gaining at 4 epochs, +0.0021 from ep2, so 400m has not converged where
+        it was scored.
   [x] scratch 50m, random encoder
         matched 4 epochs ....... 0.8856  -> pretraining worth +0.046
         scratch at 8 epochs .... 0.9001  -> pretraining worth +0.032

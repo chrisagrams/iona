@@ -397,13 +397,28 @@ All four grids are complete, 12 arms each except the 216-arm 50m:
 | 200m | **0.9446** | **0.8778** | +0.0043 | 0.0010 |
 | 400m | 0.9436 | 0.8768 | **-0.0010** | 0.0013 |
 
-The increments halve and then stop: +0.0083, +0.0043, -0.0010. The 400m figure is BELOW
-200m, and by less than either grid's top-cluster spread, so the honest reading is a
-plateau rather than a regression -- 200m and 400m are indistinguishable at one seed
-each. Doubling from 200m to 400m buys nothing measurable.
+> **CORRECTED by FT5 (job 8845262).** The paragraph below called 200m -> 400m a plateau.
+> Six seeds at each scale say it is a regression: 200m 0.9447 +/- 0.00025 against 400m
+> 0.9434 +/- 0.00045, a gap of -0.0013 at t = -6.3. Doubling from 200m to 400m does not
+> buy nothing -- it costs something measurable.
+>
+> THE REASONING IS WHERE THE ERROR WAS, not the arithmetic. "By less than either grid's
+> top-cluster spread" treats the spread across a grid's best few ARMS as the error bar
+> on a single arm. Those are different quantities: the top-cluster spread mixes real
+> hyperparameter effects with noise, so it is an UPPER bound on noise and using it as
+> the error bar is systematically too conservative. It dismisses real effects, always in
+> the same direction. The right error bar is the seed spread at one fixed configuration,
+> which is sd ~0.0005 -- and against that, even the naive -0.0010 was two sigma.
+>
+> Wherever this file or STATUS.md calls a denoise difference "within noise" on the
+> strength of a grid's internal spread, the judgement needs redoing against 0.0005.
 
-That makes 200m the largest scale worth using for denoise, and it is a useful thing to
-know before committing compute to a 400m production model on the strength of a trend.
+The increments halve and then reverse: +0.0083, +0.0043, -0.0010 (single seed) or
+-0.0013 (six seeds). 200m is the largest scale worth using for denoise AT THIS
+FINE-TUNING BUDGET, which is the caveat that matters: the 400m probe (job 8845252)
+shows 400m still gaining at 4 epochs, +0.0021 from ep2 to ep4 against sd 0.0005. So
+"400m is worse than 200m" and "400m has not finished converging" are both true, and
+only the second is a statement about scale itself.
 
 THE SAME HYPERPARAMETERS WIN AT EVERY SCALE. `lr2e4_es05_b12` is the top arm at 100m,
 200m and 400m, and the same settings won the 216-arm 50m grid. Four scales, one answer.
