@@ -126,9 +126,9 @@ def _parse_spectrum(index: int, block: bytes, prefix: bytes) -> Spectrum:
     for array in _children(array_list, "binaryDataArray") if array_list is not None else ():
         accessions = _cv_params(array)
         if MZ_ARRAY in accessions:
-            mz = decode_binary_array(array)[0]
+            mz = decode_binary_array(array)[0].copy()
         elif INTENSITY_ARRAY in accessions:
-            intensity = decode_binary_array(array)[0]
+            intensity = decode_binary_array(array)[0].copy()
     if mz.shape != intensity.shape:
         raise ValueError(f"spectrum {index} has mismatched m/z and intensity arrays")
     return Spectrum(

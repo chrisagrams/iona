@@ -208,7 +208,14 @@ def load_denoiser(
     if distributed_state is not None and distributed_state.num_processes > 1:
         if device is not None:
             raise ValueError("--device cannot be used with distributed inference")
-        device = distributed_state.device
+        if distributed_state.device.type == "cuda":
+            device = torch.device(
+                "cuda", distributed_state.local_process_index % torch.cuda.device_count()
+            )
+            torch.cuda.set_device(device)
+            distributed_state.device = device
+        else:
+            device = distributed_state.device
     elif device is None:
         device = "cuda" if torch.cuda.is_available() else "cpu"
     model = MSDeltaForDenoising.from_pretrained(checkpoint, dtype="auto").to(device)
