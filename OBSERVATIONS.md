@@ -354,6 +354,38 @@ guess, and both sit within 0.2 of a random network.
 That closes the loop on the frozen arm: it is a real measurement, it is just a small
 one, and it points the same way as everything else on this axis.
 
+## Contrastive scaling saturates at 100m -- earlier than denoise, and with error bars
+
+Six seeds per scale, so these are means rather than draws:
+
+| scale | mean | sd | step | t |
+| --- | --- | --- | --- | --- |
+| 50m | 5.86 | 0.63 | -- | -- |
+| 100m | **7.00** | 0.49 | +1.14 | **+3.5** |
+| 200m | 7.02 | 0.44 | +0.02 | +0.1 |
+| 400m | 6.74 | 0.28 | -0.28 | -1.3 |
+
+One real step, 50m to 100m, and then nothing. Doubling past 100m buys no separation at
+all, and 400m is slightly below 200m by less than the noise.
+
+I previously said contrastive was "still climbing at 100m" while denoise had plateaued,
+and used that divergence as the argument for debugging the GPU fault rather than
+skipping it. With four points instead of two, BOTH objectives saturate -- contrastive
+at 100m, denoise at 200m. The debugging was still worth it, but the claimed divergence
+was an artefact of having only two points on one of the curves.
+
+TAKEN TOGETHER WITH DENOISE: 0.9320 / 0.9403 / 0.9446 / 0.9436, saturating at 200m.
+Neither objective rewards capacity past 200m, and contrastive stops paying at 100m. For
+anything that has to choose a single encoder, 100m to 200m is the whole useful range,
+and that is now measured on both objectives with seeds rather than inferred from single
+runs.
+
+CAVEAT ON COMPARABILITY: the 200m and 400m arms ran with fixed-width padding while the
+50m and 100m arms ran with the old batch-maximum padding. Padded positions are masked
+out of attention, so the computation should be identical and only memory differs -- but
+that is an argument, not a measurement. Re-running 50m and 100m under fixed width would
+settle it, and is cheap.
+
 ## Denoise scaling saturates at 200m; 400m buys nothing
 
 All four grids are complete, 12 arms each except the 216-arm 50m:
