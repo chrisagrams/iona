@@ -661,7 +661,32 @@ difference decides which side of the edge a run lands on. So "lr 5e-4 is best" m
 - [ ] Re-read every contrastive comparison in STATUS.md and OBSERVATIONS.md against the
       measured bar. Gaps under ~2 are currently unsupported.
 
-## FT16. Two tiles share one card's HBM and both over-report it — **Diagnosed, fix in the launcher**
+## FT16. Contrastive faults at 200m+ when many arms share a node — **MECHANISM REFUTED, cause still open**
+
+THE SHARED-HBM EXPLANATION BELOW IS WRONG. Tested directly: two concurrent 200m arms on
+the SAME card (tiles 0 and 1) both ran 100/100 steps clean, each reserving 38.75 GB.
+Two on DIFFERENT cards likewise. Card placement is irrelevant, so sibling
+over-subscription is not the cause and TILE_STRIDE=2 is not justified by it -- it may
+still help empirically, but not for the reason given.
+
+The arithmetic should have caught this before the fix went in: a solo arm reserves
+38.75 GB, so a same-card pair is 77.5 GB and fits 128 GB with room to spare. The number
+that actually needs explaining is the GRID's 67.11 GB per tile at step 50, which no
+test here reproduces.
+
+WHAT IS ACTUALLY ESTABLISHED:
+  solo arm, 200 steps ............... reserved 38.75 GB, clean
+  same-card pair, 100 steps ......... reserved 38.75 GB each, both clean
+  different-card pair, 100 steps .... both clean
+  12 arms per node (the grid) ....... reserved 67.11 GB at step 50, 5 of 6 died
+
+So it depends on the NUMBER of arms sharing a node, not on which card they land on.
+Bisecting 4 / 8 / 12 next. Candidates: host RAM exhaustion across 12 loading processes,
+or something that scales with total node occupancy rather than per-card memory.
+
+Original (refuted) writeup follows, kept so the reasoning error is visible:
+
+### REFUTED: two tiles share one card's HBM and both over-report it
 
 A node presents 12 tiles and has 6 physical cards. An Intel Max 1550 exposes two tiles
 per card which SHARE that card's 128 GB of HBM, and each tile reports 68.7 GB
