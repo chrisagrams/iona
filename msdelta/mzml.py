@@ -142,10 +142,6 @@ def _parse_spectrum(index: int, block: bytes, prefix: bytes) -> Spectrum:
     )
 
 
-def _format(value: float) -> str:
-    return repr(float(value))
-
-
 def filter_spectrum_peaks(spectrum: Spectrum, keep: np.ndarray) -> bytes:
     """Serialize ``spectrum`` with every peak array reduced to ``keep``."""
     keep = np.asarray(keep, dtype=bool)
@@ -185,7 +181,7 @@ def filter_spectrum_peaks(spectrum: Spectrum, keep: np.ndarray) -> bytes:
     for accession, param in _cv_params(element).items():
         name = _PEAK_STATISTICS.get(accession)
         if name is not None:
-            param.set("value", _format(statistics[name]))
+            param.set("value", str(float(statistics[name])))
     return etree.tostring(element)
 
 
