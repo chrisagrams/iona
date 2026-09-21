@@ -8,7 +8,6 @@ Example:
 from __future__ import annotations
 
 import argparse
-import contextlib
 import json
 import logging
 import sys
@@ -26,13 +25,6 @@ from msdelta.mzml import MzMLRewriter, Spectrum
 from msdelta.processing_msdelta import MSDeltaProcessor
 
 logger = logging.getLogger(__name__)
-
-DTYPES = {
-    "float32": torch.float32,
-    "bfloat16": torch.bfloat16,
-    "float16": torch.float16,
-}
-
 
 @dataclass
 class DenoisingSummary:
@@ -81,7 +73,6 @@ class SpectrumDenoiser:
         noise_threshold: float = 0.5,
         peak_pair_budget: int = 4_194_304,
         keep_unscored: bool = False,
-        dtype: torch.dtype | None = None,
     ):
         if not 0.0 < noise_threshold <= 1.0:
             raise ValueError("noise_threshold must be in (0, 1]")
@@ -93,17 +84,6 @@ class SpectrumDenoiser:
         self.peak_pair_budget = peak_pair_budget
         self.keep_unscored = keep_unscored
         self.device = next(model.parameters()).device
-        self.dtype = dtype
-        if not isinstance(self._autocast(), contextlib.nullcontext):
-            # Autocast already runs the per-head bias MLPs in the reduced dtype, but
-            # it re-casts the large pairwise Fourier feature tensor once per head.
-            # Storing those weights in the reduced dtype makes the cast happen once.
-            self.model.msdelta.bias_module.head_mlps.to(dtype)
-
-    def _autocast(self):
-        if self.dtype is None or self.dtype == torch.float32 or self.device.type == "cpu":
-            return contextlib.nullcontext()
-        return torch.autocast(device_type=self.device.type, dtype=self.dtype)
 
     @torch.inference_mode()
     def noise_probabilities(self, spectra: list[tuple[np.ndarray, np.ndarray]]) -> list[np.ndarray]:
@@ -117,8 +97,7 @@ class SpectrumDenoiser:
                 padding=True,
                 return_tensors="pt",
             ).to(self.device)
-            with self._autocast():
-                logits = self.model(**inputs, return_dict=True).logits
+            logits = self.model(**inputs, return_dict=True).logits
             probabilities = torch.sigmoid(logits.float()).cpu().numpy()
             for row, i in enumerate(batch):
                 results[i] = probabilities[row, : lengths[i]]
@@ -195,15 +174,14 @@ def load_denoiser(
     *,
     processor_path: str | None = None,
     device: str | None = None,
-    dtype: str = "bfloat16",
     **kwargs,
 ) -> SpectrumDenoiser:
     """Load a denoising checkpoint and its processor onto ``device``."""
     if device is None:
         device = "cuda" if torch.cuda.is_available() else "cpu"
-    model = MSDeltaForDenoising.from_pretrained(checkpoint).to(device)
+    model = MSDeltaForDenoising.from_pretrained(checkpoint, dtype="auto").to(device)
     processor = MSDeltaProcessor.from_pretrained(processor_path or checkpoint)
-    return SpectrumDenoiser(model, processor, dtype=DTYPES[dtype], **kwargs)
+    return SpectrumDenoiser(model, processor, **kwargs)
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -253,12 +231,6 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument("--device", help="torch device (default: cuda if available)")
     parser.add_argument(
-        "--dtype",
-        choices=sorted(DTYPES),
-        default="bfloat16",
-        help="autocast precision for model inference on accelerators (default: bfloat16)",
-    )
-    parser.add_argument(
         "--summary", type=Path, help="write per-file peak and spectrum counts to this JSON file"
     )
     parser.add_argument(
@@ -277,7 +249,6 @@ def main(argv: list[str] | None = None) -> int:
         args.checkpoint,
         processor_path=args.processor,
         device=args.device,
-        dtype=args.dtype,
         noise_threshold=args.noise_threshold,
         peak_pair_budget=args.peak_pair_budget,
         keep_unscored=args.keep_unscored,
