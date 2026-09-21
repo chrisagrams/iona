@@ -1,0 +1,20 @@
+#!/bin/bash -l
+# Run the EXACT script that passes over ssh, but from inside a PBS job.
+#
+# Every failure so far ran inside a PBS sweep job; every pass ran over ssh into a
+# sleeper node holding an allocation. Four different nodes have faulted and three
+# different nodes have passed, so it is not a bad node -- and 12 concurrent 200m arms
+# pass over ssh while the same shape died in the grid.
+#
+# If this faults, the difference is the PBS job context itself (cgroup, CPU binding,
+# inherited environment) and not the model, the batch, the concurrency or the card.
+#PBS -N msdelta-pbsvsssh
+#PBS -A UIC-HPC
+#PBS -l place=scatter
+#PBS -l filesystems=home:flare
+#PBS -j oe
+#PBS -o pbs/logs/
+set -uo pipefail
+cd "${PBS_O_WORKDIR:-/home/khuss/code/msdelta}"
+echo "=== running the ssh-passing script from inside PBS, node $(hostname) ==="
+bash pbs/diag/armcount12.sh

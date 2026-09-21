@@ -661,30 +661,50 @@ difference decides which side of the edge a run lands on. So "lr 5e-4 is best" m
 - [ ] Re-read every contrastive comparison in STATUS.md and OBSERVATIONS.md against the
       measured bar. Gaps under ~2 are currently unsupported.
 
-## FT16. Contrastive faults at 200m+ when many arms share a node — **MECHANISM REFUTED, cause still open**
+## FT16. Contrastive faults at 200m+ inside PBS jobs, never over ssh — **Cause narrowed, unresolved**
 
-THE SHARED-HBM EXPLANATION BELOW IS WRONG. Tested directly: two concurrent 200m arms on
-the SAME card (tiles 0 and 1) both ran 100/100 steps clean, each reserving 38.75 GB.
-Two on DIFFERENT cards likewise. Card placement is irrelevant, so sibling
-over-subscription is not the cause and TILE_STRIDE=2 is not justified by it -- it may
-still help empirically, but not for the reason given.
+THE ONE SURVIVING PATTERN. Every failure has been inside a PBS sweep job; every pass has
+been over ssh into a sleeper node holding an allocation. Both directions, no exceptions:
 
-The arithmetic should have caught this before the fix went in: a solo arm reserves
-38.75 GB, so a same-card pair is 77.5 GB and fits 128 GB with room to spare. The number
-that actually needs explaining is the GRID's 67.11 GB per tile at step 50, which no
-test here reproduces.
+  FAILED, inside PBS .... x4310c1s1b0n0, x4216c0s3b0n0, x4605c5s0b0n0, x4720c6s5b0n0
+  PASSED, over ssh ...... x4400c3s1b0n0, x4407c2s0b0n0, x4305c7s4b0n0
 
-WHAT IS ACTUALLY ESTABLISHED:
-  solo arm, 200 steps ............... reserved 38.75 GB, clean
-  same-card pair, 100 steps ......... reserved 38.75 GB each, both clean
-  different-card pair, 100 steps .... both clean
-  12 arms per node (the grid) ....... reserved 67.11 GB at step 50, 5 of 6 died
+Four nodes fail and three pass, so it is not a bad node. Job 8845596 tests it directly
+by submitting the exact script that passes over ssh as a PBS job.
 
-So it depends on the NUMBER of arms sharing a node, not on which card they land on.
-Bisecting 4 / 8 / 12 next. Candidates: host RAM exhaustion across 12 loading processes,
-or something that scales with total node occupancy rather than per-card memory.
+WHAT HAS BEEN RULED OUT, each by measurement rather than argument:
 
-Original (refuted) writeup follows, kept so the reasoning error is visible:
+| hypothesis | test | verdict |
+| --- | --- | --- |
+| model too big for the tile | peak 28.5 GB of 68.7 | refuted |
+| two tiles share a card's HBM | same-card pair, both clean at 38.75 GB | refuted |
+| concurrency / arms per node | 1, 2, 4, 8, 12 arms all clean at 38.73 GB | refuted |
+| fused SDPA kernel | MSDELTA_SDPA_MATH=1, switch verified live | no effect |
+| allocator fragmentation | expandable_segments unsupported on XPU | untestable |
+| host RAM exhaustion | 1102 GB free of 1134 | refuted |
+| the invocation (config, env, epochs) | gridexact: 38.75 GB, 300+ steps clean | refuted |
+| FT9 is the same bug | different access type and address region | refuted |
+
+THE NUMBER ANY EXPLANATION MUST ACCOUNT FOR. Every controlled run reserves 38.73-38.75
+GB. The failing grid arms reserved 47 to 67 GB for the same model and config. Nothing
+outside a PBS job has reproduced that inflation.
+
+A TRAP IN THE EVIDENCE, worth recording. In job 8845057 the launcher placed all 50m and
+100m arms on one node and all 200m and 400m arms on the other, so "large models fail"
+and "that node fails" were perfectly confounded. The failures look scale-dependent and
+are not: 12 concurrent 200m arms pass over ssh. Any future reading of that job has to
+account for the placement.
+
+LEADING CANDIDATE: the PBS job context itself -- cgroup limits, CPU binding, or
+inherited environment differing from an ssh session into the same allocation. Plausible
+rather than shown; 8845596 decides it.
+
+- [ ] Read 8845596. If it faults, bisect the PBS job context (cgroup, --cpu-bind,
+      inherited env) against the ssh path.
+- [ ] If it passes, instrument a real failing sweep instead of reproducing beside one:
+      dump the full environment and cgroup state from inside a faulting arm.
+
+### REFUTED: two tiles share one card's HBM
 
 ### REFUTED: two tiles share one card's HBM and both over-report it
 
