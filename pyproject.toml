@@ -43,7 +43,6 @@ msdelta-denoise-mzml = "msdelta.denoise_mzml:main"
 [dependency-groups]
 dev = [
     "pre-commit",
-    "pytest",
     "ruff",
 ]
 
