@@ -387,3 +387,40 @@ def test_generated_sweep_arms_use_no_unknown_flags():
                     seen.setdefault(line.split()[0], f"{grid.name}/{arm.parent.name}")
     unknown = {f: where for f, where in seen.items() if f not in known}
     assert not unknown, f"no dataclass declares these generated flags: {unknown}"
+
+
+class TestResumeIsWiredThrough:
+    """RESUME_JOB in the sweep runner is useless unless train() is told about it.
+
+    Trainer.train() signs as `resume_from_checkpoint: str | bool | None = None` and
+    never falls back to `self.args.resume_from_checkpoint`. So `--resume_from_checkpoint
+    <path>` parses cleanly into TrainingArguments and is then silently ignored: the run
+    restarts from step 0 while every log line and the PBS output claim it resumed. That
+    failure is invisible except in the step count, which is exactly the kind of thing
+    nobody checks on a recovery run.
+    """
+
+    ENTRY_POINTS = ("msdelta/finetune_denoise.py", "msdelta/finetune_contrastive.py")
+
+    @pytest.mark.parametrize("module", ENTRY_POINTS)
+    def test_train_is_not_called_bare(self, module):
+        source = (REPO / module).read_text()
+        assert "trainer.train()" not in source, (
+            f"{module} calls trainer.train() with no argument, so "
+            f"--resume_from_checkpoint is parsed and discarded")
+        assert "trainer.train(resume_from_checkpoint=" in source, module
+
+    def test_the_sweep_runner_can_actually_pass_one(self):
+        """And the other half: the runner has to build the flag in the first place."""
+        script = (REPO / "pbs" / "aurora-finetune-sweep.pbs").read_text()
+        assert "RESUME_JOB" in script
+        assert "--resume_from_checkpoint" in script
+        # Checkpoints must be ordered numerically: lexically, checkpoint-9000 beats
+        # checkpoint-29072 and a recovery run would silently rewind 20k steps.
+        assert "sort -n" in script, "checkpoint selection must sort numerically"
+
+    def test_evaluation_still_strips_it(self):
+        """eval_checkpoint scores a saved checkpoint; resuming training into it is
+        never what is wanted, so the flag has to keep being removed there."""
+        source = (REPO / "msdelta" / "eval_checkpoint.py").read_text()
+        assert '"--resume_from_checkpoint",' in source

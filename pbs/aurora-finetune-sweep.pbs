@@ -310,6 +310,35 @@ run_node() {
     # shared MASTER_PORT cannot collide across concurrent arms.
     for arm in ${NODE_ARMS[$index]}; do
         local dir=$SCRATCH_ROOT/runs/sweep-$arm-$JOB_ID
+        local resume=() ckpt=""
+        # RECOVERY. An arm killed at walltime used to be lost outright even though it had
+        # been writing checkpoints the whole time: a fresh job mints a new
+        # sweep-$arm-$JOB_ID directory and never looks at the old one. The 400m arms at 8
+        # epochs finish ~15 minutes inside an 8 hour walltime, so this is a live risk and
+        # not a hypothetical -- losing one discards nearly eight hours of training that is
+        # already 91% done and sitting on disk.
+        #
+        # RESUME_JOB=<jobid> reuses that job's per-arm directories: arms that already
+        # produced test_results.json are SKIPPED, and any arm with a checkpoint restarts
+        # from the newest one. Re-submitting the same grid with RESUME_JOB set therefore
+        # finishes exactly what is missing and repeats nothing.
+        if [[ -n ${RESUME_JOB:-} ]]; then
+            dir=$SCRATCH_ROOT/runs/sweep-$arm-$RESUME_JOB
+            if [[ -f $dir/test_results.json ]]; then
+                echo "  [skip $arm] already complete in $RESUME_JOB"
+                continue
+            fi
+            # Sort by the numeric step, not lexically: checkpoint-9000 must not outrank
+            # checkpoint-29072.
+            ckpt=$(ls -d "$dir"/checkpoint-* 2>/dev/null \
+                   | sed 's/.*checkpoint-//' | sort -n | tail -1)
+            if [[ -n $ckpt ]]; then
+                resume=(--resume_from_checkpoint "$dir/checkpoint-$ckpt")
+                echo "  [resume $arm] from step $ckpt in $RESUME_JOB"
+            else
+                echo "  [restart $arm] no checkpoint in $RESUME_JOB, starting over"
+            fi
+        fi
         mkdir -p "$dir/logs"
         start=$SECONDS
         # Each slot pins its own tiles and its own port, so concurrent arms on one host
@@ -324,7 +353,7 @@ run_node() {
             "$REPO_DIR/pbs/rank_wrapper.sh" \
             "$VENV_DIR/bin/python" -m "$SWEEP_MODULE" \
                 --args_file "$CONFIG_SNAPSHOT/$arm/training.args" \
-                --output_dir "$dir" "${SHORT[@]}" \
+                --output_dir "$dir" "${SHORT[@]}" "${resume[@]}" \
             >"$dir/logs/train.log" 2>&1
         # No `|| true` here: the script runs under `set -uo pipefail`, not `set -e`, so a
         # non-zero mpiexec does not abort the function -- and `|| true` would force
