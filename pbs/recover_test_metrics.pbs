@@ -1,0 +1,136 @@
+#!/bin/bash -l
+# Recompute the test metric for sweep arms that finished training but never wrote one.
+#
+#   qsub -q debug -l select=1 -l walltime=00:59:00 -v JOB=8840408 pbs/recover_test_metrics.pbs
+#
+# `sweeps/recover_test_metrics.py --dry-run` decides WHICH arms qualify; this script only
+# executes that list. An arm qualifies when it reached its expected step count and left
+# weights on disk but has no test_results.json -- the load_best_model_at_end failure,
+# which strikes after training and after every evaluation is logged.
+#
+# Arms are re-evaluated one at a time across all twelve tiles, the same shape they
+# trained in, so the recovered number comes off the same gather path as every number it
+# will be compared against.
+#
+# The recovered numbers come from FINAL weights where a healthy arm reports
+# BEST-VALIDATION weights. eval_checkpoint.py stamps `weights_selected_by` into every
+# test_results.json it writes so the two can always be told apart downstream.
+
+#PBS -N msdelta-recover
+#PBS -A UIC-HPC
+#PBS -l place=scatter
+#PBS -l filesystems=home:flare
+#PBS -j oe
+#PBS -o pbs/logs/
+
+set -uo pipefail
+REPO_DIR=${REPO_DIR:-${PBS_O_WORKDIR:-$PWD}}
+cd "$REPO_DIR"
+
+JOB=${JOB:?set JOB to the sweep job id whose arms need recovering}
+VENV_DIR=${VENV_DIR:-$REPO_DIR/.venv}
+PROJECT=${PROJECT:-UIC-HPC}
+SCRATCH_ROOT=${SCRATCH_ROOT:-/lus/flare/projects/$PROJECT/$USER/msdelta}
+XPUS_PER_HOST=${XPUS_PER_HOST:-12}
+# Written by the sweep launcher at submission time, so it is the config the arms actually
+# trained with rather than whatever the working tree holds now.
+CONFIG_SNAPSHOT=${CONFIG_SNAPSHOT:-$SCRATCH_ROOT/runs/.configs-$JOB}
+[[ -d $CONFIG_SNAPSHOT ]] || { echo "no config snapshot at $CONFIG_SNAPSHOT" >&2; exit 2; }
+
+set +u
+source /usr/share/lmod/lmod/init/bash
+module load "${FRAMEWORKS_MODULE:-frameworks/2025.3.1}"
+set -u
+
+# Without these three, importing torch segfaults with no traceback (jobs 8841255 and the
+# two rescoring runs before it). Every entry point that imports torch needs them.
+export ONEAPI_DEVICE_SELECTOR=level_zero:gpu
+export ZE_FLAT_DEVICE_HIERARCHY=FLAT
+# Job-wide default so any python added here later is protected; run_arm overrides it
+# per arm to pin each one to its own tile.
+export ZE_AFFINITY_MASK=${ZE_AFFINITY_MASK:-$(seq -s, 0 $((XPUS_PER_HOST - 1)))}
+export OMP_NUM_THREADS=${OMP_NUM_THREADS:-4}
+export MKL_NUM_THREADS=${MKL_NUM_THREADS:-4}
+export PYTHONPATH=$REPO_DIR${PYTHONPATH:+:$PYTHONPATH}
+export HF_HOME=${HF_HOME:-$SCRATCH_ROOT/huggingface}
+export HF_HUB_OFFLINE=${HF_HUB_OFFLINE:-1}
+export HF_DATASETS_OFFLINE=${HF_DATASETS_OFFLINE:-1}
+
+# Which arms need it. Parsed from the same reporter a human would run, so the job can
+# never disagree with the dry run about what is recoverable.
+mapfile -t ARMS < <(
+    "$VENV_DIR/bin/python" sweeps/recover_test_metrics.py "$JOB" --dry-run 2>/dev/null \
+        | awk '/^  sweep-/ {print $1}'
+)
+if [[ ${#ARMS[@]} -eq 0 ]]; then
+    echo "nothing to recover for job $JOB"
+    exit 0
+fi
+echo "=== recovering ${#ARMS[@]} arm(s) from job $JOB, $XPUS_PER_HOST at a time ==="
+printf '  %s\n' "${ARMS[@]}"
+
+# Arms run SEQUENTIALLY on all twelve tiles, exactly as they trained, rather than one
+# per tile in parallel. Two reasons, and the second is the one that matters:
+#
+#   accelerate needs a real process group. Under a bare `python -m` with WORLD_SIZE set
+#   it picks a backend, skips init_process_group, then calls get_world_size() on a group
+#   that does not exist ("Default process group has not been initialized"). The launcher
+#   avoids this by going through mpiexec --pmi=pmix, so this does too.
+#
+#   The test metric must come off the same code path as the 212 it will sit beside.
+#   denoise_metrics is hardened against a third value appearing in the DDP gather (job
+#   8839579); a single-process eval never gathers, so it would exercise different code
+#   to produce a number presented as comparable. Twelve tiles keeps it identical.
+#
+# A test pass is ~10 s at twelve tiles, so four arms in sequence costs minutes.
+HOSTFILE=$SCRATCH_ROOT/runs/.hostfile-recover-$PBS_JOBID
+sort -u "${PBS_NODEFILE:?PBS_NODEFILE is required}" | head -1 > "$HOSTFILE"
+export MASTER_ADDR=$(head -1 "$HOSTFILE")
+export MASTER_PORT=${MASTER_PORT:-29500}
+export MSDELTA_XPUS_PER_HOST=$XPUS_PER_HOST
+export MSDELTA_WORLD_SIZE=$XPUS_PER_HOST
+
+run_arm() {
+    local arm=$1
+    local dir="$SCRATCH_ROOT/runs/$arm"
+    # The arm directory is sweep-<name>-<job>; the config snapshot is keyed by <name>.
+    local name=${arm#sweep-}; name=${name%-$JOB}
+    local args="$CONFIG_SNAPSHOT/$name/training.args"
+    if [[ ! -f $args ]]; then
+        echo "  [$arm] no config at $args -- skipped" >&2
+        return 1
+    fi
+    # Highest-numbered checkpoint: the arm trained to the end, so this is its final state.
+    local final
+    final=$(ls -d "$dir"/checkpoint-* 2>/dev/null | sed 's/.*checkpoint-//' | sort -n | tail -1)
+    [[ -n $final ]] || { echo "  [$arm] no checkpoints -- skipped" >&2; return 1; }
+
+    mpiexec --envall --pmi=pmix -n "$XPUS_PER_HOST" --ppn "$XPUS_PER_HOST" \
+        --cpu-bind depth --depth "${CPU_DEPTH:-8}" --hostfile="$HOSTFILE" \
+        "$REPO_DIR/pbs/rank_wrapper.sh" \
+        "$VENV_DIR/bin/python" -m msdelta.eval_checkpoint \
+            --args_file "$args" \
+            --checkpoint "$dir/checkpoint-$final" \
+            --results_into "$dir" \
+            --weights_selected_by final \
+            --output_dir "$dir/.recover" \
+        > "$dir/recover-$PBS_JOBID.log" 2>&1
+    local status=$?
+    if [[ $status -eq 0 ]]; then
+        grep -h '^\[eval\] ' "$dir/recover-$PBS_JOBID.log" | head -1
+    else
+        echo "  [$arm] FAILED (status $status), see $dir/recover-$PBS_JOBID.log" >&2
+        tail -15 "$dir/recover-$PBS_JOBID.log" >&2
+    fi
+    return $status
+}
+
+ok=0
+for arm in "${ARMS[@]}"; do
+    if run_arm "$arm"; then ok=$(( ok + 1 )); fi
+done
+
+echo
+echo "=== recovered $ok/${#ARMS[@]} arm(s) ==="
+echo "These carry weights_selected_by=final; a healthy arm carries best-validation."
+[[ $ok -eq ${#ARMS[@]} ]] || exit 1

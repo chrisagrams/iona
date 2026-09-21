@@ -1,0 +1,1 @@
+The 50m denoise baseline under DeepSpeed ZeRO-2 on all twelve tiles of a node. ZeRO-2 replaces the DDP reducer, which is what faults, and is 21.4x the throughput of one tile. This is the grid template. Effective batch is 48 rather than 4, so warmup is 42 steps rather than 500 and freeze_encoder_steps is 0.

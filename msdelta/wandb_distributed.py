@@ -18,6 +18,8 @@ def init_wandb_run(
     role: str = "pretrain",
     run_id: str | None = None,
     entity: str | None = None,
+    notes: str | None = None,
+    tags: list[str] | None = None,
 ) -> wandb.Run | None:
     """Create one W&B client per node, sharing a run across multiple nodes."""
     rank = int(os.environ.get("RANK", "0"))
@@ -72,5 +74,9 @@ def init_wandb_run(
         entity=entity,
         name=run_name if is_primary else None,
         config=run_config,
+        # Only the primary writes these: a shared run has one client per node, and every
+        # one of them passing notes would race to overwrite the same field.
+        notes=notes if is_primary else None,
+        tags=tags if is_primary else None,
         settings=settings,
     )

@@ -1,0 +1,15 @@
+# Which pretraining checkpoint each fine-tune actually started from.
+#
+# final/ is a periodically-refreshed export of a run still in progress, so it MOVES.
+# Resolved by byte-comparing final/model.safetensors against every checkpoint in the
+# run. Recorded because that is only possible while those checkpoints still exist,
+# and the compute budget per run cannot be reconstructed afterwards without it.
+# Generated 2026-09-20T17:46Z.
+
+scale  final/ is      run's last   of sched   used by
+50m    checkpoint-133233 180000       24.7%      268 configs
+100m   checkpoint-138073 190000       25.5%      20 configs
+200m   checkpoint-192799 192799       35.7%      13 configs
+400m   checkpoint-181381 181381       33.6%      13 configs
+
+max_steps for every production run: 540423
