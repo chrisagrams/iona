@@ -715,3 +715,36 @@ has been run somewhere else first.
 
 WHAT WOULD OVERTURN IT: es 0.75 at batch 12 landing above 0.9436, which would make the
 peak a plateau rather than a maximum at 0.5.
+
+## The denoise scale curve turns over at 400m (FT5, complete)
+
+Six seeds at each of four scales, one fixed configuration, 24/24 arms (job 8845262):
+
+| scale | mean test AUROC | sd | step | gap | t |
+| --- | --- | --- | --- | --- | --- |
+| 50m | 0.9317 | 0.00055 | -- | -- | -- |
+| 100m | 0.9400 | 0.00029 | 50m -> 100m | +0.0083 | +32.7 |
+| 200m | **0.9447** | 0.00025 | 100m -> 200m | +0.0047 | +30.2 |
+| 400m | 0.9434 | 0.00045 | 200m -> 400m | **-0.0013** | **-6.3** |
+
+The curve rises, decelerates, and turns over. Every step resolves, including the last.
+This replaces the earlier reading of a plateau, which came from one seed per scale
+judged against each grid's internal arm spread -- an upper bound on noise, not a
+measurement of it.
+
+The configuration is not a confound: `lr2e4_es05_b12` was independently the top arm of
+all four HP grids, so each scale is repeated at its own selected point.
+
+Grid bests sit ~0.0003 above the seed means at every scale, because a grid best is a
+max over arms. The bias is consistent, so the gaps move very little, but no single grid
+best should be quoted as that scale's expected score.
+
+THE CLAIM IS ABOUT A BUDGET, NOT ABOUT SCALE. All of this is at 4 epochs, and the 400m
+probe has 400m still gaining there: +0.0021 from ep2 to ep4, four times this noise. So
+"400m is worse than 200m at 4 epochs" is established, and "400m is worse than 200m" is
+not. The 8-epoch row -- 8846027 at 50m, the ep8-mid grid at 100m/200m, and the recovered
+probe arms at 400m -- is what separates them.
+
+WHAT WOULD OVERTURN IT: 400m at 8 epochs reaching or passing 200m at 8 epochs, which
+would make the turnover an artefact of under-training the larger model rather than a
+property of scale. That is a live possibility, not a hedge.

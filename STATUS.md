@@ -34,7 +34,10 @@ DENOISE  — the line that works
         seeds per scale, job 8845262):
 
               50m   0.9317 +/- 0.00055        200m  0.9447 +/- 0.00025
-              100m  pending                   400m  0.9434 +/- 0.00045
+              100m  0.9400 +/- 0.00029        400m  0.9434 +/- 0.00045
+
+        All 24 arms in. Every step resolves: +0.0083 (t=32.7), +0.0047
+        (t=30.2), -0.0013 (t=-6.3). See results/denoise_scale_seeds.txt.
 
         200m -> 400m is -0.0013 at t = -6.3, a regression and not a plateau.
         AT THIS FINE-TUNING BUDGET: the 400m probe (8845252) has 400m still

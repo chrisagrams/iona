@@ -1,0 +1,30 @@
+# FT5: denoise scale curve with seed error bars
+# job 8845262, 4 scales x 6 seeds = 24 arms, all completed
+# config held fixed at lr 2e-4 / encoder_lr_scale 0.5 / 4 epochs / head 512 /
+#   effective batch 12 -- independently the top arm of all four HP grids
+# --seed moves head init, data order and dropout; the train/val/test split is NOT
+#   moved by it, so every arm is scored on identical test rows
+# metric: test_auroc on denoising
+
+scale    n      mean        sd       min       max  grid best    bias
+50m      6    0.9317   0.00055    0.9306    0.9321     0.9320 +0.0003
+100m     6    0.9400   0.00029    0.9397    0.9405     0.9403 +0.0003
+200m     6    0.9447   0.00025    0.9445    0.9452     0.9446 -0.0001
+400m     6    0.9434   0.00045    0.9427    0.9439     0.9436 +0.0002
+
+  'grid best' is a MAX over each grid's arms, so it sits above the mean by
+  ~0.0003 at every scale. Consistent bias; the gaps are barely affected.
+
+step                  gap       se       t   verdict
+50m -> 100m       +0.0083  0.00025   +32.7   RESOLVED
+100m -> 200m      +0.0047  0.00016   +30.2   RESOLVED
+200m -> 400m      -0.0013  0.00021    -6.3   RESOLVED
+
+  Every step resolves. The curve rises, decelerates, and TURNS OVER.
+  200m -> 400m is a regression, not the plateau reported from one seed each.
+
+  CAVEAT, and it is the important one: this is 4 epochs. The 400m probe
+  (job 8845252) has 400m still gaining at 4 epochs, +0.0021 from ep2, which
+  is four times this noise. '400m is worse than 200m at this budget' and
+  '400m has not converged' are both true; only the second is about scale.
+  The 8-epoch row at every scale is what settles it.
