@@ -568,6 +568,28 @@ inference, check the within-group version before drawing a conclusion.
       systematic difference could reorder them.
 - [ ] Backfill 200m and 400m winners the same way once those grids finish.
 
+## FT17. The pair-loss grid samples both margins on the low side — **Open, watch for it**
+
+Embeddings reach `pair_contrastive_loss` L2-normalised (`MSDeltaForContrastive.embed`
+ends in `F.normalize`), verified rather than assumed, so pair distance lives in [0, 2]
+and relates to cosine by d^2 = 2 - 2cos. The grid sweeps `pair_margin` over {0.5, 1.0}:
+
+    margin 0.5 .. asks different peptides for cosine <= 0.875, a weak ask
+    margin 1.0 .. asks for cosine <= 0.5
+    margin 2.0 .. would demand antipodal, certainly too strong
+
+Both sampled values sit in the bottom half of the usable range. If 1.0 wins it will
+have won at the edge of the grid, which says the optimum is at or beyond it rather
+than located -- the same shape of result as the 400m probe, where encoder_lr_scale was
+monotone up to its largest sampled value of 0.5 and 1.0 was never tried.
+
+- [ ] If margin 1.0 beats 0.5, extend to {1.0, 1.25, 1.5} before reading anything into
+      the margin.
+- [ ] Do not read `positive_fraction` as a loss-balance knob here: `pair_positive_weight`
+      is left at its 1.0 default across all twelve arms, so the sweep varies how often a
+      positive pair is DRAWN and lets the loss weighting follow. That is the intended
+      question -- sampling balance -- but the two are not separated by this grid.
+
 ## FT13. The pretrained-vs-scratch denoise comparison has an unmeasured cell — **Open, cheap**
 
 The two grids did not sweep the same epoch counts, so there are two valid comparisons
