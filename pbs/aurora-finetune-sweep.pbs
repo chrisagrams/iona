@@ -121,6 +121,10 @@ declare -A GRID_CHECK=(
     # FT13: the pretrained winner at the scratch grid's 8 epochs, so "+0.032 at
     # double budget" can be attributed to pretraining rather than to the budget.
     [configs/sweep-denoise-seeds-ep8]="sweeps/make_seed_grid.py --sizes 50m --seeds 6 --epochs 8 --check"
+    # The rest of the 8-epoch row. Separate directory from the 50m one because a
+    # QUEUED job globs its grid at job start, so extending that directory would
+    # have changed what 8846027 runs after it was already submitted.
+    [configs/sweep-denoise-seeds-ep8-mid]="sweeps/make_seed_grid.py --sizes 100m,200m --seeds 6 --epochs 8 --out-name sweep-denoise-seeds-ep8-mid --check"
 )
 if [[ -z ${SKIP_GRID_CHECK:-} ]]; then
     check=${GRID_CHECK[${SWEEP_ROOT%/}]:-}
