@@ -1,7 +1,7 @@
 """Denoise the spectra of mzML files with a trained ``MSDeltaForDenoising`` model.
 
 Example:
-    msdelta-denoise-mzml run.mzML --checkpoint runs/denoise-probes/step-190000 \\
+    msdelta-denoise run.mzML --checkpoint runs/denoise-probes/step-190000 \\
         --output run.denoised.mzML
 """
 
