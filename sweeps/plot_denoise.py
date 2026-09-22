@@ -4,9 +4,8 @@
 
 Four figures, each making one point that a table makes badly:
 
-  auroc_scaling        the curve turns over, and the error bars are small enough to say so
-  f1_scaling           the same on F1, where the turnover is marginal rather than decisive
-  pretrain_ablation    what pretraining is worth, against a random encoder
+  scaling              denoise against model size, AUROC and F1
+  pretrain_ablation    pretrained against a random encoder, AUROC and F1
 
 and under figures/extra/, the three that explain how those were reached:
 
@@ -67,83 +66,48 @@ def annotate(ax, text, xy, xytext, color=INK):
                                              shrinkA=0, shrinkB=3))
 
 
-def _scaling_figure(runs: Path, metric: str, label: str, colour: str,
-                    filename: str) -> None:
-    """One metric's scale curve plus its step significance.
+def fig_scaling(runs: Path) -> None:
+    """The denoise scale curve on both metrics, FT5: 4 scales x 6 seeds (job 8845262).
 
-    AUROC and F1 get separate figures because they are separate claims: F1 is
-    thresholded at 0.5 and AUROC is not, so a calibration shift moves one and not the
-    other. They happen to agree on every step here, and each figure says so.
+    One figure rather than two: AUROC and F1 answer the same question and agree on
+    every step, so putting them side by side is the comparison. The per-step table that
+    used to occupy a third panel is in results/denoise_scale_seeds.txt -- a bar chart of
+    three differences restated what the curve already shows.
     """
     recs = load(runs, "8845262")
     scales = ["50m", "100m", "200m", "400m"]
     x = np.arange(len(scales))
-    mean, sd = [], []
-    for s in scales:
-        v = [r[metric] for a, r in recs.items() if a.startswith(s + "_")]
-        mean.append(np.mean(v)); sd.append(np.std(v, ddof=1))
-    mean, sd = np.array(mean), np.array(sd)
 
-    fig, (ax, ax2) = plt.subplots(1, 2, figsize=(9.8, 3.9),
-                                  gridspec_kw={"width_ratios": [1.35, 1]})
+    fig, axes = plt.subplots(1, 2, figsize=(11.0, 4.2))
+    for ax, metric, label, colour in ((axes[0], "test_auroc", "AUROC", BLUE),
+                                      (axes[1], "test_f1", "F1", "#7c3aed")):
+        mean, sd = [], []
+        for s in scales:
+            v = [r[metric] for a, r in recs.items() if a.startswith(s + "_")]
+            mean.append(np.mean(v)); sd.append(np.std(v, ddof=1))
+        mean, sd = np.array(mean), np.array(sd)
 
-    ax.fill_between(x, mean - sd, mean + sd, color=colour, alpha=0.16, lw=0)
-    ax.plot(x[:3], mean[:3], "-", color=colour, lw=2, zorder=3)
-    ax.plot(x[2:], mean[2:], "-", color=RED, lw=2, zorder=3)
-    ax.errorbar(x, mean, yerr=sd, fmt="o", ms=6, color=colour, ecolor=colour,
-                capsize=4, lw=1.4, zorder=4)
-    ax.plot(x[3], mean[3], "o", ms=6, color=RED, zorder=5)
-    span = (mean + sd).max() - (mean - sd).min()
-    for xi, m, e in zip(x, mean, sd):
-        ax.annotate(f"{m:.4f}", (xi, m + e), textcoords="offset points",
-                    xytext=(0, 7), ha="center", fontsize=8.5, color=INK)
-    ax.set_ylim((mean - sd).min() - 0.12 * span, (mean + sd).max() + 0.22 * span)
-    ax.set_xticks(x); ax.set_xticklabels(scales)
-    ax.set_xlabel("model size"); ax.set_ylabel(f"test {label}")
-    ax.set_title(f"{label} improves with size — then turns over at 400m",
-                 loc="left", pad=16)
-    ax.grid(axis="y"); ax.set_axisbelow(True); ax.set_xlim(-0.35, 3.45)
-    ax.text(0.98, 0.04, "shaded band = ±1 sd over 6 seeds", transform=ax.transAxes,
-            fontsize=7.8, color=MUTED, ha="right")
+        ax.fill_between(x, mean - sd, mean + sd, color=colour, alpha=0.16, lw=0)
+        ax.plot(x[:3], mean[:3], "-", color=colour, lw=2.2, zorder=3)
+        ax.plot(x[2:], mean[2:], "-", color=RED, lw=2.2, zorder=3)
+        ax.errorbar(x, mean, yerr=sd, fmt="o", ms=6, color=colour, ecolor=colour,
+                    capsize=4, lw=1.4, zorder=4)
+        ax.plot(x[3], mean[3], "o", ms=6, color=RED, zorder=5)
+        span = (mean + sd).max() - (mean - sd).min()
+        for xi, m, e in zip(x, mean, sd):
+            ax.annotate(f"{m:.4f}", (xi, m + e), textcoords="offset points",
+                        xytext=(0, 8), ha="center", fontsize=8, color=INK)
+        ax.set_ylim((mean - sd).min() - 0.12 * span, (mean + sd).max() + 0.24 * span)
+        ax.set_xticks(x); ax.set_xticklabels(scales)
+        ax.set_xlim(-0.35, 3.45)
+        ax.set_xlabel("model size"); ax.set_ylabel(f"test {label}")
+        ax.set_title(f"test {label}", loc="left", pad=14)
+        ax.grid(axis="y"); ax.set_axisbelow(True)
 
-    steps = [(f"{a}→{b}", mean[i + 1] - mean[i],
-              np.sqrt(sd[i] ** 2 / 6 + sd[i + 1] ** 2 / 6))
-             for i, (a, b) in enumerate(zip(scales, scales[1:]))]
-    y = np.arange(len(steps))[::-1]
-    ax2.barh(y, [g for _, g, _ in steps], height=0.5,
-             color=[GREEN if g > 0 else RED for _, g, _ in steps], alpha=0.85)
-    ax2.errorbar([g for _, g, _ in steps], y, xerr=[e for _, _, e in steps],
-                 fmt="none", ecolor=INK, capsize=3, lw=1)
-    widest = max(abs(g) for _, g, _ in steps)
-    for yi, (lab, g, e) in zip(y, steps):
-        ax2.text(max(g, 0) + 0.05 * widest, yi, f"{g:+.4f}   t={g/e:+.0f}",
-                 va="center", ha="left", fontsize=8.2)
-    ax2.axvline(0, color=MUTED, lw=0.9)
-    ax2.set_yticks(y); ax2.set_yticklabels([s[0] for s in steps])
-    ax2.set_xlabel(f"change in test {label}")
-    ts = [abs(g / e) for _, g, e in steps]
-    # Do not claim more than the metric gives: F1 carries about twice the seed
-    # noise of AUROC, so the same turnover lands at t=-3 there against t=-6.
-    ax2.set_title("Every step resolves" if min(ts) >= 4 else
-                  "First two steps resolve; the turnover is marginal",
-                  loc="left", pad=16)
-    ax2.set_xlim(-0.30 * widest, 1.75 * widest)
-    ax2.grid(axis="x"); ax2.set_axisbelow(True)
-    ax2.set_ylim(-0.6, len(steps) - 0.4)
-
-    fig.suptitle(f"FT5 — 4 scales × 6 seeds, one fixed configuration (job 8845262). "
-                 f"AUROC and F1 agree on all three steps.",
-                 x=0.005, ha="left", fontsize=8.5, color=MUTED, y=1.04)
-    fig.savefig(FIGS / filename)
+    fig.suptitle("FT5, job 8845262. 6 seeds per scale, band is ±1 sd.",
+                 x=0.005, ha="left", fontsize=8.5, color=MUTED, y=1.02)
+    fig.savefig(FIGS / "scaling.png")
     plt.close(fig)
-
-
-def fig_auroc_scaling(runs: Path) -> None:
-    _scaling_figure(runs, "test_auroc", "AUROC", BLUE, "auroc_scaling.png")
-
-
-def fig_f1_scaling(runs: Path) -> None:
-    _scaling_figure(runs, "test_f1", "F1", "#7c3aed", "f1_scaling.png")
 
 
 def fig_top_cluster(runs: Path) -> None:
@@ -169,29 +133,23 @@ def fig_top_cluster(runs: Path) -> None:
     ax.scatter(rank[lowlr & ~frozen], v[lowlr & ~frozen], s=13, color=AMBER, zorder=4,
                label="lr 1e-6")
     ax.set_xlabel("arm, ranked by test AUROC"); ax.set_ylabel("test AUROC")
-    ax.set_title("216 arms: the floor is the learning rate, not freezing",
-                 loc="left", pad=16)
+    ax.set_title("216 arms ranked by test AUROC", loc="left", pad=16)
     ax.grid(axis="y"); ax.set_axisbelow(True); ax.set_xlim(0, len(v) + 2)
     ax.legend(frameon=False, fontsize=8, loc="lower left", handletextpad=0.3)
-    ax.text(0.98, 0.96, f"frozen arms span {v[frozen].min():.4f}–{v[frozen].max():.4f}\n"
-            f"and never reach the top cluster", transform=ax.transAxes, ha="right",
-            va="top", fontsize=7.8, color=MUTED)
 
     k = 26
     ax2.axhspan(best - 2 * noise, best, color=AMBER, alpha=0.20, lw=0)
     ax2.plot(rank[:k], v[:k], "o-", color=BLUE, lw=1.5, ms=4.5)
     ax2.axhline(best, color=RED, lw=0.9, ls="--")
     ax2.set_xlabel("rank"); ax2.set_ylabel("test AUROC")
-    ax2.set_title(f"Top {k}: {inside} arms are one measurement", loc="left", pad=16)
+    ax2.set_title(f"Top {k}", loc="left", pad=16)
     ax2.grid(axis="y"); ax2.set_axisbelow(True)
-    ax2.text(0.97, 0.10,
-             f"band = ±2 sd of seed noise (0.0005)\ntop {inside} arms fall inside it",
-             transform=ax2.transAxes, ha="right", fontsize=7.8, color=INK)
     ax2.annotate(f"best {best:.4f}", xy=(1, best), xytext=(7, best + 0.0006),
                  fontsize=8.2, color=RED,
                  arrowprops=dict(arrowstyle="-", lw=0.7, color=RED))
 
-    fig.suptitle("50m hyperparameter grid (job 8840408); seed noise 0.0005 from FT5",
+    fig.suptitle("50m hyperparameter grid (job 8840408). Band is ±2 sd of the 0.0005 "
+                 "seed noise measured in FT5.",
                  x=0.005, ha="left", fontsize=8.5, color=MUTED, y=1.02)
     fig.savefig(EXTRA / "top_cluster.png")
     plt.close(fig)
@@ -238,14 +196,14 @@ def fig_encoder_lr(runs: Path) -> None:
             zorder=2, label="extrapolating the probe")
     ax.scatter([0.5], [ys[-1]], s=150, facecolor="none", edgecolor=GREEN, lw=1.6, zorder=5)
     ax.set_xlabel("encoder_lr_scale"); ax.set_ylabel("test AUROC")
-    ax.set_title("400m: the peak is at 0.5", loc="left", pad=16)
+    ax.set_title("400m, 4 epochs", loc="left", pad=16)
     ax.grid(axis="y"); ax.set_axisbelow(True); ax.set_xlim(0.02, 1.13)
     ax.legend(frameon=False, fontsize=7.8, loc="lower right", borderaxespad=0.5)
 
     x = np.arange(len(scales))
     for ax, kind, title in (
-            (axes[1], "small", "Small batch (12): 0.5 wins at all four scales"),
-            (axes[2], "large", "Large batch (144 at 50m, 48 else): 1.0 wins, all four")):
+            (axes[1], "small", "Effective batch 12"),
+            (axes[2], "large", "Large batch (144 at 50m, 48 elsewhere)")):
         a = np.array([val(s, "05", kind) for s in scales])
         b = np.array([val(s, "10", kind) for s in scales])
         ax.fill_between(x, a, b, color=GRID, alpha=0.9, lw=0, zorder=1)
@@ -263,8 +221,8 @@ def fig_encoder_lr(runs: Path) -> None:
         ax.grid(axis="y"); ax.set_axisbelow(True); ax.set_xlim(-0.3, 3.3)
         ax.legend(frameon=False, fontsize=7.8, loc="lower right")
 
-    fig.suptitle("encoder_lr_scale: how hard to push the pretrained encoder. The best "
-                 "value depends on batch size, the same way at every scale.",
+    fig.suptitle("encoder_lr_scale is the encoder LR as a multiple of the head's. "
+                 "Left: the 400m probe. Right: 0.5 against 1.0 at each scale.",
                  x=0.005, ha="left", fontsize=8.5, color=MUTED, y=1.03)
     fig.savefig(EXTRA / "encoder_lr_scale.png")
     plt.close(fig)
@@ -311,25 +269,17 @@ def fig_probe_heatmap(runs: Path) -> None:
     if borrowed:
         ax.add_patch(plt.Rectangle((0.5, 2.5), 1, 1, fill=False, edgecolor=RED,
                                    lw=1.8, hatch="///", alpha=0.85))
-        ax.text(0.0, -0.19,
-                "hatched: from the 400m HP grid (job 8842147), not the probe — the "
-                "probe never sampled 1.0,\nwhich is why it looked monotone. Same lr, "
-                "epochs and batch; the jobs agree to 0.0003 where they overlap.",
-                transform=ax.transAxes, fontsize=7.4, color=RED, va="top")
     ax.set_xticks(range(len(eps))); ax.set_xticklabels([e[2:] + " epochs" for e in eps])
     ax.set_yticks(range(len(es))); ax.set_yticklabels(labels)
     ax.set_ylabel("encoder_lr_scale"); ax.set_xlabel("fine-tuning budget")
-    ax.set_title("400m: BOTH axes turn over — the peak is es 0.5 at 4 epochs",
-                 loc="left", pad=16)
+    ax.set_title("400m: encoder_lr_scale × fine-tuning budget", loc="left", pad=16)
     for sp in ax.spines.values():
         sp.set_visible(False)
     ax.tick_params(length=0)
     fig.colorbar(im, ax=ax, fraction=0.045, pad=0.03, label="test AUROC")
-    fig.suptitle("More epochs stops helping: at es 0.5 the 8-epoch arm is 0.0021 BELOW "
-                 "the 4-epoch one, five times the fixed-seed noise.\nThe lower the "
-                 "encoder LR the later the peak, but the throttled arms never catch up "
-                 "— 0.1 at 8 epochs still trails 0.5 at 4.",
-                 x=0.005, ha="left", fontsize=8.3, color=MUTED, y=1.07)
+    fig.suptitle("Job 8845252, one arm per cell. Fixed-seed noise 0.00022. The "
+                 "hatched cell is from the 400m HP grid (8842147), not the probe.",
+                 x=0.005, ha="left", fontsize=8.5, color=MUTED, y=1.02)
     fig.savefig(EXTRA / "probe_heatmap.png")
     plt.close(fig)
 
@@ -378,8 +328,7 @@ def fig_pretrain_ablation(runs: Path) -> None:
         ax.set_xticks([2, 4, 8]); ax.set_xticklabels([f"{e} epochs" for e in (2, 4, 8)])
         ax.set_xlim(1.5, 8.9)
         ax.set_xlabel("fine-tuning budget"); ax.set_ylabel(f"test {label}")
-        ax.set_title(f"{label}: +{P[4]-S[4]:.3f} at 4 epochs, +{top8-S[8]:.3f} at 8",
-                     loc="left", pad=14)
+        ax.set_title(f"test {label}", loc="left", pad=14)
         ax.grid(axis="y"); ax.set_axisbelow(True)
         ax.legend(frameon=False, fontsize=8.4, loc="lower right")
     fig.savefig(FIGS / "pretrain_ablation.png")
@@ -395,8 +344,8 @@ def main() -> int:
         raise SystemExit(f"no run directory at {runs}")
     FIGS.mkdir(parents=True, exist_ok=True)
     EXTRA.mkdir(parents=True, exist_ok=True)
-    for fn in (fig_auroc_scaling, fig_f1_scaling, fig_top_cluster,
-               fig_encoder_lr, fig_probe_heatmap, fig_pretrain_ablation):
+    for fn in (fig_scaling, fig_top_cluster, fig_encoder_lr,
+               fig_probe_heatmap, fig_pretrain_ablation):
         fn(runs)
         print(f"  {fn.__name__}")
     return 0
