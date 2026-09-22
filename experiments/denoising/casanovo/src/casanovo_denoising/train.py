@@ -1,4 +1,8 @@
-"""Train a denoising head on a frozen Casanovo encoder with plain PyTorch."""
+"""Train a denoising head on a frozen Casanovo encoder with Accelerate.
+
+Single process:  casanovo-denoising --checkpoint ... --output-dir ...
+Multiple GPUs:   accelerate launch --num_processes 2 -m casanovo_denoising.train ...
+"""
 
 from __future__ import annotations
 
@@ -8,12 +12,13 @@ import json
 import random
 import sys
 import warnings
-from contextlib import nullcontext
 from importlib.metadata import version
 from pathlib import Path
 
 import numpy as np
 import torch
+from accelerate import Accelerator
+from accelerate.utils import gather_object
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
@@ -26,11 +31,11 @@ from casanovo_denoising.data import (
 from casanovo_denoising.metrics import denoising_metrics
 from casanovo_denoising.model import CasanovoDenoiser, count_parameters
 
-AMP_DTYPES = {"fp16": torch.float16, "bf16": torch.bfloat16}
+ACCELERATE_PRECISION = {"fp32": "no", "fp16": "fp16", "bf16": "bf16"}
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description=__doc__)
+    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--checkpoint", type=Path, required=True)
     parser.add_argument("--dataset-repo", default=DEFAULT_DATASET_REPO)
     parser.add_argument("--train-split", default="train")
@@ -57,39 +62,33 @@ def seed_everything(seed: int) -> None:
     torch.manual_seed(seed)
 
 
-def resolve_device(name: str) -> torch.device:
+def resolve_device_type(name: str) -> str:
     xpu_available = hasattr(torch, "xpu") and torch.xpu.is_available()
     if name == "auto":
         if torch.cuda.is_available():
-            return torch.device("cuda")
-        return torch.device("xpu") if xpu_available else torch.device("cpu")
+            return "cuda"
+        return "xpu" if xpu_available else "cpu"
     if name == "cuda" and not torch.cuda.is_available():
         raise RuntimeError("--device cuda requested but CUDA is not available")
     if name == "xpu" and not xpu_available:
         raise RuntimeError("--device xpu requested but XPU is not available")
-    return torch.device(name)
+    return name
 
 
-def resolve_precision(precision: str, device: torch.device) -> str:
+def resolve_precision(precision: str, device_type: str) -> str:
     """Return the precision actually used, falling back to fp32 if unsupported."""
     if precision == "fp32":
         return precision
-    if device.type == "cuda":
+    if device_type == "cuda":
         supported = precision == "fp16" or torch.cuda.is_bf16_supported()
-    elif device.type == "xpu":
+    elif device_type == "xpu":
         supported = True
     else:
         supported = precision == "bf16"
     if not supported:
-        warnings.warn(f"{precision} autocast is not supported on {device}; using fp32")
+        warnings.warn(f"{precision} autocast is not supported on {device_type}; using fp32")
         return "fp32"
     return precision
-
-
-def make_grad_scaler(device: torch.device, enabled: bool):
-    if hasattr(torch.amp, "GradScaler"):
-        return torch.amp.GradScaler(device.type, enabled=enabled)
-    return torch.cuda.amp.GradScaler(enabled=enabled)
 
 
 def sha256sum(path: Path) -> str:
@@ -100,19 +99,33 @@ def sha256sum(path: Path) -> str:
     return digest.hexdigest()
 
 
-def make_loader(dataset, *, peak_pair_budget: int, seed: int, shuffle: bool, num_workers: int, device):
+def make_loader(
+    dataset,
+    accelerator: Accelerator,
+    *,
+    peak_pair_budget: int,
+    seed: int,
+    train: bool,
+    num_workers: int,
+) -> tuple[DataLoader, PeakBudgetBatchSampler]:
+    # Sharding is done by the sampler rather than accelerator.prepare so that
+    # variable-sized batches, epoch reshuffling, and exact evaluation
+    # (no duplicated spectra) stay under our control.
     sampler = PeakBudgetBatchSampler(
         lengths=dataset["num_peaks"],
         peak_pair_budget=peak_pair_budget,
         seed=seed,
-        shuffle=shuffle,
+        shuffle=train,
+        process_index=accelerator.process_index,
+        num_processes=accelerator.num_processes,
+        pad=train,
     )
     loader = DataLoader(
         dataset.with_format("numpy", columns=["mz", "intensity", "labels"]),
         batch_sampler=sampler,
         collate_fn=collate_denoising,
         num_workers=num_workers,
-        pin_memory=device.type == "cuda",
+        pin_memory=accelerator.device.type == "cuda",
     )
     return loader, sampler
 
@@ -122,18 +135,26 @@ def to_device(batch: dict[str, torch.Tensor], device: torch.device) -> dict[str,
 
 
 @torch.no_grad()
-def evaluate(model, loader, device, autocast) -> dict[str, float]:
+def evaluate(model: CasanovoDenoiser, loader: DataLoader, accelerator: Accelerator) -> dict[str, float]:
+    """Evaluate this process's shard, then gather every peak onto all processes."""
     model.eval()
-    all_logits: list[np.ndarray] = []
-    all_labels: list[np.ndarray] = []
-    for batch in tqdm(loader, desc="Denoising eval"):
-        batch = to_device(batch, device)
-        with autocast():
+    shard_logits: list[np.ndarray] = []
+    shard_labels: list[np.ndarray] = []
+    progress = tqdm(loader, desc="Denoising eval", disable=not accelerator.is_local_main_process)
+    for batch in progress:
+        batch = to_device(batch, accelerator.device)
+        with accelerator.autocast():
             _, logits, valid = model(batch["mz"], batch["intensity"], batch["labels"])
-        all_logits.append(logits[valid].float().cpu().numpy())
-        all_labels.append(batch["labels"][valid].cpu().numpy())
-    logits = np.concatenate(all_logits)
-    labels = np.concatenate(all_labels)
+        shard_logits.append(logits[valid].float().cpu().numpy())
+        shard_labels.append(batch["labels"][valid].cpu().numpy())
+    empty = np.zeros(0, dtype=np.float32)
+    shard = (
+        np.concatenate(shard_logits) if shard_logits else empty,
+        np.concatenate(shard_labels) if shard_labels else empty,
+    )
+    shards = gather_object([shard])
+    logits = np.concatenate([shard_logits for shard_logits, _ in shards])
+    labels = np.concatenate([shard_labels for _, shard_labels in shards])
     loss = torch.nn.functional.binary_cross_entropy_with_logits(
         torch.from_numpy(logits), torch.from_numpy(labels)
     ).item()
@@ -143,48 +164,51 @@ def evaluate(model, loader, device, autocast) -> dict[str, float]:
 
 def main(argv: list[str] | None = None) -> None:
     args = parse_args(argv)
+    device_type = resolve_device_type(args.device)
+    precision = resolve_precision(args.precision, device_type)
+    accelerator = Accelerator(
+        mixed_precision=ACCELERATE_PRECISION[precision],
+        cpu=device_type == "cpu",
+    )
+    if accelerator.device.type != device_type:
+        raise RuntimeError(f"Accelerate selected {accelerator.device}, expected {device_type}")
     seed_everything(args.seed)
-    device = resolve_device(args.device)
-    precision = resolve_precision(args.precision, device)
-    amp_dtype = AMP_DTYPES.get(precision)
-
-    def autocast():
-        if amp_dtype is None:
-            return nullcontext()
-        return torch.autocast(device_type=device.type, dtype=amp_dtype)
 
     checkpoint = args.checkpoint.expanduser().resolve()
-    args.output_dir.mkdir(parents=True, exist_ok=True)
+    if accelerator.is_main_process:
+        args.output_dir.mkdir(parents=True, exist_ok=True)
 
-    datasets = build_denoising_datasets(
-        args.dataset_repo,
-        train_split=args.train_split,
-        validation_split=args.validation_split,
-        cache_dir=args.cache_dir,
-        num_proc=args.num_proc if args.num_proc > 1 else None,
-    )
+    # Let the main process populate the datasets cache before the others read it.
+    with accelerator.main_process_first():
+        datasets = build_denoising_datasets(
+            args.dataset_repo,
+            train_split=args.train_split,
+            validation_split=args.validation_split,
+            cache_dir=args.cache_dir,
+            num_proc=args.num_proc if args.num_proc > 1 else None,
+        )
     train_loader, train_sampler = make_loader(
         datasets["train"],
+        accelerator,
         peak_pair_budget=args.peak_pair_budget,
         seed=args.seed,
-        shuffle=True,
+        train=True,
         num_workers=args.num_workers,
-        device=device,
     )
     validation_loader, _ = make_loader(
         datasets["validation"],
+        accelerator,
         peak_pair_budget=args.peak_pair_budget,
         seed=args.seed,
-        shuffle=False,
+        train=False,
         num_workers=args.num_workers,
-        device=device,
     )
 
     model = CasanovoDenoiser.from_checkpoint(
         checkpoint,
         head_hidden_size=args.head_hidden_size,
         head_dropout=args.head_dropout,
-    ).to(device)
+    )
     parameter_counts = {
         "encoder": count_parameters(model.encoder),
         "head": count_parameters(model.head),
@@ -192,52 +216,63 @@ def main(argv: list[str] | None = None) -> None:
         "trainable": count_parameters(model, trainable_only=True),
     }
     for name, count in parameter_counts.items():
-        print(f"{name} parameters: {count:,}")
+        accelerator.print(f"{name} parameters: {count:,}")
 
     optimizer = torch.optim.AdamW(
         [p for p in model.parameters() if p.requires_grad],
         lr=args.learning_rate,
         weight_decay=args.weight_decay,
     )
-    scaler = make_grad_scaler(device, enabled=precision == "fp16")
+    model, optimizer = accelerator.prepare(model, optimizer)
 
     for epoch in range(args.epochs):
         model.train()
         train_sampler.set_epoch(epoch)
-        progress = tqdm(train_loader, desc=f"Denoising train (epoch {epoch + 1}/{args.epochs})")
+        progress = tqdm(
+            train_loader,
+            desc=f"Denoising train (epoch {epoch + 1}/{args.epochs})",
+            disable=not accelerator.is_local_main_process,
+        )
         for batch in progress:
-            batch = to_device(batch, device)
-            with autocast():
+            batch = to_device(batch, accelerator.device)
+            with accelerator.autocast():
                 loss, _, _ = model(batch["mz"], batch["intensity"], batch["labels"])
             optimizer.zero_grad(set_to_none=True)
-            scaler.scale(loss).backward()
-            scaler.step(optimizer)
-            scaler.update()
+            accelerator.backward(loss)
+            optimizer.step()
             progress.set_postfix(loss=f"{loss.item():.4f}")
 
-    metrics = evaluate(model, validation_loader, device, autocast)
-    for name, value in metrics.items():
-        print(f"{name}: {value:.6f}")
+    # Evaluate the unwrapped module: shards may have different batch counts,
+    # which DDP forward passes are not designed for.
+    denoiser = accelerator.unwrap_model(model)
+    metrics = evaluate(denoiser, validation_loader, accelerator)
 
-    torch.save(model.head.state_dict(), args.output_dir / "head.pt")
-    (args.output_dir / "metrics.json").write_text(json.dumps(metrics, indent=2) + "\n")
-    run_config = {
-        **{key: str(value) if isinstance(value, Path) else value for key, value in vars(args).items()},
-        "checkpoint": str(checkpoint),
-        "checkpoint_sha256": sha256sum(checkpoint),
-        "resolved_device": str(device),
-        "resolved_precision": precision,
-        "parameter_counts": parameter_counts,
-        "num_train_spectra": len(datasets["train"]),
-        "num_validation_spectra": len(datasets["validation"]),
-        "versions": {
-            "python": sys.version.split()[0],
-            "casanovo": version("casanovo"),
-            "torch": torch.__version__,
-            "numpy": np.__version__,
-        },
-    }
-    (args.output_dir / "run_config.json").write_text(json.dumps(run_config, indent=2) + "\n")
+    if accelerator.is_main_process:
+        for name, value in metrics.items():
+            print(f"{name}: {value:.6f}")
+        torch.save(denoiser.head.state_dict(), args.output_dir / "head.pt")
+        (args.output_dir / "metrics.json").write_text(json.dumps(metrics, indent=2) + "\n")
+        run_config = {
+            **{key: str(value) if isinstance(value, Path) else value for key, value in vars(args).items()},
+            "checkpoint": str(checkpoint),
+            "checkpoint_sha256": sha256sum(checkpoint),
+            "resolved_device": device_type,
+            "resolved_precision": precision,
+            "num_processes": accelerator.num_processes,
+            "parameter_counts": parameter_counts,
+            "num_train_spectra": len(datasets["train"]),
+            "num_validation_spectra": len(datasets["validation"]),
+            "versions": {
+                "python": sys.version.split()[0],
+                "casanovo": version("casanovo"),
+                "accelerate": version("accelerate"),
+                "torch": torch.__version__,
+                "numpy": np.__version__,
+            },
+        }
+        (args.output_dir / "run_config.json").write_text(json.dumps(run_config, indent=2) + "\n")
+    accelerator.wait_for_everyone()
+    accelerator.end_training()
 
 
 if __name__ == "__main__":

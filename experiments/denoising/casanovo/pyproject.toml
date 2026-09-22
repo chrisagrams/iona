@@ -5,6 +5,7 @@ description = "Frozen Casanovo encoder baseline for peak-level MS/MS denoising."
 readme = "README.md"
 requires-python = ">=3.10,<3.14"
 dependencies = [
+    "accelerate>=1.0",
     "casanovo==5.2.0",
     "numpy<2",
     "datasets>=3,<5",
