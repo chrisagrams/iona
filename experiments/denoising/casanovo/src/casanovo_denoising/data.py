@@ -114,7 +114,10 @@ def _process_example(example: dict) -> dict:
         precursor_charge=int(example["charge"]),
     )
     if processed is None:
-        return {"mz": [], "intensity": [], "labels": [], "num_peaks": 0}
+        # Match the float32 arrays of retained spectra; empty Python lists
+        # become float64 and cannot be concatenated with them by Arrow.
+        empty = np.zeros(0, dtype=np.float32)
+        return {"mz": empty, "intensity": empty, "labels": empty, "num_peaks": 0}
     return {**processed, "num_peaks": len(processed["mz"])}
 
 
