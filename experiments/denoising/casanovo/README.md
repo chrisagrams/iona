@@ -48,10 +48,14 @@ The run writes these files to `--output-dir`:
 
 - `head.pt`: the head's `state_dict` only (the encoder is unchanged, so its
   weights are not saved).
-- `metrics.json`: validation metrics named `denoise/loss`,
-  `denoise/accuracy`, `denoise/balanced_accuracy`, `denoise/precision`,
-  `denoise/recall`, `denoise/f1`, `denoise/auroc`, `denoise/auprc`, and
-  `denoise/noise_prevalence`. Noise is the positive class.
+- `metrics.json`: two sets of validation metrics, both with noise as the
+  positive class (see [Evaluation](#evaluation)):
+  - `denoise/*`: `loss`, `accuracy`, `balanced_accuracy`, `precision`,
+    `recall`, `f1`, `auroc`, `auprc`, and `noise_prevalence`, over the peaks
+    Casanovo keeps.
+  - `denoise_full/*`: the same metrics except `loss`, over every original
+    peak, plus `num_spectra`, `num_spectra_skipped_by_casanovo`, and
+    `head_peak_fraction`.
 - `run_config.json`: the CLI arguments, the Casanovo checkpoint's absolute
   path and SHA-256, the resolved device and precision, parameter counts,
   dataset sizes, and package versions.
@@ -96,12 +100,30 @@ add Casanovo to the root `pyproject.toml`.**
   correct. A duplicate pair with different labels would raise an error rather
   than risk a wrong label.
 
-## Caveat: not a controlled common-peaks comparison
+## Evaluation
 
-Casanovo's native preprocessing changes which peaks are evaluated compared
-with MSDelta. The m/z window, precursor removal, and top-150 cap drop peaks
-that MSDelta keeps, and noise and signal peaks are not dropped at the same
-rate. This changes the noise prevalence and the difficulty of the task. Treat
-these numbers as an **operational baseline**: each model sees its own native
-input. They are not a head-to-head comparison on the same peaks. The logged
-`denoise/noise_prevalence` shows how far the evaluated population has shifted.
+Peaks from all validation spectra are pooled into one set and scored
+together, not averaged per spectrum. A logit of 0 or above predicts noise.
+AUPRC is the area under the precision–recall curve, as in MSDelta. There are
+two sets of metrics:
+
+- **`denoise/*`: kept peaks only.** Only peaks that survive Casanovo's
+  preprocessing are scored (at most 150 per spectrum), and only in spectra
+  Casanovo keeps. This measures the head on Casanovo's own input. It is not
+  comparable with MSDelta: the top-150 cap and the other filters mostly drop
+  low-intensity peaks, which are mostly noise. The scored set therefore has a
+  different noise prevalence (`denoise/noise_prevalence`) and is harder than
+  a full spectrum.
+- **`denoise_full/*`: every original peak.** Covers every validation spectrum
+  with 1 to `--full-max-peaks` peaks (default 1,024), the same spectra
+  MSDelta's denoising probe scores. Peaks Casanovo keeps get the head's logit.
+  Peaks Casanovo removes, and every peak of a spectrum Casanovo skips, count
+  as confident noise predictions. They get a score above every head logit
+  and above 0, so preprocessing is treated as part of the denoiser. These
+  numbers can be compared directly with MSDelta's `denoise/*` on the same
+  peaks. `head_peak_fraction` is the share of those peaks the head actually
+  scored.
+
+`denoise_full/*` reflects the whole pipeline. A peak that Casanovo's
+preprocessing removes but that is really signal counts as a false positive,
+even though the head never saw it.

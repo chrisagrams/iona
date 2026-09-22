@@ -28,7 +28,7 @@ from casanovo_denoising.data import (
     build_denoising_datasets,
     collate_denoising,
 )
-from casanovo_denoising.metrics import denoising_metrics
+from casanovo_denoising.metrics import denoising_metrics, full_spectrum_metrics
 from casanovo_denoising.model import CasanovoDenoiser, count_parameters
 
 ACCELERATE_PRECISION = {"fp32": "no", "fp16": "fp16", "bf16": "bf16"}
@@ -49,6 +49,13 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--head-hidden-size", type=int, default=128)
     parser.add_argument("--head-dropout", type=float, default=0.1)
     parser.add_argument("--peak-pair-budget", type=int, default=4_194_304)
+    parser.add_argument(
+        "--full-max-peaks",
+        type=int,
+        default=1024,
+        help="largest raw spectrum included in denoise_full/* metrics "
+        "(MSDelta's denoise_max_peaks)",
+    )
     parser.add_argument("--num-workers", type=int, default=4)
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--device", choices=("auto", "cpu", "cuda", "xpu"), default="auto")
@@ -120,8 +127,11 @@ def make_loader(
         num_processes=accelerator.num_processes,
         pad=train,
     )
+    columns = ["mz", "intensity", "labels"]
+    if not train:
+        columns += ["source_index", "kept_index"]
     loader = DataLoader(
-        dataset.with_format("numpy", columns=["mz", "intensity", "labels"]),
+        dataset.with_format("numpy", columns=columns),
         batch_sampler=sampler,
         collate_fn=collate_denoising,
         num_workers=num_workers,
@@ -135,31 +145,51 @@ def to_device(batch: dict[str, torch.Tensor], device: torch.device) -> dict[str,
 
 
 @torch.no_grad()
-def evaluate(model: CasanovoDenoiser, loader: DataLoader, accelerator: Accelerator) -> dict[str, float]:
-    """Evaluate this process's shard, then gather every peak onto all processes."""
+def evaluate(
+    model: CasanovoDenoiser,
+    loader: DataLoader,
+    accelerator: Accelerator,
+    raw_validation,
+    full_max_peaks: int,
+) -> dict[str, float]:
+    """Evaluate this process's shard, then gather every spectrum on all processes.
+
+    Reports ``denoise/*`` over the peaks Casanovo retains and
+    ``denoise_full/*`` over every original peak (see full_spectrum_metrics).
+    """
     model.eval()
-    shard_logits: list[np.ndarray] = []
-    shard_labels: list[np.ndarray] = []
+    shard: list[tuple[int, np.ndarray, np.ndarray, np.ndarray]] = []
     progress = tqdm(loader, desc="Denoising eval", disable=not accelerator.is_local_main_process)
     for batch in progress:
+        source_index = batch.pop("source_index").tolist()
+        kept_index = batch.pop("kept_index").numpy()
         batch = to_device(batch, accelerator.device)
         with accelerator.autocast():
             _, logits, valid = model(batch["mz"], batch["intensity"], batch["labels"])
-        shard_logits.append(logits[valid].float().cpu().numpy())
-        shard_labels.append(batch["labels"][valid].cpu().numpy())
-    empty = np.zeros(0, dtype=np.float32)
-    shard = (
-        np.concatenate(shard_logits) if shard_logits else empty,
-        np.concatenate(shard_labels) if shard_labels else empty,
-    )
-    shards = gather_object([shard])
-    logits = np.concatenate([shard_logits for shard_logits, _ in shards])
-    labels = np.concatenate([shard_labels for _, shard_labels in shards])
+        logits = logits.float().cpu().numpy()
+        valid = valid.cpu().numpy()
+        labels = batch["labels"].cpu().numpy()
+        for row, index in enumerate(source_index):
+            row_valid = valid[row]
+            if not np.array_equal(row_valid, kept_index[row] >= 0):
+                raise RuntimeError("valid peak positions do not match kept_index")
+            shard.append(
+                (index, kept_index[row][row_valid], logits[row][row_valid], labels[row][row_valid])
+            )
+    spectra = gather_object(shard)
+
+    logits = np.concatenate([row_logits for _, _, row_logits, _ in spectra])
+    labels = np.concatenate([row_labels for _, _, _, row_labels in spectra])
     loss = torch.nn.functional.binary_cross_entropy_with_logits(
         torch.from_numpy(logits), torch.from_numpy(labels)
     ).item()
-    metrics = {"loss": loss, **denoising_metrics(logits, labels)}
-    return {f"denoise/{name}": value for name, value in metrics.items()}
+    retained = {"loss": loss, **denoising_metrics(logits, labels)}
+    metrics = {f"denoise/{name}": value for name, value in retained.items()}
+
+    scored = {index: (kept, row_logits) for index, kept, row_logits, _ in spectra}
+    full = full_spectrum_metrics(raw_validation["noise"], scored, full_max_peaks)
+    metrics.update({f"denoise_full/{name}": value for name, value in full.items()})
+    return metrics
 
 
 def main(argv: list[str] | None = None) -> None:
@@ -180,7 +210,7 @@ def main(argv: list[str] | None = None) -> None:
 
     # Let the main process populate the datasets cache before the others read it.
     with accelerator.main_process_first():
-        datasets = build_denoising_datasets(
+        datasets, raw_validation = build_denoising_datasets(
             args.dataset_repo,
             train_split=args.train_split,
             validation_split=args.validation_split,
@@ -245,7 +275,9 @@ def main(argv: list[str] | None = None) -> None:
     # Evaluate the unwrapped module: shards may have different batch counts,
     # which DDP forward passes are not designed for.
     denoiser = accelerator.unwrap_model(model)
-    metrics = evaluate(denoiser, validation_loader, accelerator)
+    metrics = evaluate(
+        denoiser, validation_loader, accelerator, raw_validation, args.full_max_peaks
+    )
 
     if accelerator.is_main_process:
         for name, value in metrics.items():

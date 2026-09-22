@@ -9,7 +9,7 @@ from collections.abc import Callable, Sequence
 import numpy as np
 import torch
 from casanovo.denovo.dataloaders import DeNovoDataModule
-from datasets import DatasetDict, Features, Value, load_dataset
+from datasets import Dataset, DatasetDict, Features, Value, load_dataset
 from datasets import Sequence as SequenceFeature
 from depthcharge.primitives import MassSpectrum
 from torch.utils.data import BatchSampler
@@ -23,6 +23,10 @@ PROCESSED_FEATURES = Features(
         "intensity": SequenceFeature(Value("float32")),
         "labels": SequenceFeature(Value("float32")),
         "num_peaks": Value("int32"),
+        # Row in the raw split and original position of each retained peak,
+        # used to score full spectra (see metrics.full_spectrum_metrics).
+        "source_index": Value("int64"),
+        "kept_index": SequenceFeature(Value("int32")),
     }
 )
 
@@ -51,7 +55,8 @@ def preprocess_spectrum(
 
     Casanovo's steps only sort peaks by m/z and drop peaks; they never alter
     m/z values. Each retained peak is therefore matched back to its original
-    index by exact m/z to select its label. Returns ``None`` when Casanovo
+    index by exact m/z to select its label; ``kept_index`` holds those
+    original indices. Returns ``None`` when Casanovo
     would skip the spectrum (it catches the same exceptions in depthcharge's
     parser).
     """
@@ -72,8 +77,8 @@ def preprocess_spectrum(
             raise ValueError(f"{name} must be nonnegative")
     order = np.argsort(mz, kind="stable")
     sorted_mz = mz[order].astype(np.float64)
-    # A retained duplicate m/z is matched to its first occurrence, which is
-    # only correct if every peak sharing that m/z has the same label.
+    # Retained peaks sharing an m/z are matched to successive occurrences of
+    # it. Which copy gets which peak is arbitrary, so require equal labels.
     duplicate = np.flatnonzero(np.diff(sorted_mz) == 0)
     if np.any(noise[order][duplicate] != noise[order][duplicate + 1]):
         raise ValueError("peaks with identical m/z have different noise labels")
@@ -97,6 +102,12 @@ def preprocess_spectrum(
 
     kept_mz = np.asarray(spectrum.mz, dtype=np.float64)
     positions = np.searchsorted(sorted_mz, kept_mz)
+    # kept_mz is sorted, so repeats of an m/z are adjacent; offset them onto
+    # distinct occurrences so every original peak is used at most once.
+    run_start = np.r_[True, positions[1:] != positions[:-1]]
+    positions = positions + np.arange(len(positions)) - np.maximum.accumulate(
+        np.where(run_start, np.arange(len(positions)), 0)
+    )
     positions = np.minimum(positions, len(sorted_mz) - 1)
     if not np.array_equal(sorted_mz[positions], kept_mz):
         raise RuntimeError("Casanovo preprocessing changed m/z values; cannot align labels")
@@ -105,10 +116,11 @@ def preprocess_spectrum(
         "mz": np.asarray(spectrum.mz, dtype=np.float32),
         "intensity": np.asarray(spectrum.intensity, dtype=np.float32),
         "labels": noise[indices].astype(np.float32),
+        "kept_index": indices.astype(np.int32),
     }
 
 
-def _process_example(example: dict) -> dict:
+def _process_example(example: dict, index: int) -> dict:
     processed = preprocess_spectrum(
         example["mz"],
         example["intensity"],
@@ -120,8 +132,15 @@ def _process_example(example: dict) -> dict:
         # Match the float32 arrays of retained spectra; empty Python lists
         # become float64 and cannot be concatenated with them by Arrow.
         empty = np.zeros(0, dtype=np.float32)
-        return {"mz": empty, "intensity": empty, "labels": empty, "num_peaks": 0}
-    return {**processed, "num_peaks": len(processed["mz"])}
+        return {
+            "mz": empty,
+            "intensity": empty,
+            "labels": empty,
+            "num_peaks": 0,
+            "source_index": index,
+            "kept_index": np.zeros(0, dtype=np.int32),
+        }
+    return {**processed, "num_peaks": len(processed["mz"]), "source_index": index}
 
 
 def build_denoising_datasets(
@@ -131,27 +150,37 @@ def build_denoising_datasets(
     validation_split: str = "validation",
     cache_dir: str | None = None,
     num_proc: int | None = None,
-) -> DatasetDict:
-    """Load the labeled dataset and apply Casanovo preprocessing per spectrum."""
+) -> tuple[DatasetDict, Dataset]:
+    """Load the labeled dataset and apply Casanovo preprocessing per spectrum.
+
+    Returns the processed splits and the raw validation split, which the
+    full-spectrum metrics score against.
+    """
     raw = load_dataset(repo_id, cache_dir=cache_dir)
     raw = DatasetDict({"train": raw[train_split], "validation": raw[validation_split]})
     processed = raw.map(
         _process_example,
+        with_indices=True,
         remove_columns=raw["train"].column_names,
         features=PROCESSED_FEATURES,
         num_proc=num_proc,
         desc="Casanovo preprocessing",
     )
-    return processed.filter(
+    processed = processed.filter(
         lambda num_peaks: num_peaks > 0,
         input_columns="num_peaks",
         num_proc=num_proc,
         desc="drop spectra Casanovo would skip",
     )
+    return processed, raw["validation"].select_columns(["noise"])
 
 
 def collate_denoising(examples: list[dict]) -> dict[str, torch.Tensor]:
-    """Right-pad a batch: m/z and intensity with 0, labels with -100."""
+    """Right-pad a batch: m/z and intensity with 0, labels with -100.
+
+    ``source_index`` and ``kept_index`` (padded with -1) are passed through
+    when present, for full-spectrum evaluation.
+    """
     longest = max(len(example["mz"]) for example in examples)
     mz = torch.zeros(len(examples), longest, dtype=torch.float32)
     intensity = torch.zeros(len(examples), longest, dtype=torch.float32)
@@ -163,7 +192,17 @@ def collate_denoising(examples: list[dict]) -> dict[str, torch.Tensor]:
             np.asarray(example["intensity"], dtype=np.float32)
         )
         labels[row, :length] = torch.as_tensor(np.asarray(example["labels"], dtype=np.float32))
-    return {"mz": mz, "intensity": intensity, "labels": labels}
+    batch = {"mz": mz, "intensity": intensity, "labels": labels}
+    if "kept_index" in examples[0]:
+        kept_index = torch.full((len(examples), longest), -1, dtype=torch.int64)
+        for row, example in enumerate(examples):
+            values = np.asarray(example["kept_index"], dtype=np.int64)
+            kept_index[row, : len(values)] = torch.as_tensor(values)
+        batch["kept_index"] = kept_index
+        batch["source_index"] = torch.as_tensor(
+            [int(example["source_index"]) for example in examples], dtype=torch.int64
+        )
+    return batch
 
 
 class PeakBudgetBatchSampler(BatchSampler):
