@@ -19,7 +19,7 @@ sweep arm configs they cannot be reproduced from this repository alone.
 | `grid_denoise_scratch.txt` | The same 50m fine-tune with a **random** encoder — the pretraining ablation. |
 | `grid_denoise_50m_earlytest.txt` | The same 50m grid on a reduced evaluation. **Not comparable** — see below. |
 | `checkpoint_provenance.txt` | Which pretrained checkpoint each scale was fine-tuned from. |
-| `figures/` | The three headline claims: `auroc_scaling`, `f1_scaling`, `pretrain_ablation`. |
+| `figures/` | `scaling` (denoise vs model size, AUROC and F1) and `pretrain_ablation` (pretrained vs random, AUROC and F1). |
 | `figures/extra/` | Supporting: `top_cluster` (why a grid best is not a measurement), `encoder_lr_scale` (how hard to push the encoder, and why it depends on batch size), `probe_heatmap` (`encoder_lr_scale` × epochs at 400m). |
 
 ## What the numbers say
@@ -37,7 +37,7 @@ F1 agrees on every step: +0.0093 (t=15), +0.0062 (t=10), −0.0015 (t=−3). It 
 about twice the seed noise — it is thresholded at 0.5 where AUROC is not — so the
 turnover is marginal in F1 where it is decisive in AUROC. The sign is the same at all
 three steps, which is the useful thing: a calibration shift would have moved one metric
-and not the other. See `figures/auroc_scaling.png` and `figures/f1_scaling.png`.
+and not the other. See `figures/scaling.png`.
 
 Every step resolves, including the last. An earlier reading called 200m → 400m a
 plateau; that came from one seed per scale judged against each grid's internal arm
