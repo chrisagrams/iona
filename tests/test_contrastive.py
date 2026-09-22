@@ -364,6 +364,126 @@ class TestGradCache:
         assert torch.allclose(grads[0], grads[1], atol=1e-6)
 
 
+class TestGradCacheEdges:
+    """The cases the happy-path tests do not reach.
+
+    GradCache is the only route to a batch wider than four spectra -- DeltaMZBias is
+    O(batch * peaks^2 * 2 * n_freqs), which is 32 GiB at batch 64 against a 64 GiB tile --
+    so a P/K sweep rests entirely on this being exact. The existing tests cover chunk
+    sizes that DIVIDE the batch, one batch shape, temperature 0.2 and dropout on. Each
+    test below is a case that differs from those in a way that could plausibly break it.
+    """
+
+    def _model(self, kl_weight=10.0, temperature=0.2, dropout=0.0):
+        from msdelta.contrastive import MSDeltaForContrastive
+        from msdelta.modeling_msdelta import MSDeltaForPreTraining
+        from msdelta.configuration_msdelta import MSDeltaConfig
+        # BOTH dropouts must be off to compare against a direct full-batch backward:
+        # masks are drawn per tensor shape, so a chunked forward can never bit-match a
+        # full-batch one no matter how carefully the RNG is replayed. Leaving
+        # attention_probs_dropout_prob at its default made all seven of these tests fail
+        # at a relative gradient error of ~5e-1, which reads exactly like a broken
+        # GradCache and is not one.
+        config = MSDeltaConfig(hidden_size=32, num_attention_heads=4, num_hidden_layers=2,
+                               intermediate_size=64, delta_bias_n_freqs=8,
+                               delta_bias_per_head_hidden=4,
+                               hidden_dropout_prob=dropout,
+                               attention_probs_dropout_prob=dropout)
+        torch.manual_seed(0)
+        return MSDeltaForContrastive(MSDeltaForPreTraining(config),
+                                     MSDeltaForPreTraining(config),
+                                     temperature=temperature, kl_weight=kl_weight).train()
+
+    def _batch(self, size=8, length=12, groups=None, mask=None):
+        torch.manual_seed(1)
+        return {"mz": torch.rand(size, length) * 1000,
+                "log_intensity": torch.rand(size, length),
+                "attention_mask": (mask if mask is not None
+                                   else torch.ones(size, length, dtype=torch.long)),
+                "group": (groups if groups is not None else torch.arange(size) // 2)}
+
+    def _flat_grad(self, model):
+        return torch.cat([p.grad.flatten()
+                          for _, p in sorted(model.model.named_parameters())
+                          if p.grad is not None])
+
+    def _assert_matches(self, batch, chunk_size, **kw):
+        from msdelta.contrastive import gradcache_step
+        direct = self._model(**kw)
+        direct(**batch)["loss"].backward()
+        cached = self._model(**kw)
+        got = gradcache_step(cached, batch, chunk_size=chunk_size)
+        ref, mine = self._flat_grad(direct), self._flat_grad(cached)
+        rel = (ref - mine).norm() / ref.norm()
+        assert rel < 1e-4, f"relative gradient error {rel:.2e}"
+        return got
+
+    @pytest.mark.parametrize("size,chunk", [(8, 3), (8, 5), (10, 4), (7, 2), (9, 9)])
+    def test_chunk_size_need_not_divide_the_batch(self, size, chunk):
+        """The P/K sweep will not hand us batches that divide evenly by the chunk.
+
+        A ragged final chunk is the obvious place for an off-by-one in the cached
+        gradient to hide, and every existing test uses a chunk that divides.
+        """
+        groups = torch.arange(size) // 2
+        self._assert_matches(self._batch(size=size, groups=groups), chunk)
+
+    @pytest.mark.parametrize("p,k", [(4, 2), (8, 2), (4, 4)])
+    def test_holds_at_the_batch_widths_a_pk_sweep_would_use(self, p, k):
+        """Batch 8 is what GradCache exists to escape; the sweep wants 16 and 32."""
+        size = p * k
+        groups = torch.arange(size) // k
+        self._assert_matches(self._batch(size=size, groups=groups), chunk_size=4)
+
+    def test_holds_at_the_live_temperature(self):
+        """t=0.07, not the 0.2 every other test uses.
+
+        A lower temperature sharpens the softmax, so the loss concentrates mass on the
+        hardest negative and the gradient becomes far less uniform across the batch.
+        If any chunk boundary effect exists, this is where it shows.
+        """
+        self._assert_matches(self._batch(), chunk_size=3, temperature=0.07)
+
+    def test_holds_with_padding(self):
+        """Real batches are padded to max_peaks; every existing test is fully unmasked."""
+        mask = torch.ones(8, 12, dtype=torch.long)
+        mask[::2, 6:] = 0            # half the rows are half padding
+        self._assert_matches(self._batch(mask=mask), chunk_size=3)
+
+    def test_a_group_with_no_positive_in_the_batch_does_not_poison_it(self):
+        """PK sampling guarantees positives; a ragged final batch may not.
+
+        SupCon has no defined positive term for a singleton, and the masking trap in
+        supervised_contrastive_loss (-inf * False = NaN) lives exactly here.
+        """
+        groups = torch.tensor([0, 0, 1, 1, 2, 3, 4, 5])   # four singletons
+        got = self._assert_matches(self._batch(groups=groups), chunk_size=3)
+        assert torch.isfinite(got["loss"]), "singleton groups produced a non-finite loss"
+
+    def test_gradcache_is_self_consistent_with_dropout_on(self):
+        """With dropout ON there is no full-batch reference, so check reproducibility.
+
+        Every other test here runs dropout off, because a chunked forward cannot
+        bit-match a full-batch one when masks depend on shape. That leaves the RNG
+        replay untested, so this asserts the thing replay is FOR: two GradCache steps
+        from the same seed must produce identical gradients.
+        """
+        from msdelta.contrastive import gradcache_step
+        batch = self._batch()
+        grads = []
+        for _ in range(2):
+            torch.manual_seed(0)
+            model = self._model(dropout=0.3)
+            torch.manual_seed(7)
+            gradcache_step(model, batch, chunk_size=3)
+            grads.append(self._flat_grad(model))
+        assert torch.allclose(grads[0], grads[1], atol=1e-6)
+
+    def test_one_chunk_is_the_same_as_no_gradcache(self):
+        """chunk_size >= batch degenerates to the direct path; it must agree exactly."""
+        self._assert_matches(self._batch(size=8), chunk_size=8)
+
+
 class TestLayerMixPooler:
     """A trained mixture over depth, instead of picking one layer by hand.
 
