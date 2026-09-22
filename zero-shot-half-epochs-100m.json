@@ -1,0 +1,110 @@
+[
+  {
+    "checkpoint": "/mnt/vault-1/k8/msdelta-runs/msdelta-100m-production-01/checkpoint-90000",
+    "metrics": {
+      "zero_shot/replicate_retrieval/Hit@1": 0.55848787446505,
+      "zero_shot/replicate_retrieval/Hit@1_abt": 0.7658899984149627,
+      "zero_shot/replicate_retrieval/MAP@100": 0.12431497743500522,
+      "zero_shot/replicate_retrieval/MAP@100_abt": 0.33518507881117054,
+      "zero_shot/replicate_retrieval/R@5": 0.10802334547042847,
+      "zero_shot/replicate_retrieval/R@5_abt": 0.22196708619594574,
+      "zero_shot/retrieval/Hit@1": 0.2305,
+      "zero_shot/retrieval/Hit@1_abt": 0.543,
+      "zero_shot/retrieval/MAP@100": 0.11555384026722612,
+      "zero_shot/retrieval/MAP@100_abt": 0.3787242557773657,
+      "zero_shot/retrieval/R@5": 0.12441667914390564,
+      "zero_shot/retrieval/R@5_abt": 0.39475005865097046
+    },
+    "step": 90000
+  },
+  {
+    "checkpoint": "/mnt/vault-1/k8/msdelta-runs/msdelta-100m-production-01/checkpoint-180000",
+    "metrics": {
+      "zero_shot/replicate_retrieval/Hit@1": 0.5296401965446188,
+      "zero_shot/replicate_retrieval/Hit@1_abt": 0.739974639404026,
+      "zero_shot/replicate_retrieval/MAP@100": 0.11078287779338829,
+      "zero_shot/replicate_retrieval/MAP@100_abt": 0.2903098475269226,
+      "zero_shot/replicate_retrieval/R@5": 0.09659608453512192,
+      "zero_shot/replicate_retrieval/R@5_abt": 0.20115765929222107,
+      "zero_shot/retrieval/Hit@1": 0.199,
+      "zero_shot/retrieval/Hit@1_abt": 0.4645,
+      "zero_shot/retrieval/MAP@100": 0.09669815426753599,
+      "zero_shot/retrieval/MAP@100_abt": 0.30992969520905866,
+      "zero_shot/retrieval/R@5": 0.10475000739097595,
+      "zero_shot/retrieval/R@5_abt": 0.3289166986942291
+    },
+    "step": 180000
+  },
+  {
+    "checkpoint": "/mnt/vault-1/k8/msdelta-runs/msdelta-100m-production-01/checkpoint-270000",
+    "metrics": {
+      "zero_shot/replicate_retrieval/Hit@1": 0.4617213504517356,
+      "zero_shot/replicate_retrieval/Hit@1_abt": 0.6934537961642099,
+      "zero_shot/replicate_retrieval/MAP@100": 0.08679105332611747,
+      "zero_shot/replicate_retrieval/MAP@100_abt": 0.2429109416911398,
+      "zero_shot/replicate_retrieval/R@5": 0.07792843878269196,
+      "zero_shot/replicate_retrieval/R@5_abt": 0.17640869319438934,
+      "zero_shot/retrieval/Hit@1": 0.17575000000000002,
+      "zero_shot/retrieval/Hit@1_abt": 0.41425,
+      "zero_shot/retrieval/MAP@100": 0.08736582120540223,
+      "zero_shot/retrieval/MAP@100_abt": 0.2663600857810782,
+      "zero_shot/retrieval/R@5": 0.09716667979955673,
+      "zero_shot/retrieval/R@5_abt": 0.28466668725013733
+    },
+    "step": 270000
+  },
+  {
+    "checkpoint": "/mnt/vault-1/k8/msdelta-runs/msdelta-100m-production-01/checkpoint-360000",
+    "metrics": {
+      "zero_shot/replicate_retrieval/Hit@1": 0.44848628942780155,
+      "zero_shot/replicate_retrieval/Hit@1_abt": 0.687272150895546,
+      "zero_shot/replicate_retrieval/MAP@100": 0.08425211992423454,
+      "zero_shot/replicate_retrieval/MAP@100_abt": 0.23649494397215237,
+      "zero_shot/replicate_retrieval/R@5": 0.07597162574529648,
+      "zero_shot/replicate_retrieval/R@5_abt": 0.17245016992092133,
+      "zero_shot/retrieval/Hit@1": 0.1675,
+      "zero_shot/retrieval/Hit@1_abt": 0.38025000000000003,
+      "zero_shot/retrieval/MAP@100": 0.08264550649295939,
+      "zero_shot/retrieval/MAP@100_abt": 0.24366997913431196,
+      "zero_shot/retrieval/R@5": 0.09166667610406876,
+      "zero_shot/retrieval/R@5_abt": 0.2654167115688324
+    },
+    "step": 360000
+  },
+  {
+    "checkpoint": "/mnt/vault-1/k8/msdelta-runs/msdelta-100m-production-01/checkpoint-450000",
+    "metrics": {
+      "zero_shot/replicate_retrieval/Hit@1": 0.44737676335393883,
+      "zero_shot/replicate_retrieval/Hit@1_abt": 0.6940085592011412,
+      "zero_shot/replicate_retrieval/MAP@100": 0.0822283783607793,
+      "zero_shot/replicate_retrieval/MAP@100_abt": 0.23844981555333722,
+      "zero_shot/replicate_retrieval/R@5": 0.0743618831038475,
+      "zero_shot/replicate_retrieval/R@5_abt": 0.17312321066856384,
+      "zero_shot/retrieval/Hit@1": 0.16525,
+      "zero_shot/retrieval/Hit@1_abt": 0.38925,
+      "zero_shot/retrieval/MAP@100": 0.08135966302866454,
+      "zero_shot/retrieval/MAP@100_abt": 0.25009452155994777,
+      "zero_shot/retrieval/R@5": 0.08966667950153351,
+      "zero_shot/retrieval/R@5_abt": 0.26891669631004333
+    },
+    "step": 450000
+  },
+  {
+    "checkpoint": "/mnt/vault-1/k8/msdelta-runs/msdelta-100m-production-01/checkpoint-540423",
+    "metrics": {
+      "zero_shot/replicate_retrieval/Hit@1": 0.45641147566967827,
+      "zero_shot/replicate_retrieval/Hit@1_abt": 0.7005864637818989,
+      "zero_shot/replicate_retrieval/MAP@100": 0.08482149710431856,
+      "zero_shot/replicate_retrieval/MAP@100_abt": 0.2443916993500117,
+      "zero_shot/replicate_retrieval/R@5": 0.07668676972389221,
+      "zero_shot/replicate_retrieval/R@5_abt": 0.17669962346553802,
+      "zero_shot/retrieval/Hit@1": 0.1795,
+      "zero_shot/retrieval/Hit@1_abt": 0.42325,
+      "zero_shot/retrieval/MAP@100": 0.08846396430036099,
+      "zero_shot/retrieval/MAP@100_abt": 0.27203983509491947,
+      "zero_shot/retrieval/R@5": 0.09700000286102295,
+      "zero_shot/retrieval/R@5_abt": 0.2899166941642761
+    },
+    "step": 540423
+  }
+]

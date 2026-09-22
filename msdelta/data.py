@@ -210,6 +210,36 @@ def build_retrieval_datasets(
     )
 
 
+def build_retrieval_validation_dataset(
+    repo_id: str,
+    processor: MSDeltaProcessor,
+    num_proc: int | None = None,
+) -> Dataset:
+    """Load and preprocess only the validation groups needed for retrieval evaluation."""
+    dataset = load_dataset(repo_id, split="validation")
+    dataset = dataset.filter(
+        lambda example: all(
+            0 < len(spectrum["mz"]) <= processor.max_peaks
+            for spectrum in (example["consensus"], *example["experimental"])
+        ),
+        num_proc=num_proc,
+        desc="drop invalid or oversized retrieval validation groups",
+    )
+    dataset = dataset.map(
+        lambda example: processor.process_retrieval_example(
+            example["consensus"], example["experimental"]
+        ),
+        remove_columns=dataset.column_names,
+        num_proc=num_proc,
+        desc="preprocess retrieval validation spectra",
+    )
+    return dataset.filter(
+        lambda example: len(example["mz"]) == 4 and all(example["mz"]),
+        num_proc=num_proc,
+        desc="drop invalid retrieval validation groups",
+    )
+
+
 def build_retrieval_evaluation_datasets(
     validation_dataset: Dataset,
     processor: MSDeltaProcessor,

@@ -5,6 +5,7 @@ from __future__ import annotations
 import numpy as np
 import torch
 from torch.nn.utils.rnn import pad_sequence
+from tqdm.auto import tqdm
 
 
 def pool_tokens(tokens: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
@@ -34,12 +35,21 @@ def encode_batch(model, mzs, log_intensities, device):
 
 
 @torch.no_grad()
-def embed_spectra(enc, specs, device, *, batch_size=128):
+def embed_spectra(enc, specs, device, *, batch_size=128, progress_desc: str | None = None):
     """Return one float32 vector for each spectrum."""
     enc.to(device).eval()
     n = len(specs)
     emb = None
-    for s in range(0, n, batch_size):
+    starts = range(0, n, batch_size)
+    if progress_desc is not None:
+        starts = tqdm(
+            starts,
+            total=(n + batch_size - 1) // batch_size,
+            desc=progress_desc,
+            unit="batch",
+            leave=False,
+        )
+    for s in starts:
         e = min(s + batch_size, n)
         mzs = [m for m, _ in specs[s:e]]
         lis = [log_intensity for _, log_intensity in specs[s:e]]
