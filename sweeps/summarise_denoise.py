@@ -182,26 +182,34 @@ def write_scratch(runs: Path) -> int:
         v = [r["test_auroc"] for a, r in rs.items() if re.search(rf"_ep{ep}(?:_|$)", a)]
         return max(v) if v else None
     p4, s4, s8 = best(pre, 4), best(recs, 4), best(recs, 8)
+    # FT13, job 8847610. NOT 8846027: that one ran without TILES_PER_ARM=12 and so
+    # trained at effective batch 1 instead of 12 -- a different experiment, discarded.
+    ft13 = load(runs, "8847610")
+    p8 = max((r["test_auroc"] for r in ft13.values()), default=float("nan"))
     body = header(GRIDS["8841984"][1], "8841984", recs) + [
         "--random_init true: the same architecture with the encoder reinitialised, so",
         "the only thing removed is pretraining. Everything else -- data, head, schedule,",
         "test split -- is held.",
         "",
-        "TWO HONEST COMPARISONS, AND A HOLE. The grids did not sweep the same epoch",
-        "counts: pretrained ran 2 and 4, this one ran 4 and 8.",
+        "THE GRIDS DID NOT SWEEP THE SAME EPOCH COUNTS: pretrained ran 2 and 4, this",
+        "one ran 4 and 8, which left two comparisons answering different questions and",
+        "one hole. FT13 filled it.",
         "",
         f"    matched at 4 epochs ......... {p4:.4f} vs {s4:.4f}   pretraining worth "
         f"+{p4-s4:.4f}",
         f"    scratch at double budget .... {p4:.4f} vs {s8:.4f}   pretraining worth "
         f"+{p4-s8:.4f}",
-        "    pretrained at 8 epochs ...... NOT RUN (FT13, job 8846027)",
+        f"    matched at 8 epochs ......... {p8:.4f} vs {s8:.4f}   pretraining worth "
+        f"+{p8-s8:.4f}",
         "",
-        "They answer different questions and quoting either alone is misleading in a",
-        "predictable direction. The second cannot be called pretraining's advantage at",
-        "equal wall-clock until the pretrained model has also had 8 epochs, because it",
-        "might gain from the extra budget too. It might equally LOSE: the 400m probe now",
-        "has its 8-epoch column, and at the winning encoder rate more epochs made things",
-        "worse. Either direction is open until the cell is measured.",
+        "FT13 (job 8847610, six seeds) filled the hole, and the ambiguity turned out not",
+        "to matter much: the pretrained model gains only +0.0014 from 4 to 8 epochs, so",
+        "the matched-at-8 figure and the old cross-budget one nearly coincide.",
+        "",
+        "THE GAP NARROWS WITH BUDGET, +0.046 matched at 4 against +0.033 matched at 8,",
+        "because scratch gains ten times as much from the extra epochs (+0.0145 against",
+        "+0.0014). Whether it narrows to nothing is open -- sweep-denoise-scratch-scale",
+        "runs 50m at 16 epochs for that.",
         "",
         "What is unambiguous either way: the pretrained model at TWO epochs already",
         f"scores {best(pre,2):.4f}, above this ablation's best at eight.",

@@ -7,19 +7,22 @@
 the only thing removed is pretraining. Everything else -- data, head, schedule,
 test split -- is held.
 
-TWO HONEST COMPARISONS, AND A HOLE. The grids did not sweep the same epoch
-counts: pretrained ran 2 and 4, this one ran 4 and 8.
+THE GRIDS DID NOT SWEEP THE SAME EPOCH COUNTS: pretrained ran 2 and 4, this
+one ran 4 and 8, which left two comparisons answering different questions and
+one hole. FT13 filled it.
 
     matched at 4 epochs ......... 0.9320 vs 0.8856   pretraining worth +0.0464
     scratch at double budget .... 0.9320 vs 0.9001   pretraining worth +0.0319
-    pretrained at 8 epochs ...... NOT RUN (FT13, job 8846027)
+    matched at 8 epochs ......... 0.9337 vs 0.9001   pretraining worth +0.0336
 
-They answer different questions and quoting either alone is misleading in a
-predictable direction. The second cannot be called pretraining's advantage at
-equal wall-clock until the pretrained model has also had 8 epochs, because it
-might gain from the extra budget too. It might equally LOSE: the 400m probe now
-has its 8-epoch column, and at the winning encoder rate more epochs made things
-worse. Either direction is open until the cell is measured.
+FT13 (job 8847610, six seeds) filled the hole, and the ambiguity turned out not
+to matter much: the pretrained model gains only +0.0014 from 4 to 8 epochs, so
+the matched-at-8 figure and the old cross-budget one nearly coincide.
+
+THE GAP NARROWS WITH BUDGET, +0.046 matched at 4 against +0.033 matched at 8,
+because scratch gains ten times as much from the extra epochs (+0.0145 against
++0.0014). Whether it narrows to nothing is open -- sweep-denoise-scratch-scale
+runs 50m at 16 epochs for that.
 
 What is unambiguous either way: the pretrained model at TWO epochs already
 scores 0.9272, above this ablation's best at eight.

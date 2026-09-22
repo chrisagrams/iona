@@ -70,18 +70,26 @@ past 4 epochs the gap stands, and if it gains the gap widens. That cell is runni
 The random-encoder ablation (`--random_init true`, everything else held) gives two
 honest comparisons and one hole, because the grids did not sweep the same epoch counts:
 
-| epochs | pretrained | random encoder |
-| --- | --- | --- |
-| 2 | 0.9272 | not run |
-| 4 | **0.9320** | 0.8856 |
-| 8 | **not run** (FT13 in flight) | 0.9001 |
+| epochs | pretrained | random encoder | gap |
+| --- | --- | --- | --- |
+| 2 | 0.9272 | not run | — |
+| 4 | **0.9320** | 0.8856 | **+0.0464** |
+| 8 | **0.9337** | 0.9001 | **+0.0336** |
 
-Matched at 4 epochs, pretraining is worth **+0.0464**. Against scratch at double the
-budget it is **+0.0319**. Those answer different questions and quoting either alone is
-misleading in a predictable direction — the second is not pretraining's advantage at
-equal wall-clock until the pretrained model has also had 8 epochs. What is unambiguous
-either way: the pretrained model at **two** epochs already beats the random encoder at
-eight.
+Both comparisons are now matched. FT13 (job 8847610, six seeds) filled the 8-epoch
+cell, and the ambiguity it resolved turned out to be small: the pretrained model gains
+only +0.0014 from 4 to 8 epochs, so matched-at-8 (+0.0336) and the older cross-budget
+figure (+0.0319) nearly coincide.
+
+**The gap narrows with budget** — +0.046 at 4 epochs, +0.033 at 8 — because the random
+encoder gains ten times as much from the extra epochs (+0.0145 against +0.0014). So
+part of pretraining's advantage is a head start that further fine-tuning erodes.
+Whether it erodes to nothing is open; `sweep-denoise-scratch-scale` runs 50m at 16
+epochs to find out, and the same grid asks whether +0.046 holds at 100m, 200m and 400m,
+since it has only ever been measured at 50m.
+
+What needs no caveat: the pretrained model at **two** epochs already beats the random
+encoder at **eight**.
 
 **The same hyperparameter point wins at every scale**: `lr 2e-4`, `encoder_lr_scale 0.5`,
 effective batch 12, first at 50m, 100m, 200m and 400m independently.
