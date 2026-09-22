@@ -235,8 +235,23 @@ class TestSweepPartition:
         assert len(assigned) == len(set(assigned))
 
     def test_slots_follow_tiles_per_arm(self):
-        out = self._dry_run(2, {"TILES_PER_ARM": "1", "SKIP_GRID_CHECK": "1"})
+        # ONE_TILE_OK because sweep-denoise is a DeepSpeed grid and one tile per arm is
+        # now refused for it -- that changes the effective batch, not just the speed.
+        # This test is about the slot ARITHMETIC, which is what the override is for.
+        out = self._dry_run(2, {"TILES_PER_ARM": "1", "SKIP_GRID_CHECK": "1",
+                                "ONE_TILE_OK": "1"})
         assert "2 hosts x 12 slots = 24 concurrent" in out.stdout
+
+    def test_one_tile_with_deepspeed_is_refused(self):
+        """The inverse of the FT7 guard, and the mistake that cost job 8846027.
+
+        Omitting TILES_PER_ARM looks like omitting nothing, but it defaults to 1, and a
+        DeepSpeed arm on one tile runs at effective batch 1 where every other denoise
+        run uses 12 -- a different experiment, silently.
+        """
+        out = self._dry_run(2, {"SKIP_GRID_CHECK": "1"})
+        assert out.returncode != 0
+        assert "EFFECTIVE BATCH" in out.stdout + out.stderr
 
     def test_multi_tile_without_deepspeed_is_refused(self):
         """That combination is the DDP reducer, which faults (FT7)."""
