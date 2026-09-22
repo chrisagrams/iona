@@ -37,6 +37,13 @@ ACCELERATE_PRECISION = {"fp32": "no", "fp16": "fp16", "bf16": "bf16"}
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--checkpoint", type=Path, required=True)
+    parser.add_argument(
+        "--encoder-init",
+        choices=("pretrained", "random"),
+        default="pretrained",
+        help="'random' keeps the checkpoint's architecture but uses freshly "
+        "initialized encoder weights (seeded by --seed)",
+    )
     parser.add_argument("--dataset-repo", default=DEFAULT_DATASET_REPO)
     parser.add_argument("--train-split", default="train")
     parser.add_argument("--validation-split", default="validation")
@@ -238,7 +245,9 @@ def main(argv: list[str] | None = None) -> None:
         checkpoint,
         head_hidden_size=args.head_hidden_size,
         head_dropout=args.head_dropout,
+        random_init=args.encoder_init == "random",
     )
+    accelerator.print(f"encoder init: {args.encoder_init}")
     parameter_counts = {
         "encoder": count_parameters(model.encoder),
         "head": count_parameters(model.head),

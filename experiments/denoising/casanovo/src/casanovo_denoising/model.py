@@ -54,7 +54,15 @@ class CasanovoDenoiser(nn.Module):
         checkpoint: str | Path,
         head_hidden_size: int = 128,
         head_dropout: float = 0.1,
+        random_init: bool = False,
     ) -> CasanovoDenoiser:
+        """Build from a Casanovo checkpoint.
+
+        With ``random_init=True`` only the checkpoint's hyperparameters are
+        used: a fresh ``Spec2Pep`` with the same architecture is constructed,
+        which is exactly the untrained model Casanovo starts training from.
+        Its weights depend on the global torch seed.
+        """
         # Casanovo checkpoints pickle NumPy scalars in their hyperparameters,
         # which torch>=2.6's weights_only default rejects. Casanovo's own
         # ModelRunner loads them with weights_only=False, so match it; only
@@ -62,6 +70,8 @@ class CasanovoDenoiser(nn.Module):
         spec2pep = Spec2Pep.load_from_checkpoint(
             str(checkpoint), map_location="cpu", weights_only=False
         )
+        if random_init:
+            spec2pep = Spec2Pep(**spec2pep.hparams)
         hidden_size = int(spec2pep.hparams.get("dim_model", 512))
         encoder = spec2pep.encoder
         del spec2pep

@@ -19,6 +19,24 @@ uv run casanovo-denoising \
   --precision bf16
 ```
 
+### Randomly initialized encoder (control)
+
+`--encoder-init random` keeps the checkpoint's architecture but discards its
+trained weights. It builds a fresh `Spec2Pep` from the checkpoint's saved
+hyperparameters, which is the model Casanovo would start training from. The
+encoder stays frozen, so this measures how much of the result comes from
+pretraining and how much from the architecture plus a trained head. The
+random weights depend on `--seed`.
+
+```bash
+uv run casanovo-denoising \
+  --checkpoint /path/to/casanovo-orbitrap.ckpt \
+  --encoder-init random \
+  --output-dir outputs/random-init-seed-0 \
+  --device cuda \
+  --precision bf16
+```
+
 ### Multiple GPUs
 
 Training uses [Accelerate](https://huggingface.co/docs/accelerate). To split
