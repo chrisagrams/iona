@@ -136,6 +136,8 @@ declare -A GRID_CHECK=(
     # The corrected-HP re-take of the scale curve, and the three follow-ups the
     # HP grid unblocked: breadth for PK, breadth for pairs, HP at 200m/400m.
     [configs/sweep-contrastive-scale-v2]="sweeps/make_contrastive_scale_v2.py --check"
+    # The pretraining ablation for contrastive, matched to the curve above.
+    [configs/sweep-contrastive-scale-v2-random]="sweeps/make_contrastive_random_v2.py --check"
     [configs/sweep-pairaccum]="sweeps/make_pairaccum_grid.py --check"
     [configs/sweep-gradcache-v2]="sweeps/make_gradcache_v2_grid.py --check"
     [configs/sweep-contrastive-hp-big]="sweeps/make_contrastive_hp_big.py --check"
