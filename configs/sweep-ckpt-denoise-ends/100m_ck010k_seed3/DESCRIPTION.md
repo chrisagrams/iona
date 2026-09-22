@@ -1,0 +1,1 @@
+CHECKPOINT ARM (denoise): 100m from pretrained checkpoint 10,000 -- 2% of the 540,423 steps every scale targets -- seed 3. Hyperparameters are held at the configuration chosen at checkpoint 1 and are NOT swept here; whether that choice still holds this far into pretraining is untested.

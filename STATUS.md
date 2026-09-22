@@ -15,85 +15,50 @@ LEGEND  [x] done  [~] RUNNING  [>] blocked  [X] closed  [ ] not started
 
 JOBS
 ──────────────────────────────────────────────────────────────────────────
-  [~] 400m denoise grid .. 8842147  capacity  just started, ~2.5h
-      everything else in the queue has finished
+  [~] 8850494  denoise LADDER ..... 21 arms, ckpt 220k+330k, 4 scales
+  [~] 8851663  contrastive LADDER . 42 arms, same cells, NEW config
+  [~] 8851492/8851650  100m rescore  fills the last HP-transfer cell
+  [~] 8848555 pairaccum / 8847663 dnscratch .. pre-canonical, finishing
 
 
-DENOISE  — the line that works
+DENOISE  — the line that works, unchanged
 ──────────────────────────────────────────────────────────────────────────
-  [x] 50m,  216 arms ..... 0.9320 auroc / 0.8632 f1
-  [x] 100m,  12 arms ..... 0.9403 / 0.8723      (+0.0083)
-  [x] 200m,  12 arms ..... 0.9446 / 0.8778      (+0.0043)
-  [x] 400m,  12 arms ..... 0.9436 / 0.8768      (-0.0010)
-
-        The prediction that stood here -- "+0.002, inside the ~0.001 within-grid
-        spread" -- was wrong in both parts. 400m came in BELOW 200m, and the
-        within-grid spread is not the error bar: it mixes real hyperparameter
-        effects with noise, so it overstates noise and dismisses real effects.
-        Measured seed noise at a fixed configuration is sd ~0.0005 (FT5, six
-        seeds per scale, job 8845262):
-
-              50m   0.9317 +/- 0.00055        200m  0.9447 +/- 0.00025
-              100m  0.9400 +/- 0.00029        400m  0.9434 +/- 0.00045
-
-        All 24 arms in. Every step resolves: +0.0083 (t=32.7), +0.0047
-        (t=30.2), -0.0013 (t=-6.3). See results/finetune/denoise/denoise_scale_seeds.txt.
-
-        200m -> 400m is -0.0013 at t = -6.3, a regression and not a plateau.
-        AT THIS FINE-TUNING BUDGET: the 400m probe (8845252) has 400m still
-        gaining at 4 epochs, +0.0021 from ep2, so 400m has not converged where
-        it was scored.
-  [x] scratch 50m, random encoder
-        matched 4 epochs ....... 0.8856  -> pretraining worth +0.046
-        scratch at 8 epochs .... 0.9001  -> pretraining worth +0.032
-        never quote +0.032 alone; see FT13 for the missing cell
-  [>] FT5 multi-seed, all scales .. blocked on 400m. Now a PRECONDITION,
-        not a refinement: without seeds there is no basis for ranking 400m.
-  [>] final model ................. after FT5
+  [x] scale curve, 6 seeds .. 0.9317 / 0.9400 / 0.9447 / 0.9434
+        every step resolves; 200m->400m is -0.0013 at t=-6.3, a real
+        turnover, not a budget artefact
+  [x] pretraining worth ..... +0.046 at ep4, +0.032 at ep8
+  [x] HP confirmed at a 4x-better checkpoint .. lr2e-4 / es0.5 still wins,
+        and es0.5-over-1.0 SHARPENS (0.0045 vs sem 0.0004)
+  [~] checkpoint ladder ..... first canonical-rung work, just launched
 
 
-EMBEDDING  — one finding explains the whole axis
+CONTRASTIVE  — was measuring nothing; now fixed
 ──────────────────────────────────────────────────────────────────────────
-  [x] THE FINDING: pretrained structure is REAL but NON-LINEAR
-        frozen              pretrained 1.35 == random 1.35
-        after contrastive   pretrained 7.83 >> random 1.35
-        No readout reaches it. Fine-tuning unlocks it. Both needed.
-
-  [x] complete readout x encoder x init factorial -- every random cell
-        is exactly 1.35; on the pretrained side only "final layer +
-        encoder trains" works, every elaboration is worse
-  [x] pretraining is worth >10x the fine-tuning budget
-        random: 1.35 @1.3k steps -> 2.10 @4.5k -> 2.73 @13.5k
-        pretrained: 7.83 @1.3k
-  [X] layer / pooling / scale / longer pretraining .. noise on the floor
-  [X] trained depth mixture ........................ 1.49 vs 1.53 by hand
-  [X] genuine blend vs one layer ................... blend is WORSE
-  [X] embedding -> reranker ........................ -0.109 hit@1
-  [ ] contrastive from the 10k checkpoint .......... THE LAST LEAD
-        1.67 frozen, the only reading that ever beat the floor.
-        3 arms, one node, ~5 min. Needs checkpoint-10000 frozen first.
+  [X] THE SEPARATION RATIO IS DEAD. It does not predict retrieval.
+        rho +0.28 Hit@1 (p=0.18), +0.40 MAP@100 (p=0.055), n=24.
+        WITHIN a scale rho = -0.04: it cannot even order seeds.
+  [X] the config we used all along does NOTHING
+        lr2e-5/KL0/t0.2: level with an UNTRAINED encoder on MAP@100
+        (p=0.98), worse on Hit@1 (p=0.003). Ranks 9/8/9/9 of 12.
+  [x] a config that works ... lr1e-4 / KL10 / t0.07
+        beats untrained on both (Hit@1 p=0.0007, MAP@100 p=0.0002)
+  [x] HP TRANSFERS across scale AND checkpoint
+        4 cells, mean pairwise rho +0.80, min +0.70, all significant.
+        Same winner in all four => ONE config for the whole ladder,
+        no per-rung and no per-scale sweep. This is what the probe bought.
+  [>] every prior contrastive number .. measured at the dead config.
+        Shapes may survive, LEVELS DO NOT. Re-run decision is open.
 
 
-RERANKING
+DECISIONS NEEDED
 ──────────────────────────────────────────────────────────────────────────
-  [x] feature rescorer ... hit@1 0.889, no neural embedding
-  [ ] cross-encoder ...... unblocked now: embeddings reach 7.83
-
-
-INFRA & BUGS
-──────────────────────────────────────────────────────────────────────────
-  [x] per-spectrum AUROC .. pooled was NOT hiding a within-spectrum failure
-        50m 0.9213 -> 0.9269, 100m 0.9331 -> 0.9377, p10 > 0.85
-  [x] checkpoints frozen by step; validation gate; unknown-flag tests;
-      SaveEncoderCallback; staleness guard on 10 grids
-  [X] FT10 RETRACTED ... warmup was never the bug, I read a smoke log as real
-  [X] FT11 closed ...... blend worked and was worse, nothing to protect
-  [ ] FT12 ............. pooled-vs-within sign unpredictable; check applied
-  [ ] FT13 ............. pretrained @ 8 epochs never run; fold into FT5
-  [ ] MSDeltaForContrastive -> PreTrainedModel .. worth revisiting, the
-      contrastive line survived
-  [~] FT9 12-tile align fault .. parked for ALCF
-  [ ] FT1 / FT3 / FT4 / FT8 .... open, none blocking
+  [ ] re-run the contrastive corpus at the live config? scale curve,
+      pretraining ablation, pair-loss, negatives -- all at the dead point
+  [ ] transfer rests on 3 NON-canonical cells (cost no new training).
+      Redo on canonical rungs, or accept as-is?
+  [ ] winner resolved only at 50m; 200m p=0.20, 400m p=0.067.
+      More seeds there, or accept the ranking argument?
+  [ ] later rungs: 430000, 540423, then 120000 / 10000
 ```
 
 Model scales are NOT compared against each other directly; figures normalise by

@@ -50,8 +50,17 @@ REPO = Path(__file__).resolve().parent.parent
 FROZEN = "/flare/UIC-HPC/khuss/msdelta/pretrained"
 
 # (scale, checkpoint) -- the middle two rungs, minus what does not exist yet.
-CELLS = [(s, c) for s in ("50m", "100m", "200m", "400m") for c in ("220000", "330000")
-         if not (s == "400m" and c == "330000")]
+# The ladder is walked in waves, not all at once: the middle two rungs first, then the
+# ends. CELLS is overridden by --cells so a later wave does not require editing this.
+# 400m@330000 does not exist -- that run is 47% through its schedule -- and 200m/400m
+# cannot reach 540423 at all yet, so those cells are dropped rather than substituted.
+AVAILABLE = {"50m":  ("10000", "120000", "220000", "330000", "430000", "540423"),
+             "100m": ("10000", "120000", "220000", "330000", "430000", "540423"),
+             "200m": ("10000", "120000", "220000", "330000", "430000"),
+             "400m": ("10000", "120000", "220000")}
+WAVES = {"middle": ("220000", "330000"),
+         "ends":   ("10000", "120000", "430000", "540423")}
+CELLS = [(s, c) for s in AVAILABLE for c in WAVES["middle"] if c in AVAILABLE[s]]
 
 TASKS = {
     "denoise": dict(
@@ -111,9 +120,21 @@ def main() -> int:
     ap.add_argument("--task", required=True, choices=sorted(TASKS))
     ap.add_argument("--check", action="store_true")
     ap.add_argument("--clean", action="store_true")
+    ap.add_argument("--wave", choices=sorted(WAVES), default="middle",
+                    help="which rungs of the ladder to build")
+    ap.add_argument("--scales", nargs="+", default=sorted(AVAILABLE),
+                    help="limit to these scales (50m and 100m finished pretraining "
+                         "first, so their curves can be completed before the others)")
     cli = ap.parse_args()
+    global CELLS
+    CELLS = [(s, c) for s in cli.scales for c in WAVES[cli.wave]
+             if c in AVAILABLE.get(s, ())]
     spec = TASKS[cli.task]
-    out = REPO / "configs" / spec["out"]
+    # The wave goes in the directory NAME. A queued job reads its config dir at RUN
+    # time, so regenerating a different wave into the same path silently changes the
+    # experiment an already-submitted job will run.
+    suffix = "" if cli.wave == "middle" else f"-{cli.wave}"
+    out = REPO / "configs" / (spec["out"] + suffix)
     combos = [(s, c, sd) for (s, c) in CELLS for sd in spec["seeds"]]
 
     missing = [f"{s}/{c}" for s, c in CELLS
@@ -141,7 +162,7 @@ def main() -> int:
         (out / name / "training.args").write_text(text)
         (out / name / "DESCRIPTION.md").write_text(describe(cli.task, *c))
     (out / ".template").write_text(f"per-scale templates\nckpt-{cli.task}\n")
-    print(f"arms={len(combos)} under configs/{spec['out']}/  "
+    print(f"arms={len(combos)} under {out.relative_to(REPO)}/  "
           f"({len(CELLS)} cells x {len(spec['seeds'])} seeds)")
     return 0
 

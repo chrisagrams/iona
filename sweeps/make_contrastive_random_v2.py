@@ -1,4 +1,12 @@
-"""The contrastive pretraining ablation, matched to the corrected scale curve.
+"""
+RE-TAKEN AT A CONFIGURATION THAT ACTUALLY TRAINS. The first version of this grid ran at
+lr 2e-5 / KL 0 / temperature 0.2, chosen by the separation ratio. Scored on MAP@100 that
+point is statistically indistinguishable from NOT TRAINING AT ALL -- level with an
+untrained encoder (p=0.98) and worse than it on Hit@1 (p=0.003) -- because the ratio
+does not predict retrieval (OBSERVATIONS.md). KL 0 removes the leash to the pretrained
+weights and t 0.2 is too soft; the two together cost more than either alone. This grid
+now runs lr 1e-4 / KL 10 / t 0.07, top-ranked in all four scale x checkpoint cells.
+The contrastive pretraining ablation, matched to the corrected scale curve.
 
     python sweeps/make_contrastive_random_v2.py --clean
 
@@ -39,7 +47,7 @@ STAMP = OUT / ".template"
 RUN_PREFIX = "v3_conrand-"
 FROZEN = "/flare/UIC-HPC/khuss/msdelta/pretrained"
 
-LEARNING_RATE, KL_WEIGHT, TEMPERATURE = "2e-5", "0", "0.2"
+LEARNING_RATE, KL_WEIGHT, TEMPERATURE = "1e-4", "10", "0.07"
 SEEDS = ("0", "1", "2", "3", "4", "5")
 # sort key -> (label, frozen checkpoint). Keys chosen so s400m sorts last.
 SCALES = {
