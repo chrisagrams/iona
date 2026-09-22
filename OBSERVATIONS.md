@@ -775,3 +775,42 @@ Only 50m@540423 is a canonical rung.
 
 WHAT IS NOT YET MEASURED: 100m. Its 48 arms predate the retrieval code; jobs 8851492
 and 8851650 are rescoring them, which will make this four scales instead of three.
+
+## Report the metric-learning standards, under the names the literature uses
+
+Contrastive was being scored on Hit@1 and MAP@100, neither of which is what the metric
+learning field reports, so our numbers could not be compared against published work.
+
+THE REFERENCE: Musgrave, Belongie and Lim, "A Metric Learning Reality Check", ECCV 2020,
+arXiv:2003.08505. They re-ran a decade of metric-learning papers under matched training
+and found most reported gains vanished, and they argue Recall@K is a poor metric --
+it saturates and is blind to ranking quality below the cutoff. Their recommendation is
+MAP@R, with R the number of relevant items FOR THAT QUERY, alongside Precision@1 and
+R-Precision.
+
+WHY IT MATTERS HERE SPECIFICALLY. The replicate corpus has 1000 peptide+charge groups,
+NO singletons, and group sizes from 11 to 120 with a median of 13. A fixed cutoff asks a
+much harder question of a 120-replicate peptide than of an 11-replicate one, and MAP@100
+averages the two as equals. MAP@R adapts the cutoff per query, which is exactly the
+variable-group-size case it was designed for.
+
+WHAT WAS NOT WRONG: the worry that MAP@100 is unreachable because no peptide has 100
+replicates. Exactly one group of 1000 exceeds 100 members (0.8% of spectra), so MAP@100
+essentially never truncates and average precision can reach 1.0 for 999 of 1000 groups.
+The problem with it is difficulty normalisation, not reachability.
+
+NAMING, since these get used inconsistently:
+  Precision@1  identical to the Hit@1 we already reported; both names are emitted so
+               older tables still line up.
+  R-Precision  of a query's R relevant spectra, the fraction inside its own top R.
+  MAP@R        average precision over the top R, zero-padded past the last hit.
+  R@5          OURS IS NOT THE LITERATURE'S Recall@K. Ours is the fraction of a query's
+               relevant spectra appearing in its top 5; theirs is the fraction of
+               QUERIES with at least one hit in the top K. Kept only for continuity.
+
+The implementation is checked against a brute-force loop on random embeddings, matching
+to 1e-6 on all three across four trials, and returns 1.0 on a constructed perfect case.
+
+WHAT IS NOT YET MEASURED: every contrastive number in this project is quoted in MAP@100.
+The saved encoders all carry final/, so re-scoring them in MAP@R is a rescore rather
+than a retrain, but it has not been done.

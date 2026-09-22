@@ -15,50 +15,68 @@ LEGEND  [x] done  [~] RUNNING  [>] blocked  [X] closed  [ ] not started
 
 JOBS
 ──────────────────────────────────────────────────────────────────────────
-  [~] 8850494  denoise LADDER ..... 21 arms, ckpt 220k+330k, 4 scales
-  [~] 8851663  contrastive LADDER . 42 arms, same cells, NEW config
-  [~] 8851492/8851650  100m rescore  fills the last HP-transfer cell
-  [~] 8848555 pairaccum / 8847663 dnscratch .. pre-canonical, finishing
+  [~] 8853558  contrastive pretraining ablation, live config  (24 arms)
+  [~] 8847663  dnscratch, pre-canonical
+  [ ] 8850494  DENOISE LADDER 220k+330k, 4 scales -- still QUEUED, 16 nodes
+  [ ] 8853703  seed top-up, 200m/400m to n=12
+  [ ] 8854412  REPAIR: 6 arms of 8853557 that died on a Lustre write storm
+  [x] 8851663  contrastive ladder, 42/42 arms -- THE NEW DATA
+  [X] 8853557  contrastive scale re-run: 18/24, 6 lost. Repaired above.
 
 
-DENOISE  — the line that works, unchanged
+DENOISE  — unchanged, and still the line that works
 ──────────────────────────────────────────────────────────────────────────
   [x] scale curve, 6 seeds .. 0.9317 / 0.9400 / 0.9447 / 0.9434
-        every step resolves; 200m->400m is -0.0013 at t=-6.3, a real
-        turnover, not a budget artefact
   [x] pretraining worth ..... +0.046 at ep4, +0.032 at ep8
-  [x] HP confirmed at a 4x-better checkpoint .. lr2e-4 / es0.5 still wins,
-        and es0.5-over-1.0 SHARPENS (0.0045 vs sem 0.0004)
-  [~] checkpoint ladder ..... first canonical-rung work, just launched
+  [x] HP holds at 540423 .... lr 2e-4 / es 0.5, preference SHARPENS
+  [ ] checkpoint ladder ..... queued behind smaller jobs; plots wait on it
+        50m is the only scale with two points: 0.9272 -> 0.9365 AUROC
+        across 133k -> 540k pretraining steps
 
 
-CONTRASTIVE  — was measuring nothing; now fixed
+CONTRASTIVE  — the config fix changed the conclusion, not just the level
 ──────────────────────────────────────────────────────────────────────────
-  [X] THE SEPARATION RATIO IS DEAD. It does not predict retrieval.
-        rho +0.28 Hit@1 (p=0.18), +0.40 MAP@100 (p=0.055), n=24.
-        WITHIN a scale rho = -0.04: it cannot even order seeds.
-  [X] the config we used all along does NOTHING
-        lr2e-5/KL0/t0.2: level with an UNTRAINED encoder on MAP@100
-        (p=0.98), worse on Hit@1 (p=0.003). Ranks 9/8/9/9 of 12.
-  [x] a config that works ... lr1e-4 / KL10 / t0.07
-        beats untrained on both (Hit@1 p=0.0007, MAP@100 p=0.0002)
-  [x] HP TRANSFERS across scale AND checkpoint
-        4 cells, mean pairwise rho +0.80, min +0.70, all significant.
-        Same winner in all four => ONE config for the whole ladder,
-        no per-rung and no per-scale sweep. This is what the probe bought.
-  [>] every prior contrastive number .. measured at the dead config.
-        Shapes may survive, LEVELS DO NOT. Re-run decision is open.
+  [x] AT THE LIVE CONFIG IT BEATS AN UNTRAINED ENCODER ON BOTH METRICS
+        Hit@1 0.70-0.78 vs 0.6538 untrained;  MAP@100 0.295-0.412 vs 0.1727.
+        The earlier "contrastive costs Hit@1 everywhere" was the dead config.
+  [x] SCALE DOES NOT HELP. 50m is the BEST cell, 200m the worst:
+        50m  220k 0.3758   330k 0.4122   <- best
+        100m 220k 0.3721   330k 0.3715
+        200m 220k 0.3449   330k 0.2950   <- worst
+        400m 220k 0.3604
+  [x] CHECKPOINT EFFECT HAS NO COMMON SIGN
+        50m improves, 100m flat, 200m DECLINES with more pretraining.
+  [x] the ratio inverts against the task AGAIN, now across scale:
+        ratio climbs 6.14 -> 11.12 while MAP@100 falls. Third independent
+        confirmation the proxy is anti-correlated with what we care about.
+  [x] HP transfers across scale AND checkpoint .. mean pairwise rho +0.80
+  [>] old contrastive corpus .. measured at the dead config, levels invalid
 
 
-DECISIONS NEEDED
+HAZARDS HIT THIS SESSION
 ──────────────────────────────────────────────────────────────────────────
-  [ ] re-run the contrastive corpus at the live config? scale curve,
-      pretraining ablation, pair-loss, negatives -- all at the dead point
-  [ ] transfer rests on 3 NON-canonical cells (cost no new training).
-      Redo on canonical rungs, or accept as-is?
-  [ ] winner resolved only at 50m; 200m p=0.20, 400m p=0.067.
-      More seeds there, or accept the ranking argument?
-  [ ] later rungs: 430000, 540423, then 120000 / 10000
+  [X] a queued job reads its config dir at RUN time, not submit time.
+        Regenerating a grid overwrote 8850494's configs while it sat queued.
+        Restored; wave is now part of the directory NAME.
+  [X] averaging a (scale, checkpoint) cell mixes in the whole HP grid.
+        Put 50m at 0.7523 where the configuration scores 0.9272.
+  [X] TILES_PER_ARM=1 packs 12 arms per node; a 400m optimizer checkpoint
+        is 7.4 GB, so save_steps 200 means ~89 GB of simultaneous Lustre
+        writes. Killed 6 arms. Fixed with save_only_model + save_steps 700.
+  [X] PBS -v treats commas as variable separators; ARMS needs escaping.
+
+
+OPEN RESEARCH QUESTIONS
+──────────────────────────────────────────────────────────────────────────
+  [ ] WHY does contrastive get WORSE with scale when denoise gets better?
+        Opposite signs on the same encoders. This is the real result.
+  [ ] Is 200m@330000 a real decline or a bad checkpoint? Only cell that
+        moves backwards with more pretraining.
+  [ ] Does the 50m contrastive advantage survive at 430k and 540423?
+  [ ] Denoise turnover at 400m and contrastive decline with scale -- same
+        cause, or unrelated?
+  [ ] Re-run the rest of the contrastive corpus at the live config?
+  [ ] Winner margin still unresolved at 200m/400m (8853703 pending)
 ```
 
 Model scales are NOT compared against each other directly; figures normalise by

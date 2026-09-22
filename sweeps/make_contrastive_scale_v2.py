@@ -68,6 +68,17 @@ def arm_name(scale: str, seed: str) -> str:
 def render_arm(scale: str, seed: str) -> tuple[str, str]:
     name = arm_name(scale, seed)
     overrides = {
+        # Twelve arms share a node at TILES_PER_ARM=1, and a 400m optimizer checkpoint
+        # is 7.4 GB. Every 200 steps that is ~89 GB hitting Lustre at once, which is
+        # what killed six arms of job 8853557 with
+        #   RuntimeError: [enforce fail at inline_container.cc:668] unexpected pos ...
+        # from torch.save writing the optimizer state. Nothing here ever resumes from an
+        # intermediate checkpoint -- only final/ is consumed -- so the optimizer state is
+        # pure write amplification. Dropping it and saving less often cuts the burst by
+        # more than an order of magnitude.
+        "--save_only_model": "true",
+        "--save_steps": "700",
+        "--save_total_limit": "1",
         "--pretrained_path": SCALES[scale][1],
         "--learning_rate": LEARNING_RATE,
         "--kl_weight": KL_WEIGHT,

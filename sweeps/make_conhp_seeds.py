@@ -53,6 +53,13 @@ def arm_name(scale, lr, kl, t, seed):
 def render_arm(scale, lr, kl, t, seed) -> tuple[str, str]:
     name = arm_name(scale, lr, kl, t, seed)
     overrides = {
+        # 12 arms/node at TILES_PER_ARM=1, and a 400m optimizer checkpoint is 7.4 GB:
+        # save_steps 200 put ~89 GB on Lustre at once and killed arms in 8853557,
+        # 8853558 and 8853703 with "enforce fail ... unexpected pos" from torch.save.
+        # Only final/ is ever consumed, so optimizer state is pure write amplification.
+        "--save_only_model": "true",
+        "--save_steps": "700",
+        "--save_total_limit": "1",
         "--pretrained_path": SCALES[scale][1],
         "--learning_rate": LEARNING_RATES[lr],
         "--kl_weight": KL_WEIGHTS[kl],

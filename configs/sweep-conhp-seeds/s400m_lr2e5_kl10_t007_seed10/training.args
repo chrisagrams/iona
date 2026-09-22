@@ -25,8 +25,8 @@
 --bf16 true
 --eval_strategy no
 --save_strategy steps
---save_steps 200
---save_total_limit 2
+--save_steps 700
+--save_total_limit 1
 --logging_steps 10
 --logging_first_step true
 --remove_unused_columns false
@@ -36,4 +36,5 @@
 --report_to wandb
 --wandb_project msdelta-finetune-contrastive
 --wandb_entity CS_Pharm
+--save_only_model true
 --split_seed 0
