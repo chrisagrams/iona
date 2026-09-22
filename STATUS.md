@@ -37,7 +37,7 @@ DENOISE  — the line that works
               100m  0.9400 +/- 0.00029        400m  0.9434 +/- 0.00045
 
         All 24 arms in. Every step resolves: +0.0083 (t=32.7), +0.0047
-        (t=30.2), -0.0013 (t=-6.3). See results/denoise_scale_seeds.txt.
+        (t=30.2), -0.0013 (t=-6.3). See results/finetune/denoise/denoise_scale_seeds.txt.
 
         200m -> 400m is -0.0013 at t = -6.3, a regression and not a plateau.
         AT THIS FINE-TUNING BUDGET: the 400m probe (8845252) has 400m still
@@ -98,7 +98,7 @@ INFRA & BUGS
 
 Model scales are NOT compared against each other directly; figures normalise by
 compute budget. That is why the matched-checkpoint control was dropped -- and why
-`results/checkpoint_provenance.txt` matters: `final/` is a moving export, so the
+`results/finetune/checkpoint_provenance.txt` matters: `final/` is a moving export, so the
 step each fine-tune started from is only recoverable while those checkpoints still
 exist. It is recorded there rather than left to be reconstructed later.
 

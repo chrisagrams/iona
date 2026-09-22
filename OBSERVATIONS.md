@@ -278,7 +278,7 @@ which was really two models read at ~135k steps compared against one at ~193k. W
 after a matched-step probe showed no effect at all.
 
 Everything now points at frozen copies under `/flare/UIC-HPC/khuss/msdelta/pretrained/`,
-named by step number, with `results/checkpoint_provenance.txt` recording which is which.
+named by step number, with `results/finetune/checkpoint_provenance.txt` recording which is which.
 
 ---
 

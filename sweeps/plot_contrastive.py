@@ -31,7 +31,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 REPO = Path(__file__).resolve().parent.parent
-FIGS = REPO / "results" / "figures"
+FIGS = REPO / "results" / "finetune" / "contrastive" / "figures"
 RUNS = "/lus/flare/projects/UIC-HPC/khuss/msdelta/runs"
 INK, MUTED, GRID = "#1a1a1a", "#6b7280", "#e5e7eb"
 BLUE, RED, GREY = "#2563eb", "#dc2626", "#9ca3af"

@@ -40,4 +40,4 @@ export HF_DATASETS_OFFLINE=${HF_DATASETS_OFFLINE:-1}
 "$VENV_DIR/bin/python" -m msdelta.eval_retrieval \
     --job "$JOB" ${BASELINE:+--baseline "$BASELINE"} \
     --runs "$SCRATCH_ROOT/runs" \
-    --out "results/retrieval_vs_separation_$JOB.json"
+    --out "results/finetune/contrastive/retrieval_vs_separation_$JOB.json"

@@ -5,7 +5,7 @@
 
 THE TOP CLUSTER IS NOT RESOLVED. The best eight arms span 0.0023 across three head
 widths and two encoder scales, against a seed noise of 0.0005 measured at a fixed
-configuration (results/denoise_scale_seeds.txt). Most of the ranking inside that
+configuration (results/finetune/denoise/denoise_scale_seeds.txt). Most of the ranking inside that
 cluster is not a measurement. Do not quote a winner without the error bar.
 
 encoder_lr_scale 0 means a FROZEN encoder: those arms collapse, which is the one

@@ -26,7 +26,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 REPO = Path(__file__).resolve().parent.parent
-FIGS = REPO / "results" / "figures"
+FIGS = REPO / "results" / "finetune" / "contrastive" / "figures"
 INK, MUTED, GRID = "#1a1a1a", "#6b7280", "#e5e7eb"
 BLUE, RED, GREEN = "#2563eb", "#dc2626", "#059669"
 SCALE_COLOUR = {"s050m": "#93c5fd", "s100m": "#60a5fa",

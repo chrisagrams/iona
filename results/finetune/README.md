@@ -1,4 +1,17 @@
-# Denoise fine-tuning results
+# Fine-tuning results
+
+Two lines of work, in their own directories:
+
+    finetune/denoise/       per-peak noise classification
+    finetune/contrastive/   spectrum embeddings for retrieval and reranking
+    finetune/checkpoint_provenance.txt   which pretrained checkpoint each scale used
+
+Each carries its own `figures/`. Denoise additionally has `figures/extra/` for the
+supporting figures -- how the numbers were reached rather than what they are.
+
+---
+
+# Denoise
 
 Per-peak noise classification on `chrisagrams/ms-denoise-100k`. Every number is
 `test_auroc` on the held-out test split, produced by `msdelta/finetune_denoise.py`.
@@ -12,15 +25,15 @@ sweep arm configs they cannot be reproduced from this repository alone.
 
 | file | what it holds |
 | --- | --- |
-| `denoise_scale_seeds.txt` | FT5: 4 scales × 6 seeds at one fixed configuration. The headline. |
-| `grid_denoise_50m.txt` | The 216-arm 50m hyperparameter grid. |
-| `grid_denoise_by_scale.txt` | 12-arm grids at 100m / 200m / 400m, identical axes. |
-| `grid_denoise_400m_probe.txt` | `encoder_lr_scale` × epochs at 400m, plus fixed-seed repeats. |
-| `grid_denoise_scratch.txt` | The same 50m fine-tune with a **random** encoder — the pretraining ablation. |
-| `grid_denoise_50m_earlytest.txt` | The same 50m grid on a reduced evaluation. **Not comparable** — see below. |
+| `denoise/denoise_scale_seeds.txt` | FT5: 4 scales × 6 seeds at one fixed configuration. The headline. |
+| `denoise/grid_denoise_50m.txt` | The 216-arm 50m hyperparameter grid. |
+| `denoise/grid_denoise_by_scale.txt` | 12-arm grids at 100m / 200m / 400m, identical axes. |
+| `denoise/grid_denoise_400m_probe.txt` | `encoder_lr_scale` × epochs at 400m, plus fixed-seed repeats. |
+| `denoise/grid_denoise_scratch.txt` | The same 50m fine-tune with a **random** encoder — the pretraining ablation. |
+| `denoise/grid_denoise_50m_earlytest.txt` | The same 50m grid on a reduced evaluation. **Not comparable** — see below. |
 | `checkpoint_provenance.txt` | Which pretrained checkpoint each scale was fine-tuned from. |
-| `figures/` | `scaling` (denoise vs model size, AUROC and F1) and `pretrain_ablation` (pretrained vs random, AUROC and F1). |
-| `figures/extra/` | Supporting: `top_cluster` (why a grid best is not a measurement), `encoder_lr_scale` (how hard to push the encoder, and why it depends on batch size), `probe_heatmap` (`encoder_lr_scale` × epochs at 400m). |
+| `denoise/figures/` | `scaling` (denoise vs model size, AUROC and F1) and `pretrain_ablation` (pretrained vs random, AUROC and F1). |
+| `denoise/figures/extra/` | Supporting: `top_cluster` (why a grid best is not a measurement), `encoder_lr_scale` (how hard to push the encoder, and why it depends on batch size), `probe_heatmap` (`encoder_lr_scale` × epochs at 400m). |
 
 ## What the numbers say
 
@@ -141,3 +154,37 @@ that grid is quarantined in its own file.
 **Why do the later runs score 8,584 of 9,893 test spectra rather than all of them?**
 Consistent across every job, so it does not affect any comparison. Most likely spectra
 dropped for exceeding the peak limit. Not confirmed.
+
+
+---
+
+# Contrastive
+
+Spectrum embeddings for retrieval and reranking, scored by the separation ratio --
+out-group over in-group mean distance, floor 1.35 for an untrained encoder.
+
+| file | what it holds |
+| --- | --- |
+| `contrastive/figures/contrastive_scaling.png` | Separation ratio by model size, 6 seeds per scale. |
+| `contrastive/figures/contrastive_ablation.png` | Pretrained against randomly initialised. |
+| `contrastive/contrastive_random_control.txt` | The original random-init control. |
+| `contrastive/layer_probe_all_scales.txt` | Training-free probe of every encoder block. |
+| `contrastive/layer_probe_trajectory.txt` | The same probe across pretraining checkpoints. |
+| `contrastive/random_init_baseline.txt` | Where the 1.35 floor comes from. |
+| `contrastive/layermix_and_contrastive_v2.txt` | The learned depth mixture. |
+
+**The scale curve climbs to 400m** — 9.37 / 10.36 / 11.50 / 13.84 at 50m/100m/200m/400m,
++4.47 end to end (t=4.1), though no individual step resolves against a seed sd that
+grows from 0.80 to 2.56. An earlier reading of "saturates at 100m" was measured under a
+sampler that replayed identical batches and at hyperparameters ranked seventh of twelve.
+
+**Pretraining is a precondition, not an advantage.** Every random-init cell sat on the
+1.35 floor where the pretrained encoder reached 7.83 — categorically unlike denoise,
+where pretraining is worth a finite +0.033. That result is 50m only and at the old
+configuration; the matched re-run at four scales with six seeds is job 8848471.
+
+**The separation ratio is a proxy that has never been validated.** Contrastive exists
+for retrieval, and every conclusion here — which hyperparameters win, whether the metric
+scales, whether the pair loss trails — was decided by the ratio. `msdelta/eval_retrieval.py`
+scores saved encoders on Hit@1, R@5 and MAP@100 and correlates the two; until that lands,
+treat every contrastive conclusion as conditional on the proxy tracking the task.

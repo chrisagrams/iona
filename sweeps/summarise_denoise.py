@@ -24,7 +24,7 @@ import statistics as st
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
-OUT = REPO / "results"
+OUT = REPO / "results" / "finetune" / "denoise"
 
 # job id -> (filename, title, how to split an arm name into columns)
 GRIDS = {
@@ -101,7 +101,7 @@ def write_50m(runs: Path) -> None:
         "THE TOP CLUSTER IS NOT RESOLVED. The best eight arms span "
         f"{max(top8)-min(top8):.4f} across three head",
         "widths and two encoder scales, against a seed noise of 0.0005 measured at a fixed",
-        "configuration (results/denoise_scale_seeds.txt). Most of the ranking inside that",
+        "configuration (results/finetune/denoise/denoise_scale_seeds.txt). Most of the ranking inside that",
         "cluster is not a measurement. Do not quote a winner without the error bar.",
         "",
         "encoder_lr_scale 0 means a FROZEN encoder: those arms collapse, which is the one",
