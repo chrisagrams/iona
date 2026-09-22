@@ -165,6 +165,11 @@ def fig_encoder_lr(runs: Path) -> None:
     an earlier version showed. A difference makes the reader do arithmetic to find out
     which setting won, and it hid that the two grids use different large batches -- 144
     at 50m, 48 elsewhere -- so a shared "batch 48" series silently had no 50m point.
+
+    An earlier version also drew a dotted extrapolation from the probe's last two points
+    to show what assuming the trend continued would have predicted. That was there
+    because the assumption had been made and was wrong; with es 1.0 now measured at
+    every scale it is a picture of a mistake rather than of the data.
     """
     probe = load(runs, "8845252")
     G = {"50m": ("8840408", "lr2e4_es05_ep4_h512", "lr2e4_es10_ep4_h512", 12, 144),
@@ -188,13 +193,9 @@ def fig_encoder_lr(runs: Path) -> None:
     xs = [0.1, 0.25, 0.5]
     ys = [probe[f"es{k}_ep4"]["test_auroc"] for k in ("01", "025", "05")]
     g05, g10 = val("400m", "05", "small"), val("400m", "10", "small")
-    slope = ys[-1] - ys[-2]
     ax.plot(xs, ys, "o-", color=BLUE, lw=2.2, ms=7, zorder=4, label="probe, 4 epochs")
     ax.plot([0.5, 1.0], [g05, g10], "s--", color=RED, lw=2.2, ms=7, zorder=4,
             label="400m grid, batch 12")
-    ax.plot([0.5, 1.0], [ys[-1], ys[-1] + 2 * slope], ":", color=MUTED, lw=1.8,
-            zorder=2, label="extrapolating the probe")
-    ax.scatter([0.5], [ys[-1]], s=150, facecolor="none", edgecolor=GREEN, lw=1.6, zorder=5)
     ax.set_xlabel("encoder_lr_scale"); ax.set_ylabel("test AUROC")
     ax.set_title("400m, 4 epochs", loc="left", pad=16)
     ax.grid(axis="y"); ax.set_axisbelow(True); ax.set_xlim(0.02, 1.13)
