@@ -37,8 +37,15 @@ export HF_HOME=${HF_HOME:-$SCRATCH_ROOT/huggingface}
 export HF_HUB_OFFLINE=${HF_HUB_OFFLINE:-1}
 export HF_DATASETS_OFFLINE=${HF_DATASETS_OFFLINE:-1}
 
+# Name the output for what it holds. A filtered run must not overwrite a full-job
+# file, and two halves of one split must not overwrite each other.
+if [[ -n ${OUT_TAG:-} ]]; then SUFFIX="_$OUT_TAG"
+elif [[ -n ${ARMS:-} ]]; then SUFFIX="_sel"
+else SUFFIX=""
+fi
+
 "$VENV_DIR/bin/python" -m msdelta.eval_retrieval \
     --job "$JOB" ${BASELINE:+--baseline "$BASELINE"} \
     ${ARMS:+--arms "$ARMS"} \
     --runs "$SCRATCH_ROOT/runs" \
-    --out "results/finetune/contrastive/retrieval_vs_separation_$JOB${ARMS:+_sel}.json"
+    --out "results/finetune/contrastive/retrieval_vs_separation_${JOB}${SUFFIX}.json"
