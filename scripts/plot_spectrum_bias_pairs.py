@@ -1,13 +1,11 @@
 from __future__ import annotations
 
 import argparse
-import csv
-import json
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
+from itertools import islice
 from pathlib import Path
 
 import numpy as np
-import pyarrow.parquet as pq
 from _delta_bias_plotting import (
     evaluate_bias,
     load_bias_module,
@@ -16,21 +14,27 @@ from _delta_bias_plotting import (
     set_publication_style,
     write_csv,
 )
+from datasets import load_dataset
 from matplotlib.lines import Line2D
-from matplotlib.patches import PathPatch
-from matplotlib.path import Path as MplPath
+from matplotlib.patches import FancyArrowPatch
 from pyteomics import mass
 
-from msdelta.chemistry import ISOTOPES, NEUTRAL_LOSSES, RESIDUE_MASSES, RESIDUES_AA20
+from msdelta.chemistry import RESIDUE_MASSES
+
+DATASET_ID = "chrisagrams/MSConsensus-100M"
+DATASET_SPLIT = "validation"
 
 ANNOTATION_STYLE: dict[str, tuple[str, str]] = {
-    "b_ion": ("tab:blue", "b-ion ladder"),
-    "y_ion": ("tab:red", "y-ion ladder"),
-    "neutral_loss": ("tab:orange", "Neutral loss"),
-    "isotope": ("tab:green", "Isotope spacing"),
-    "residue": ("tab:purple", "Residue mass"),
-    "unassigned": ("0.55", "Unassigned"),
+    "b_ion": ("#1358b0", "Observed b-ion ladder transition"),
+    "y_ion": ("#d7191c", "Observed y-ion ladder transition"),
 }
+
+_CALLOUT = (
+    "Only transitions whose two endpoints match\n"
+    "the peptide's theoretical b/y ladder are shown.\n"
+    "Hn identifies the attention-bias head with the\n"
+    "largest learned score at that observed Δm."
+)
 
 CSV_HEADER = (
     "lower_index",
@@ -39,8 +43,8 @@ CSV_HEADER = (
     "upper_mz",
     "delta_mass",
     "score",
-    "max_bias_head",
-    "max_head_bias",
+    "bias_head",
+    "head_bias",
     "annotation_type",
     "annotation_label",
     "reference_mass",
@@ -58,8 +62,8 @@ class PairRecord:
     upper_mz: float
     delta_mass: float
     score: float
-    max_head: int
-    max_bias: float
+    head: int
+    head_bias: float
     annotation_type: str = "unassigned"
     annotation_label: str = ""
     reference_mass: float | None = None
@@ -75,94 +79,40 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     """Parse the Figure C command line."""
     parser = argparse.ArgumentParser(description="Draw bias-favored peak pairs over a single spectrum (Figure C).")
     parser.add_argument("--checkpoint", type=Path, required=True, help="pretraining checkpoint")
-    parser.add_argument("--spectra", type=Path, required=True, help="CSV/JSON/JSONL/Parquet file")
     parser.add_argument("--output", type=Path, required=True, help="figure path (.pdf/.svg/.png)")
     parser.add_argument("--pairs-output", type=Path, default=None, help="annotated pairs CSV")
     parser.add_argument("--device", default="auto", help="auto, cpu, cuda, or xpu")
-    parser.add_argument("--row-index", type=int, default=0, help="row to plot when no id is given")
-    parser.add_argument("--id-column", default=None, help="column holding the spectrum id")
-    parser.add_argument("--spectrum-id", default=None, help="spectrum id to select")
-    parser.add_argument("--mz-column", default="mz")
-    parser.add_argument("--intensity-column", default="intensity")
-    parser.add_argument("--peptide-column", default="peptide")
-    parser.add_argument("--charge-column", default="charge")
-    parser.add_argument("--top-pairs", type=int, default=12, help="pairs drawn and written")
-    parser.add_argument("--top-k-heads", type=int, default=3, help="heads averaged per pair score")
+    parser.add_argument("--row-index", type=int, default=0, help="validation-split row to plot")
+    parser.add_argument("--table-pairs", type=int, default=10, help="pairs shown in table")
     parser.add_argument("--min-dm", type=float, default=0.5, help="lowest pair Δm in Da")
     parser.add_argument("--max-dm", type=float, default=250.0, help="highest pair Δm in Da")
-    parser.add_argument("--mass-tolerance", type=float, default=0.05, help="Δm match tolerance")
+    parser.add_argument("--min-bias", type=float, default=0.0, help="lowest per-head bias to draw")
     parser.add_argument(
-        "--fragment-tolerance", type=float, default=0.05, help="b/y ion match tolerance"
+        "--fragment-tolerance", type=float, default=0.01, help="b/y ion match tolerance"
     )
     parser.add_argument("--symmetric", action="store_true", help="fold b(+Δm) with b(-Δm)")
     parser.add_argument("--dpi", type=int, default=300)
-    parser.add_argument("--title", default=None, help="figure title")
     return parser.parse_args(argv)
 
 
-def _maybe_parse_array(value: object) -> object:
-    """Parse a JSON-list string such as ``"[100.1, 200.2]"`` into a list."""
-    if not isinstance(value, str):
-        return value
-    text = value.strip()
-    if text.startswith("[") and text.endswith("]"):
-        try:
-            return json.loads(text)
-        except json.JSONDecodeError:
-            return [float(part) for part in text[1:-1].replace(",", " ").split()]
-    return value
+def load_spectrum_row(row_index: int) -> dict[str, object]:
+    """Stream one evaluation spectrum from MSConsensus-100M."""
+    if row_index < 0:
+        raise SystemExit("--row-index must be non-negative when streaming the dataset")
+    dataset = load_dataset(DATASET_ID, split=DATASET_SPLIT, streaming=True)
+    try:
+        return next(islice(dataset, row_index, row_index + 1))
+    except StopIteration:
+        raise SystemExit(f"--row-index {row_index} is past the end of the dataset") from None
 
 
-def _select_row(
-    rows: list[dict[str, object]], row_index: int, id_column: str | None, spectrum_id: str | None
-) -> dict[str, object]:
-    """Pick a row by id when one is supplied, otherwise by position."""
-    if id_column and spectrum_id is not None:
-        for row in rows:
-            if str(row.get(id_column, "")) == str(spectrum_id):
-                return row
-        raise SystemExit(f"no row with {id_column}={spectrum_id!r}")
-    if not -len(rows) <= row_index < len(rows):
-        raise SystemExit(f"--row-index {row_index} is out of range for {len(rows)} rows")
-    return rows[row_index]
-
-
-def load_spectrum_row(
-    path: Path, row_index: int, id_column: str | None, spectrum_id: str | None
-) -> dict[str, object]:
-    """Load one spectrum record from a CSV, JSON, JSONL, or Parquet file."""
-    suffix = path.suffix.lower()
-    if suffix == ".parquet":
-        table = pq.read_table(path)
-        rows = table.to_pylist()
-    elif suffix == ".jsonl" or suffix == ".ndjson":
-        with path.open(encoding="utf-8") as handle:
-            rows = [json.loads(line) for line in handle if line.strip()]
-    elif suffix == ".json":
-        with path.open(encoding="utf-8") as handle:
-            payload = json.load(handle)
-        rows = payload if isinstance(payload, list) else [payload]
-    elif suffix == ".csv":
-        with path.open(newline="", encoding="utf-8") as handle:
-            rows = [dict(record) for record in csv.DictReader(handle)]
-    else:
-        raise SystemExit(f"unsupported spectra suffix {path.suffix!r}")
-
-    if not rows:
-        raise SystemExit(f"{path} contains no rows")
-    row = _select_row(rows, row_index, id_column, spectrum_id)
-    return {key: _maybe_parse_array(value) for key, value in row.items()}
-
-
-def extract_peaks(
-    row: dict[str, object], mz_column: str, intensity_column: str
-) -> tuple[np.ndarray, np.ndarray]:
+def extract_peaks(row: dict[str, object]) -> tuple[np.ndarray, np.ndarray]:
     """Validate and return the sorted m/z array and base-peak-normalized intensity."""
-    for column in (mz_column, intensity_column):
+    for column in ("mz", "intensity"):
         if column not in row or row[column] is None:
             raise SystemExit(f"the selected row has no {column!r} column")
-    mz = np.asarray(row[mz_column], dtype=np.float64)
-    intensity = np.asarray(row[intensity_column], dtype=np.float64)
+    mz = np.asarray(row["mz"], dtype=np.float64)
+    intensity = np.asarray(row["intensity"], dtype=np.float64)
     if mz.ndim != 1 or intensity.ndim != 1:
         raise SystemExit("m/z and intensity must be one-dimensional arrays")
     if mz.shape != intensity.shape:
@@ -183,9 +133,9 @@ def extract_peaks(
     return mz, intensity / base
 
 
-def read_peptide(row: dict[str, object], column: str) -> str | None:
+def read_peptide(row: dict[str, object]) -> str | None:
     """Return the unmodified peptide sequence, or None when unusable."""
-    value = row.get(column)
+    value = row.get("peptide")
     if value is None:
         return None
     peptide = str(value).strip().upper()
@@ -194,9 +144,9 @@ def read_peptide(row: dict[str, object], column: str) -> str | None:
     return peptide
 
 
-def read_charge(row: dict[str, object], column: str) -> int | None:
+def read_charge(row: dict[str, object]) -> int | None:
     """Return the precursor charge, or None when missing or unparsable."""
-    value = row.get(column)
+    value = row.get("charge")
     if value is None or value == "":
         return None
     try:
@@ -269,100 +219,77 @@ def ladder_annotation(
     return None
 
 
-def charge_scaled(values: dict[str, float], max_charge: int) -> list[tuple[str, float]]:
-    """Expand reference masses to the charge-scaled differences they produce."""
-    scaled: list[tuple[str, float]] = []
-    for name, value in values.items():
-        for charge in range(1, max_charge + 1):
-            label = name if charge == 1 else f"{name} z{charge}"
-            scaled.append((label, value / charge))
-    return scaled
-
-
-def closest_reference(
-    delta: float, candidates: list[tuple[str, float]], tolerance: float
-) -> tuple[str, float] | None:
-    """Return the closest candidate within ``tolerance`` of ``delta``."""
-    best: tuple[str, float] | None = None
-    best_error = tolerance
-    for name, value in candidates:
-        error = abs(delta - value)
-        if error <= best_error:
-            best, best_error = (name, value), error
-    return best
-
-
-def annotate_pair(
+def annotate_ladder_pair(
     record: PairRecord,
-    peptide: str | None,
+    peptide: str,
     assignments: dict[int, set[tuple[str, int, int]]],
-    losses: list[tuple[str, float]],
-    isotopes: list[tuple[str, float]],
-    residues: list[tuple[str, float]],
-    tolerance: float,
 ) -> None:
-    """Assign the highest-priority chemical interpretation to ``record`` in place."""
-    if peptide is not None:
-        lower = assignments.get(record.lower_index, set())
-        upper = assignments.get(record.upper_index, set())
-        for series in ("b", "y"):
-            hit = ladder_annotation(peptide, lower, upper, series, record.delta_mass)
-            if hit is not None:
-                record.annotation_type = hit[0]
-                record.annotation_label = hit[1]
-                record.reference_mass = hit[2]
-                record.mass_error = hit[3]
-                return
-
-    for kind, candidates in (
-        ("neutral_loss", losses),
-        ("isotope", isotopes),
-        ("residue", residues),
-    ):
-        hit = closest_reference(record.delta_mass, candidates, tolerance)
+    """Annotate ``record`` only when both endpoints form a theoretical b/y ladder step."""
+    lower = assignments.get(record.lower_index, set())
+    upper = assignments.get(record.upper_index, set())
+    for series in ("b", "y"):
+        hit = ladder_annotation(peptide, lower, upper, series, record.delta_mass)
         if hit is not None:
-            record.annotation_type = kind
-            record.annotation_label = hit[0]
-            record.reference_mass = hit[1]
-            record.mass_error = record.delta_mass - hit[1]
+            record.annotation_type = hit[0]
+            record.annotation_label = hit[1]
+            record.reference_mass = hit[2]
+            record.mass_error = hit[3]
             return
 
 
-def score_pairs(
+def score_candidate_pairs(
     bias_module,
     mz: np.ndarray,
     min_dm: float,
     max_dm: float,
-    top_k_heads: int,
     symmetric: bool,
-) -> list[PairRecord]:
-    """Score every in-window peak pair with one batched bias evaluation."""
+) -> tuple[list[PairRecord], np.ndarray]:
+    """Score every in-window peak pair, retaining the per-head bias matrix."""
     lower_idx, upper_idx = np.triu_indices(mz.size, k=1)
     deltas = mz[upper_idx] - mz[lower_idx]
     keep = (deltas >= min_dm) & (deltas <= max_dm)
     lower_idx, upper_idx, deltas = lower_idx[keep], upper_idx[keep], deltas[keep]
     if deltas.size == 0:
-        return []
+        return [], np.empty((0, 0), dtype=np.float64)
 
     bias = evaluate_bias(bias_module, deltas, symmetric=symmetric)
-    k = max(1, min(top_k_heads, bias.shape[1]))
-    scores = np.sort(bias, axis=1)[:, -k:].mean(axis=1)
-    max_heads = np.argmax(bias, axis=1)
-    max_bias = bias[np.arange(bias.shape[0]), max_heads]
-
-    return [
+    records = [
         PairRecord(
             lower_index=int(lower_idx[i]),
             upper_index=int(upper_idx[i]),
             lower_mz=float(mz[lower_idx[i]]),
             upper_mz=float(mz[upper_idx[i]]),
             delta_mass=float(deltas[i]),
-            score=float(scores[i]),
-            max_head=int(max_heads[i]),
-            max_bias=float(max_bias[i]),
+            score=0.0,
+            head=0,
+            head_bias=0.0,
         )
         for i in range(deltas.size)
     ]
+    return records, bias
+
+
+def select_ladder_transitions(
+    records: list[PairRecord], bias: np.ndarray, min_bias: float
+) -> list[PairRecord]:
+    """Attach each supported ladder transition to its highest-bias attention head."""
+    selected: list[PairRecord] = []
+    for index, record in enumerate(records):
+        if not record.annotated:
+            continue
+        head_index = int(np.argmax(bias[index]))
+        head_bias = float(bias[index, head_index])
+        if head_bias < min_bias:
+            continue
+        selected.append(
+            replace(
+                record,
+                score=head_bias,
+                head=head_index + 1,
+                head_bias=head_bias,
+            )
+        )
+    return selected
 
 
 def assign_levels(records: list[PairRecord]) -> list[int]:
@@ -389,38 +316,59 @@ def plot_spectrum(
     mz: np.ndarray,
     intensity: np.ndarray,
     records: list[PairRecord],
-    title: str | None,
+    peptide: str | None = None,
+    charge: int | None = None,
+    table_pairs: int = 4,
 ) -> plt.Figure:
-    """Draw the stick spectrum with colored arcs over the selected peak pairs."""
+    """Draw the spectrum, relationship arcs, compact table, and interpretation."""
     levels = assign_levels(records)
     n_levels = (max(levels) + 1) if levels else 1
-    arc_base, arc_step = 1.08, 0.16
-    top = arc_base + arc_step * n_levels + 0.12
+    arc_base, arc_step = 1.03, 0.13
+    top = arc_base + arc_step * n_levels + 0.1
 
-    fig, ax = plt.subplots(figsize=(7.2, 3.4))
+    fig = plt.figure(figsize=(10.2, 5.1))
+    layout = fig.add_gridspec(
+        2,
+        5,
+        left=0.07,
+        right=0.985,
+        bottom=0.07,
+        top=0.82,
+        height_ratios=(2.15, 1.0),
+        hspace=0.45,
+        wspace=0.28,
+    )
+    ax = fig.add_subplot(layout[0, :])
     ax.vlines(mz, 0.0, intensity, color="black", linewidth=0.6)
     ax.axhline(0.0, color="black", linewidth=0.6)
 
     for record, level in zip(records, levels):
         color = ANNOTATION_STYLE[record.annotation_type][0]
         apex = arc_base + arc_step * level
-        start = (record.lower_mz, min(intensity[record.lower_index] + 0.02, apex - 0.01))
-        end = (record.upper_mz, min(intensity[record.upper_index] + 0.02, apex - 0.01))
-        mid_x = 0.5 * (record.lower_mz + record.upper_mz)
-        path = MplPath(
-            [start, (start[0], apex), (mid_x, apex), (end[0], apex), end],
-            [MplPath.MOVETO, MplPath.CURVE4, MplPath.CURVE4, MplPath.CURVE4, MplPath.LINETO],
+        start_y = min(float(intensity[record.lower_index]) + 0.025, apex - 0.05)
+        end_y = min(float(intensity[record.upper_index]) + 0.025, apex - 0.05)
+        span_fraction = (record.upper_mz - record.lower_mz) / max(float(np.ptp(mz)), 1.0)
+        radius = -(0.22 + min(0.35, 0.7 * span_fraction) + 0.08 * level)
+        arrow = FancyArrowPatch(
+            (record.lower_mz, start_y),
+            (record.upper_mz, end_y),
+            connectionstyle=f"arc3,rad={radius}",
+            arrowstyle="-|>",
+            mutation_scale=5,
+            color=color,
+            linewidth=0.8,
+            alpha=0.95,
         )
-        ax.add_patch(PathPatch(path, edgecolor=color, facecolor="none", linewidth=0.8, alpha=0.9))
-        label = record.annotation_label or f"{record.delta_mass:.2f}"
+        ax.add_patch(arrow)
+        mid_x = 0.5 * (record.lower_mz + record.upper_mz)
+        explanation = record.annotation_label or f"Δm={record.delta_mass:.2f}"
+        label = f"H{record.head}: {explanation}"
         ax.annotate(
             label,
-            xy=(mid_x, apex),
-            xytext=(0, 1.5),
-            textcoords="offset points",
+            xy=(mid_x, apex - 0.01),
             ha="center",
             va="bottom",
-            fontsize=5.5,
+            fontsize=6,
             color=color,
         )
 
@@ -444,10 +392,66 @@ def plot_spectrum(
             )
             for key in used
         ]
-        ax.legend(handles=handles, loc="upper center", ncols=min(len(handles), 6), frameon=False)
-    if title:
-        ax.set_title(title)
-    fig.tight_layout()
+        legend = ax.legend(
+            handles=handles,
+            loc="upper right",
+            title="Sequence-supported transitions",
+            frameon=True,
+            fancybox=False,
+            framealpha=1.0,
+            borderpad=0.5,
+            fontsize=7,
+        )
+        legend.get_frame().set_linewidth(0.6)
+
+    table_ax = fig.add_subplot(layout[1, :3])
+    table_ax.axis("off")
+    table_ax.set_title("Observed peptide ladder transitions", loc="left", fontsize=8, weight="bold")
+    ranked = sorted(records, key=lambda record: (record.lower_mz, record.upper_mz))
+    table_records = ranked[: max(table_pairs, 0)]
+    cells = [
+        [
+            f"H{record.head}",
+            f"{record.lower_mz:.1f}",
+            f"{record.upper_mz:.1f}",
+            f"{record.delta_mass:.2f}",
+            record.annotation_label or "Unassigned",
+        ]
+        for record in table_records
+    ]
+    table = table_ax.table(
+        cellText=cells,
+        colLabels=["Head", r"$m/z_i$", r"$m/z_j$", r"$\Delta m$ (Da)", "Explanation"],
+        cellLoc="center",
+        colWidths=[0.10, 0.13, 0.13, 0.16, 0.48],
+        bbox=(0.0, 0.0, 1.0, 0.92),
+    )
+    table.auto_set_font_size(False)
+    table.set_fontsize(7)
+    for (row, _column), cell in table.get_celld().items():
+        cell.set_linewidth(0.5)
+        if row == 0:
+            cell.set_text_props(weight="bold")
+            cell.set_facecolor("#f1f1f1")
+
+    callout_ax = fig.add_subplot(layout[1, 3:])
+    callout_ax.axis("off")
+    callout_ax.text(
+        0.03,
+        0.58,
+        _CALLOUT,
+        transform=callout_ax.transAxes,
+        va="center",
+        ha="left",
+        fontsize=7,
+        style="italic",
+        linespacing=1.3,
+        bbox={"boxstyle": "round,pad=0.7", "facecolor": "#edf4ff", "edgecolor": "#b7c7df"},
+    )
+
+    if peptide:
+        charge_text = f"   (z = {charge})" if charge is not None else ""
+        fig.text(0.08, 0.89, f"Peptide:   {peptide}{charge_text}", fontsize=8, weight="bold")
     return fig
 
 
@@ -461,8 +465,8 @@ def pair_rows(records: list[PairRecord]) -> list[list[object]]:
             f"{record.upper_mz:.6f}",
             f"{record.delta_mass:.6f}",
             f"{record.score:.10g}",
-            record.max_head,
-            f"{record.max_bias:.10g}",
+            record.head,
+            f"{record.head_bias:.10g}",
             record.annotation_type,
             record.annotation_label,
             "" if record.reference_mass is None else f"{record.reference_mass:.6f}",
@@ -477,60 +481,55 @@ def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
     if args.max_dm <= args.min_dm:
         raise SystemExit("--max-dm must exceed --min-dm")
-    if args.top_pairs < 1:
-        raise SystemExit("--top-pairs must be at least 1")
+    if args.table_pairs < 0:
+        raise SystemExit("--table-pairs must be non-negative")
 
     pairs_output = args.pairs_output or args.output.with_name(args.output.stem + "_pairs.csv")
     set_publication_style()
 
-    row = load_spectrum_row(args.spectra, args.row_index, args.id_column, args.spectrum_id)
-    mz, intensity = extract_peaks(row, args.mz_column, args.intensity_column)
-    peptide = read_peptide(row, args.peptide_column)
-    charge = read_charge(row, args.charge_column)
-    if peptide is None or charge is None:
-        print("peptide or charge unavailable; skipping sequence-specific b/y annotation")
-        peptide = None
+    row = load_spectrum_row(args.row_index)
+    mz, intensity = extract_peaks(row)
+    peptide = read_peptide(row)
+    charge = read_charge(row)
+    if peptide is None:
+        raise SystemExit("the selected spectrum has no usable unmodified peptide sequence")
+    if charge is None:
+        raise SystemExit("the selected spectrum has no usable precursor charge")
 
-    max_fragment_charge = max(1, (charge - 1) if charge else 1)
-    assignments: dict[int, set[tuple[str, int, int]]] = {}
-    if peptide is not None:
-        ladders = theoretical_ions(peptide, max_fragment_charge)
-        assignments = match_ions(mz, ladders, args.fragment_tolerance)
+    max_fragment_charge = max(1, charge - 1)
+    ladders = theoretical_ions(peptide, max_fragment_charge)
+    assignments = match_ions(mz, ladders, args.fragment_tolerance)
 
     bias_module = load_bias_module(args.checkpoint, args.device)
-    records = score_pairs(
-        bias_module, mz, args.min_dm, args.max_dm, args.top_k_heads, args.symmetric
+    candidates, bias = score_candidate_pairs(
+        bias_module, mz, args.min_dm, args.max_dm, args.symmetric
     )
-    if not records:
+    if not candidates:
         raise SystemExit(f"no peak pairs fall inside [{args.min_dm}, {args.max_dm}] Da")
 
-    losses = charge_scaled(NEUTRAL_LOSSES, max_fragment_charge)
-    isotopes = list(ISOTOPES.items())
-    residues = list(RESIDUES_AA20.items())
-    for record in records:
-        annotate_pair(
-            record,
-            peptide,
-            assignments,
-            losses,
-            isotopes,
-            residues,
-            args.mass_tolerance,
-        )
+    for record in candidates:
+        annotate_ladder_pair(record, peptide, assignments)
 
-    records.sort(key=lambda item: (item.annotated, item.score), reverse=True)
-    selected = records[: args.top_pairs]
-    selected.sort(key=lambda item: item.lower_mz)
+    selected = select_ladder_transitions(candidates, bias, args.min_bias)
+    if not selected:
+        raise SystemExit("no observed peak pairs support a theoretical b/y ladder transition")
+    selected.sort(key=lambda item: (item.lower_mz, item.upper_mz))
 
-    fig = plot_spectrum(mz, intensity, selected, args.title)
+    fig = plot_spectrum(
+        mz,
+        intensity,
+        selected,
+        peptide=peptide,
+        charge=charge,
+        table_pairs=args.table_pairs,
+    )
     save_figure(fig, args.output, args.dpi)
     write_csv(pairs_output, CSV_HEADER, pair_rows(selected))
 
-    annotated = sum(1 for record in selected if record.annotated)
     print(
         f"wrote {args.output} and {pairs_output} "
-        f"({len(mz)} peaks, {len(records)} candidate pairs, "
-        f"{len(selected)} drawn, {annotated} annotated)"
+        f"({len(mz)} peaks, {len(candidates)} candidate pairs, {bias.shape[1]} heads, "
+        f"{len(selected)} sequence-supported transitions drawn)"
     )
     return 0
 

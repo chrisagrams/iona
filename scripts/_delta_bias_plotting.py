@@ -21,15 +21,15 @@ CATEGORY_NEUTRAL_LOSS = "neutral_loss"
 CATEGORY_RESIDUE = "residue"
 
 CATEGORY_COLORS: dict[str, str] = {
-    CATEGORY_ISOTOPE: "tab:green",
-    CATEGORY_NEUTRAL_LOSS: "tab:orange",
-    CATEGORY_RESIDUE: "tab:purple",
+    CATEGORY_ISOTOPE: "#4c8bc4",
+    CATEGORY_NEUTRAL_LOSS: "#4c8bc4",
+    CATEGORY_RESIDUE: "#4c8bc4",
 }
 
 CATEGORY_LABELS: dict[str, str] = {
-    CATEGORY_ISOTOPE: "Isotope spacings",
+    CATEGORY_ISOTOPE: "Isotope\ndifferences",
     CATEGORY_NEUTRAL_LOSS: "Neutral losses",
-    CATEGORY_RESIDUE: "Residue masses",
+    CATEGORY_RESIDUE: "Amino acid\nresidue masses",
 }
 
 GUIDE_RESIDUES: tuple[str, ...] = (
@@ -160,26 +160,28 @@ def local_peak_scores(
 
 
 def set_publication_style() -> None:
-    """Apply a restrained, print-oriented Matplotlib style."""
+    """Apply the serif, print-oriented style shared by the example panels."""
     plt.rcParams.update(
         {
             "figure.dpi": 150,
             "savefig.bbox": "tight",
             "savefig.pad_inches": 0.03,
-            "font.family": "sans-serif",
-            "font.size": 8,
-            "axes.titlesize": 9,
-            "axes.labelsize": 8,
-            "axes.linewidth": 0.6,
+            "font.family": "serif",
+            "font.serif": ["DejaVu Serif", "Times New Roman", "Times"],
+            "mathtext.fontset": "stix",
+            "font.size": 9,
+            "axes.titlesize": 10,
+            "axes.labelsize": 9,
+            "axes.linewidth": 0.7,
             "axes.spines.top": False,
             "axes.spines.right": False,
-            "xtick.labelsize": 7,
-            "ytick.labelsize": 7,
+            "xtick.labelsize": 8,
+            "ytick.labelsize": 8,
             "xtick.major.width": 0.6,
             "ytick.major.width": 0.6,
             "xtick.direction": "out",
             "ytick.direction": "out",
-            "legend.fontsize": 7,
+            "legend.fontsize": 8,
             "legend.frameon": False,
             "lines.linewidth": 0.9,
             "pdf.fonttype": 42,
