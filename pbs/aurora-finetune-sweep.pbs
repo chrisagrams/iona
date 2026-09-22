@@ -141,6 +141,10 @@ declare -A GRID_CHECK=(
     # The pretraining-checkpoint ladder, middle two rungs first.
     [configs/sweep-ckpt-denoise]="sweeps/make_checkpoint_grid.py --task denoise --check"
     [configs/sweep-ckpt-contrastive]="sweeps/make_checkpoint_grid.py --task contrastive --check"
+    # Does the HP optimum move with pretraining? Asked once, at 50m, between
+    # the 25%-trained checkpoint the config came from and the 100% one.
+    [configs/sweep-ckpthp-denoise]="sweeps/make_ckpt_hp_grid.py --task denoise --check"
+    [configs/sweep-ckpthp-contrastive]="sweeps/make_ckpt_hp_grid.py --task contrastive --check"
     [configs/sweep-pairaccum]="sweeps/make_pairaccum_grid.py --check"
     [configs/sweep-gradcache-v2]="sweeps/make_gradcache_v2_grid.py --check"
     [configs/sweep-contrastive-hp-big]="sweeps/make_contrastive_hp_big.py --check"
