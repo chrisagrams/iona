@@ -39,19 +39,40 @@ import torch
 RUNS = "/lus/flare/projects/UIC-HPC/khuss/msdelta/runs"
 
 
-def score_encoder(path: str, datasets, collator, device, max_rows: int) -> dict:
-    """Load one saved encoder and report separation and retrieval on the same rows."""
-    from msdelta.contrastive import (MSDeltaForContrastive, group_separation_summary,
-                                     retrieval_summary)
+def score_encoder(path: str, datasets, collator, device, max_rows: int,
+                  batch_size: int) -> dict:
+    """Load one saved encoder; report separation and retrieval from ONE embedding pass.
+
+    Embedding once rather than twice is both the point and a necessity. The point,
+    because the two metrics must be computed over identical rows or their correlation
+    means nothing. The necessity, because DeltaMZBias materialises a
+    (batch, peaks, peaks, 2*n_freqs) tensor -- at batch 16 and 512 peaks that is 8 GiB,
+    which is what the first attempt died on.
+    """
+    from msdelta.contrastive import (MSDeltaForContrastive, embed_dataset,
+                                     retrieval_metrics_exact)
     from msdelta.modeling_msdelta import MSDeltaForPreTraining
+    from msdelta.reranking import group_separation_metrics
 
     encoder = MSDeltaForPreTraining.from_pretrained(path)
     model = MSDeltaForContrastive(encoder, None, kl_weight=0).to(device)
-    out = group_separation_summary(model, datasets["validation"], collator, device,
-                                   max_rows=max_rows)
-    out |= retrieval_summary(model, datasets["validation"], collator, device,
-                             max_rows=max_rows)
-    del model, encoder
+    try:
+        embeddings, groups = embed_dataset(model, datasets["validation"], collator,
+                                           device, max_rows=max_rows,
+                                           batch_size=batch_size)
+        if embeddings is None:
+            return {}
+        out = dict(group_separation_metrics(embeddings, groups, "sep_spectrum"))
+        counts = np.bincount(groups)
+        if (counts > 1).sum() >= 2:
+            out |= {f"retrieval/{k}": v
+                    for k, v in retrieval_metrics_exact(embeddings, groups).items()}
+            out["retrieval/queries"] = float(len(embeddings))
+            out["retrieval/scorable_groups"] = float((counts > 1).sum())
+    finally:
+        del model, encoder
+        if device.type == "xpu":
+            torch.xpu.empty_cache()
     return out
 
 
@@ -62,6 +83,8 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--runs", default=RUNS)
     ap.add_argument("--dataset-repo", default="chrisagrams/ms2-peptide-replicate-retrieval")
     ap.add_argument("--max-rows", type=int, default=2000)
+    # DeltaMZBias is O(batch * peaks^2 * n_freqs); 16 x 512 peaks is 8 GiB.
+    ap.add_argument("--batch-size", type=int, default=4)
     ap.add_argument("--out", default="results/retrieval_vs_separation.json")
     cli = ap.parse_args(argv)
 
@@ -84,12 +107,13 @@ def main(argv: list[str] | None = None) -> int:
     rows = {}
     if cli.baseline:
         rows["BASELINE-untrained"] = score_encoder(cli.baseline, datasets, collator,
-                                                   device, cli.max_rows)
+                                                   device, cli.max_rows,
+                                                   cli.batch_size)
         print(f"  baseline: {rows['BASELINE-untrained']}", flush=True)
     for a in arms:
         name = re.sub(rf"^sweep-|-{cli.job}$", "", os.path.basename(a))
         rows[name] = score_encoder(a + "/final", datasets, collator, device,
-                                   cli.max_rows)
+                                   cli.max_rows, cli.batch_size)
         print(f"  {name}: ratio {rows[name].get('sep_spectrum/ratio', float('nan')):.2f}"
               f"  Hit@1 {rows[name].get('retrieval/Hit@1', float('nan')):.4f}", flush=True)
 
