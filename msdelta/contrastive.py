@@ -229,35 +229,41 @@ def pair_contrastive_loss(embeddings: Tensor, groups: Tensor, margin: float = 1.
 
 def supervised_contrastive_loss(embeddings: Tensor, groups: Tensor,
                                 temperature: float = 0.07) -> Tensor:
-    """SupCon: every same-group pair is a positive, not just one.
+    """SupCon (Khosla et al., NeurIPS 2020): every same-group pair is a positive.
 
-    Plain InfoNCE assumes a single positive per anchor. Here a batch holds K replicates
-    of each peptide, so all K-1 of them are positives and the loss averages over them --
-    which is both more signal per step and the right objective, since no replicate is
-    privileged over another.
+    A thin wrapper over pytorch_metric_learning's SupConLoss, which this repository
+    already depends on and which MSDeltaForRetrieval -- the downstream consumer -- uses
+    for the same objective. Two implementations that agree today is a maintenance trap:
+    the risk is not that they differ now, it is that someone fixes or tunes one.
+
+    The hand-written version this replaces was verified numerically identical to the
+    library across P=2/K=2, P=4/K=3 and P=8/K=2 at both temperatures, and on every
+    degenerate input our samplers can produce. They diverged in exactly one case, a
+    batch holding a single group: ours returned a real number whose gradient pushes
+    toward uniformity among positives, the library returns 0. The library's behaviour is
+    the better one -- with no negatives the softmax denominator holds only positives, so
+    there is no discriminative signal and a gradient there is meaningless -- and
+    GroupBatchSampler refuses to construct that batch anyway.
+
+    ONE TRAP WORTH KEEPING, from the implementation that was deleted. Writing this by
+    hand, the natural way to select an anchor's positives is to multiply log_prob by a
+    boolean mask. That is wrong: log_prob holds -inf at the self-masked diagonal, and
+    -inf * False is NaN, not 0, which silently poisons the whole batch. Select with
+    torch.where instead of scaling by the mask.
     """
-    embeddings = F.normalize(embeddings.float(), dim=-1)
-    logits = embeddings @ embeddings.T / temperature
-    # Exclude self-similarity, which is 1/temperature and would dominate every row.
-    self_mask = torch.eye(len(embeddings), dtype=torch.bool, device=logits.device)
-    logits = logits.masked_fill(self_mask, float("-inf"))
+    return _SUPCON[temperature](F.normalize(embeddings.float(), dim=-1), groups)
 
-    positives = (groups[:, None] == groups[None, :]) & ~self_mask
-    counts = positives.sum(1)
-    if not (counts > 0).any():
-        return logits.new_zeros(())
 
-    log_prob = logits - torch.logsumexp(logits, dim=1, keepdim=True)
-    # torch.where, not multiplication by the mask: log_prob holds -inf on the diagonal
-    # from the self-masking above, and -inf * False is NaN rather than 0, which poisons
-    # the whole batch. Select instead of scale.
-    contributions = torch.where(positives, log_prob, torch.zeros_like(log_prob))
-    # Mean log-probability over an anchor's positives, then averaged over the anchors
-    # that have any. An anchor whose group is a singleton in this batch contributes
-    # nothing rather than a zero that would dilute the mean.
-    valid = counts > 0
-    per_anchor = contributions.sum(1)[valid] / counts[valid]
-    return -per_anchor.mean()
+class _SupConCache(dict):
+    """One SupConLoss per temperature; it holds no state beyond that scalar."""
+
+    def __missing__(self, temperature: float):
+        from pytorch_metric_learning.losses import SupConLoss
+        self[temperature] = SupConLoss(temperature=temperature)
+        return self[temperature]
+
+
+_SUPCON = _SupConCache()
 
 
 def head_kl(logits: Tensor, reference_logits: Tensor, attention_mask: Tensor) -> Tensor:
