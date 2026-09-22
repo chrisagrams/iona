@@ -584,14 +584,36 @@ def retrieval_metrics_exact(embeddings: Tensor, groups) -> dict[str, float]:
     matmul. An approximate index would add a dependency, a build, and a recall ceiling
     in exchange for nothing.
 
-    DEFINITIONS, stated because retrieval metrics are named inconsistently:
-      Hit@1    the nearest OTHER spectrum is the same peptide.
-      R@5      of a query's relevant spectra, the fraction appearing in its top 5.
-      MAP@100  average precision over the top 100, with ALL relevant spectra in the
-               denominator, including any beyond rank 100. Averaged over queries.
+    DEFINITIONS, stated because retrieval metrics are named inconsistently. The last
+    three are the metric-learning standards and carry their literature names:
+
+      Hit@1        the nearest OTHER spectrum is the same peptide. Identical to
+                   Precision@1; reported under both names so our older tables still
+                   line up.
+      R@5          of a query's relevant spectra, the fraction appearing in its top 5.
+                   NOT the Recall@K of the retrieval literature, which is the FRACTION
+                   OF QUERIES with at least one hit in the top K. Kept for continuity
+                   with earlier tables; prefer the three below.
+      Precision@1  Musgrave et al. name for Hit@1.
+      R-Precision  of a query's R relevant spectra, the fraction that appear in its own
+                   top R. Adapts the cutoff to each query.
+      MAP@R        average precision over the top R, R being THAT QUERY's number of
+                   relevant spectra, zero-padded past the last hit. The metric Musgrave
+                   et al. recommend, and the right one here: our group sizes run 11 to
+                   120 with a median of 13, so a fixed cutoff asks a much harder
+                   question of a 120-replicate peptide than an 11-replicate one.
+      MAP@100      average precision over the top 100, ALL relevant spectra in the
+                   denominator. Retained because every earlier contrastive number in
+                   this project is quoted in it. Only 1 group of 1000 exceeds 100
+                   members, so it almost never truncates here.
+
     A query whose peptide has no other spectrum is excluded: it has no correct answer
     available, and scoring it as a miss would understate retrieval by however many
     singletons the split happens to contain.
+
+    Musgrave, Belongie and Lim, "A Metric Learning Reality Check", ECCV 2020,
+    arXiv:2003.08505 -- the source of MAP@R and R-Precision, and of the argument that
+    Recall@K saturates and hides ranking quality.
     """
     e = F.normalize(embeddings.float(), dim=-1)
     g = torch.as_tensor(groups, dtype=torch.long)
@@ -615,8 +637,27 @@ def retrieval_metrics_exact(embeddings: Tensor, groups) -> dict[str, float]:
     csum = top.cumsum(1)
     ranks = torch.arange(1, k + 1, dtype=torch.float32).unsqueeze(0)
     ap = ((csum / ranks) * top).sum(1) / n_rel.clamp(min=1).float()
+
+    # MAP@R and R-Precision: the cutoff is PER QUERY, so build a mask of rank < n_rel
+    # rather than slicing a fixed width. Ranks past a query's R contribute nothing.
+    # n columns, not n-1: argsort ranks all n items. The self-match sorts last (its
+    # similarity is -inf) and is never relevant, so it contributes nothing.
+    all_ranks = torch.arange(1, n + 1, dtype=torch.float32).unsqueeze(0)
+    within_r = all_ranks <= n_rel.unsqueeze(1).float()
+    hit_f = hit.float()
+    # R-Precision: hits inside the query's own top R, over R.
+    r_prec = (hit_f * within_r).sum(1) / n_rel.clamp(min=1).float()
+    # MAP@R: precision@i at each hit inside the top R, divided by R -- the zero padding
+    # past the last hit is what the division by R (not by the hit count) accomplishes.
+    csum_all = hit_f.cumsum(1)
+    ap_r = (((csum_all / all_ranks) * hit_f) * within_r).sum(1) / n_rel.clamp(min=1).float()
+
+    p1 = float(hit[scorable, 0].float().mean())
     return {
-        "Hit@1": float(hit[scorable, 0].float().mean()),
+        "Hit@1": p1,
+        "Precision@1": p1,          # the literature name for the same quantity
+        "R-Precision": float(r_prec[scorable].mean()),
+        "MAP@R": float(ap_r[scorable].mean()),
         "R@5": float(at5[scorable].mean()),
         "MAP@100": float(ap[scorable].mean()),
     }
