@@ -166,7 +166,8 @@ out-group over in-group mean distance, floor 1.35 for an untrained encoder.
 | file | what it holds |
 | --- | --- |
 | `contrastive/figures/contrastive_scaling.png` | Separation ratio by model size, 6 seeds per scale. |
-| `contrastive/figures/contrastive_ablation.png` | Pretrained against randomly initialised. |
+| `contrastive/figures/contrastive_ablation.png` | Pretrained against randomly initialised, 4 scales × 6 seeds. |
+| `contrastive/figures/contrastive_breadth.png` | Separation ratio against rows per contrastive step. |
 | `contrastive/contrastive_random_control.txt` | The original random-init control. |
 | `contrastive/layer_probe_all_scales.txt` | Training-free probe of every encoder block. |
 | `contrastive/layer_probe_trajectory.txt` | The same probe across pretraining checkpoints. |
@@ -178,10 +179,27 @@ out-group over in-group mean distance, floor 1.35 for an untrained encoder.
 grows from 0.80 to 2.56. An earlier reading of "saturates at 100m" was measured under a
 sampler that replayed identical batches and at hyperparameters ranked seventh of twelve.
 
-**Pretraining is a precondition, not an advantage.** Every random-init cell sat on the
-1.35 floor where the pretrained encoder reached 7.83 — categorically unlike denoise,
-where pretraining is worth a finite +0.033. That result is 50m only and at the old
-configuration; the matched re-run at four scales with six seeds is job 8848471.
+**Pretraining is a precondition, not an advantage.** Matched grids at four scales, six
+seeds, differing only in `--random_init`:
+
+| scale | pretrained | random init | gap |
+| --- | --- | --- | --- |
+| 50m | 9.37 ± 0.80 | 1.34 ± 0.02 | 8.03 |
+| 100m | 10.36 ± 1.38 | 1.33 ± 0.03 | 9.03 |
+| 200m | 11.50 ± 1.71 | 1.33 ± 0.02 | 10.17 |
+| 400m | 13.84 ± 2.56 | 1.32 ± 0.03 | 12.52 |
+
+The random encoder sits on the 1.35 floor at **every** scale, sd 0.02–0.03 — it does not
+learn less with more capacity, it learns nothing regardless. Categorically unlike
+denoise, where pretraining is worth a finite +0.033.
+
+**More negatives make contrastive worse here, which is the opposite of usual practice.**
+Only the batch shape varying, 4 seeds per point: 4 rows → 9.40, 16 rows → 7.12, 64 rows
+→ 6.60, a monotone decline of −2.80 at t=−4.5. An earlier verdict of "more negatives do
+not help" was confounded by a different learning rate, a different temperature, the
+pre-FT14 sampler and n=1; re-asked at matched settings the answer is stronger than
+before. No explanation established — with ~900 peptides a 64-row batch may draw
+negatives that are near-duplicates of the positive, but that is speculation.
 
 **The separation ratio is a proxy that has never been validated.** Contrastive exists
 for retrieval, and every conclusion here — which hyperparameters win, whether the metric

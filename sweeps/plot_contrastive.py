@@ -60,6 +60,14 @@ def ratios(job):
     return out
 
 
+def by_scale(job):
+    out = {}
+    for arm, v in ratios(job).items():
+        if arm[:1] == "s" and "_seed" in arm:
+            out.setdefault(arm[:5], []).append(v)
+    return out
+
+
 def fig_scaling():
     new, old = ratios("8848049"), ratios("8845057")
     scales = ["s050m", "s100m", "s200m", "s400m"]
@@ -97,44 +105,84 @@ def fig_scaling():
 
 
 def fig_ablation():
-    """Best cell only. HP variance is not an error bar.
+    """Pretrained against randomly initialised, all four scales, 6 seeds each.
 
-    Selection here is max over hyperparameters, as everywhere else in this project, so
-    showing the spread across cells would plot the sweep rather than an uncertainty and
-    invite comparison with the seed bands in the scaling figure. Until the matched
-    ablation lands (job 8848471, 4 scales x 6 seeds) these two points carry no
-    uncertainty at all, and the figure says so rather than implying one.
+    Both grids are identical apart from --random_init true, so they subtract. The
+    earlier version of this figure used the 50m-only control at the old configuration
+    and had no error bars; jobs 8848049 and 8848471 replace it with a matched pair.
     """
-    pre, rand = ratios("8842232"), ratios("8842288")
-    if not pre or not rand:
-        print("  ablation: no data"); return
-    best = [max(pre.values()), max(rand.values())]
-
-    fig, ax = plt.subplots(figsize=(5.4, 4.3))
-    ax.bar([0, 1], best, width=0.5, color=[BLUE, RED], alpha=0.9)
-    for i, b in enumerate(best):
-        ax.annotate(f"{b:.2f}", (i, b), textcoords="offset points", xytext=(0, 5),
-                    ha="center", fontsize=10, color=INK)
-    ax.axhline(FLOOR, color=RED, lw=1.1, ls=":")
-    ax.annotate(f"untrained {FLOOR}", (-0.42, FLOOR), fontsize=8, color=RED,
-                ha="left", va="bottom")
-    ax.set_xticks([0, 1]); ax.set_xticklabels(["pretrained", "random init"])
-    ax.set_xlim(-0.55, 1.55)
-    ax.set_ylim(0, max(best) * 1.18)
-    ax.set_ylabel("separation ratio")
-    ax.set_title("50m, best of 12 hyperparameter cells", loc="left", pad=14)
+    pre, rnd = by_scale("8848049"), by_scale("8848471")
+    if not pre or not rnd:
+        print("  ablation: missing data"); return
+    scales = ["s050m", "s100m", "s200m", "s400m"]
+    fig, ax = plt.subplots(figsize=(7.0, 4.3))
+    for series, colour, lab in ((pre, BLUE, "pretrained"), (rnd, RED, "random init")):
+        m, s, xi = [], [], []
+        for i, k in enumerate(scales):
+            v = series.get(k, [])
+            if len(v) > 1:
+                m.append(np.mean(v)); s.append(np.std(v, ddof=1)); xi.append(i)
+        m, s, xi = np.array(m), np.array(s), np.array(xi)
+        ax.fill_between(xi, m - s, m + s, color=colour, alpha=0.16, lw=0)
+        ax.errorbar(xi, m, yerr=s, fmt="o-", ms=6, lw=2.2, color=colour, ecolor=colour,
+                    capsize=4, label=lab)
+        for a_, b_, e_ in zip(xi, m, s):
+            ax.annotate(f"{b_:.2f}", (a_, b_ + e_), textcoords="offset points",
+                        xytext=(0, 7), ha="center", fontsize=8.5, color=INK)
+    ax.axhline(FLOOR, color=MUTED, lw=1.1, ls=":")
+    ax.annotate(f"untrained {FLOOR}", (3.4, FLOOR), fontsize=8, color=MUTED,
+                ha="right", va="bottom")
+    ax.set_xticks(range(4)); ax.set_xticklabels(["50m", "100m", "200m", "400m"])
+    ax.set_xlim(-0.35, 3.45)
+    ax.set_xlabel("model size"); ax.set_ylabel("separation ratio")
+    ax.set_title("pretrained against random init", loc="left", pad=14)
     ax.grid(axis="y"); ax.set_axisbelow(True)
-    fig.suptitle("Jobs 8842232 and 8842288, one seed each — no error bars available.\n"
-                 "Old configuration, matched to each other. Seed-replicated re-run at "
-                 "all four scales: job 8848471.",
-                 x=0.005, ha="left", fontsize=8.5, color=MUTED, y=1.06)
+    ax.legend(frameon=False, fontsize=8.4, loc="upper left")
+    fig.suptitle("Jobs 8848049 and 8848471 — identical but for --random_init. "
+                 "6 seeds per point, band ±1 sd.",
+                 x=0.005, ha="left", fontsize=8.5, color=MUTED, y=1.02)
     fig.savefig(FIGS / "contrastive_ablation.png"); plt.close(fig)
+
+
+def fig_breadth():
+    """Separation ratio against how many rows a contrastive step sees.
+
+    The standard lever in contrastive learning is more negatives. Here it costs.
+    """
+    gc = ratios("8848463")
+    if not gc:
+        print("  breadth: no data"); return
+    shapes = [("p02k02", 4, "P=2 K=2"), ("p08k02", 16, "P=8 K=2"),
+              ("p16k04", 64, "P=16 K=4")]
+    xs, m, s, labs = [], [], [], []
+    for key, rows, lab in shapes:
+        v = [x for a, x in gc.items() if a.startswith(key)]
+        if len(v) > 1:
+            xs.append(rows); m.append(np.mean(v)); s.append(np.std(v, ddof=1))
+            labs.append(f"{lab}\n{rows} rows")
+    fig, ax = plt.subplots(figsize=(6.4, 4.3))
+    x = np.arange(len(xs))
+    ax.errorbar(x, m, yerr=s, fmt="o-", ms=7, lw=2.2, color=BLUE, ecolor=BLUE,
+                capsize=4)
+    for xi, b_, e_ in zip(x, m, s):
+        ax.annotate(f"{b_:.2f}", (xi, b_ + e_), textcoords="offset points",
+                    xytext=(0, 7), ha="center", fontsize=9, color=INK)
+    ax.set_xticks(x); ax.set_xticklabels(labs)
+    ax.set_xlim(-0.35, len(xs) - 0.65)
+    ax.set_xlabel("rows per contrastive step")
+    ax.set_ylabel("separation ratio")
+    ax.set_title("more negatives, via GradCache", loc="left", pad=14)
+    ax.grid(axis="y"); ax.set_axisbelow(True)
+    fig.suptitle("Job 8848463, 50m, 4 seeds per point, band ±1 sd. Only the batch "
+                 "shape varies.", x=0.005, ha="left", fontsize=8.5, color=MUTED, y=1.02)
+    fig.savefig(FIGS / "contrastive_breadth.png"); plt.close(fig)
 
 
 def main() -> int:
     FIGS.mkdir(parents=True, exist_ok=True)
     fig_scaling(); print("  wrote contrastive_scaling.png")
     fig_ablation(); print("  wrote contrastive_ablation.png")
+    fig_breadth(); print("  wrote contrastive_breadth.png")
     return 0
 
 
