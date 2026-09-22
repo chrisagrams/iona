@@ -129,6 +129,27 @@ if (( TILES_PER_ARM > 1 )) \
     exit 2
 fi
 
+# And the inverse, which is the easier mistake to make because TILES_PER_ARM defaults
+# to 1 and omitting it looks like omitting nothing.
+#
+# A DeepSpeed arm on ONE tile is not a slower version of the same experiment, it is a
+# DIFFERENT one: per_device_train_batch_size 1 across 12 tiles is an effective batch of
+# 12, and across 1 tile it is an effective batch of 1. Job 8846027 ran the whole FT13
+# grid that way -- six arms, six hours, 43,400 steps each -- and every number it would
+# have produced was incomparable with the batch-12 runs it existed to be compared
+# against. It surfaced only because the resume then failed: DeepSpeed refuses to load a
+# ZeRO checkpoint written at DP world size 1 into a world of 12.
+#
+# Override with ONE_TILE_OK=1 if a single-tile DeepSpeed run is genuinely wanted.
+if (( TILES_PER_ARM == 1 )) && [[ -z ${ONE_TILE_OK:-} ]] \
+   && grep -q -- "--deepspeed" "$SWEEP_ROOT/${ARM_LIST[0]}/training.args"; then
+    echo "TILES_PER_ARM is 1 but the arms name a --deepspeed config." >&2
+    echo "  That changes the EFFECTIVE BATCH, not just the speed: per_device 1 on one" >&2
+    echo "  tile is batch 1, where every other denoise run is batch 12. Pass" >&2
+    echo "  TILES_PER_ARM=12, or ONE_TILE_OK=1 if you mean it." >&2
+    exit 2
+fi
+
 # Snapshot the arm configs. run_node reads an arm's training.args at the moment it
 # launches that arm, which can be hours into the job, so editing or regenerating the grid
 # on the login node while a sweep runs silently changes what the later arms train -- or
