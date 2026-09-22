@@ -389,18 +389,13 @@ def fig_pretrain_ablation(runs: Path) -> None:
     # Both comparisons as VERTICAL arrows against a horizontal reference. The earlier
     # version drew the double-budget gap as one diagonal from (4, pretrained) to
     # (8, scratch), which cut across the whole figure and crossed both data lines.
-    # Both arrows are MATCHED comparisons now. Before FT13 the 8-epoch one had to be
-    # drawn against the pretrained 4-epoch level, because the pretrained 8-epoch cell
-    # did not exist -- a cross-budget comparison the figure had to caveat.
-    ax.annotate("", xy=(4, P[4]), xytext=(4, S[4]),
-                arrowprops=dict(arrowstyle="<->", lw=1.4, color=GREEN))
-    ax.text(4.12, (P[4] + S[4]) / 2, f"matched at\n4 epochs\n+{P[4]-S[4]:.4f}",
-            fontsize=8.4, color=GREEN, va="center")
+    # The gap is visible from the two lines; a double-headed arrow between them adds
+    # nothing but clutter. Label the size only.
     top8 = P[8] if not np.isnan(P[8]) else P[4]
-    ax.annotate("", xy=(8, top8), xytext=(8, S[8]),
-                arrowprops=dict(arrowstyle="<->", lw=1.4, color=AMBER))
-    ax.text(7.88, (top8 + S[8]) / 2, f"matched at\n8 epochs\n+{top8-S[8]:.4f}",
-            fontsize=8.4, color=AMBER, va="center", ha="right")
+    ax.text(4.1, (P[4] + S[4]) / 2, f"+{P[4]-S[4]:.4f}", fontsize=10, color=INK,
+            va="center", ha="left")
+    ax.text(7.9, (top8 + S[8]) / 2, f"+{top8-S[8]:.4f}", fontsize=10, color=INK,
+            va="center", ha="right")
     ax.axhline(P[2], color=MUTED, lw=0.9, ls=":")
     ax.text(1.62, S[8] - 0.004,
             "dotted line = pretrained at 2 epochs, already above scratch at 8 —\n"
