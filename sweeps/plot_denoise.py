@@ -335,74 +335,49 @@ def fig_probe_heatmap(runs: Path) -> None:
 
 
 def fig_pretrain_ablation(runs: Path) -> None:
-    """What pretraining is worth, and why one number for it is not enough.
+    """What pretraining is worth, on both metrics.
 
     The grids originally did not sweep the same epoch counts -- pretrained ran 2 and 4,
-    scratch ran 4 and 8 -- which left two honest comparisons answering different
-    questions and one hole. FT13 (job 8847610) filled it, and the answer is that the
-    ambiguity did not matter much: pretrained gains only +0.0014 from 4 to 8 epochs, so
-    the matched-at-8 gap (+0.033) and the old cross-budget figure (+0.032) nearly
-    coincide.
+    scratch ran 4 and 8 -- which left one hole. FT13 (job 8847610) filled it, and the
+    ambiguity did not matter much: pretrained gains only +0.0014 AUROC from 4 to 8
+    epochs, so matched-at-8 and the old cross-budget figure nearly coincide.
 
-    The gap does narrow with budget, +0.046 matched at 4 against +0.033 matched at 8,
-    because scratch gains ten times as much from the extra epochs. Whether it narrows
-    to nothing is open; sweep-denoise-scratch-scale has 50m at 16 epochs for that.
+    The gap narrows with budget on both metrics, because the random encoder gains about
+    ten times as much from the extra epochs.
     """
     pre = load(runs, "8840408")
     scr = load(runs, "8841984")
-    # FT13, the formerly missing cell. Job 8847610, not the earlier 8846027: that one
-    # ran without TILES_PER_ARM=12 and so trained at an effective batch of 1 instead of
-    # 12, which is a different experiment rather than a slower one. It was discarded.
+    # FT13, job 8847610. NOT 8846027: that one ran without TILES_PER_ARM=12 and so
+    # trained at effective batch 1 instead of 12 -- a different experiment, discarded.
     ep8 = load(runs, "8847610")
 
-    def best(recs, ep):
-        v = [r["test_auroc"] for a, r in recs.items() if re.search(rf"_ep{ep}(?:_|$)", a)]
+    def best(recs, ep, metric):
+        v = [r[metric] for a, r in recs.items() if re.search(rf"_ep{ep}(?:_|$)", a)]
         return max(v) if v else np.nan
 
-    P = {2: best(pre, 2), 4: best(pre, 4), 8: np.nan}
-    S = {4: best(scr, 4), 8: best(scr, 8)}
-    if ep8:
-        vals = [r["test_auroc"] for r in ep8.values()]
-        if vals:
-            P[8] = float(np.mean(vals))
-
-    fig, ax = plt.subplots(figsize=(7.8, 4.4))
-    xs = [2, 4, 8]
-    ax.plot([e for e in xs if not np.isnan(P[e])],
-            [P[e] for e in xs if not np.isnan(P[e])],
-            "o-", color=BLUE, lw=2.2, ms=7, label="pretrained encoder")
-    ax.plot([4, 8], [S[4], S[8]], "s-", color=RED, lw=2.2, ms=7,
-            label="random encoder (trained from scratch)")
-    if np.isnan(P[8]):
-        ax.text(8, P[4], "?", fontsize=22, color=BLUE, ha="center", va="center",
-                alpha=0.55, zorder=5)
-        ax.text(8, P[4] + 0.0022, "NOT RUN", fontsize=7.8,
-                color=BLUE, ha="center", va="bottom", linespacing=1.4)
-    elif ep8:
-        # The only cell with repeats, so show its spread. Every other point is a single
-        # best arm with no error bar available.
-        vals = [r["test_auroc"] for r in ep8.values()]
-        ax.errorbar([8], [float(np.mean(vals))], yerr=[float(np.std(vals, ddof=1))],
-                    fmt="none", ecolor=BLUE, capsize=4, lw=1.4, zorder=6)
-    # Both comparisons as VERTICAL arrows against a horizontal reference. The earlier
-    # version drew the double-budget gap as one diagonal from (4, pretrained) to
-    # (8, scratch), which cut across the whole figure and crossed both data lines.
-    # The gap is visible from the two lines; a double-headed arrow between them adds
-    # nothing but clutter. Label the size only.
-    top8 = P[8] if not np.isnan(P[8]) else P[4]
-    ax.text(4.1, (P[4] + S[4]) / 2, f"+{P[4]-S[4]:.4f}", fontsize=10, color=INK,
-            va="center", ha="left")
-    ax.text(7.9, (top8 + S[8]) / 2, f"+{top8-S[8]:.4f}", fontsize=10, color=INK,
-            va="center", ha="right")
-
-    ax.set_xticks(xs); ax.set_xticklabels([f"{e} epochs" for e in xs])
-    ax.set_xlim(1.5, 8.9)
-    ax.set_xlabel("fine-tuning budget"); ax.set_ylabel("test AUROC")
-    gap4, gap8 = P[4] - S[4], (P[8] if not np.isnan(P[8]) else P[4]) - S[8]
-    ax.set_title(f"Pretraining is worth +{gap4:.3f} at 4 epochs and +{gap8:.3f} at 8",
-                 loc="left", pad=16)
-    ax.grid(axis="y"); ax.set_axisbelow(True)
-    ax.legend(frameon=False, fontsize=8.4, loc="lower right")
+    fig, axes = plt.subplots(1, 2, figsize=(11.0, 4.2))
+    for ax, metric, label in ((axes[0], "test_auroc", "AUROC"),
+                              (axes[1], "test_f1", "F1")):
+        P = {2: best(pre, 2, metric), 4: best(pre, 4, metric),
+             8: max((r[metric] for r in ep8.values()), default=np.nan)}
+        S = {4: best(scr, 4, metric), 8: best(scr, 8, metric)}
+        xs = [e for e in (2, 4, 8) if not np.isnan(P[e])]
+        ax.plot(xs, [P[e] for e in xs], "o-", color=BLUE, lw=2.2, ms=7,
+                label="pretrained encoder")
+        ax.plot([4, 8], [S[4], S[8]], "s-", color=RED, lw=2.2, ms=7,
+                label="random encoder")
+        top8 = P[8] if not np.isnan(P[8]) else P[4]
+        ax.text(4.1, (P[4] + S[4]) / 2, f"+{P[4]-S[4]:.4f}", fontsize=10, color=INK,
+                va="center", ha="left")
+        ax.text(7.9, (top8 + S[8]) / 2, f"+{top8-S[8]:.4f}", fontsize=10, color=INK,
+                va="center", ha="right")
+        ax.set_xticks([2, 4, 8]); ax.set_xticklabels([f"{e} epochs" for e in (2, 4, 8)])
+        ax.set_xlim(1.5, 8.9)
+        ax.set_xlabel("fine-tuning budget"); ax.set_ylabel(f"test {label}")
+        ax.set_title(f"{label}: +{P[4]-S[4]:.3f} at 4 epochs, +{top8-S[8]:.3f} at 8",
+                     loc="left", pad=14)
+        ax.grid(axis="y"); ax.set_axisbelow(True)
+        ax.legend(frameon=False, fontsize=8.4, loc="lower right")
     fig.savefig(FIGS / "pretrain_ablation.png")
     plt.close(fig)
 

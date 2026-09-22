@@ -70,11 +70,11 @@ past 4 epochs the gap stands, and if it gains the gap widens. That cell is runni
 The random-encoder ablation (`--random_init true`, everything else held) gives two
 honest comparisons and one hole, because the grids did not sweep the same epoch counts:
 
-| epochs | pretrained | random encoder | gap |
-| --- | --- | --- | --- |
-| 2 | 0.9272 | not run | — |
-| 4 | **0.9320** | 0.8856 | **+0.0464** |
-| 8 | **0.9337** | 0.9001 | **+0.0336** |
+| epochs | pretrained | random | gap AUROC | | pretrained | random | gap F1 |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| 2 | 0.9272 | — | — | | 0.8575 | — | — |
+| 4 | **0.9320** | 0.8856 | **+0.0464** | | **0.8632** | 0.8154 | **+0.0478** |
+| 8 | **0.9337** | 0.9001 | **+0.0336** | | **0.8652** | 0.8290 | **+0.0361** |
 
 Both comparisons are now matched. FT13 (job 8847610, six seeds) filled the 8-epoch
 cell, and the ambiguity it resolved turned out to be small: the pretrained model gains
