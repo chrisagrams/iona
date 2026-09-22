@@ -685,3 +685,93 @@ no rescoring pass; older jobs need msdelta.eval_retrieval.
 WHAT IS NOT YET MEASURED: whether a different contrastive configuration (temperature,
 loss, or fewer epochs) can raise MAP@100 without spending Hit@1. Every arm here used
 one configuration per scale.
+
+## The ratio picked a contrastive configuration that does nothing; MAP@100 picks one that works
+
+Rescoring the 50m half of the HP sweep at checkpoint-133233 (job 8847624, 12
+configurations x 4 seeds) on the task rather than the proxy inverts the winner. The two
+metrics pick near-opposite configurations:
+
+    ratio's pick    lr2e-5 / KL0  / t0.2     MAP@100 rank  9 of 12
+    MAP@100's pick  lr1e-4 / KL10 / t0.07    ratio   rank  9 of 12
+    rank agreement across the 12 configs: Spearman +0.25 (p=0.43)
+
+                        ratio    Hit@1              MAP@100
+    untrained base      1.34    0.6538             0.1727
+    lr1e-4/KL10/t0.07   6.34    0.7464 +- 0.0065   0.3837 +- 0.0086
+    lr2e-5/KL0 /t0.2    9.59    0.5107 +- 0.0157   0.1725 +- 0.0080
+
+THE CONFIGURATION THIS PROJECT HAS BEEN USING DOES NOTHING. lr2e-5/KL0/t0.2 is
+significantly WORSE than the untrained encoder on Hit@1 (t=-9.1, p=0.003) and exactly
+level with it on MAP@100 (t=-0.03, p=0.98). It has the highest separation ratio of all
+twelve.
+
+A PROPERLY SELECTED CONFIGURATION WORKS, DECISIVELY. lr1e-4/KL10/t0.07 beats the
+untrained encoder on Hit@1 (t=+14.2, p=0.0007) and more than doubles MAP@100 (t=+24.5,
+p=0.0002). Head to head against the config we used: t=+13.9 and t=+18.0, both p<0.0001.
+All four seeds cluster tightly -- Hit@1 0.737/0.737/0.739/0.765, MAP 0.364-0.406 -- so
+this is not one lucky draw.
+
+CORRECTION TO THE ENTRY ABOVE. "Contrastive FT costs Hit@1 at every scale, 0/24 arms
+beat the untrained encoder" is true of the SCALE GRID, which ran entirely at
+lr2e-5/KL0/t0.2. It is not a property of contrastive training. Read as written it is
+misleading, and the error came from generalising a grid that varied only scale while
+holding a bad configuration fixed. The proxy-failure finding itself is unaffected and is
+in fact strengthened: the two rescore halves independently reproduce it on a grid that
+varies hyperparameters instead of scale (Hit@1 rho +0.33 p=0.12 and +0.20 p=0.36).
+
+WHAT THE AXES SAY: t0.07 beats t0.2 almost everywhere, KL10 helps at the top, and
+lr5e-4 with KL0 diverges outright (ratio 1.6-1.8, at the floor; Hit@1 0.06).
+
+CONSEQUENCE: every contrastive number in this project -- the scale curve, the
+pretraining ablation, the pair-loss comparison, the negatives result -- was measured at
+an operating point statistically indistinguishable from not training. Curve shapes may
+survive, levels do not, and none of it should be quoted until re-taken at
+lr1e-4/KL10/t0.07.
+
+WHAT IS NOT YET MEASURED: whether lr1e-4/KL10/t0.07 is still the winner at other
+checkpoints and scales. Job 8849088 runs the same twelve configurations at 50m
+checkpoint-540423, so the transfer question is answerable on MAP@100 on both sides once
+it lands. Nothing above has been re-measured at 100m/200m/400m.
+
+## Contrastive hyperparameters transfer across BOTH scale and pretraining checkpoint
+
+Twelve configurations (lr x KL x temperature), four seeds each, scored on MAP@100 in
+four cells: 50m at checkpoint-133233 and checkpoint-540423 (a 4x pretraining gap), 200m
+at 192799, 400m at 181381. Every pairwise ranking agrees.
+
+    50m @133233  vs 50m @540423    rho +0.902  p=0.0001
+    200m@192799  vs 400m@181381    rho +0.853  p=0.0004
+    50m @133233  vs 200m@192799    rho +0.811  p=0.0014
+    50m @133233  vs 400m@181381    rho +0.783  p=0.0026
+    50m @540423  vs 400m@181381    rho +0.755  p=0.0045
+    50m @540423  vs 200m@192799    rho +0.699  p=0.0114
+    mean pairwise rho +0.801, minimum +0.699, all significant at n=12 configs
+
+lr1e-4 / KL10 / t0.07 is top-ranked in ALL FOUR cells (MAP@100 0.3837 / 0.4405 / 0.3409
+/ 0.3541). The configuration this project used before, lr2e-5 / KL0 / t0.2, ranks 9th,
+8th, 9th, 9th -- consistently bad everywhere, not a 50m artefact.
+
+STATED AT THE STRENGTH IT HAS: the RANKING transfers; the WINNER's margin is resolved
+only at 50m.
+
+    50m @133233   0.3837 vs 0.2686 (lr5e4_kl10_t007)  t=+6.49  p=0.0006
+    50m @540423   0.4405 vs 0.2650 (lr1e4_kl0_t007)   t=+4.35  p=0.0048
+    400m@181381   0.3541 vs 0.3113 (lr2e5_kl10_t007)  t=+2.23  p=0.067
+    200m@192799   0.3409 vs 0.2596 (lr5e4_kl10_t007)  t=+1.45  p=0.196
+
+At 200m and 400m it is first but not separated from the runner-up at four seeds. What
+corroborates the choice anyway is that every runner-up chasing it is also KL10/t0.07 --
+the AXES that matter are consistent even where the exact learning rate is not resolved.
+
+CONSEQUENCE: no per-rung and no per-scale HP sweep is needed for contrastive. The
+checkpoint ladder can run one configuration at every cell, which is what job 8851663
+does.
+
+CAVEAT ON PROVENANCE: three of the four cells sit at each scale's ORIGINAL checkpoint
+(133233/192799/181381), not on the canonical ladder. They were used because those arms
+already existed and only needed rescoring, so the transfer test cost no new training.
+Only 50m@540423 is a canonical rung.
+
+WHAT IS NOT YET MEASURED: 100m. Its 48 arms predate the retrieval code; jobs 8851492
+and 8851650 are rescoring them, which will make this four scales instead of three.

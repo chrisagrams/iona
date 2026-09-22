@@ -19,12 +19,24 @@ This grid runs the MIDDLE TWO first -- 220,000 and 330,000 -- which bracket wher
 existing results sit and are the cheapest place to see whether the curve moves at all.
 400m has no 330,000 yet, so that cell is skipped rather than substituted.
 
-HYPERPARAMETERS ARE NOT SWEPT. Denoise uses lr 2e-4 / encoder_lr_scale 0.5 / 4 epochs /
-head 512 / effective batch 12, the point all four HP grids independently chose.
-Contrastive uses lr 2e-5 / KL 0 / temperature 0.2, which the 96-arm grid selected and
-which transferred between 50m and 100m at Spearman 0.95. BOTH WERE CHOSEN AT
-CHECKPOINT 1. Whether they still hold at 220k and 330k is untested and is the obvious
-thing to check if these results look strange -- it is on the TODO, not in this grid.
+HYPERPARAMETERS ARE NOT SWEPT, AND NO LONGER NEED TO BE. Probe 8848874/8849088 asked
+whether the checkpoint-1 choices survive at a 4x-better-trained checkpoint. On
+contrastive the answer is yes and it is strong: the twelve configurations rank the same
+at checkpoint-133233 and checkpoint-540423, Spearman +0.90 (p=0.0001), same winner at
+both. Denoise keeps its winner too (lr 2e-4 / encoder_lr_scale 0.5), and its preference
+for es 0.5 over 1.0 actually SHARPENS at the better checkpoint: 0.0003 apart against
+seed noise 0.0005 at checkpoint 1, 0.0045 apart against sem 0.0004 at 540423.
+
+Denoise uses lr 2e-4 / encoder_lr_scale 0.5 / 4 epochs / head 512 / effective batch 12,
+the point all four HP grids and the probe independently chose.
+
+Contrastive uses lr 1e-4 / KL 10 / temperature 0.07. It does NOT use the lr 2e-5 / KL 0
+/ temperature 0.2 that the 96-arm grid selected, because that grid selected on the
+separation ratio and the ratio does not predict retrieval (see OBSERVATIONS.md). Scored
+on MAP@100 the ratio's pick ranks 9th of 12 and is statistically indistinguishable from
+NOT TRAINING AT ALL -- level with an untrained encoder on MAP@100 (p=0.98) and worse
+than it on Hit@1 (p=0.003). lr 1e-4 / KL 10 / t 0.07 beats the untrained encoder on
+both (Hit@1 p=0.0007, MAP@100 p=0.0002) and wins at both checkpoints.
 """
 
 from __future__ import annotations
@@ -54,8 +66,8 @@ TASKS = {
         out="sweep-ckpt-contrastive", prefix="v2_ckcon-",
         module="msdelta.finetune_contrastive", seeds=("0", "1", "2", "3", "4", "5"),
         template=lambda s: REPO / "configs" / "finetune-contrastive-50m" / "training.args",
-        overrides={"--learning_rate": "2e-5", "--kl_weight": "0",
-                   "--temperature": "0.2", "--num_train_epochs": "3",
+        overrides={"--learning_rate": "1e-4", "--kl_weight": "10",
+                   "--temperature": "0.07", "--num_train_epochs": "3",
                    "--groups_per_batch": "2", "--replicates": "2",
                    "--split_seed": "0"}),
 }
