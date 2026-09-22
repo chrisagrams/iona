@@ -367,10 +367,14 @@ def fig_pretrain_ablation(runs: Path) -> None:
         ax.plot([4, 8], [S[4], S[8]], "s-", color=RED, lw=2.2, ms=7,
                 label="random encoder")
         top8 = P[8] if not np.isnan(P[8]) else P[4]
-        ax.text(4.1, (P[4] + S[4]) / 2, f"+{P[4]-S[4]:.4f}", fontsize=10, color=INK,
-                va="center", ha="left")
-        ax.text(7.9, (top8 + S[8]) / 2, f"+{top8-S[8]:.4f}", fontsize=10, color=INK,
-                va="center", ha="right")
+        for e in xs:
+            ax.annotate(f"{P[e]:.4f}", (e, P[e]), textcoords="offset points",
+                        xytext=(0, 9), ha="center", fontsize=8, color=BLUE)
+        for e in (4, 8):
+            ax.annotate(f"{S[e]:.4f}", (e, S[e]), textcoords="offset points",
+                        xytext=(0, -15), ha="center", fontsize=8, color=RED)
+        span = max(P[4], top8) - min(S[4], S[8])
+        ax.set_ylim(min(S[4], S[8]) - 0.18 * span, max(P[4], top8) + 0.14 * span)
         ax.set_xticks([2, 4, 8]); ax.set_xticklabels([f"{e} epochs" for e in (2, 4, 8)])
         ax.set_xlim(1.5, 8.9)
         ax.set_xlabel("fine-tuning budget"); ax.set_ylabel(f"test {label}")
