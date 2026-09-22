@@ -26,6 +26,7 @@ from msdelta.contrastive import (GroupBatchSampler, MSDeltaForContrastive,
                                  PairBatchSampler,
                                  gradcache_step,
                                  embedding_size, group_separation_summary,
+                                 retrieval_summary,
                                  subset_by_group)
 from msdelta.finetune_denoise import MemoryProbe, load_description, select_device, subset_splits
 from msdelta.modeling_msdelta import MSDeltaForPreTraining
@@ -493,6 +494,25 @@ def main(argv: list[str] | None = None) -> int:
                 print(f"[contrastive] separation: {before_after}", flush=True)
                 trainer.log(before_after)
                 trainer.save_metrics("separation", before_after)
+
+            # The TASK, on the same rows. The separation ratio is a proxy that has never
+            # been checked against what it proxies for; reporting both on every run is
+            # what makes the correlation measurable across a grid instead of assumed.
+            # Never fatal: a missing or broken faiss must not lose a completed run.
+            try:
+                retrieval = retrieval_summary(
+                    model, datasets["validation"], collator, trainer.args.device,
+                    max_rows=training_args.eval_alignment_rows
+                    if hasattr(training_args, "eval_alignment_rows") else 2000)
+            except Exception as error:
+                retrieval = {}
+                if trainer.is_world_process_zero():
+                    print(f"[contrastive] retrieval eval failed: {error}", flush=True)
+            if retrieval and trainer.is_world_process_zero():
+                print(f"[contrastive] retrieval: {retrieval}", flush=True)
+                trainer.log({k: v for k, v in retrieval.items()
+                             if isinstance(v, (int, float))})
+                trainer.save_metrics("retrieval", retrieval)
 
         if trainer.is_world_process_zero():
             # save_pretrained on the inner model, so the result is a drop-in

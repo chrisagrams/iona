@@ -12,6 +12,7 @@ import numpy as np
 import pytest
 import torch
 
+from tests.conftest import REPO
 from msdelta.contrastive import (GroupBatchSampler, head_kl, subset_by_group,
                                  supervised_contrastive_loss)
 
@@ -611,3 +612,119 @@ class TestPairSamplerAndLoss:
         z = torch.randn(4, 8, requires_grad=True)
         pair_contrastive_loss(z, torch.tensor([0, 0, 1, 2]))["loss"].backward()
         assert z.grad is not None and bool((z.grad != 0).any())
+
+
+class TestRetrievalSummary:
+    """The task, not the proxy.
+
+    Every contrastive result in this project is scored on the separation ratio, which
+    exists to stand in for retrieval and has never been checked against it. These tests
+    cover the evaluation itself; whether the proxy actually predicts the task is an
+    empirical question the grids answer, not something a test can assert.
+    """
+
+    def _fixture(self, tmp_path, n_groups=6, n_per=3):
+        import numpy as np
+        from msdelta.contrastive import retrieval_summary
+
+        class Tiny:
+            def __init__(self, rows): self.rows = rows
+            def __iter__(self): return iter(self.rows)
+            def __len__(self): return len(self.rows)
+
+        rows = [{"peptide": f"PEPTIDE{g}K", "charge": 2,
+                 "mz": [100.0 + g * 10 + j, 200.0 + g * 10 + j],
+                 "log_intensity": [1.0, 0.5]}
+                for g in range(n_groups) for j in range(n_per)]
+        return Tiny(rows), retrieval_summary
+
+    def test_reports_the_three_task_metrics(self, tiny_config, tmp_path):
+        """Hit@1, MAP@100 and R@5 -- what retrieval is actually judged on."""
+        import torch
+        from msdelta.contrastive import MSDeltaForContrastive
+        from msdelta.modeling_msdelta import MSDeltaModel
+        from msdelta.finetune_contrastive import ContrastiveCollator
+
+        dataset, retrieval_summary = self._fixture(tmp_path)
+        model = MSDeltaForContrastive(MSDeltaModel(tiny_config), kl_weight=0)
+        out = retrieval_summary(model, dataset, ContrastiveCollator(pad_spectra_to=8),
+                                torch.device("cpu"), max_rows=18)
+        if "retrieval/error" in out:
+            pytest.skip("faiss unavailable in this environment")
+        for key in ("retrieval/Hit@1", "retrieval/MAP@100", "retrieval/R@5"):
+            assert key in out, out
+            assert 0.0 <= out[key] <= 1.0
+
+    def test_scored_on_the_same_rows_as_the_separation_ratio(self, tiny_config, tmp_path):
+        """If the two evaluations embedded different subsets, comparing them would be
+        meaningless -- which is the entire reason both are reported."""
+        import torch
+        from msdelta.contrastive import (MSDeltaForContrastive, embed_dataset,
+                                         group_separation_summary, retrieval_summary)
+        from msdelta.modeling_msdelta import MSDeltaModel
+        from msdelta.finetune_contrastive import ContrastiveCollator
+
+        dataset, _ = self._fixture(tmp_path)
+        model = MSDeltaForContrastive(MSDeltaModel(tiny_config), kl_weight=0)
+        collator = ContrastiveCollator(pad_spectra_to=8)
+        device = torch.device("cpu")
+        emb, groups = embed_dataset(model, dataset, collator, device, max_rows=12)
+        sep = group_separation_summary(model, dataset, collator, device, max_rows=12)
+        ret = retrieval_summary(model, dataset, collator, device, max_rows=12)
+        assert len(emb) == 12
+        assert sep, "separation should report on these rows"
+        if "retrieval/queries" in ret:
+            assert ret["retrieval/queries"] == 12
+            assert ret["retrieval/groups"] == len(set(groups.tolist()))
+
+    def test_a_failing_evaluation_does_not_lose_the_run(self):
+        """A completed training run must not be thrown away by its own evaluation.
+
+        The metric is computed after training and after the encoder is saved, so any
+        exception there costs hours and returns nothing. The fine-tune wraps the call.
+        """
+        source = (REPO / "msdelta" / "finetune_contrastive.py").read_text()
+        block = source[source.index("retrieval_summary("):]
+        assert "try:" in source[:source.index("retrieval_summary(")][-400:], \
+            "the retrieval evaluation must be wrapped in try/except"
+        assert "retrieval eval failed" in block[:600]
+
+    def test_exact_search_matches_a_hand_computed_answer(self):
+        """Two tight pairs: every query's nearest other point is its own partner."""
+        import torch
+        from msdelta.contrastive import retrieval_metrics_exact
+        e = torch.tensor([[1.0, 0.0], [0.99, 0.14], [0.0, 1.0], [0.14, 0.99]])
+        out = retrieval_metrics_exact(e, [0, 0, 1, 1])
+        assert out["Hit@1"] == pytest.approx(1.0)
+        assert out["R@5"] == pytest.approx(1.0)
+        assert out["MAP@100"] == pytest.approx(1.0)
+
+    def test_exact_search_penalises_a_scrambled_space(self):
+        """And the same metric on embeddings that carry no group structure."""
+        import torch
+        from msdelta.contrastive import retrieval_metrics_exact
+        torch.manual_seed(0)
+        # Same four points. Only the LABELS change: in the second case each group's two
+        # members sit on opposite sides of the space, so the nearest other point is
+        # always the wrong one.
+        points = torch.tensor([[1.0, 0.0], [0.99, 0.14], [0.0, 1.0], [0.14, 0.99]])
+        good = retrieval_metrics_exact(points, [0, 0, 1, 1])
+        scrambled = retrieval_metrics_exact(points, [0, 1, 0, 1])
+        assert good["Hit@1"] == pytest.approx(1.0)
+        assert scrambled["Hit@1"] == pytest.approx(0.0)
+        assert good["MAP@100"] > scrambled["MAP@100"]
+
+    def test_singleton_groups_are_not_scored_as_failures(self, tiny_config, tmp_path):
+        """A query whose group has no other member has no correct answer available;
+        counting it as a miss would understate retrieval by however many singletons
+        the split happens to contain."""
+        import torch
+        from msdelta.contrastive import MSDeltaForContrastive, retrieval_summary
+        from msdelta.modeling_msdelta import MSDeltaModel
+        from msdelta.finetune_contrastive import ContrastiveCollator
+
+        dataset, _ = self._fixture(tmp_path, n_groups=8, n_per=1)
+        model = MSDeltaForContrastive(MSDeltaModel(tiny_config), kl_weight=0)
+        out = retrieval_summary(model, dataset, ContrastiveCollator(pad_spectra_to=8),
+                                torch.device("cpu"), max_rows=8)
+        assert out == {}, "all-singleton split has nothing to retrieve"
