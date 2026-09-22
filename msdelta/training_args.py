@@ -43,6 +43,10 @@ class DataArguments:
         default=None,
         metadata={"help": "Optional finalized dataset directory created by msdelta-preprocess."},
     )
+    preprocessed_probe_dir: str | None = field(
+        default=None,
+        metadata={"help": "Optional finalized probe directory created by msdelta-preprocess."},
+    )
     preprocessing_num_workers: int = 24
     max_peaks: int | None = None
 

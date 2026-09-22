@@ -7,6 +7,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import torch
+from datasets import load_from_disk
 from transformers import TrainingArguments, set_seed
 
 from msdelta.data import (
@@ -79,12 +80,20 @@ def build_probe_data(kind, data_args, training_args, processor):
             data_args.processor_name_or_path,
             max_peaks=training_args.denoise_max_peaks,
         )
+        if getattr(data_args, "preprocessed_probe_dir", None):
+            datasets = load_from_disk(Path(data_args.preprocessed_probe_dir) / "denoise")
+            return datasets, processor, None
         datasets = build_denoising_datasets(
             training_args.denoise_dataset_repo, processor, num_proc=num_proc
         )
         return datasets, processor, None
     if kind != "retrieval":
         raise ValueError(f"Unknown probe: {kind}")
+    if getattr(data_args, "preprocessed_probe_dir", None):
+        root = Path(data_args.preprocessed_probe_dir)
+        datasets = load_from_disk(root / "retrieval")
+        evaluation = load_from_disk(root / "retrieval-evaluation")
+        return datasets, processor, evaluation
     datasets = build_retrieval_datasets(
         training_args.retrieval_dataset_repo, processor, num_proc=num_proc
     )
