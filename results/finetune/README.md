@@ -167,7 +167,7 @@ out-group over in-group mean distance, floor 1.35 for an untrained encoder.
 | --- | --- |
 | `contrastive/figures/contrastive_scaling.png` | Separation ratio by model size, 6 seeds per scale. |
 | `contrastive/figures/contrastive_ablation.png` | Pretrained against randomly initialised, 4 scales × 6 seeds. |
-| `contrastive/figures/contrastive_breadth.png` | Separation ratio against rows per contrastive step. |
+| `contrastive/figures/extra/contrastive_breadth.png` | More negatives, which hurt — a closed question, not a lever. |
 | `contrastive/contrastive_random_control.txt` | The original random-init control. |
 | `contrastive/layer_probe_all_scales.txt` | Training-free probe of every encoder block. |
 | `contrastive/layer_probe_trajectory.txt` | The same probe across pretraining checkpoints. |

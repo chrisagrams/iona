@@ -8,13 +8,18 @@ contrastive_scaling.png   Separation ratio against model size, 6 SEEDS per scale
                           0.07 under the broken sampler, which is what "contrastive
                           saturates at 100m" was read from.
 
-contrastive_ablation.png  Pretrained against randomly initialised, BEST cell each.
-                          Selection is max over hyperparameters everywhere in this
-                          project, so the spread across cells is not an uncertainty and
-                          is not drawn. These two points have no error bars, because
-                          neither grid was seed-replicated. PROVISIONAL: 50m only, old
-                          configuration. Job 8848471 re-runs it with 6 seeds at all
-                          four scales.
+contrastive_ablation.png  Pretrained against randomly initialised, 4 scales x 6 seeds,
+                          grids identical but for --random_init.
+
+extra/contrastive_breadth.png
+                          Separation ratio against rows per contrastive step. Filed
+                          under extra/ because it is a negative result that closes a
+                          question rather than opening one: more negatives measurably
+                          HURT here, -2.80 from 4 rows to 64 at t=-4.5, so breadth is
+                          not a lever this project will pull. Worth keeping because it
+                          contradicts standard contrastive practice and because the
+                          earlier verdict on the same question was confounded four
+                          ways.
 """
 
 from __future__ import annotations
@@ -32,6 +37,10 @@ import numpy as np
 
 REPO = Path(__file__).resolve().parent.parent
 FIGS = REPO / "results" / "finetune" / "contrastive" / "figures"
+# Supporting figures: results that closed a question without changing what
+# we do. GradCache is here because more negatives measurably hurt, so the
+# lever is not one we will pull.
+EXTRA = FIGS / "extra"
 RUNS = "/lus/flare/projects/UIC-HPC/khuss/msdelta/runs"
 INK, MUTED, GRID = "#1a1a1a", "#6b7280", "#e5e7eb"
 BLUE, RED, GREY = "#2563eb", "#dc2626", "#9ca3af"
@@ -175,11 +184,12 @@ def fig_breadth():
     ax.grid(axis="y"); ax.set_axisbelow(True)
     fig.suptitle("Job 8848463, 50m, 4 seeds per point, band ±1 sd. Only the batch "
                  "shape varies.", x=0.005, ha="left", fontsize=8.5, color=MUTED, y=1.02)
-    fig.savefig(FIGS / "contrastive_breadth.png"); plt.close(fig)
+    fig.savefig(EXTRA / "contrastive_breadth.png"); plt.close(fig)
 
 
 def main() -> int:
     FIGS.mkdir(parents=True, exist_ok=True)
+    EXTRA.mkdir(parents=True, exist_ok=True)
     fig_scaling(); print("  wrote contrastive_scaling.png")
     fig_ablation(); print("  wrote contrastive_ablation.png")
     fig_breadth(); print("  wrote contrastive_breadth.png")
