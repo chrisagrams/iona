@@ -94,6 +94,7 @@ done
 # skipping the check for an unrecognised path is how the pinned version stopped covering
 # anything, and SKIP_GRID_CHECK is there for the deliberate exception.
 declare -A GRID_CHECK=(
+    [configs/sweep-conhp-seeds]="sweeps/make_conhp_seeds.py"
     [configs/sweep-denoise]="sweeps/make_denoise_grid.py --check"
     [configs/sweep-denoise-100m]="sweeps/make_denoise_size_grid.py --size 100m --check"
     [configs/sweep-denoise-200m]="sweeps/make_denoise_size_grid.py --size 200m --check"
