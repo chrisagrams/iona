@@ -384,8 +384,6 @@ def fig_pretrain_ablation(runs: Path) -> None:
         vals = [r["test_auroc"] for r in ep8.values()]
         ax.errorbar([8], [float(np.mean(vals))], yerr=[float(np.std(vals, ddof=1))],
                     fmt="none", ecolor=BLUE, capsize=4, lw=1.4, zorder=6)
-        ax.text(8, P[8] + 0.0013, f"6 seeds\n±{np.std(vals, ddof=1):.4f}", fontsize=7.4,
-                color=BLUE, ha="center", va="bottom", linespacing=1.3)
     # Both comparisons as VERTICAL arrows against a horizontal reference. The earlier
     # version drew the double-budget gap as one diagonal from (4, pretrained) to
     # (8, scratch), which cut across the whole figure and crossed both data lines.
@@ -396,12 +394,6 @@ def fig_pretrain_ablation(runs: Path) -> None:
             va="center", ha="left")
     ax.text(7.9, (top8 + S[8]) / 2, f"+{top8-S[8]:.4f}", fontsize=10, color=INK,
             va="center", ha="right")
-    ax.axhline(P[2], color=MUTED, lw=0.9, ls=":")
-    ax.text(1.62, S[8] - 0.004,
-            "dotted line = pretrained at 2 epochs, already above scratch at 8 —\n"
-            "four times the budget. The gap narrows with budget (+0.046 to +0.034)\n"
-            "because scratch gains ten times as much from the extra epochs.",
-            fontsize=8, color=MUTED, va="top")
 
     ax.set_xticks(xs); ax.set_xticklabels([f"{e} epochs" for e in xs])
     ax.set_xlim(1.5, 8.9)
@@ -411,9 +403,6 @@ def fig_pretrain_ablation(runs: Path) -> None:
                  loc="left", pad=16)
     ax.grid(axis="y"); ax.set_axisbelow(True)
     ax.legend(frameon=False, fontsize=8.4, loc="lower right")
-    fig.suptitle("50m, best arm at each budget. Pretrained job 8840408, "
-                 "random-encoder ablation job 8841984.",
-                 x=0.005, ha="left", fontsize=8.5, color=MUTED, y=1.01)
     fig.savefig(FIGS / "pretrain_ablation.png")
     plt.close(fig)
 
