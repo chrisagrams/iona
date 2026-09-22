@@ -550,12 +550,20 @@ def embed_dataset(model, dataset, collator, device, max_rows: int = 2000,
     rows = list(dataset)[:max_rows]
     embeddings = []
     try:
-        for start in range(0, len(rows), batch_size):
-            chunk = rows[start : start + batch_size]
-            batch = {k: v.to(device) for k, v in collator(chunk).items()}
-            pooled, _ = model.embed(batch["mz"], batch["log_intensity"],
-                                    batch["attention_mask"])
-            embeddings.append(pooled.cpu())
+        # no_grad is not an optimisation here, it is the difference between running and
+        # not. model.eval() alone still builds the autograd graph, and .cpu() keeps it
+        # alive through grad_fn, so every batch's DeltaMZBias intermediates -- which are
+        # (batch, peaks, peaks, 2*n_freqs) and measured in gigabytes -- are retained for
+        # the whole pass. Job 8848808 filled a 64 GB tile on its first encoder that way,
+        # and shrinking the batch did not help because the leak scales with the NUMBER
+        # of batches, not their size.
+        with torch.no_grad():
+            for start in range(0, len(rows), batch_size):
+                chunk = rows[start : start + batch_size]
+                batch = {k: v.to(device) for k, v in collator(chunk).items()}
+                pooled, _ = model.embed(batch["mz"], batch["log_intensity"],
+                                        batch["attention_mask"])
+                embeddings.append(pooled.cpu())
     finally:
         model.train(was_training)
     if not embeddings:

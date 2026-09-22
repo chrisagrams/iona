@@ -138,6 +138,9 @@ declare -A GRID_CHECK=(
     [configs/sweep-contrastive-scale-v2]="sweeps/make_contrastive_scale_v2.py --check"
     # The pretraining ablation for contrastive, matched to the curve above.
     [configs/sweep-contrastive-scale-v2-random]="sweeps/make_contrastive_random_v2.py --check"
+    # The pretraining-checkpoint ladder, middle two rungs first.
+    [configs/sweep-ckpt-denoise]="sweeps/make_checkpoint_grid.py --task denoise --check"
+    [configs/sweep-ckpt-contrastive]="sweeps/make_checkpoint_grid.py --task contrastive --check"
     [configs/sweep-pairaccum]="sweeps/make_pairaccum_grid.py --check"
     [configs/sweep-gradcache-v2]="sweeps/make_gradcache_v2_grid.py --check"
     [configs/sweep-contrastive-hp-big]="sweeps/make_contrastive_hp_big.py --check"

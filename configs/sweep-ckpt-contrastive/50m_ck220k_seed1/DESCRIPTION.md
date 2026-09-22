@@ -1,0 +1,1 @@
+CHECKPOINT ARM (contrastive): 50m from pretrained checkpoint 220,000 -- 41% of the 540,423 steps every scale targets -- seed 1. Hyperparameters are held at the configuration chosen at checkpoint 1 and are NOT swept here; whether that choice still holds this far into pretraining is untested.
