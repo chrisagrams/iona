@@ -91,8 +91,10 @@ add Casanovo to the root `pyproject.toml`.**
   the errors Casanovo's parser skips, are dropped. These steps only drop peaks
   and sort them by m/z; they never change m/z values. Each kept peak is
   therefore matched back to its original index by exact m/z to select its
-  noise label. A spectrum with duplicate m/z values raises an error rather
-  than risk a wrong label. The dataset has none.
+  noise label. A few training spectra (4 of 100,066) contain duplicate m/z
+  values. Every such pair shares a noise label, so matching to either copy is
+  correct. A duplicate pair with different labels would raise an error rather
+  than risk a wrong label.
 
 ## Caveat: not a controlled common-peaks comparison
 

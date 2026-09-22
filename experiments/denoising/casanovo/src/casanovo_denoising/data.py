@@ -72,8 +72,11 @@ def preprocess_spectrum(
             raise ValueError(f"{name} must be nonnegative")
     order = np.argsort(mz, kind="stable")
     sorted_mz = mz[order].astype(np.float64)
-    if np.any(np.diff(sorted_mz) == 0):
-        raise ValueError("duplicate m/z values make label alignment ambiguous")
+    # A retained duplicate m/z is matched to its first occurrence, which is
+    # only correct if every peak sharing that m/z has the same label.
+    duplicate = np.flatnonzero(np.diff(sorted_mz) == 0)
+    if np.any(noise[order][duplicate] != noise[order][duplicate + 1]):
+        raise ValueError("peaks with identical m/z have different noise labels")
 
     preprocessing_fn, valid_charge = casanovo_preprocessing()
     if precursor_charge not in valid_charge:
