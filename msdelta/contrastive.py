@@ -516,12 +516,34 @@ def group_separation_summary(model, dataset, collator, device, max_rows: int = 2
                              batch_size: int = 16) -> dict[str, float]:
     """Embed a validation split and report whether replicates now cluster.
 
-    This is the number the whole exercise exists to move. The pretrained encoder scores
-    `clean` = 0.010 on this corpus -- 1% of peptide+charge groups have every replicate
-    nearer to each other than to any other peptide. If contrastive training does not
-    raise that substantially, it has not done its job, whatever the loss curve says.
+    The pretrained encoder scores `clean` = 0.010 on this corpus -- 1% of peptide+charge
+    groups have every replicate nearer to each other than to any other peptide. If
+    contrastive training does not raise that substantially, it has not done its job,
+    whatever the loss curve says.
+
+    This is a PROXY for retrieval, not the task. See retrieval_summary, which scores the
+    same rows on Hit@1, MAP@100 and R@5 so the two can be compared rather than one
+    assumed to stand for the other.
     """
-    from msdelta.reranking import group_separation_metrics, peptide_key
+    from msdelta.reranking import group_separation_metrics
+
+    embeddings, groups = embed_dataset(model, dataset, collator, device,
+                                       max_rows=max_rows, batch_size=batch_size)
+    if embeddings is None:
+        return {}
+    return group_separation_metrics(embeddings, groups, "sep_spectrum")
+
+
+def embed_dataset(model, dataset, collator, device, max_rows: int = 2000,
+                  batch_size: int = 16):
+    """Embed rows and return (embeddings, group ids). Shared by both evaluations.
+
+    Factored out so the separation ratio and the retrieval metrics are computed over
+    exactly the same rows in the same order. Two evaluations that disagree because they
+    embedded different subsets would be the worst possible outcome here, since the whole
+    point is to find out whether one predicts the other.
+    """
+    from msdelta.reranking import peptide_key
 
     was_training = model.training
     model.eval()
@@ -537,11 +559,91 @@ def group_separation_summary(model, dataset, collator, device, max_rows: int = 2
     finally:
         model.train(was_training)
     if not embeddings:
-        return {}
+        return None, None
     groups = np.unique(
         np.array([peptide_key(r["peptide"], int(r.get("charge", 0))) for r in rows]),
         return_inverse=True)[1]
-    return group_separation_metrics(torch.cat(embeddings), groups, "sep_spectrum")
+    return torch.cat(embeddings), groups
+
+
+def retrieval_metrics_exact(embeddings: Tensor, groups) -> dict[str, float]:
+    """Hit@1, R@5 and MAP@100 by exact search, without faiss.
+
+    faiss is imported at module level by msdelta.retrieval and is not installed in this
+    environment -- not in the venv, not in the frameworks module -- so that path cannot
+    run here at all. It is also unnecessary: the evaluation embeds at most a couple of
+    thousand spectra, and an exact all-pairs cosine similarity at that size is a single
+    matmul. An approximate index would add a dependency, a build, and a recall ceiling
+    in exchange for nothing.
+
+    DEFINITIONS, stated because retrieval metrics are named inconsistently:
+      Hit@1    the nearest OTHER spectrum is the same peptide.
+      R@5      of a query's relevant spectra, the fraction appearing in its top 5.
+      MAP@100  average precision over the top 100, with ALL relevant spectra in the
+               denominator, including any beyond rank 100. Averaged over queries.
+    A query whose peptide has no other spectrum is excluded: it has no correct answer
+    available, and scoring it as a miss would understate retrieval by however many
+    singletons the split happens to contain.
+    """
+    e = F.normalize(embeddings.float(), dim=-1)
+    g = torch.as_tensor(groups, dtype=torch.long)
+    sim = e @ e.T
+    n = len(e)
+    eye = torch.eye(n, dtype=torch.bool)
+    sim = sim.masked_fill(eye, float("-inf"))
+    relevant = (g[:, None] == g[None, :]) & ~eye
+    n_rel = relevant.sum(1)
+    scorable = n_rel > 0
+    if not scorable.any():
+        return {}
+
+    order = sim.argsort(dim=1, descending=True)
+    hit = relevant.gather(1, order)                      # relevance in rank order
+
+    at5 = hit[:, :5].sum(1).float() / n_rel.clamp(min=1).float()
+    k = min(100, n - 1)
+    top = hit[:, :k].float()
+    # precision@i at each rank where a relevant item sits, averaged over all relevant.
+    csum = top.cumsum(1)
+    ranks = torch.arange(1, k + 1, dtype=torch.float32).unsqueeze(0)
+    ap = ((csum / ranks) * top).sum(1) / n_rel.clamp(min=1).float()
+    return {
+        "Hit@1": float(hit[scorable, 0].float().mean()),
+        "R@5": float(at5[scorable].mean()),
+        "MAP@100": float(ap[scorable].mean()),
+    }
+
+
+def retrieval_summary(model, dataset, collator, device, max_rows: int = 2000,
+                      batch_size: int = 16) -> dict[str, float]:
+    """Hit@1, MAP@100 and R@5 -- the task, rather than a proxy for it.
+
+    THE SEPARATION RATIO IS NOT THE GOAL. Contrastive training exists here to serve
+    retrieval and reranking, and every contrastive result in this project has been
+    scored on out-group over in-group mean distance instead. That is a reasonable proxy
+    and it has never been checked against the thing it proxies for. The two can come
+    apart: the ratio is an average over all pairs, while retrieval depends only on the
+    nearest few, so a model that tightens the bulk of the distribution while leaving the
+    hardest confusions untouched improves the ratio and not the task.
+
+    Reported alongside the ratio on the same rows, so the correlation between them can
+    be measured across a grid rather than assumed.
+    """
+    embeddings, groups = embed_dataset(model, dataset, collator, device,
+                                       max_rows=max_rows, batch_size=batch_size)
+    if embeddings is None or len(embeddings) < 3:
+        return {}
+    counts = np.bincount(groups)
+    if (counts > 1).sum() < 2:
+        return {}
+    scores = retrieval_metrics_exact(embeddings, groups)
+    if not scores:
+        return {}
+    return {f"retrieval/{k}": v for k, v in scores.items()} | {
+        "retrieval/queries": float(len(embeddings)),
+        "retrieval/groups": float(len(counts)),
+        "retrieval/scorable_groups": float((counts > 1).sum()),
+    }
 
 
 def subset_by_group(dataset, max_samples: int, group_key, min_members: int = 4):
