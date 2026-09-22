@@ -55,7 +55,13 @@ class CasanovoDenoiser(nn.Module):
         head_hidden_size: int = 128,
         head_dropout: float = 0.1,
     ) -> CasanovoDenoiser:
-        spec2pep = Spec2Pep.load_from_checkpoint(str(checkpoint), map_location="cpu")
+        # Casanovo checkpoints pickle NumPy scalars in their hyperparameters,
+        # which torch>=2.6's weights_only default rejects. Casanovo's own
+        # ModelRunner loads them with weights_only=False, so match it; only
+        # load checkpoints from a trusted source (e.g. official releases).
+        spec2pep = Spec2Pep.load_from_checkpoint(
+            str(checkpoint), map_location="cpu", weights_only=False
+        )
         hidden_size = int(spec2pep.hparams.get("dim_model", 512))
         encoder = spec2pep.encoder
         del spec2pep
