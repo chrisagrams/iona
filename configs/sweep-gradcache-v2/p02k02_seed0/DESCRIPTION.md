@@ -1,0 +1,1 @@
+BREADTH ARM: P=2 x K=2 = 4 rows, no GradCache, so each anchor sees 1 positive(s) and 2 negative(s). Seed 0, at the configuration the HP grid selected: lr 2e-5, KL 0, temperature 0.2, 3 epochs. Re-asks whether more negatives help, a question whose first answer (5.70 vs 5.86, 'no') was confounded by a different learning rate, a different temperature, the pre-FT14 sampler, and n=1.
