@@ -637,3 +637,51 @@ now reaches 40% of the corpus and 10 reaches 82%.
 
 WHAT IS NOT YET MEASURED: ep30 and ep100 are still running. "Flat from 3 to 10" and
 "flat forever" are different claims and only the first is established.
+
+## The separation ratio does not predict retrieval, and contrastive FT trades Hit@1 for MAP@100
+
+The ratio was the selection metric for every contrastive conclusion in this project. It
+has now been scored against the task it proxies for, on the same validation rows, for
+all 24 arms of job 8848049 plus the 50m arms' OWN base checkpoint
+(50m-production-01-checkpoint-133233) as an untrained control. Same 1167 queries, same
+99 groups, every encoder.
+
+    scale    ratio    Hit@1   vs base        MAP@100  vs base
+    untrained 1.34   0.6538   --             0.1727   --
+    50m       9.37   0.5137   t=-5.4 p.003   0.1751   n.s.
+    100m     10.36   0.4689   t=-16  p<.001  0.1561   t=-3.0 p=.032
+    200m     11.50   0.4986   t=-24  p<.001  0.1676   t=-3.5 p=.017
+    400m     13.84   0.5261   t=-15  p<.001  0.1976   t=+4.4 p=.007
+
+THE PROXY FAILS VALIDATION. Spearman against the ratio, n=24: Hit@1 +0.28 (p=0.18),
+R@5 +0.27 (p=0.20), MAP@100 +0.40 (p=0.055). None significant. Within a single scale,
+where only the seed differs, the mean rank correlation with Hit@1 is -0.04 -- the ratio
+cannot order runs at all. The ratio is monotone in scale (9.37 -> 13.84); neither task
+metric is, and 100m sits below 50m on both.
+
+THE TWO TASK METRICS DISAGREE IN SIGN, so reporting one alone misleads. Hit@1 asks
+whether the single nearest neighbour is a replicate -- a LOCAL property. MAP@100 scores
+the whole ranked list -- a GLOBAL one. Contrastive training pushes group centroids
+apart, which is exactly what improves the second and damages the first. It costs Hit@1
+at every scale without exception (0/24 arms beat the untrained encoder) and only beats
+the untrained encoder on MAP@100 at 400m; at 100m and 200m it is significantly WORSE
+than not training at all.
+
+WHY THE UNTRAINED ENCODER IS SO STRONG ON Hit@1: replicate spectra of one peptide are
+near-identical as raw peaks, so almost any embedding puts them adjacent. 0.654 is far
+above the ~0.009 a random ranking would give. The pretrained representation already
+solves the local problem; contrastive training then degrades it.
+
+STATED AT THE STRENGTH IT HAS: 400m beating 50m on MAP@100 is t=+1.77, p=0.11 at six
+seeds -- suggestive, not established. The 400m-vs-untrained result (p=0.007) is the
+solid one.
+
+CONSEQUENCE: "contrastive separation improves with scale" is a statement about the
+proxy. On the task, scale buys MAP@100 only by 400m and buys no Hit@1 anywhere. Arms
+must be selected on MAP@100 with Hit@1 reported beside it, never on the ratio.
+finetune_contrastive.py already emits both per arm, so grids run with current code need
+no rescoring pass; older jobs need msdelta.eval_retrieval.
+
+WHAT IS NOT YET MEASURED: whether a different contrastive configuration (temperature,
+loss, or fewer epochs) can raise MAP@100 without spending Hit@1. Every arm here used
+one configuration per scale.

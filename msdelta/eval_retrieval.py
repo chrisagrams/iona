@@ -81,6 +81,9 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--job", required=True, help="sweep job id whose arms to score")
     ap.add_argument("--baseline", help="an untrained checkpoint, scored for reference")
     ap.add_argument("--runs", default=RUNS)
+    ap.add_argument("--arms", help="regex; score only arms whose name matches. "
+                    "A 96-arm job does not fit a debug hour, and the half of it "
+                    "that answers the question usually does.")
     ap.add_argument("--dataset-repo", default="chrisagrams/ms2-peptide-replicate-retrieval")
     ap.add_argument("--max-rows", type=int, default=2000)
     # DeltaMZBias is O(batch * peaks^2 * n_freqs); 16 x 512 peaks is 8 GiB.
@@ -95,6 +98,16 @@ def main(argv: list[str] | None = None) -> int:
     device = torch.device("xpu" if torch.xpu.is_available() else "cpu")
     arms = sorted(glob.glob(f"{cli.runs}/sweep-*-{cli.job}"))
     arms = [a for a in arms if os.path.isdir(os.path.join(a, "final"))]
+    if cli.arms:
+        pattern = re.compile(cli.arms)
+        # Search the arm name only, not the path: RUNS contains the job id and a
+        # digit-bearing pattern would otherwise match every arm through the prefix.
+        kept = [a for a in arms
+                if pattern.search(re.sub(rf"^sweep-|-{cli.job}$", "",
+                                         os.path.basename(a)))]
+        print(f"[retrieval] --arms {cli.arms!r} kept {len(kept)} of {len(arms)}",
+              flush=True)
+        arms = kept
     if not arms:
         raise SystemExit(f"no arms with a saved final/ under job {cli.job}")
     print(f"[retrieval] {len(arms)} arms, device {device}", flush=True)

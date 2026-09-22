@@ -160,21 +160,25 @@ dropped for exceeding the peak limit. Not confirmed.
 
 # Contrastive
 
-Spectrum embeddings for retrieval and reranking, scored by the separation ratio --
-out-group over in-group mean distance, floor 1.35 for an untrained encoder.
+Spectrum embeddings for retrieval and reranking. Historically scored by the separation
+ratio -- out-group over in-group mean distance, floor 1.35 for an untrained encoder.
+**That proxy has now been validated against the task and it fails**; read the ratio
+results below as statements about the ratio, and see the last section.
 
 | file | what it holds |
 | --- | --- |
 | `contrastive/figures/contrastive_scaling.png` | Separation ratio by model size, 6 seeds per scale. |
 | `contrastive/figures/contrastive_ablation.png` | Pretrained against randomly initialised, 4 scales × 6 seeds. |
 | `contrastive/figures/extra/contrastive_breadth.png` | More negatives, which hurt — a closed question, not a lever. |
+| `contrastive/figures/retrieval_vs_separation.png` | The proxy against the task: Hit@1 and MAP@100 by scale, and the correlation. |
+| `contrastive/retrieval_vs_separation_8848049.json` | Per-arm retrieval metrics for all 24 scale arms plus the untrained control. |
 | `contrastive/contrastive_random_control.txt` | The original random-init control. |
 | `contrastive/layer_probe_all_scales.txt` | Training-free probe of every encoder block. |
 | `contrastive/layer_probe_trajectory.txt` | The same probe across pretraining checkpoints. |
 | `contrastive/random_init_baseline.txt` | Where the 1.35 floor comes from. |
 | `contrastive/layermix_and_contrastive_v2.txt` | The learned depth mixture. |
 
-**The scale curve climbs to 400m** — 9.37 / 10.36 / 11.50 / 13.84 at 50m/100m/200m/400m,
+**The scale curve climbs to 400m _on the proxy_** — 9.37 / 10.36 / 11.50 / 13.84 at 50m/100m/200m/400m,
 +4.47 end to end (t=4.1), though no individual step resolves against a seed sd that
 grows from 0.80 to 2.56. An earlier reading of "saturates at 100m" was measured under a
 sampler that replayed identical batches and at hyperparameters ranked seventh of twelve.
@@ -201,8 +205,33 @@ pre-FT14 sampler and n=1; re-asked at matched settings the answer is stronger th
 before. No explanation established — with ~900 peptides a 64-row batch may draw
 negatives that are near-duplicates of the positive, but that is speculation.
 
-**The separation ratio is a proxy that has never been validated.** Contrastive exists
-for retrieval, and every conclusion here — which hyperparameters win, whether the metric
-scales, whether the pair loss trails — was decided by the ratio. `msdelta/eval_retrieval.py`
-scores saved encoders on Hit@1, R@5 and MAP@100 and correlates the two; until that lands,
-treat every contrastive conclusion as conditional on the proxy tracking the task.
+**The separation ratio does not predict retrieval.** All 24 scale arms were scored on
+the task, on the same 1167 queries and 99 groups, against the 50m arms' own base
+checkpoint as an untrained control. Spearman against the ratio, n=24: Hit@1 +0.28
+(p=0.18), R@5 +0.27 (p=0.20), MAP@100 +0.40 (p=0.055) — none significant. Within one
+scale, where only the seed differs, the mean rank correlation with Hit@1 is **−0.04**:
+the ratio cannot order runs at all.
+
+| scale | ratio | Hit@1 | vs untrained | MAP@100 | vs untrained |
+| --- | --- | --- | --- | --- | --- |
+| untrained | 1.34 | **0.6538** | — | 0.1727 | — |
+| 50m | 9.37 | 0.5137 | p=0.003 ▼ | 0.1751 | n.s. |
+| 100m | 10.36 | 0.4689 | p<0.001 ▼ | 0.1561 | p=0.032 ▼ |
+| 200m | 11.50 | 0.4986 | p<0.001 ▼ | 0.1676 | p=0.017 ▼ |
+| 400m | 13.84 | 0.5261 | p<0.001 ▼ | **0.1976** | p=0.007 ▲ |
+
+**The two task metrics disagree in sign, so quoting one alone misleads.** Hit@1 asks
+whether the single nearest neighbour is a replicate — a local property. MAP@100 scores
+the whole ranked list — a global one. Contrastive training pushes group centroids apart,
+which is what improves the second and damages the first. It costs Hit@1 at every scale
+without exception (0/24 arms beat the untrained encoder) and beats untrained on MAP@100
+only at 400m; at 100m and 200m it is significantly worse than not training at all.
+400m over 50m on MAP@100 is t=+1.77, p=0.11 — suggestive, not established.
+
+Replicate spectra of one peptide are near-identical as raw peaks, so the pretrained
+encoder already solves the local problem (0.654 against ~0.009 for a random ranking).
+
+**Consequence for anything queued:** select arms on MAP@100 with Hit@1 reported beside
+it, never on the ratio. `finetune_contrastive.py` emits both per arm, so grids run with
+current code need no rescoring; older jobs need `msdelta.eval_retrieval` (`--arms` to
+fit a large sweep into a debug hour).
