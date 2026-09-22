@@ -1,0 +1,119 @@
+"""Score saved contrastive encoders on retrieval, and against the proxy that chose them.
+
+    python -m msdelta.eval_retrieval --job 8848049 \
+        --baseline /flare/UIC-HPC/khuss/msdelta/pretrained/msdelta-50m-production-01-checkpoint-133233
+
+THE QUESTION. Every contrastive result in this project is ranked by
+`sep_spectrum/ratio`, out-group over in-group mean distance. Contrastive exists here to
+serve retrieval and reranking. Nothing has ever checked that the first predicts the
+second, and they can come apart: the ratio averages over ALL pairs, retrieval depends
+only on the nearest few, so a model that tightens the bulk of the distribution while
+leaving the hardest confusions untouched improves the ratio and not the task.
+
+Two things are reported, and the second matters more than the first:
+
+  ABSOLUTE. Retrieval for each trained encoder, against the untrained pretrained
+  encoder as a baseline. If contrastive training does not move Hit@1, the separation
+  ratio it moves by 4 points is measuring something that does not matter.
+
+  CORRELATION. Spearman between the separation ratio and each retrieval metric across
+  the arms. A high correlation licenses every hyperparameter and scale conclusion drawn
+  from the ratio; a low one invalidates the selection, not just the reporting.
+
+Runs on saved encoders, so it costs no retraining -- every contrastive run writes
+`final/` as a drop-in --pretrained_path.
+"""
+
+from __future__ import annotations
+
+import argparse
+import glob
+import json
+import os
+import re
+from pathlib import Path
+
+import numpy as np
+import torch
+
+RUNS = "/lus/flare/projects/UIC-HPC/khuss/msdelta/runs"
+
+
+def score_encoder(path: str, datasets, collator, device, max_rows: int) -> dict:
+    """Load one saved encoder and report separation and retrieval on the same rows."""
+    from msdelta.contrastive import (MSDeltaForContrastive, group_separation_summary,
+                                     retrieval_summary)
+    from msdelta.modeling_msdelta import MSDeltaForPreTraining
+
+    encoder = MSDeltaForPreTraining.from_pretrained(path)
+    model = MSDeltaForContrastive(encoder, None, kl_weight=0).to(device)
+    out = group_separation_summary(model, datasets["validation"], collator, device,
+                                   max_rows=max_rows)
+    out |= retrieval_summary(model, datasets["validation"], collator, device,
+                             max_rows=max_rows)
+    del model, encoder
+    return out
+
+
+def main(argv: list[str] | None = None) -> int:
+    ap = argparse.ArgumentParser(description=__doc__)
+    ap.add_argument("--job", required=True, help="sweep job id whose arms to score")
+    ap.add_argument("--baseline", help="an untrained checkpoint, scored for reference")
+    ap.add_argument("--runs", default=RUNS)
+    ap.add_argument("--dataset-repo", default="chrisagrams/ms2-peptide-replicate-retrieval")
+    ap.add_argument("--max-rows", type=int, default=2000)
+    ap.add_argument("--out", default="results/retrieval_vs_separation.json")
+    cli = ap.parse_args(argv)
+
+    from msdelta.finetune_contrastive import ContrastiveCollator
+    from msdelta.processing_msdelta import MSDeltaProcessor
+    from msdelta.reranking import build_alignment_datasets
+
+    device = torch.device("xpu" if torch.xpu.is_available() else "cpu")
+    arms = sorted(glob.glob(f"{cli.runs}/sweep-*-{cli.job}"))
+    arms = [a for a in arms if os.path.isdir(os.path.join(a, "final"))]
+    if not arms:
+        raise SystemExit(f"no arms with a saved final/ under job {cli.job}")
+    print(f"[retrieval] {len(arms)} arms, device {device}", flush=True)
+
+    processor = MSDeltaProcessor.from_pretrained(arms[0] + "/final", max_peaks=512)
+    datasets = build_alignment_datasets(cli.dataset_repo, processor,
+                                        validation_fraction=0.1, seed=0)
+    collator = ContrastiveCollator(max_peptide_length=64, pad_spectra_to=512)
+
+    rows = {}
+    if cli.baseline:
+        rows["BASELINE-untrained"] = score_encoder(cli.baseline, datasets, collator,
+                                                   device, cli.max_rows)
+        print(f"  baseline: {rows['BASELINE-untrained']}", flush=True)
+    for a in arms:
+        name = re.sub(rf"^sweep-|-{cli.job}$", "", os.path.basename(a))
+        rows[name] = score_encoder(a + "/final", datasets, collator, device,
+                                   cli.max_rows)
+        print(f"  {name}: ratio {rows[name].get('sep_spectrum/ratio', float('nan')):.2f}"
+              f"  Hit@1 {rows[name].get('retrieval/Hit@1', float('nan')):.4f}", flush=True)
+
+    trained = {k: v for k, v in rows.items() if not k.startswith("BASELINE")}
+    ratio = [v.get("sep_spectrum/ratio") for v in trained.values()]
+    summary = {}
+    for metric in ("retrieval/Hit@1", "retrieval/R@5", "retrieval/MAP@100"):
+        vals = [v.get(metric) for v in trained.values()]
+        pairs = [(r, m) for r, m in zip(ratio, vals)
+                 if r is not None and m is not None]
+        if len(pairs) > 2:
+            from scipy import stats
+            rho, p = stats.spearmanr([r for r, _ in pairs], [m for _, m in pairs])
+            summary[metric] = {"spearman_vs_ratio": float(rho), "p": float(p),
+                               "n": len(pairs)}
+            print(f"  {metric} vs separation ratio: rho={rho:+.3f} p={p:.4f} "
+                  f"n={len(pairs)}", flush=True)
+
+    Path(cli.out).parent.mkdir(parents=True, exist_ok=True)
+    Path(cli.out).write_text(json.dumps({"job": cli.job, "arms": rows,
+                                         "correlation": summary}, indent=1))
+    print(f"[retrieval] wrote {cli.out}", flush=True)
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

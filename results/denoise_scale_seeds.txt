@@ -23,8 +23,15 @@ step                  gap       se       t   verdict
   Every step resolves. The curve rises, decelerates, and TURNS OVER.
   200m -> 400m is a regression, not the plateau reported from one seed each.
 
-  CAVEAT, and it is the important one: this is 4 epochs. The 400m probe
-  (job 8845252) has 400m still gaining at 4 epochs, +0.0021 from ep2, which
-  is four times this noise. '400m is worse than 200m at this budget' and
-  '400m has not converged' are both true; only the second is about scale.
-  The 8-epoch row at every scale is what settles it.
+  IS THE TURNOVER JUST A BUDGET ARTEFACT? No. The 400m probe (job 8845252) is
+  now complete at 8 epochs, and at the winning encoder_lr_scale of 0.5 eight
+  epochs scores 0.9418 against four epochs' 0.9439 -- WORSE by 0.0021, five
+  times the fixed-seed noise. The best 400m arm anywhere is 0.9439, still under
+  200m's 0.9447. More fine-tuning does not rescue 400m.
+
+  An earlier note here said the opposite, reasoning from ep2 -> ep4 being
+  +0.0021 that 400m was under-trained. That extrapolated past the last sampled
+  point and the next point reversed it.
+
+  STILL OPEN: 200m at 8 epochs (job 8847146). If 200m also degrades the gap
+  stands; if it gains the gap widens.

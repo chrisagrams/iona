@@ -1,0 +1,71 @@
+# Per-scale denoise hyperparameter grids, 12 arms each
+# Identical axes at every scale, so the winners are directly comparable.
+#
+# THE SAME POINT WINS AT EVERY SCALE: lr2e4_es05_b12 (lr 2e-4, encoder at 0.5x
+# the head's rate, effective batch 12) is first at 100m, 200m and 400m, and the
+# same settings won the 216-arm 50m grid. Four scales, one answer -- which is
+# what licenses repeating a single configuration across scales in FT5.
+#
+# The ranking WITHIN each top cluster is not resolved: the best three arms span
+# 0.0003-0.0008 against a seed noise of 0.0005.
+
+############ 100m
+# job 8841345, 12 arms with results
+# scored 8,584-8,584 test spectra / 1,680,125-1,680,125 peaks  (test split is 9,893 spectra)
+# metric: test_auroc on per-peak noise classification, sorted best first
+
+  arm                               lr      es       b    AUROC      F1   AUPRC
+  -----------------------------------------------------------------------------
+  lr2e4_es05_b12                  2e-4     0.5      12   0.9403  0.8723  0.9475
+  lr2e4_es10_b48                  2e-4     1.0      48   0.9401  0.8724  0.9471
+  lr5e4_es05_b48                  5e-4     0.5      48   0.9400  0.8721  0.9471
+  lr5e5_es10_b12                  5e-5     1.0      12   0.9395  0.8714  0.9467
+  lr2e4_es05_b48                  2e-4     0.5      48   0.9391  0.8712  0.9463
+  lr2e4_es10_b12                  2e-4     1.0      12   0.9372  0.8686  0.9448
+  lr5e5_es05_b12                  5e-5     0.5      12   0.9360  0.8681  0.9433
+  lr5e4_es10_b48                  5e-4     1.0      48   0.9359  0.8670  0.9438
+  lr5e4_es05_b12                  5e-4     0.5      12   0.9355  0.8671  0.9432
+  lr5e5_es10_b48                  5e-5     1.0      48   0.9354  0.8672  0.9428
+  lr5e5_es05_b48                  5e-5     0.5      48   0.9280  0.8589  0.9361
+  lr5e4_es10_b12                  5e-4     1.0      12   0.9214  0.8507  0.9307
+
+############ 200m
+# job 8841992, 12 arms with results
+# scored 8,584-8,584 test spectra / 1,680,125-1,680,125 peaks  (test split is 9,893 spectra)
+# metric: test_auroc on per-peak noise classification, sorted best first
+
+  arm                               lr      es       b    AUROC      F1   AUPRC
+  -----------------------------------------------------------------------------
+  lr2e4_es05_b12                  2e-4     0.5      12   0.9446  0.8778  0.9512
+  lr2e4_es10_b48                  2e-4     1.0      48   0.9443  0.8773  0.9510
+  lr2e4_es05_b48                  2e-4     0.5      48   0.9442  0.8781  0.9508
+  lr5e5_es10_b12                  5e-5     1.0      12   0.9442  0.8777  0.9508
+  lr5e4_es05_b48                  5e-4     0.5      48   0.9436  0.8770  0.9503
+  lr2e4_es10_b12                  2e-4     1.0      12   0.9418  0.8740  0.9491
+  lr5e5_es05_b12                  5e-5     0.5      12   0.9413  0.8739  0.9482
+  lr5e5_es10_b48                  5e-5     1.0      48   0.9412  0.8739  0.9479
+  lr5e4_es10_b48                  5e-4     1.0      48   0.9399  0.8723  0.9470
+  lr5e4_es05_b12                  5e-4     0.5      12   0.9398  0.8718  0.9472
+  lr5e5_es05_b48                  5e-5     0.5      48   0.9349  0.8669  0.9423
+  lr5e4_es10_b12                  5e-4     1.0      12   0.9291  0.8591  0.9378
+
+############ 400m
+# job 8842147, 12 arms with results
+# scored 8,584-8,584 test spectra / 1,680,125-1,680,125 peaks  (test split is 9,893 spectra)
+# metric: test_auroc on per-peak noise classification, sorted best first
+
+  arm                               lr      es       b    AUROC      F1   AUPRC
+  -----------------------------------------------------------------------------
+  lr2e4_es05_b12                  2e-4     0.5      12   0.9436  0.8768  0.9503
+  lr2e4_es10_b48                  2e-4     1.0      48   0.9434  0.8767  0.9503
+  lr5e4_es05_b48                  5e-4     0.5      48   0.9428  0.8765  0.9497
+  lr5e5_es10_b12                  5e-5     1.0      12   0.9424  0.8741  0.9493
+  lr2e4_es05_b48                  2e-4     0.5      48   0.9423  0.8754  0.9492
+  lr2e4_es10_b12                  2e-4     1.0      12   0.9396  0.8723  0.9468
+  lr5e5_es05_b12                  5e-5     0.5      12   0.9381  0.8704  0.9453
+  lr5e5_es10_b48                  5e-5     1.0      48   0.9373  0.8702  0.9448
+  lr5e4_es10_b48                  5e-4     1.0      48   0.9370  0.8682  0.9448
+  lr5e4_es05_b12                  5e-4     0.5      12   0.9359  0.8683  0.9436
+  lr5e5_es05_b48                  5e-5     0.5      48   0.9271  0.8575  0.9356
+  lr5e4_es10_b12                  5e-4     1.0      12   0.9140  0.8435  0.9237
+
