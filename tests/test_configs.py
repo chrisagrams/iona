@@ -432,7 +432,13 @@ class TestResumeIsWiredThrough:
         assert "--resume_from_checkpoint" in script
         # Checkpoints must be ordered numerically: lexically, checkpoint-9000 beats
         # checkpoint-29072 and a recovery run would silently rewind 20k steps.
-        assert "sort -n" in script, "checkpoint selection must sort numerically"
+        assert re.search(r"sort -r?n\b", script), "checkpoint selection must sort numerically"
+        # And it must skip a half-written newest checkpoint: a job killed mid-save leaves
+        # one without trainer_state.json, and resuming from it failed all five D2 arms
+        # of 8856525 in about a minute (TODO FT25).
+        block = script[script.index("RESUME_JOB"):]
+        assert "trainer_state.json" in block, \
+            "resume must pick the newest COMPLETE checkpoint, not just the newest"
 
     def test_evaluation_still_strips_it(self):
         """eval_checkpoint scores a saved checkpoint; resuming training into it is
