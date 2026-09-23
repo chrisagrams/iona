@@ -66,8 +66,11 @@ def main(argv: list[str] | None = None) -> int:
     )
     teacher = MSDeltaForPreTraining.from_pretrained(model_args.pretrained_path)
 
-    datasets = build_alignment_datasets(
-        data_args.dataset_repo, processor,
+    from msdelta.grouped_retrieval import load_spectrum_datasets
+    datasets = load_spectrum_datasets(
+        data_args.dataset_format, data_args.dataset_repo, processor,
+        include_consensus=data_args.include_consensus,
+        exclude_replicate_peptides=data_args.exclude_replicate_peptides,
         num_proc=data_args.preprocessing_num_workers or None,
         validation_fraction=data_args.validation_fraction,
         seed=precompute_args.seed,
@@ -95,6 +98,9 @@ def main(argv: list[str] | None = None) -> int:
         f"max_peaks: {data_args.max_peaks}\n"
         f"validation_fraction: {data_args.validation_fraction}\n"
         f"seed: {precompute_args.seed}\n"
+        f"dataset: {data_args.dataset_repo} ({data_args.dataset_format}, "
+        f"include_consensus={data_args.include_consensus}, "
+        f"exclude_replicate_peptides={data_args.exclude_replicate_peptides})\n"
         + "".join(f"{k}: {len(v)}\n" for k, v in datasets.items())
     )
     print(f"[precompute] wrote {width}-d targets to {cache}", flush=True)
