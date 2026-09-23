@@ -1,0 +1,31 @@
+#!/bin/bash -l
+# Regenerate the results figures on a compute node -- plotting walks thousands of run
+# directories on Lustre, which is not login-node work.
+#
+#   qsub -q debug -l select=1 -l walltime=00:20:00 pbs/make_figures.pbs
+
+#PBS -N msdelta-audit
+#PBS -A UIC-HPC
+#PBS -l place=scatter
+#PBS -l filesystems=home:flare
+#PBS -j oe
+#PBS -o pbs/logs/
+
+set -uo pipefail
+REPO_DIR=${REPO_DIR:-${PBS_O_WORKDIR:-$PWD}}
+cd "$REPO_DIR"
+VENV_DIR=${VENV_DIR:-$REPO_DIR/.venv}
+set +u
+source /usr/share/lmod/lmod/init/bash
+module load "${FRAMEWORKS_MODULE:-frameworks/2025.3.1}"
+set -u
+export HF_HOME=${HF_HOME:-/lus/flare/projects/UIC-HPC/$USER/msdelta/huggingface}
+export HF_HUB_OFFLINE=1 HF_DATASETS_OFFLINE=1
+export PYTHONPATH=$REPO_DIR${PYTHONPATH:+:$PYTHONPATH}
+rc=0
+for s in sweeps/audit_splits.py; do
+    echo "=== $s"
+    "$VENV_DIR/bin/python" "$s" || { echo "FAILED: $s"; rc=1; }
+done
+echo "=== figures rc=$rc"
+exit $rc

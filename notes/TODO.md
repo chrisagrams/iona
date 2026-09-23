@@ -792,6 +792,34 @@ the two per-user capacity run slots -- which is why D2 and the D3 ends wave sat 
 `qdel -W force` cleared it. Check: a running job with no resources_used and no
 .configs-<job> snapshot after ~10 minutes is hung; resubmit (8857336) and force-delete.
 
+## FT28. The rescorer derived the precursor from the answer — **FIXED, impact negligible**
+
+run_rescoring.py computed each spectrum's precursor m/z from the TRUE peptide's
+theoretical mass, because the alignment cache dropped the measured `precursor` column,
+so the truth's `mass_error_ppm` was exactly 0. Fixed: the cache keeps the measured
+precursor, the rescorer uses it and exits if it is missing, and it prints the truth's
+mass-error distribution as a check (median 1.7 ppm now; p95 ~1,350 ppm is ordinary
+isotope-peak error). BUT the leak turned out not to matter: every R1 number reproduced
+within noise after the fix, because the decoys' mass errors are huge either way
+(FT30). The earlier R1 numbers are NOT void on this account. (An earlier version of this
+entry said they were; that was wrong.)
+
+## FT29. The rescorer's train/test split was by spectrum, not peptide — **FIXED**
+
+train_rescorer held out 20% of SPECTRA. Each peptide has ~13 replicate spectra, so the
+audit (8859654) found 100% of rescorer-test spectra had their peptide in rescorer-train,
+and peptide-level features (length, charge, GRAVY, modifications) let it memorise them.
+It now holds out whole peptides (split_keys = each row's true peptide). Every R1 number
+so far used the leaky split. Note the pool is small: 94 held-out peptides in total.
+
+## FT30. "Mass-matched" decoys are not mass-matched — **Open, blocks R1**
+
+run_rescoring takes the ~4 nearest peptides by sorted mass from the held-out pool (94
+peptides) with no tolerance check, so they sit far outside any search window and mass
+error rejects them for free (Hit@1 0.999 without near-misses). A realistic reranking
+benchmark needs candidates within ~20 ppm of the measured precursor, which needs a far
+larger peptide pool (MassIVE-KB has millions) or real search-engine candidate lists.
+
 ## Naming trap: our R@5 is not the literature's Recall@K
 
 Ours is the fraction of a query's relevant spectra in its top 5; the literature's

@@ -312,7 +312,8 @@ class RescoringClassifier(nn.Module):
 def train_rescorer(features: np.ndarray, labels: np.ndarray, groups: np.ndarray,
                    drop_embedding: bool = False, epochs: int = 40,
                    hidden_size: int = 128, lr: float = 1e-3, seed: int = 0,
-                   validation_fraction: float = 0.2) -> dict:
+                   validation_fraction: float = 0.2,
+                   split_keys: np.ndarray | None = None) -> dict:
     """Train on (spectrum, candidate) pairs and report ranking quality.
 
     Splits by SPECTRUM, not by pair. Decoys are generated from the true peptide, so a
@@ -325,11 +326,16 @@ def train_rescorer(features: np.ndarray, labels: np.ndarray, groups: np.ndarray,
     x = torch.tensor(features[:, columns], dtype=torch.float32)
     y = torch.tensor(labels, dtype=torch.float32)
 
-    unique = np.unique(groups)
+    # Hold out by PEPTIDE when split_keys (the true peptide of each row's spectrum) is
+    # given. A spectrum-level split put 100% of test spectra's peptides in training (audit
+    # 8859654: each peptide has ~13 replicate spectra), and the peptide-level features
+    # (length, charge, GRAVY, modifications, ...) let the classifier memorise them.
+    keys = split_keys if split_keys is not None else groups
+    unique = np.unique(keys)
     rng = np.random.default_rng(seed)
     held = set(rng.choice(unique, size=max(1, int(len(unique) * validation_fraction)),
                           replace=False).tolist())
-    is_validation = np.array([g in held for g in groups])
+    is_validation = np.array([k in held for k in keys])
     train_idx = torch.tensor(np.flatnonzero(~is_validation))
     valid_idx = torch.tensor(np.flatnonzero(is_validation))
 

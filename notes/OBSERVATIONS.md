@@ -981,3 +981,98 @@ colder with scale. Best per scale at width 64 / 3 epochs:
 sweep-conlong (make_conlong.py, 117 arms) crosses width {64, 256, 512} with epochs
 {3, 12, 24} at t {0.001, 0.002, 0.003}: full grid at 50m, widths {64, 256} x epochs
 {3, 12} at 400m.
+
+## D2: pretraining is worth ~+0.05 AUROC at every scale
+
+Scratch grid 8847663 (all 12 arms, the last 5 via the 8856558 resume), 4 epochs, 3 seeds,
+against each scale's pretrained arms at its original checkpoint (FT5, 6 seeds):
+
+              pretrained   from scratch   gain
+    50m       0.9317       0.8856         +0.046
+    100m      0.9400       0.8886         +0.051
+    200m      0.9447       0.8963         +0.048
+    400m      0.9434       0.8981         +0.045
+
+The gain is flat across scale. Scratch improves with size by about as much as pretrained
+does (+0.013 from 50m to 400m). Extra fine-tuning does not close it: 50m from scratch at
+16 epochs reaches 0.9051, still 0.027 below pretrained 50m at 4.
+
+## D3: denoise saturates by ~330k-430k pretraining steps; even 10k steps is most of the gain
+
+Ends wave 8856549 (24/24) completes 6-point curves at the two scales whose pretraining
+has finished (AUROC; F1 tracks it):
+
+              10k      120k     220k     330k     430k     540k
+    50m       0.9104   0.9312   0.9343   0.9359   0.9362   0.9361
+    100m      0.9193   0.9394   0.9418   0.9426   0.9430   0.9429
+
+Most of the benefit arrives early: 2% of pretraining (10k steps) already beats training
+from scratch by ~0.025, and the curve is flat from ~330k on. The larger model is ahead at
+every checkpoint.
+
+## C1: training LENGTH was the main lever; wide batches help only when trained long
+
+sweep-conlong (117/117), 220k, K=4, 3 seeds, MAP@R. 50m, t 0.002:
+
+    width \ epochs     3       12      24
+    64                 0.734   0.860   0.864
+    256                0.605   0.846   0.877
+    512                0.402   0.799   0.870
+
+3 -> 12 epochs is worth ~+0.11; nothing else comes close. At EQUAL compute, width 64
+edges width 256 at 12 epochs (0.860 vs 0.846) and loses at 24 (0.864 vs 0.877), so the
+sweep-conneg control's jump (width 256 at 12 epochs, 0.813 vs 0.719) was mostly longer
+training, not more negatives. Temperature stops mattering once trained long: 0.001-0.003
+lie within ~0.01 at 12-24 epochs (at 3 epochs colder still helps, 0.749 vs 0.687 at
+width 64). 512 at 24 epochs, t0.01 (control): 0.836.
+
+400m (widths 64/256 x 3/12 epochs): best 0.877 (width 256, 12 epochs, t0.001); 0.873 at
+width 64, 12 epochs. SCALE AT THE LONGER RECIPE: 50m 0.860 vs 400m 0.873 at width 64 /
+12 epochs, a gap of 0.013 where it was 0.08 at 3 epochs. Much of the earlier scale gap
+was an undertraining effect that longer training closes.
+
+Working recipe: SupCon, lr1e-4, KL10, t ~0.002, width 256 (P=64, K=4), 24 epochs,
+GradCache chunk 4: MAP@R ~0.877 at 50m.
+
+## R1: the embedding costs ~0.11 Hit@1, but the benchmark cannot yet say why
+
+Current teachers (50m t0.005, 400m t0.003, width 64, 220k), 5 paired seeds, alignment
+config otherwise identical to the original run:
+
+                                     50m       400m
+    student cross-modal Hit@1        0.730     --       (old teacher: 0.045)
+    rescorer, no embedding           0.893     0.893
+    rescorer, with embedding         0.782     0.780
+    embedding contributes            -0.111    -0.112
+    no near-miss decoys, both arms   0.999     0.999
+
+The student is 16x better at cross-modal retrieval than the one behind the original
+-0.109, yet the cost is unchanged, so encoder quality is not the cause.
+
+WITHIN-SPECTRUM DIAGNOSIS (--diagnose, 50m): all cosines sit at 0.97-0.98. The truth
+beats mass-matched decoys on cosine 93.5% of the time and reversed ones 86.7%, but
+near-miss decoys (two adjacent residues swapped) only 57.0%, a coin flip. Near-misses
+win 581 of the 740 spectra where cosine picks wrong. A mean+max-pooled sequence
+encoder is nearly blind to swapping neighbours; fragment ions are not, so the feature
+adds confident noise on exactly the cases the other features solve.
+
+THREE THINGS MAKE THIS BENCHMARK UNFIT, all found today:
+  1. Precursor derived from the true peptide (FT28). Real, but INCONSEQUENTIAL: with
+     the measured precursor (truth mass error median 1.7 ppm) every number above
+     reproduces within noise.
+  2. "Mass-matched" decoys are not mass-matched (FT30). They are the ~4 nearest
+     peptides by mass among only 94 held-out peptides, far outside any search
+     tolerance, so mass error rejects them for free (0.999). The only hard decoys left
+     are near-misses, which the embedding cannot see.
+  3. The rescorer split by spectrum (FT29): 100% of its test spectra had their peptide
+     in its training data (audit 8859654). Now fixed to split by peptide.
+The -0.11 is therefore a statement about adjacent-swap decoys under a leaky split, not
+about realistic reranking.
+
+## Split audit: denoise and contrastive are peptide-disjoint; only the rescorer leaked
+
+Audit 8859654 (sweeps/audit_splits.py). ms-denoise-100k's own splits share ZERO
+peptides (and zero peptide+charge) between train and validation or test. The
+contrastive/alignment split (10% of peptides, seed 0) shares zero, as designed. The
+rescorer's spectrum-level re-split shared 90 of 90 test peptides. Not checkable here:
+overlap between test sets and the pretraining corpus, which needs its manifest.
