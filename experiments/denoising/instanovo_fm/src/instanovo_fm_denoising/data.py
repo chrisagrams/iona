@@ -1,0 +1,297 @@
+"""InstaNovo-FM preprocessing, batching, and collation for denoising."""
+
+from __future__ import annotations
+
+import functools
+from collections.abc import Mapping, Sequence
+
+import numpy as np
+import torch
+from datasets import Dataset, DatasetDict, Features, Value, load_dataset
+from datasets import Sequence as SequenceFeature
+from instanovo_fm.data.data import FoundationalDataProcessor
+from torch.utils.data import BatchSampler
+
+DEFAULT_DATASET_REPO = "chrisagrams/ms-denoise-100k"
+LABEL_PAD_VALUE = -100.0
+
+PROCESSED_FEATURES = Features(
+    {
+        "mz": SequenceFeature(Value("float32")),
+        "intensity": SequenceFeature(Value("float32")),
+        "labels": SequenceFeature(Value("float32")),
+        "num_peaks": Value("int32"),
+        # Row in the raw split and original position of each retained peak,
+        # used to score full spectra (see metrics.full_spectrum_metrics).
+        "source_index": Value("int64"),
+        "kept_index": SequenceFeature(Value("int32")),
+    }
+)
+
+
+def processor_kwargs(config: Mapping) -> dict:
+    """``FoundationalDataProcessor`` settings for a checkpoint's config.
+
+    Mirrors the validation processor InstaNovo-FM's own evaluator builds
+    (``instanovo_fm.eval.evaluator``), with masking disabled.
+    """
+    ordering = config.get("masking", {}).get("ordering_strategy", config.get("peak_ordering", "sorted"))
+    if ordering != "sorted":
+        # The other orderings shuffle peaks at random, per batch.
+        raise NotImplementedError(f"peak ordering {ordering!r} is not supported")
+    return {
+        "n_peaks": int(config.get("n_peaks", 200)),
+        "min_mz": float(config.get("min_mz", 50.0)),
+        "max_mz": float(config.get("max_mz", 2500.0)),
+        "min_intensity": float(config.get("min_intensity", 0.01)),
+        "remove_precursor_tol": float(config.get("remove_precursor_tol", 0.0)),
+        "use_spectrum_utils": bool(config.get("use_spectrum_utils", False)),
+        "normalize_mz": bool(config.get("normalize_mz", True)),
+        "peak_ordering": ordering,
+        "masking_strategy": "none",
+    }
+
+
+@functools.cache
+def _processor(settings: tuple[tuple[str, object], ...]) -> FoundationalDataProcessor:
+    return FoundationalDataProcessor(**dict(settings))
+
+
+def preprocess_spectrum(
+    mz: Sequence[float] | np.ndarray,
+    intensity: Sequence[float] | np.ndarray,
+    noise: Sequence[bool] | np.ndarray,
+    precursor_mz: float,
+    precursor_charge: int,
+    settings: Mapping,
+) -> dict[str, np.ndarray] | None:
+    """Run InstaNovo-FM's own preprocessing and carry the noise labels along.
+
+    The spectrum goes through ``FoundationalDataProcessor._process_spectrum``
+    (m/z range, precursor removal, intensity floor, top ``n_peaks``, square
+    root, unit L2 norm, m/z divided by ``max_mz``) and then the collator's
+    ``apply_peak_ordering``, both built from ``settings``
+    (see ``processor_kwargs``).
+
+    Those steps only drop and reorder peaks and scale every m/z by the same
+    constant. Each retained peak is therefore matched back to its original
+    index by exact (scaled, float32) m/z to select its label; ``kept_index``
+    holds those original indices. Returns ``None`` when upstream would
+    substitute its one-peak dummy spectrum.
+    """
+    mz = np.asarray(mz)
+    intensity = np.asarray(intensity)
+    noise = np.asarray(noise)
+    if mz.ndim != 1 or intensity.ndim != 1 or noise.ndim != 1:
+        raise ValueError("mz, intensity, and noise must be one-dimensional")
+    if not (mz.shape == intensity.shape == noise.shape):
+        raise ValueError(
+            f"mz, intensity, and noise must have equal shapes, got "
+            f"{mz.shape}, {intensity.shape}, {noise.shape}"
+        )
+    for name, values in (("mz", mz), ("intensity", intensity)):
+        if not np.all(np.isfinite(values)):
+            raise ValueError(f"{name} must be finite")
+        if np.any(values < 0):
+            raise ValueError(f"{name} must be nonnegative")
+
+    processor = _processor(tuple(sorted(settings.items())))
+    # float32, as process_row's torch.tensor() makes from dataset rows.
+    mz_tensor = torch.as_tensor(mz, dtype=torch.float32)
+    spectrum = processor._process_spectrum(
+        mz_tensor,
+        torch.as_tensor(intensity, dtype=torch.float32),
+        precursor_mz,
+        precursor_charge,
+    )
+    # The dummy spectrum is a single peak at m/z 0, below any valid min_mz.
+    if len(spectrum) == 1 and spectrum[0, 0] == 0:
+        return None
+    padding = torch.zeros(1, len(spectrum), dtype=torch.bool)
+    spectrum = processor.apply_peak_ordering(spectrum[None], padding)[0].numpy()
+
+    # The same scaled m/z upstream computed, for every original peak.
+    scaled_mz = (mz_tensor / processor.max_mz if processor.normalize_mz else mz_tensor).numpy()
+    order = np.argsort(scaled_mz, kind="stable")
+    sorted_mz = scaled_mz[order]
+    # Retained peaks sharing an m/z are matched to successive occurrences of
+    # it. Which copy gets which peak is arbitrary, so require equal labels.
+    duplicate = np.flatnonzero(np.diff(sorted_mz) == 0)
+    if np.any(noise[order][duplicate] != noise[order][duplicate + 1]):
+        raise ValueError("peaks with identical m/z have different noise labels")
+
+    kept_mz = spectrum[:, 0]
+    positions = np.searchsorted(sorted_mz, kept_mz)
+    # kept_mz is sorted, so repeats of an m/z are adjacent; offset them onto
+    # distinct occurrences so every original peak is used at most once.
+    run_start = np.r_[True, positions[1:] != positions[:-1]]
+    positions = positions + np.arange(len(positions)) - np.maximum.accumulate(
+        np.where(run_start, np.arange(len(positions)), 0)
+    )
+    positions = np.minimum(positions, len(sorted_mz) - 1)
+    if not np.array_equal(sorted_mz[positions], kept_mz):
+        raise RuntimeError("InstaNovo-FM preprocessing changed m/z values; cannot align labels")
+    indices = order[positions]
+    return {
+        "mz": kept_mz.astype(np.float32),
+        "intensity": spectrum[:, 1].astype(np.float32),
+        "labels": noise[indices].astype(np.float32),
+        "kept_index": indices.astype(np.int32),
+    }
+
+
+def _process_example(example: dict, index: int, settings: dict) -> dict:
+    processed = preprocess_spectrum(
+        example["mz"],
+        example["intensity"],
+        example["noise"],
+        precursor_mz=float(example["precursor"]),
+        precursor_charge=int(example["charge"]),
+        settings=settings,
+    )
+    if processed is None:
+        # Match the float32 arrays of retained spectra; empty Python lists
+        # become float64 and cannot be concatenated with them by Arrow.
+        empty = np.zeros(0, dtype=np.float32)
+        return {
+            "mz": empty,
+            "intensity": empty,
+            "labels": empty,
+            "num_peaks": 0,
+            "source_index": index,
+            "kept_index": np.zeros(0, dtype=np.int32),
+        }
+    return {**processed, "num_peaks": len(processed["mz"]), "source_index": index}
+
+
+def build_denoising_datasets(
+    settings: dict,
+    repo_id: str = DEFAULT_DATASET_REPO,
+    *,
+    train_split: str = "train",
+    validation_split: str = "validation",
+    cache_dir: str | None = None,
+    num_proc: int | None = None,
+) -> tuple[DatasetDict, Dataset]:
+    """Load the labeled dataset and apply InstaNovo-FM preprocessing per spectrum.
+
+    Returns the processed splits and the raw validation split, which the
+    full-spectrum metrics score against.
+    """
+    raw = load_dataset(repo_id, cache_dir=cache_dir)
+    raw = DatasetDict({"train": raw[train_split], "validation": raw[validation_split]})
+    processed = raw.map(
+        _process_example,
+        with_indices=True,
+        fn_kwargs={"settings": settings},
+        remove_columns=raw["train"].column_names,
+        features=PROCESSED_FEATURES,
+        num_proc=num_proc,
+        desc="InstaNovo-FM preprocessing",
+    )
+    processed = processed.filter(
+        lambda num_peaks: num_peaks > 0,
+        input_columns="num_peaks",
+        num_proc=num_proc,
+        desc="drop spectra left empty by preprocessing",
+    )
+    return processed, raw["validation"].select_columns(["noise"])
+
+
+def collate_denoising(examples: list[dict]) -> dict[str, torch.Tensor]:
+    """Right-pad a batch: m/z and intensity with 0, labels with -100.
+
+    ``source_index`` and ``kept_index`` (padded with -1) are passed through
+    when present, for full-spectrum evaluation.
+    """
+    longest = max(len(example["mz"]) for example in examples)
+    mz = torch.zeros(len(examples), longest, dtype=torch.float32)
+    intensity = torch.zeros(len(examples), longest, dtype=torch.float32)
+    labels = torch.full((len(examples), longest), LABEL_PAD_VALUE, dtype=torch.float32)
+    for row, example in enumerate(examples):
+        length = len(example["mz"])
+        mz[row, :length] = torch.as_tensor(np.asarray(example["mz"], dtype=np.float32))
+        intensity[row, :length] = torch.as_tensor(
+            np.asarray(example["intensity"], dtype=np.float32)
+        )
+        labels[row, :length] = torch.as_tensor(np.asarray(example["labels"], dtype=np.float32))
+    batch = {"mz": mz, "intensity": intensity, "labels": labels}
+    if "kept_index" in examples[0]:
+        kept_index = torch.full((len(examples), longest), -1, dtype=torch.int64)
+        for row, example in enumerate(examples):
+            values = np.asarray(example["kept_index"], dtype=np.int64)
+            kept_index[row, : len(values)] = torch.as_tensor(values)
+        batch["kept_index"] = kept_index
+        batch["source_index"] = torch.as_tensor(
+            [int(example["source_index"]) for example in examples], dtype=torch.int64
+        )
+    return batch
+
+
+class PeakBudgetBatchSampler(BatchSampler):
+    """Build batches bounded by their padded pairwise-attention size.
+
+    Mirrors ``msdelta.denoising.PeakBudgetBatchSampler``. Each process yields
+    every ``num_processes``-th batch starting at ``process_index``. With
+    ``pad=True`` the batch list is padded with repeated batches so every
+    process performs the same number of steps (needed for DDP training); use
+    ``pad=False`` for evaluation so no spectrum is counted twice.
+    """
+
+    batch_size = None  # type: ignore[assignment]
+    drop_last = False
+
+    def __init__(
+        self,
+        lengths: Sequence[int],
+        peak_pair_budget: int,
+        seed: int,
+        shuffle: bool = True,
+        *,
+        process_index: int = 0,
+        num_processes: int = 1,
+        pad: bool = True,
+    ):
+        self.lengths = list(lengths)
+        self.peak_pair_budget = peak_pair_budget
+        self.seed = seed
+        self.shuffle = shuffle
+        self.process_index = process_index
+        self.num_processes = num_processes
+        self.pad = pad
+        self.epoch = 0
+
+    def set_epoch(self, epoch: int) -> None:
+        self.epoch = epoch
+
+    def _batches(self) -> list[list[int]]:
+        indices = sorted(range(len(self.lengths)), key=self.lengths.__getitem__)
+        batches: list[list[int]] = []
+        batch: list[int] = []
+        longest = 0
+        for index in indices:
+            candidate_longest = max(longest, self.lengths[index])
+            attention_size = (len(batch) + 1) * candidate_longest**2
+            if batch and attention_size > self.peak_pair_budget:
+                batches.append(batch)
+                batch = []
+                longest = 0
+            batch.append(index)
+            longest = max(longest, self.lengths[index])
+        if batch:
+            batches.append(batch)
+
+        if self.shuffle:
+            generator = torch.Generator().manual_seed(self.seed + self.epoch)
+            order = torch.randperm(len(batches), generator=generator).tolist()
+            batches = [batches[index] for index in order]
+        if self.pad and batches:
+            padding = (-len(batches)) % self.num_processes
+            batches.extend([list(batches[index % len(batches)]) for index in range(padding)])
+        return batches[self.process_index :: self.num_processes]
+
+    def __iter__(self):
+        return iter(self._batches())
+
+    def __len__(self) -> int:
+        return len(self._batches())

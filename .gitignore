@@ -16,3 +16,8 @@ pbs/logs/
 
 # Benchmark data (published to HF, not tracked in git)
 data/
+
+# Experiment outputs and logs
+experiments/**/outputs/
+experiments/**/logs/
+experiments/**/*.log
