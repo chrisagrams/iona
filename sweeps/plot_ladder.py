@@ -132,7 +132,7 @@ def by_scale(cov, metric, name):
         label_points(ax, x, y)
         ax.set_title(f"{s}   ({len(pts)} checkpoint{'s' if len(pts) > 1 else ''})",
                      loc="left", pad=12)
-        ax.set_xlabel("pretraining grad steps (not compute)"); ax.set_ylabel(name)
+        ax.set_xlabel("pretraining grad steps"); ax.set_ylabel(name)
         ax.grid(); ax.set_axisbelow(True); ax.margins(x=0.18, y=0.22)
     fig.tight_layout()
     out = FIGS / f"ladder_by_scale_{metric.replace('test_', '')}.png"
@@ -174,7 +174,7 @@ def combined(cov, metric, name, ax):
         ax.errorbar(x, y, yerr=e, marker="o", ms=5, lw=1.7, capsize=3,
                     color=SCALE_COLOUR[s], label=s)
         label_points(ax, x, y)
-    ax.set_xlabel("pretraining grad steps (not compute)"); ax.set_ylabel(name)
+    ax.set_xlabel("pretraining grad steps"); ax.set_ylabel(name)
     ax.set_title(name, loc="left", pad=12)
     ax.grid(); ax.set_axisbelow(True); ax.margins(x=0.16, y=0.22)
     ax.legend(frameon=False, fontsize=8.5, title="model size", title_fontsize=8.5)

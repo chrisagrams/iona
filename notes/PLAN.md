@@ -29,7 +29,7 @@ Status: ✅ answered · 🟡 partly · ⏳ running/queued · ⬜ not started
 |---|---|---|---|
 | D1 | Do AUROC and F1 improve with model size? | ✅ | AUROC 0.9317 / 0.9400 / 0.9447 / 0.9434, F1 tracks it, 6 seeds; 400m turnover real (t=−6.3) |
 | D2 | How much does pretraining buy, in AUROC and F1? | ⏳ | AUROC +0.046 (ep4), +0.032 (ep8) at 50m. All-scale scratch grid `8847663`: 7/12 done; the other 5 resuming from checkpoint in `8856558` |
-| D3 | Do AUROC and F1 improve with pretraining checkpoint? | ⏳ | ladder `8850494` (220k+330k) running; ends wave (10k/120k/430k/540k, 50m+100m) queued as `8856549` |
+| D3 | Do AUROC and F1 improve with pretraining checkpoint? | 🟡 | yes at 50m/100m/200m (+0.001–0.002 per step, diminishing; 50m 0.9324→0.9365 over 133k→540k); 400m flat 181k→220k and still below 200m. Ends wave (10k/120k/430k/540k, 50m+100m) queued as `8856549` |
 | D4 | Do denoise HPs hold across checkpoints? | ✅ | lr2e-4/es0.5 wins at ckpt 1 and 540423 |
 
 ### Contrastive
@@ -37,8 +37,8 @@ Status: ✅ answered · 🟡 partly · ⏳ running/queued · ⬜ not started
 | id | question | status | evidence / job |
 |---|---|---|---|
 | C0 | Is our metric valid? | ✅ | separation ratio does NOT predict retrieval (ρ −0.04 within scale). Use MAP@R |
-| C1 | What is the best training recipe? | ⏳ | temperature ≈0.005 (0.003 at 200m, maybe colder with scale); width 64 beats 128–512 at 3 epochs but that is confounded with step count — step-matched controls in `8856642` (queued). Best MAP@R 0.45 → **0.79** |
-| C2 | Does retrieval improve with model size? | 🟡 | at each scale's best cell 50m 0.751 < 100m 0.783 < 200m 0.788 (220k, 3 seeds) — monotone so far; 400m in `8856642` |
+| C1 | What is the best training recipe? | ⏳ | best so far MAP@R 0.823 (400m, t0.003, width 64). Wider batches win at matched STEPS (256@12ep 0.813 vs 64@3ep 0.719, 50m), but the equal-COMPUTE cell is missing; large models want colder than 0.003 → `sweep-conlong` (width × epochs × t 0.001–0.003) |
+| C2 | Does retrieval improve with model size? | 🟡 | at each scale's best cell (width 64, 3 ep, 220k): 50m 0.751 < 100m 0.783 < 200m 0.788 < 400m 0.823 — monotone. Recipe not final (C1) |
 | C3 | How much does pretraining buy? | ✅ | ALL of it: random init trained contrastively lands at chance at every scale (MAP@100 ≈0.01, Hit@1 ≈0.03 vs 0.33–0.41 / 0.75–0.78 pretrained, t=16–96, 6 seeds). It never reaches even the UNTRAINED pretrained encoder. Since random = chance, the gap is just the pretrained score and updates with C2 |
 | C4 | Does retrieval improve with pretraining checkpoint? | 🟡 | ladder `8851663` ran at t0.07 — superseded recipe. Re-run after C1 |
 | C5 | Do contrastive HPs transfer across scale/checkpoint? | ✅ | same winner in all 5 cells (4 scales + 50m@540k), mean pairwise ρ +0.81; t0.03 beat t0.07 in all 4 cells tested |
@@ -66,7 +66,7 @@ encoder that, we now know, was barely better than untrained.
 DENOISE                                   CONTRASTIVE
 ───────                                   ───────────
 D1 ✅  D4 ✅                               C0 ✅  C3 ✅  C5 ✅  C6 ✅
-D2 ⏳ 5 scratch arms 8856558                 C1 ⏳ sweep-conneg (colder × wider × 4 scales)
+D2 ⏳ 5 scratch arms 8856558                 C1 ⏳ sweep-conlong (width × epochs × colder)
 D3 ⏳ ladder 8850494 → ends wave                │   also answers C2 at 220k
       └─► denoise scaling figures               ▼
           (AUROC and F1)                  freeze recipe R*

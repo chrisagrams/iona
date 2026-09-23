@@ -4,7 +4,7 @@ What is true right now. Overwritten, not appended: before changing the diagram, 
 old one into `status-history/`. The questions it tracks are in `PLAN.md`; results with
 their evidence are in `OBSERVATIONS.md`; hazards are in `TODO.md`.
 
-Last updated: 2026-09-23.
+Last updated: 2026-09-23, 07:30.
 
 ```
 LEGEND  [x] done  [~] RUNNING  [ ] queued / next  [>] blocked on something  [X] retracted
@@ -12,12 +12,12 @@ LEGEND  [x] done  [~] RUNNING  [ ] queued / next  [>] blocked on something  [X] 
 
 JOBS  (each tagged with the PLAN.md question it answers)
 ──────────────────────────────────────────────────────────────────────────
-  [~] C1+C2  sweep-conbig on debug-scaling: temp 0.01/0.02/0.03 x P/K 4/16/64
-             x 4 scales @220k, 108 arms. 1h rounds, resubmitted until done
-             (round 1: 8856460); interrupted arms restart from step 0
-  [~] D3     8850494 denoise ladder 220k+330k x 4 scales -- capacity, running
-  [ ] D2     8856558 resume of the 5 unfinished scratch arms -- capacity, queued
-  [ ] D3     8856549 ends wave 10k/120k/430k/540k x 50m+100m, 24 arms -- queued
+  [~] C1     8857336 sweep-conneg 400m + step-matched controls (capacity)
+  [ ] C1     sweep-conlong, 117 arms: width x epochs x t 0.001-0.003
+             (validating 8857561, then capacity + debug-scaling)
+  [ ] D2     8856558 resume of the 5 unfinished scratch arms (capacity)
+  [ ] D3     8856549 ends wave 10k/120k/430k/540k x 50m+100m (capacity)
+  [x] D3     8850494 ladder 220k+330k x 4 scales, 21/21
 
 
 DENOISE  (AUROC and F1)
@@ -26,20 +26,23 @@ DENOISE  (AUROC and F1)
                            400m turnover real (t=-6.3), not a budget artefact
   [~] D2 pretraining ..... +0.046 AUROC at ep4, +0.032 at ep8 (50m)
                            all-scale scratch grid: 7/12, rest resuming
-  [ ] D3 checkpoints ..... only 50m has two points: 0.9272 -> 0.9365, 133k -> 540k
+  [~] D3 checkpoints ..... improves at 50m/100m/200m (+0.001-0.002 per step,
+                           diminishing); 400m flat 181k -> 220k
   [x] D4 HP transfer ..... lr2e-4 / es0.5 wins at ckpt 1 and at 540423
 
 
 CONTRASTIVE  (MAP@R, Precision@1, R-Precision)
 ──────────────────────────────────────────────────────────────────────────
   [x] C0 metric .......... separation ratio does NOT predict retrieval
-  [~] C1 recipe .......... SupCon, lr1e-4, KL10, t0.03, batch of 4 (P=2 K=2)
-                           t0.03 is the grid edge; P/K never varied -> conbig
-  [~] C2 model size ...... 50m > 200m at t0.03 (p=0.003); 100m/400m not run
-                           at current recipe -> conbig
+  [~] C1 recipe .......... SupCon, lr1e-4, KL10, t 0.003-0.005, width 64
+                           best MAP@R 0.45 -> 0.82. Wider wins at matched steps;
+                           equal-compute cell + colder t -> sweep-conlong
+  [~] C2 model size ...... best per scale 50m 0.751 < 100m 0.783 < 200m 0.788
+                           < 400m 0.823 -- monotone (220k, recipe not final)
   [x] C3 pretraining ..... random init lands at CHANCE at every scale;
                            pretraining is the entire result
-  [>] C4 checkpoints ..... ladder ran at t0.07 (superseded) -> redo after C1
+  [>] C4 checkpoints ..... old-recipe ladder has no consistent trend; redo at
+                           the C1 recipe once sweep-conlong settles it
   [x] C5 HP transfer ..... same winner in 5 cells, 4 scales, mean rho +0.81
   [x] C6 selection ....... best-model selection changes nothing; final/ is fine
   [X] "more negatives hurt" -- retracted, was a ratio artefact

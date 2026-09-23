@@ -778,9 +778,19 @@ steps). Retried as 8856558.
 First recorded run of pbs/run_tests.pbs (job 8856984): the CPU suite passed on the
 compute node (375 passed, 26 skipped, 3 min), then `pytest tests/gpu` died with a
 Segmentation fault. No earlier log of the device suite exists, so this is not a
-regression we can date -- the suite has simply never been seen to pass. Which test
-crashes is being found with a verbose per-test run. Until it passes, commits are gated
-on the CPU suite only.
+regression we can date -- the suite has simply never been seen to pass. A verbose rerun (8857034, `-v`,
+`-X faulthandler`) segfaults before pytest prints a single line, so the crash is at
+import/collection -- almost certainly native code loaded by tests/gpu or its conftest --
+not in any test body. Until it passes, commits are gated on the CPU suite only.
+
+## FT27. A job can hang in node startup, and a plain qdel does not remove it — **Hazard**
+
+8856642 ran "R" for 2+ hours without writing a config snapshot, a run dir or a log, and
+qstat showed no resources_used for it at all (every healthy running job has them). The
+script never started on its nodes. `qdel` left it in R for another hour, holding one of
+the two per-user capacity run slots -- which is why D2 and the D3 ends wave sat queued.
+`qdel -W force` cleared it. Check: a running job with no resources_used and no
+.configs-<job> snapshot after ~10 minutes is hung; resubmit (8857336) and force-delete.
 
 ## Naming trap: our R@5 is not the literature's Recall@K
 

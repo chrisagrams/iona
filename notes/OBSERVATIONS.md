@@ -944,3 +944,40 @@ they land.
 SCALE: at each scale's best cell, 50m 0.751 < 100m 0.783 < 200m 0.788 -- the first
 monotone contrastive scaling seen in this project. 200m's apparent weakness at t0.01
 was a temperature effect: it needs a colder setting than the small models.
+
+## D3: denoise improves with pretraining at every scale except 400m, which is flat
+
+Job 8850494 (21/21), plus each scale's original checkpoint, 3 seeds per new cell,
+lr2e-4 / es0.5 / 4 epochs:
+
+                  original       220k           330k
+    50m (133k)    0.9324/0.8635  0.9343/0.8661  0.9359/0.8677   (540k 0.9365/0.8680)
+    100m (138k)   0.9395/0.8712  0.9418/0.8745  0.9426/0.8759
+    200m (193k)   0.9437/0.8772  0.9447/0.8784  0.9458/0.8802
+    400m (181k)   0.9433/0.8765  0.9435/0.8773  --
+                  AUROC/F1
+
+50m, 100m and 200m each gain +0.001-0.002 AUROC per extra stretch of pretraining, with
+diminishing returns (50m: +0.0020, +0.0015, then +0.0006 over the last 210k steps), and
+the larger model is ahead at every checkpoint. 400m does NOT move from 181k to 220k
+(+0.0002, inside seed noise) and stays below 200m, so the 400m turnover of D1 is not an
+artefact of its early checkpoint. Two nearby 400m points only: 330k does not exist yet.
+
+## C1: wider batches win at matched steps; 400m wants colder still
+
+sweep-conneg capacity half (8857336, 39/42 at the time of writing).
+
+STEP-MATCHED CONTROL, 50m, t0.01: width 64 at 3 epochs 0.719; width 256 at 3 epochs
+0.510; width 256 at 12 epochs (same ~660 optimizer steps as 64 at 3) 0.813. Wide batches
+lost only because they took a quarter of the steps. But the 0.813 arm also saw 4x the
+data -- its equal-COMPUTE comparison, width 64 at 12 epochs, has not been run. That is
+what sweep-conlong settles.
+
+400m at width 64, 3 epochs: t0.003 0.8226 > t0.005 0.8079 > t0.01 0.7660. With 200m
+(best at t0.003) this makes two scales whose optimum is at the coldest value tried:
+colder with scale. Best per scale at width 64 / 3 epochs:
+50m 0.751 < 100m 0.783 < 200m 0.788 < 400m 0.823 -- monotone.
+
+sweep-conlong (make_conlong.py, 117 arms) crosses width {64, 256, 512} with epochs
+{3, 12, 24} at t {0.001, 0.002, 0.003}: full grid at 50m, widths {64, 256} x epochs
+{3, 12} at 400m.

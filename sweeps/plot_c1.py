@@ -47,6 +47,7 @@ plt.rcParams.update({
     "grid.color": GRID, "grid.linewidth": 0.7, "figure.facecolor": "white",
 })
 
+COLDEST = 0.0
 ARM = re.compile(r"^s(\d{3}m)_t(\d+)_pk(\d+)(?:_ep(\d+))?_seed\d+$")
 
 
@@ -111,7 +112,14 @@ def width_temperature(main, ctrl):
         ax.set_xlabel("batch width P×K")
         ax.grid(); ax.set_axisbelow(True)
     axes[0].set_ylabel("MAP@R")
-    axes[-1].legend(frameon=False, fontsize=8, title="temperature", title_fontsize=8)
+    # One legend for every temperature drawn anywhere: a per-axes legend only lists the
+    # lines in that panel, and the last panel lacked the two coldest.
+    from matplotlib.lines import Line2D
+    temps = sorted({t for (_, t, _) in main})
+    handles = [Line2D([], [], color=TEMP_COLOUR.get(t, MUTED), marker="o", ms=4,
+                      label=f"t {t:g}") for t in temps]
+    axes[-1].legend(handles=handles, frameon=False, fontsize=8, title="temperature",
+                    title_fontsize=8)
     fig.tight_layout()
     out = FIGS / "c1_width_temperature.png"
     fig.savefig(out); plt.close(fig)
@@ -119,20 +127,29 @@ def width_temperature(main, ctrl):
 
 
 def scale(main):
+    global COLDEST
+    COLDEST = min(t for (_, t, _) in main)
     fig, ax = plt.subplots(figsize=(4.6, 3.8))
-    xs, ys, es, labels = [], [], [], []
+    xs, ys, es, labels, done = [], [], [], [], []
     for i, s in enumerate(SCALES):
         cells = [(stat(v), t, w) for (ss, t, w), v in main.items() if ss == s and len(v) >= 2]
         if not cells:
             continue
         (m, e), t, w = max(cells, key=lambda c: c[0][0])
-        xs.append(i); ys.append(m); es.append(e); labels.append(f"t {t:g}, width {w}")
-        ax.errorbar([i], [m], yerr=[e], marker="o", ms=7, capsize=3, color=SCALE_COLOUR[s])
+        # A scale whose coldest arm is warmer than the coldest anywhere has not had its
+        # temperature swept yet: draw it open, so its point is not read as a result.
+        partial = min(tt for (ss, tt, _) in main if ss == s) > COLDEST
+        xs.append(i); ys.append(m); es.append(e); done.append(not partial)
+        labels.append(f"t {t:g}, width {w}")
+        ax.errorbar([i], [m], yerr=[e], marker="o", ms=7, capsize=3, color=SCALE_COLOUR[s],
+                    mfc="white" if partial else SCALE_COLOUR[s])
         ax.annotate(f"{m:.3f}", (i, m), textcoords="offset points", xytext=(0, 8),
                     ha="center", fontsize=8)
         ax.annotate(labels[-1], (i, m), textcoords="offset points", xytext=(0, -16),
                     ha="center", fontsize=7, color=MUTED)
-    ax.plot(xs, ys, color=MUTED, lw=1, zorder=0)
+    # Connect only scales whose sweep is complete; a line into an open marker reads as a trend.
+    fx = [x for x, d in zip(xs, done) if d]; fy = [y for y, d in zip(ys, done) if d]
+    ax.plot(fx, fy, color=MUTED, lw=1, zorder=0)
     ax.set_xticks(range(len(SCALES)))
     ax.set_xticklabels([s.lstrip("0") for s in SCALES])
     ax.set_xlabel("model size"); ax.set_ylabel("best MAP@R")
