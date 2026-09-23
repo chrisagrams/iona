@@ -8,8 +8,8 @@ from unittest.mock import patch
 
 from datasets import Dataset, DatasetDict
 
-from msdelta.posttraining import build_probe_data
-from msdelta.preprocess import main
+from iona.posttraining import build_probe_data
+from iona.preprocess import main
 
 
 class PreprocessedProbeTests(unittest.TestCase):
@@ -20,7 +20,7 @@ class PreprocessedProbeTests(unittest.TestCase):
         evaluation = {"retrieval": splits["validation"], "replicate_retrieval": splits["train"]}
         processor = object()
         with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory) / "msdelta-probes"
+            root = Path(directory) / "iona-probes"
             argv = [
                 "--processor_name_or_path",
                 "unused",
@@ -38,11 +38,9 @@ class PreprocessedProbeTests(unittest.TestCase):
                 "true",
             ]
             with (
-                patch(
-                    "msdelta.preprocess.MSDeltaProcessor.from_pretrained", return_value=processor
-                ),
-                patch("msdelta.preprocess.build_pretraining_datasets") as pretrain,
-                patch("msdelta.preprocess.build_probe_data") as build,
+                patch("iona.preprocess.IonaProcessor.from_pretrained", return_value=processor),
+                patch("iona.preprocess.build_pretraining_datasets") as pretrain,
+                patch("iona.preprocess.build_probe_data") as build,
             ):
                 build.side_effect = [(splits, processor, None), (splits, processor, evaluation)]
                 self.assertEqual(main(argv), 0)
@@ -57,12 +55,10 @@ class PreprocessedProbeTests(unittest.TestCase):
             )
             args = SimpleNamespace(denoise_max_peaks=1024)
             with (
-                patch(
-                    "msdelta.posttraining.MSDeltaProcessor.from_pretrained", return_value=processor
-                ),
-                patch("msdelta.posttraining.build_denoising_datasets") as denoise,
-                patch("msdelta.posttraining.build_retrieval_datasets") as retrieval,
-                patch("msdelta.posttraining.build_retrieval_evaluation_datasets") as evaluate,
+                patch("iona.posttraining.IonaProcessor.from_pretrained", return_value=processor),
+                patch("iona.posttraining.build_denoising_datasets") as denoise,
+                patch("iona.posttraining.build_retrieval_datasets") as retrieval,
+                patch("iona.posttraining.build_retrieval_evaluation_datasets") as evaluate,
             ):
                 loaded, _, galleries = build_probe_data("denoise", data_args, args, processor)
                 self.assertEqual(loaded["train"]["value"], [1, 2])
@@ -76,8 +72,8 @@ class PreprocessedProbeTests(unittest.TestCase):
 
     def test_off_does_not_build_probes(self):
         with (
-            patch("msdelta.preprocess.MSDeltaProcessor.from_pretrained"),
-            patch("msdelta.preprocess.build_probe_data") as build,
+            patch("iona.preprocess.IonaProcessor.from_pretrained"),
+            patch("iona.preprocess.build_probe_data") as build,
         ):
             self.assertEqual(
                 main(

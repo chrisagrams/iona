@@ -1,5 +1,5 @@
 [project]
-name = "msdelta"
+name = "iona"
 version = "0.1.0"
 description = "Mass-spec transformer with learned per-head Δm/z attention bias"
 readme = "README.md"
@@ -35,8 +35,8 @@ xpu = [
 ]
 
 [project.scripts]
-msdelta-train = "msdelta.train:main"
-msdelta-preprocess = "msdelta.preprocess:main"
+iona-train = "iona.train:main"
+iona-preprocess = "iona.preprocess:main"
 
 [dependency-groups]
 dev = [
@@ -49,7 +49,7 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["msdelta"]
+packages = ["iona"]
 
 [tool.ruff]
 target-version = "py313"
@@ -62,7 +62,7 @@ select = ["E4", "E7", "E9", "F", "I", "PLC0415", "TID252"]
 ban-relative-imports = "all"
 
 [tool.ruff.lint.per-file-ignores]
-"msdelta/modeling_msdelta.py" = ["TID252"]
+"iona/modeling_iona.py" = ["TID252"]
 
 [tool.uv]
 conflicts = [

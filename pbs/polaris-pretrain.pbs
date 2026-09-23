@@ -4,7 +4,7 @@
 # qsub -A PROJECT -q QUEUE \
 #   -l select=2:system=polaris -l place=scatter -l walltime=12:00:00 \
 #   -l filesystems=home:eagle -j oe -o /path/to/pbs/logs \
-#   -v ARGS_FILE=configs/msdelta-base-200m/training.args,CHECKPOINT_DIR=/eagle/PROJECT/checkpoints,HF_HOME=/eagle/PROJECT/hf \
+#   -v ARGS_FILE=configs/iona-base-200m/training.args,CHECKPOINT_DIR=/eagle/PROJECT/checkpoints,HF_HOME=/eagle/PROJECT/hf \
 #   pbs/polaris-pretrain.pbs
 # Launch pattern follows the ALCF Polaris DeepSpeed guide's MPICH option:
 # https://docs.alcf.anl.gov/polaris/data-science/frameworks/deepspeed/
@@ -13,7 +13,7 @@ set -euo pipefail
 
 REPO_DIR=${REPO_DIR:-${PBS_O_WORKDIR:-$PWD}}
 VENV_DIR=${VENV_DIR:-$REPO_DIR/.venv}
-ARGS_FILE=${ARGS_FILE:?set ARGS_FILE to an MSDelta training args file}
+ARGS_FILE=${ARGS_FILE:?set ARGS_FILE to an Iona training args file}
 CHECKPOINT_DIR=${CHECKPOINT_DIR:?set CHECKPOINT_DIR for Trainer checkpoints}
 
 if [[ $ARGS_FILE != /* ]]; then
@@ -114,7 +114,7 @@ export HF_HUB_OFFLINE=${HF_HUB_OFFLINE:-0}
 export PYTHONPATH=$REPO_DIR${PYTHONPATH:+:$PYTHONPATH}
 export MASTER_ADDR=${MASTER_ADDR:-$(head -n 1 "$NODE_LIST")}
 export MASTER_PORT=${MASTER_PORT:-29500}
-export MSDELTA_GPUS_PER_HOST=$GPUS_PER_HOST
+export IONA_GPUS_PER_HOST=$GPUS_PER_HOST
 
 ALCF_PROXY=${ALCF_PROXY:-http://proxy.alcf.anl.gov:3128}
 export HTTP_PROXY=${HTTP_PROXY:-$ALCF_PROXY}
@@ -151,12 +151,12 @@ exec mpiexec \
     bash -c '
         export RANK="$PMI_RANK"
         export WORLD_SIZE="$PMI_SIZE"
-        export LOCAL_RANK="${MPI_LOCALRANKID:-$((RANK % MSDELTA_GPUS_PER_HOST))}"
-        export LOCAL_WORLD_SIZE="${MPI_LOCALNRANKS:-$MSDELTA_GPUS_PER_HOST}"
+        export LOCAL_RANK="${MPI_LOCALRANKID:-$((RANK % IONA_GPUS_PER_HOST))}"
+        export LOCAL_WORLD_SIZE="${MPI_LOCALNRANKS:-$IONA_GPUS_PER_HOST}"
         exec "$@"
     ' bash \
     "$VENV_DIR/bin/python" \
-    -m msdelta.train \
+    -m iona.train \
     "${TRAIN_ARGS[@]}" \
     >"$LOG_DIR/train-$JOB_ID.out" \
     2>"$LOG_DIR/train-$JOB_ID.err"

@@ -1,6 +1,6 @@
-program: msdelta/train.py
+program: iona/train.py
 
-project: msdelta-pretrain
+project: iona-pretrain
 name: 50m-delta-bias-fourier-10k-bayes
 
 method: bayes
@@ -39,11 +39,11 @@ command:
           ;;
       esac;
     done;
-    exec uv run torchrun --standalone --nproc_per_node=2 -m msdelta.train
-    --args_file configs/msdelta-base-50m/training.args
+    exec uv run torchrun --standalone --nproc_per_node=2 -m iona.train
+    --args_file configs/iona-base-50m/training.args
     --run_name="$WANDB_RUN_ID"
     --output_dir="./runs/delta-bias-fourier/$WANDB_RUN_ID"
-    --wandb_project=msdelta-pretrain
+    --wandb_project=iona-pretrain
     --max_steps=10000
     --warmup_steps=400
     --eval_steps=500
