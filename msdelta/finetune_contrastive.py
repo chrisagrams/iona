@@ -119,6 +119,26 @@ class ContrastiveModelArguments:
 @dataclass
 class ContrastiveDataArguments:
     dataset_repo: str = REPLICATE_REPO
+    dataset_format: str = field(
+        default="replicate",
+        metadata={"help": "replicate: one spectrum per row, re-split here by peptide "
+                          "(ms2-peptide-replicate-retrieval). grouped: one ANALYTE per "
+                          "row, consensus + 3 experimental, with the corpus's own "
+                          "peptide-disjoint train/validation/test splits "
+                          "(ms-contrastive-100k); see msdelta/grouped_retrieval.py."})
+    include_consensus: bool = field(
+        default=False,
+        metadata={"help": "grouped only: train on the consensus spectrum as a fourth "
+                          "member. Off by default because a consensus is built FROM "
+                          "the replicates, so pairing it with them is partly pairing "
+                          "a spectrum with its own average."})
+    exclude_replicate_peptides: bool = field(
+        default=True,
+        metadata={"help": "grouped only: drop peptides that appear anywhere in "
+                          "ms2-peptide-replicate-retrieval (445 of 88,817 train "
+                          "peptides), so a model trained here can still be scored on "
+                          "that corpus -- and fed to the reranking chain built on it "
+                          "-- without having seen its held-out peptides."})
     processor_name_or_path: str | None = None
     max_peaks: int = 512
     validation_fraction: float = 0.1
@@ -397,6 +417,39 @@ class ContrastiveTrainer(Trainer):
         return (outputs["loss"], outputs) if return_outputs else outputs["loss"]
 
 
+def load_contrastive_datasets(data_args, processor) -> dict:
+    """train + validation for either corpus format. See ContrastiveDataArguments."""
+    from msdelta import grouped_retrieval as gr
+
+    if data_args.dataset_format == "grouped":
+        # K above the group size makes the PK sampler draw with replacement, i.e. pair a
+        # spectrum with ITSELF as a positive -- a free, meaningless positive per group.
+        members = 3 + int(data_args.include_consensus)
+        if data_args.replicates > members:
+            raise ValueError(f"replicates={data_args.replicates} but grouped analytes "
+                             f"have {members} spectra (include_consensus="
+                             f"{data_args.include_consensus}); set replicates <= {members}")
+    datasets = gr.load_spectrum_datasets(
+        data_args.dataset_format, data_args.dataset_repo, processor,
+        include_consensus=data_args.include_consensus,
+        exclude_replicate_peptides=data_args.exclude_replicate_peptides,
+        num_proc=data_args.preprocessing_num_workers or None,
+        validation_fraction=data_args.validation_fraction, seed=data_args.split_seed)
+    if data_args.dataset_format != "grouped":
+        return datasets
+    # max_peaks drops can leave an analyte with one spectrum: it has no positive, and
+    # the sampler would pair it with itself. Drop such rows from TRAIN only; eval
+    # metrics already skip queries with no relevant item.
+    train = datasets["train"]
+    ids = gr.group_ids(train)
+    keep = np.flatnonzero(np.bincount(ids)[ids] >= 2)
+    if len(keep) < len(train):
+        print(f"[contrastive] dropped {len(train) - len(keep):,} train spectra left "
+              f"alone in their group by max_peaks", flush=True)
+        datasets["train"] = train.select(keep)
+    return datasets
+
+
 @dataclass
 class ContrastiveCollator(AlignmentCollator):
     """Spectra plus an integer group id per row."""
@@ -487,12 +540,8 @@ def main(argv: list[str] | None = None) -> int:
             (out_dir / "RUN.md").write_text(f"# {training_args.run_name}\n\n{description}\n")
             print(f"[contrastive] {description}", flush=True)
 
-        with training_args.main_process_first(local=False, desc="replicate data"):
-            datasets = build_alignment_datasets(
-                data_args.dataset_repo, processor,
-                num_proc=data_args.preprocessing_num_workers or None,
-                validation_fraction=data_args.validation_fraction,
-                seed=data_args.split_seed)
+        with training_args.main_process_first(local=False, desc="contrastive data"):
+            datasets = load_contrastive_datasets(data_args, processor)
         if data_args.max_samples:
             # By group, not by row: see subset_by_group. A contiguous slice of this
             # corpus yields groups of about two, which makes the PK sampler draw
@@ -536,6 +585,11 @@ def main(argv: list[str] | None = None) -> int:
         # cleanly and is then IGNORED -- the run restarts from scratch while looking as
         # though it resumed. See pbs/aurora-finetune-sweep.pbs RESUME_JOB.
         trainer.train(resume_from_checkpoint=training_args.resume_from_checkpoint)
+        # FT31: a run whose sampler yields no batch "finishes" at step 0 and then writes
+        # final/ and metrics exactly like a real one; the C2/C4 smoke 8859890 reported
+        # 14/14 ok that way. Fail loudly instead.
+        if trainer.state.global_step == 0:
+            raise SystemExit("trained 0 optimizer steps -- too few groups/rows for one batch?")
 
         # The number this whole exercise exists to move: does the space separate peptides?
         if datasets.get("validation") is not None:

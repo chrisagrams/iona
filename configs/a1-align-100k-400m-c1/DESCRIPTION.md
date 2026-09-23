@@ -1,0 +1,1 @@
+A1 ALIGNMENT STUDENT on ms-contrastive-100k, teacher sweep-s400m_t0002_pk256_ep12_seed0-8857593. The student maps a peptide sequence to the frozen teacher's spectrum embedding (L2 on normalised vectors); scored by peptide->spectrum Hit@1. Same data flags as C7 (experimental spectra only, replicate-corpus peptides excluded). PLAN.md A1.

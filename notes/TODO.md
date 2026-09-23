@@ -812,6 +812,37 @@ and peptide-level features (length, charge, GRAVY, modifications) let it memoris
 It now holds out whole peptides (split_keys = each row's true peptide). Every R1 number
 so far used the leaky split. Note the pool is small: 94 held-out peptides in total.
 
+## Hazard audit, 2026-09-23 (non-leak hazards; checked = evidence below)
+
+| # | hazard | verdict | evidence |
+|---|---|---|---|
+| H1 | weight decay applied to biases/LayerNorm; `--weight_decay` ignored | **CONFIRMED, open** | custom `create_optimizer` (denoise + contrastive) passes no `weight_decay`; torch AdamW default 0.01 hits every param. Configs say 0.01, so the value coincides. Fix deferred until after C2/C4 + A/B |
+| H2 | denoise F1 thresholded at logit 0, not tuned | **by design, noted** | `finetune_denoise.py`; same threshold at every scale, so comparisons are fair; absolute F1 may understate |
+| H3 | eval subsets differ between runs | **checked, OK but underpowered** | replicate eval: `eval_alignment_rows` 2000 > 1,167 validation spectra, so every run scores all 99 groups. 99 groups is too few (C2 gap 0.013 invisible); ms-contrastive-100k test (35,734 spectra, 9,950 analytes) replaces it |
+| H4 | KL reference not frozen | **checked, OK** | `MSDeltaForContrastive.__init__`: `reference.requires_grad_(False)`, `.eval()`, re-`eval()` in `train()`; loaded as a separate `from_pretrained` copy |
+| H5 | GradCache RNG desync (dropout) | **checked, OK** | `_rng_state`/`_restore_rng` replay CPU + XPU RNG; `test_rng_is_replayed_so_dropout_cannot_desync`, `test_gradcache_is_self_consistent_with_dropout_on`, `test_one_chunk_is_the_same_as_no_gradcache` pass |
+| H6 | effective batch differs across scales (denoise) | **checked, OK** | ladder overrides `per_device_train_batch_size 1`, `gradient_accumulation_steps 1`, 12 tiles ZeRO-2 at every scale = 12; contrastive batch is P x K, identical across arms |
+| H7 | max_peaks drop biased | **open, quantified** | 512 at every scale for both tasks (not a 400m-only issue). Drops 19.4% of replicate spectra, 10.2% of ms-contrastive-100k test spectra; peak count tracks charge/length |
+| H8 | checkpoint silently loads random weights | **checked, OK** | no missing/unexpected-key warnings in denoise (8850494) or contrastive (8857593, 8859938) logs; untrained encoders score far above random init (C3), and pretraining gains in D2 are +0.045-0.051 |
+| H9 | pretraining-corpus contamination | **on hold** | needs data provenance from Chris |
+| H10 | seed noise hides effects | **checked, small** | 3-seed spread: C1 50m ep24 0.877/0.880/0.874; ms-contrastive-100k 0.657/0.654/0.656 |
+| H11 | rescorer intensity reconstruction | **CONFIRMED, open (FT32)** | see FT32 |
+
+## FT32. run_rescoring rebuilds intensity from a NORMALISED log — **Open, low (reranking on hold)**
+
+`run_rescoring.py:91` does `exp(log_intensity) - 1`, but the processor stores
+`log1p(I) / max log1p(I)`, so the result is a monotone distortion of I, not I. Fragment
+matching is unaffected; `explained_intensity` and any intensity-weighted feature are
+computed on compressed intensities. Fix before the new reranking dataset is used: keep
+raw intensity in the cache, or invert with the per-spectrum max.
+
+## FT31. A run that trains 0 steps reports success — **FIXED**
+
+The C2/C4 smoke 8859890 used MAX_SAMPLES=1500, which left 37 train groups against
+P=64: the PK sampler yielded no batch, HF stopped at step 0, and every arm still wrote
+final/ and retrieval metrics. The runner reported 14/14 ok. Both trainers now exit
+non-zero when `trainer.state.global_step == 0`, so the runner counts it as a failure.
+
 ## FT30. "Mass-matched" decoys are not mass-matched — **Open, blocks R1**
 
 run_rescoring takes the ~4 nearest peptides by sorted mass from the held-out pool (94

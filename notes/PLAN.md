@@ -37,12 +37,27 @@ Status: ✅ answered · 🟡 partly · ⏳ running/queued · ⬜ not started
 | id | question | status | evidence / job |
 |---|---|---|---|
 | C0 | Is our metric valid? | ✅ | separation ratio does NOT predict retrieval (ρ −0.04 within scale). Use MAP@R |
-| C1 | What is the best training recipe? | 🟡 | nearly settled: t ~0.002, width 256, **24 epochs**, MAP@R 0.877 (50m). Training length was the main lever (+0.11 from 3 → 12 epochs); wider batches help only when trained long; temperature matters little once trained long |
-| C2 | Does retrieval improve with model size? | 🟡 | at 3 epochs 50m 0.751 < 100m 0.783 < 200m 0.788 < 400m 0.823, but at 12 epochs the 50m/400m gap shrinks to 0.013 (0.860 vs 0.873). Needs all 4 scales at the final recipe |
+| C1 | What is the best training recipe? | ✅ | frozen as R* (`sweeps/make_confreeze.py`): t ~0.002, width 256, **24 epochs**, MAP@R 0.877 (50m). Training length was the main lever (+0.11 from 3 → 12 epochs); wider batches help only when trained long; temperature matters little once trained long |
+| C2 | Does retrieval improve with model size? | 🟡 | at 3 epochs 50m 0.751 < 100m 0.783 < 200m 0.788 < 400m 0.823, but at 12 epochs the 50m/400m gap shrinks to 0.013 (0.860 vs 0.873). Needs all 4 scales at the final recipe. **Frozen-recipe run queued: 8860092** (`configs/sweep-confreeze`, 4 scales @220k, 3 seeds) |
 | C3 | How much does pretraining buy? | ✅ | ALL of it: random init trained contrastively lands at chance at every scale (MAP@100 ≈0.01, Hit@1 ≈0.03 vs 0.33–0.41 / 0.75–0.78 pretrained, t=16–96, 6 seeds). It never reaches even the UNTRAINED pretrained encoder. Since random = chance, the gap is just the pretrained score and updates with C2 |
-| C4 | Does retrieval improve with pretraining checkpoint? | 🟡 | ladder `8851663` ran at t0.07 — superseded recipe. Re-run after C1 |
+| C4 | Does retrieval improve with pretraining checkpoint? | ⏳ | frozen C1 recipe, 50m+100m x 10k/120k/330k/430k/540k (+220k from C2), 3 seeds: **8860093**. Old ladder 8851663 (t0.07) superseded |
 | C5 | Do contrastive HPs transfer across scale/checkpoint? | ✅ | same winner in all 5 cells (4 scales + 50m@540k), mean pairwise ρ +0.81; t0.03 beat t0.07 in all 4 cells tested |
 | C6 | Does best-model selection / early stopping matter? | ✅ | no: −0.002, −0.006 (n.s.); `final/` == last checkpoint |
+| C7 | Does training on ms-contrastive-100k (100k analytes, 10k-analyte test) beat the 900-peptide replicate corpus, and does scale show there? | ⏳ | existing models on its test split (replicate-corpus peptides excluded): scale DOES show -- 400m ep12 0.711 vs 50m ep24 0.656 experimental MAP@R (tied at 0.87 on the 99-group eval); untrained 0.08-0.17. Scoring finishes in 8860206; binned-cosine baseline 8860250. Training smoke 8859995 passed (loss 8.7→5.0). Cost is ~22 s/step at 50m and ~69 s/step at 400m on one tile, so ~7 h (50m) and ~22 h (400m) per epoch; 50m ep1 x3 seeds queued (8860292), 50m ep3 and 400m ep1 pending a decision |
+| C8 | Does a per-pair sigmoid loss (SigLIP, Zhai et al. 2023) beat SupCon? | ⬜ | SupCon is a softmax over the batch with every positive in every denominator, so positives compete (target 1/(K-1) each). Sigmoid scores each pair independently (learnable temperature + bias). Ablation at the C1 recipe, 50m, 3 seeds, after C7 so data and loss do not change together |
+
+### Alignment (peptide embedder)
+
+A peptide encoder trained to land on the frozen spectrum encoder's embedding of that
+peptide's spectra (L2 on normalised vectors). It is the sequence side of reranking and of
+library search. Metric: peptide->spectrum Hit@1 / MAP@R on held-out peptides.
+
+| id | question | status | evidence / job |
+|---|---|---|---|
+| A0 | What does the current student reach, and on what? | 🟡 | R1's student: Hit@1 0.73 on 94 held-out replicate-corpus peptides (50m teacher), trained on ~855. Blind to adjacent-residue swaps (57% vs near-miss decoys). Not yet scored on ms-contrastive-100k |
+| A1 | Does training on ms-contrastive-100k (~88k peptides) give a much better student? | ⏳ | `configs/a1-align-100k-400m-c1` (teacher: C1 400m ep12, 0.711 on 100k test); smoke 8860290 |
+| A2 | Does student quality track teacher quality? | ⬜ | re-run A1 with the C7 teacher(s); only --pretrained_path changes |
+| A3 | Does order-aware pooling fix the adjacent-swap blindness? | ⬜ | mean+max pooling is nearly a bag of residues; try a CLS/attention pool, scored on the swap test and Hit@1 |
 
 ### Reranking (downstream of contrastive)
 
@@ -61,35 +76,46 @@ R1's first pass runs now with the current best encoders: they are ~2.3x better t
 one behind the −0.109, which is the question, and it proves the pipeline so the final
 C1 winners can go through it immediately.
 
+## Baselines to build (to-do)
+
+External reference points; each names the question it serves.
+
+- [x] **Binned cosine** (spectral-library dot product), C7/C2 — in `eval_grouped_retrieval`, scored by 8860250
+- [ ] **GLEAMS** (Bittremieux et al., Nat Methods 2022), spectrum→spectrum, C7 — not on PyPI; GitHub install with an old TensorFlow in its OWN venv (never the project env). ~0.5–1 day. Caveat: trained on MassIVE-KB, which may overlap our test spectra
+- [ ] **Sage + mokapot** (PSMs at 1% FDR), R0–R2 — prebuilt Sage binary + mokapot in their own venv, raw mzML + FASTA; ~1–1.5 days setup, a few CPU node-hours. Wait for the incoming reranking dataset's format first: if it ships search results, only mokapot is needed (~0.5 day)
+- [ ] later, if R needs them: MS²Rescore (~1 day on top of Sage+mokapot), Prosit/Oktoberfest (1–2 days), yHydra (1–3 days, cross-modal, A-track)
+
 ## Order of work
 
 ```
-DENOISE                                   CONTRASTIVE
+DENOISE                                   CONTRASTIVE (spectrum embedder)
 ───────                                   ───────────
-D1 ✅  D4 ✅                               C0 ✅  C3 ✅  C5 ✅  C6 ✅
-D2 ⏳ 5 scratch arms 8856558                 C1 ⏳ sweep-conlong (width × epochs × colder)
-D3 ⏳ ladder 8850494 → ends wave                │   also answers C2 at 220k
-      └─► denoise scaling figures               ▼
-          (AUROC and F1)                  freeze recipe R*
-                                                │
+D1 ✅  D2 ✅  D3 ✅  D4 ✅                  C0 ✅  C1 ✅  C3 ✅  C5 ✅  C6 ✅
+      └─► denoise scaling figures         recipe R* frozen (sweep-confreeze)
+          (AUROC and F1)                        │
                                          ┌──────┴──────┐
                                          ▼             ▼
-                                   C2 all scales  C4 checkpoint
-                                   seeds at R*    ladder at R*
+                                   C2 ⏳ 8860092   C4 ⏳ 8860093
+                                   4 scales @220k  50m/100m ladder
                                          └──────┬──────┘
                                                 ▼
-                                   contrastive scaling figures
+                                   C7 ⏳ ms-contrastive-100k: eval existing
+                                      models (8860206/8860250), then train
                                                 │
                                                 ▼
-                                   R1 best encoders → alignment → rescorer
-                                      vs feature-only Hit@1 0.889
-                                                │ if no gain
+                                   C8 ⬜ sigmoid vs SupCon (after C7)
+                                                │
                                                 ▼
-                                   R2 cross-encoder
+                                   peptide embedder (alignment student)
+                                   retrained on the best spectrum teacher
+                                                │
+                                                ▼
+                                   R0-R2 on the incoming reranking dataset
 ```
 
-Contrastive work downstream of C1 waits for it: re-running the ladder at a recipe that
-is still moving would take every number twice (it already happened once, t0.07 → t0.03).
+Reranking waits for the new reranking dataset (2026-09-23: being obtained). Until then
+the work is good spectrum and peptide embedders; R0-R2 as written assume our synthetic
+decoys and will be re-set against that dataset.
 
 ## Parked
 

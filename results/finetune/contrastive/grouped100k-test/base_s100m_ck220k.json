@@ -1,0 +1,22 @@
+{
+ "name": "base_s100m_ck220k",
+ "path": "/flare/UIC-HPC/khuss/msdelta/pretrained/msdelta-100m-production-01-checkpoint-220000",
+ "pooling": "mean+max",
+ "data": "/lus/flare/projects/UIC-HPC/khuss/msdelta/eval-data/ms-contrastive-100k-test-mp512",
+ "metrics": {
+  "all/Hit@1": 0.11566712633326767,
+  "all/Precision@1": 0.11566712633326767,
+  "all/R-Precision": 0.05496299365113449,
+  "all/MAP@R": 0.05022639550315409,
+  "all/R@5": 0.06152965880713824,
+  "all/MAP@100": 0.0552855073941018,
+  "all/queries": 35533.0,
+  "experimental/Hit@1": 0.14890400604686319,
+  "experimental/Precision@1": 0.14890400604686319,
+  "experimental/R-Precision": 0.09734654095556351,
+  "experimental/MAP@R": 0.0932489955046346,
+  "experimental/R@5": 0.11739666626884672,
+  "experimental/MAP@100": 0.1054160687226965,
+  "experimental/queries": 25137.0
+ }
+}

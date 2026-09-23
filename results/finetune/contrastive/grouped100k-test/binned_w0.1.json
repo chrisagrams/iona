@@ -1,0 +1,22 @@
+{
+ "name": "binned_w0.1",
+ "path": "binned:0.1",
+ "pooling": "mean+max",
+ "data": "/lus/flare/projects/UIC-HPC/khuss/msdelta/eval-data/ms-contrastive-100k-test-mp512",
+ "metrics": {
+  "all/Hit@1": 0.903470013789998,
+  "all/Precision@1": 0.903470013789998,
+  "all/R-Precision": 0.7684077860666053,
+  "all/MAP@R": 0.7586586304071655,
+  "all/R@5": 0.8153453808975767,
+  "all/MAP@100": 0.798343658769335,
+  "all/queries": 35533.0,
+  "experimental/Hit@1": 0.8192306162230975,
+  "experimental/Precision@1": 0.8192306162230975,
+  "experimental/R-Precision": 0.7345944225643474,
+  "experimental/MAP@R": 0.7294724907506862,
+  "experimental/R@5": 0.7880813143971038,
+  "experimental/MAP@100": 0.7622766473125708,
+  "experimental/queries": 25137.0
+ }
+}

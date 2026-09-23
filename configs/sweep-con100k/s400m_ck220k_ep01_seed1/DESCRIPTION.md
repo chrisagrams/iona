@@ -1,0 +1,1 @@
+C7 ARM (ms-contrastive-100k): 400m at pretraining checkpoint 220000, 1 epoch(s), seed 1 of 3. C1's recipe with K=3 (experimental replicates only), P=85; replicate-corpus peptides excluded. Scored on the corpus's test split by msdelta.eval_grouped_retrieval.

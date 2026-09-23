@@ -5,7 +5,7 @@ until it does.
 
 | file | answers | contains | does NOT contain |
 |---|---|---|---|
-| `PLAN.md` | **What are we trying to find out?** | goals, the numbered questions (D1–D4 denoise, C0–C6 contrastive) with status, order of work, rules | results, job logs |
+| `PLAN.md` | **What are we trying to find out?** | goals, the numbered questions (D1–D4 denoise, C0–C8 contrastive, A0–A3 alignment, R0–R2 reranking) with status, order of work, rules | results, job logs |
 | `STATUS.md` | **Where does everything stand right now?** | the status diagram: live jobs (each tagged with its question id), what's done/running/blocked, decisions needed | reasoning, history — it is overwritten, not appended |
 | `OBSERVATIONS.md` | **What have we learned?** | one entry per result: numbers, n, p-values, strength, what would overturn it, what is not yet measured. Append-only; corrections are new entries | plans, defects |
 | `TODO.md` | **What is broken or dangerous?** | defects and operational hazards (FT-numbered), each with status | research questions — those are PLAN.md |
