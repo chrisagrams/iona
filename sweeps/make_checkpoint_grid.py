@@ -32,7 +32,7 @@ the point all four HP grids and the probe independently chose.
 
 Contrastive uses lr 1e-4 / KL 10 / temperature 0.07. It does NOT use the lr 2e-5 / KL 0
 / temperature 0.2 that the 96-arm grid selected, because that grid selected on the
-separation ratio and the ratio does not predict retrieval (see OBSERVATIONS.md). Scored
+separation ratio and the ratio does not predict retrieval (see notes/OBSERVATIONS.md). Scored
 on MAP@100 the ratio's pick ranks 9th of 12 and is statistically indistinguishable from
 NOT TRAINING AT ALL -- level with an untrained encoder on MAP@100 (p=0.98) and worse
 than it on Hit@1 (p=0.003). lr 1e-4 / KL 10 / t 0.07 beats the untrained encoder on

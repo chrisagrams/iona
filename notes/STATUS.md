@@ -1,5 +1,7 @@
 # Project status
 
+What is true right now. The questions this tracks are in `PLAN.md` (D1-D4, C0-C6);
+every past version of the diagram below is in `status-history/`.
 The schedule for the denoise fine-tune and the reranking pipeline. Hand-kept, so it says
 what is *true right now*; `TODO.md` says what is *wrong and open*, and the two are meant
 to be read together.
@@ -13,11 +15,15 @@ anyone's memory. Last updated: 2026-09-20.
 LEGEND  [x] done  [~] RUNNING  [>] blocked  [X] closed  [ ] not started
 
 
-JOBS
+JOBS  (each tagged with the PLAN.md question it answers)
 ──────────────────────────────────────────────────────────────────────────
-  [~] 8853558  contrastive pretraining ablation, live config  (24 arms)
-  [~] 8847663  dnscratch, pre-canonical
-  [ ] 8850494  DENOISE LADDER 220k+330k, 4 scales -- still QUEUED, 16 nodes
+  [ ] 8850494  D3  denoise ladder 220k+330k, 4 scales -- QUEUED, 16 nodes
+  [ ] 8856399  C1+C2  sweep-conbig: temp 0.01-0.03 x P/K 4/16/64 x 4 scales, 108 arms
+  [>]  --      D2  5 scratch arms of 8847663 incomplete, need resume
+  [>]  --      D3  ends wave 10k/120k/430k/540k at 50m+100m, built
+
+
+DENOISE LADDER 220k+330k, 4 scales -- still QUEUED, 16 nodes
   [ ] 8853703  seed top-up, 200m/400m to n=12
   [ ] 8854412  REPAIR: 6 arms of 8853557 that died on a Lustre write storm
   [x] 8851663  contrastive ladder, 42/42 arms -- THE NEW DATA

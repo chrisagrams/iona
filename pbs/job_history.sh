@@ -4,9 +4,9 @@
 #   pbs/job_history.sh              # every job with a log
 #   pbs/job_history.sh 88403        # jobs whose id starts with this
 #
-# STATUS.md carries this table by hand, and a hand-kept table drifts. This regenerates it
+# notes/STATUS.md carries this table by hand, and a hand-kept table drifts. This regenerates it
 # from the logs, which cannot drift: a job either has a fault line or it does not, either
-# reached its last step or did not. Paste the output into STATUS.md.
+# reached its last step or did not. Paste the output into notes/STATUS.md.
 cd "$(dirname "$0")/.." || exit 1
 filter=${1:-}
 printf '%-9s %-8s %-11s %-26s %s\n' JOB TASK PARALLELISM OUTCOME NOTE

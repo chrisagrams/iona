@@ -181,6 +181,20 @@ class ContrastiveTrainingArguments(TrainingArguments):
     wandb_project: str | None = None
     wandb_entity: str | None = None
     run_description: str | None = None
+    eval_retrieval_rows: int = field(
+        default=0,
+        metadata={"help": "Spectra to embed when scoring retrieval inside evaluate(). "
+                          "0 disables it and leaves eval_loss as the only eval metric, "
+                          "which is what every run before this did -- and eval_loss is "
+                          "not selectable here, because the contrastive objective is "
+                          "solved by epoch 0.18 of 3 and is measured on a 4-spectrum "
+                          "batch. Set this AND metric_for_best_model to make "
+                          "load_best_model_at_end pick on the task."})
+    eval_alignment_rows: int = field(
+        default=2000,
+        metadata={"help": "Spectra embedded for the post-training separation and "
+                          "retrieval summaries. Declared here rather than read off the "
+                          "namespace with hasattr, which silently fell back to 2000."})
 
 
 class SaveEncoderCallback(TrainerCallback):
@@ -332,6 +346,45 @@ class ContrastiveTrainer(Trainer):
                       "kl": float(outputs["kl"])})
             self._log_layer_mix()
         return outputs["loss"].detach()
+
+    def evaluate(self, eval_dataset=None, ignore_keys=None,
+                 metric_key_prefix: str = "eval"):
+        """Score RETRIEVAL at eval time, not just the contrastive loss.
+
+        Without this the only eval number is eval_loss, and the contrastive loss is
+        useless for model selection here: measured on 50m@330k it falls below 10% of
+        chance (ln 4 = 1.386) by epoch 0.18 of 3.0, so 94% of training optimises a task
+        that is already solved. Worse, it is computed on a FOUR-spectrum batch, so each
+        value is one noisy draw -- the last logged step of a real run was 0.142 while
+        epoch 2.90 had reached 0.0016. Selecting on that would pick noise.
+
+        These metrics are what load_best_model_at_end reads, so putting them here is
+        what makes `final/` the BEST encoder rather than whatever the last step left
+        behind. They also reach wandb, because Trainer logs whatever evaluate returns.
+
+        Kept cheap on purpose: retrieval_summary embeds eval_retrieval_rows spectra, so
+        the cost is one forward pass over a subset and nothing is trained on it.
+        """
+        metrics = super().evaluate(eval_dataset=eval_dataset, ignore_keys=ignore_keys,
+                                   metric_key_prefix=metric_key_prefix)
+        dataset = eval_dataset if eval_dataset is not None else self.eval_dataset
+        rows = getattr(self.args, "eval_retrieval_rows", 0)
+        if dataset is None or not rows:
+            return metrics
+        try:
+            extra = retrieval_summary(self.model, dataset, self.data_collator,
+                                      self.args.device, max_rows=rows)
+        except Exception as error:      # never lose a run to the eval pass
+            if self.is_world_process_zero():
+                print(f"[contrastive] retrieval eval failed inside evaluate(): {error}", flush=True)
+            return metrics
+        # Prefix to match HF's convention so metric_for_best_model can name them:
+        #   retrieval/MAP@R  ->  eval_retrieval/MAP@R
+        scored = {f"{metric_key_prefix}_{k}": v for k, v in extra.items()
+                  if isinstance(v, (int, float))}
+        metrics.update(scored)
+        self.log(scored)
+        return metrics
 
     def compute_loss(self, model, inputs, return_outputs=False, **kwargs):
         outputs = model(**inputs)

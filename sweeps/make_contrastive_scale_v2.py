@@ -3,7 +3,7 @@ RE-TAKEN AT A CONFIGURATION THAT ACTUALLY TRAINS. The first version of this grid
 lr 2e-5 / KL 0 / temperature 0.2, chosen by the separation ratio. Scored on MAP@100 that
 point is statistically indistinguishable from NOT TRAINING AT ALL -- level with an
 untrained encoder (p=0.98) and worse than it on Hit@1 (p=0.003) -- because the ratio
-does not predict retrieval (OBSERVATIONS.md). KL 0 removes the leash to the pretrained
+does not predict retrieval (notes/OBSERVATIONS.md). KL 0 removes the leash to the pretrained
 weights and t 0.2 is too soft; the two together cost more than either alone. This grid
 now runs lr 1e-4 / KL 10 / t 0.07, top-ranked in all four scale x checkpoint cells.
 Re-take the contrastive scale curve at the configuration that actually wins.
