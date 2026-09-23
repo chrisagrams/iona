@@ -1,8 +1,7 @@
-# Fine-tuning TODO
+# Defects and hazards
 
-Open work on `dev_finetune`. Items are ordered by what would change a decision, not by
-effort. This file is what is WRONG; [STATUS.md](STATUS.md) is the schedule and what is
-currently true. Read them together.
+What is broken or dangerous, FT-numbered, each with a status. Research questions do not
+live here -- they are in PLAN.md. Where things stand is STATUS.md.
 
 ## FT7. The GPU page fault is DDP, not the model — **Isolated, workaround in hand**
 
@@ -147,7 +146,7 @@ buys more steps. Its published workarounds simply do not help on this driver.
 - [ ] Re-test if the frameworks module is updated. #973's fix (commit 3d7a21dca9,
       2026-08-27) was unreleased as of that issue's last update.
 
-## FT8. Is a warm-up freeze on the encoder worth anything? — **Open, deferred**
+## FT8. Is a warm-up freeze on the encoder worth anything? — **Research question, moved to PLAN.md (parked)**
 
 `freeze_encoder_steps` held the encoder still for the first N steps so the randomly
 initialised head could not push large gradients back through pretrained weights before it
@@ -167,7 +166,7 @@ meant something different.
 - [ ] If it does help, check whether it still helps at `encoder_lr_scale=0.1`, where the
       encoder is already moving slowly, or only at `1.0`.
 
-## FT1. Does the denoiser generalise beyond 1024 peaks? — **Open**
+## FT1. Does the denoiser generalise beyond 1024 peaks? — **Research question, moved to PLAN.md (parked)**
 
 `max_peaks=1024` and `build_denoising_datasets` DROPS anything above it rather than
 truncating, so 1.62% of train, 1.58% of validation and 1.71% of test never reach the
@@ -206,7 +205,7 @@ expensive retrain buys nothing.
       currently discards whole spectra; truncating by m/z keeps them but silently removes
       the high-m/z tail, which is where the large fragment ions live.
 
-## FT6. Ablation: 50m trained from scratch — **SUBMITTED (job 8839946)**
+## FT6. Ablation: 50m trained from scratch — **DONE** (0.8856 at ep4, 0.9001 at ep8; PLAN.md D2)
 
 Every fine-tuned number is uninterpretable without this control. If a randomly
 initialised encoder of the same architecture also reaches ~0.935 test AUROC, pretraining
@@ -233,7 +232,7 @@ rather than make the comparison fair.
       "pretrained capacity helps" if a from-scratch 100m does NOT show the same gain --
       otherwise it is just a bigger model fitting the labels better.
 
-## FT5. Multi-seed denoise on every scale — **Open, deprioritised**
+## FT5. Multi-seed denoise on every scale — **DONE** (6 seeds per scale, job 8845262; PLAN.md D1)
 
 Not urgent while the 200m, 400m and scratch grids are queued; those answer questions we
 do not have answers to at all, where this sharpens ones we do. Keep it on the list.
@@ -406,7 +405,7 @@ OPTIONS, cheapest first:
 - [ ] Either way, record the entropy trajectory alongside the ratio so a collapsed arm
       is never reported as a blend again.
 
-## FT12. The sign of the pooled-vs-within AUROC gap is not predictable by reasoning — measure it
+## FT12. The sign of the pooled-vs-within AUROC gap is not predictable by reasoning — **Research question, moved to PLAN.md (parked)**
 
 Not a bug: a warning about how to treat the result of job 8842917, and about a class of
 claim that keeps going wrong here.
@@ -446,7 +445,7 @@ inference, check the within-group version before drawing a conclusion.
       systematic difference could reorder them.
 - [ ] Backfill 200m and 400m winners the same way once those grids finish.
 
-## FT17. The pair-loss grid samples both margins on the low side — **Open, watch for it**
+## FT17. The pair-loss grid samples both margins on the low side — **SUPERSEDED** (that grid was ranked on the separation ratio, which does not predict retrieval; nothing downstream uses the pair loss)
 
 Embeddings reach `pair_contrastive_loss` L2-normalised (`MSDeltaForContrastive.embed`
 ends in `F.normalize`), verified rather than assumed, so pair distance lives in [0, 2]
@@ -482,7 +481,7 @@ UNLOCATED, in either direction.
       positive pair is DRAWN and lets the loss weighting follow. That is the intended
       question -- sampling balance -- but the two are not separated by this grid.
 
-## FT13. The pretrained-vs-scratch denoise comparison has an unmeasured cell — **SUBMITTED (job 8846027)**
+## FT13. The pretrained-vs-scratch denoise comparison has an unmeasured cell — **DONE** (400m ep8: 0.9418 / 0.9423 / 0.9399, job 8845252)
 
 The two grids did not sweep the same epoch counts, so there are two valid comparisons
 and one gap:
@@ -563,7 +562,7 @@ sequence is overfitting to a fixed set of contrasts, not additional learning.
       distribution enough that the curve has to be re-taken before it means anything
       about scale.
 
-## FT15. Contrastive results are not reproducible run to run — **Open, measuring**
+## FT15. Contrastive results are not reproducible run to run — **Open, not rechecked since 2026-09-22** (seed sems at the current recipe are 0.004-0.02 MAP@R, small against the effects now being measured)
 
 Byte-identical config and seed, two runs, 7.83 (job 8842232) and 6.01 (job 8843838).
 
@@ -599,7 +598,7 @@ difference decides which side of the edge a run lands on. So "lr 5e-4 is best" m
 - [ ] Re-read every contrastive comparison in STATUS.md and OBSERVATIONS.md against the
       measured bar. Gaps under ~2 are currently unsupported.
 
-## FT16. Contrastive faults at 200m+ inside PBS jobs, never over ssh — **Cause narrowed, unresolved**
+## FT16. Contrastive faults at 200m+ inside PBS jobs, never over ssh — **Unresolved, not seen since**. Some of the arm losses attributed here may have been FT19 (Lustre write storm), which also hit only 200m/400m arms
 
 THE ONE SURVIVING PATTERN. Every failure has been inside a PBS sweep job; every pass has
 been over ssh into a sleeper node holding an allocation. Both directions, no exceptions:
@@ -707,3 +706,72 @@ node x4407c2s0b0n0.
 - [ ] The 50m pair-loss validation faulted while running single-tile with
       XPUS_PER_HOST=1, which this does not explain. Either a second cause or the tile
       assignment was not what the script intended. Check before trusting pair-loss runs.
+
+
+## FT18. A queued job reads its config dir at run time, not submit time — **Hazard, guarded**
+
+Regenerating a grid overwrote `configs/sweep-ckpt-denoise` while 8850494 sat queued
+against it; it would have run 10000/120000/430000/540423 instead of the validated
+220000/330000, and completed normally. Restored from git. Guards: the checkpoint-ladder
+generator puts the wave in the directory name, and the rule is to `qstat` for jobs on a
+config path before writing to it. To change a queued job's grid: `qdel` first.
+
+## FT19. Twelve arms per node writing optimizer checkpoints swamps Lustre — **FIXED**
+
+At TILES_PER_ARM=1 a node carries twelve arms, and a 400m optimizer checkpoint is 7.4 GB,
+so save_steps 200 put ~89 GB on Lustre at once. torch.save failed with
+`enforce fail at inline_container.cc:668 ... unexpected pos` and killed 6 arms of
+8853557, 6 of 8853558 and 13 of 8853703, all 200m/400m. Fix: save_only_model true,
+save_steps 700, save_total_limit 1 in every contrastive generator. load_best_model_at_end
+needs full checkpoints, so a grid that selects re-enables them -- keep such grids small.
+
+## FT20. The session scratchpad is invisible to compute nodes — **Hazard**
+
+`/tmp/claude-*/.../scratchpad` is node-local on the login node. A PBS job that calls a
+script there fails at once with "No such file or directory" (8856114). Anything a job
+runs lives in the repo.
+
+## FT21. A contrastive checkpoint-N/ root loads as a RANDOM encoder — **Hazard**
+
+MSDeltaForContrastive is a plain nn.Module, so checkpoint-N/model.safetensors holds the
+wrapper's bare state dict. Loading the root silently gives an untrained encoder
+(MAP@R 0.0029, ratio nan -- job 8856058). The loadable encoder is
+checkpoint-N/encoder/, written by SaveEncoderCallback. final/ is fine. The proper fix is
+still making the wrapper a PreTrainedModel.
+
+## FT22. Monitor scripts leak orphaned processes on the login node — **Cleaned, hazard stands**
+
+Background monitors of the form `tail -F log | ugrep | sed &` ending in
+`pkill -P $$ tail` leave the tails orphaned when the parent exits early. 69 such
+processes from 11-12 days earlier were killed one by one on 2026-09-23 (the pid inside
+the SCREEN session was spared). Pollers now use qstat loops with no child processes.
+
+## FT23. RESUME_JOB re-ran finished contrastive arms, and resumed them inexactly — **FIXED**
+
+The resume skip test was `test_results.json`, which contrastive never writes, so every
+finished contrastive arm counted as unfinished. Now `test_results.json` OR (`final/` AND
+`retrieval_results.json`). Separately, resuming from a save_only_model checkpoint restarts
+Adam and the LR schedule mid-run; grids driven by repeated resubmission (sweep-conbig)
+therefore save no intermediate checkpoints, so an interrupted arm restarts cleanly from
+step 0 with its seed.
+
+## Naming trap: our R@5 is not the literature's Recall@K
+
+Ours is the fraction of a query's relevant spectra in its top 5; the literature's
+Recall@K is the fraction of QUERIES with at least one hit in the top K. Documented in
+`retrieval_metrics_exact`; prefer MAP@R, R-Precision and Precision@1.
+
+## Conventions worth not rediscovering
+
+- **Runs are prefixed `v2_`.** Anything without it predates the DDP, dtype and eval fixes
+  and is not comparable. `RUN_PREFIX` in both launchers and the generator.
+- **Validate on debug before capacity**, and validate with `MAX_SAMPLES`, not `MAX_STEPS`.
+  Capping steps skips saving, `save_total_limit`, `load_best_model_at_end`, the test split
+  and the final save -- which is exactly where the alignment bugs were hiding.
+- **DDP is broken on this stack.** One tile, or DeepSpeed ZeRO-2 on twelve. The sweep
+  launcher refuses multi-tile arms that name no deepspeed config.
+- **Every experiment carries a description**: auto-derived from settings into W&B notes
+  and `RUN.md`, plus a hand-written `DESCRIPTION.md` beside each args file for intent.
+- Jobs read configs from a snapshot taken at job START, so the working tree can be edited
+  while a sweep RUNS -- but NOT while it is QUEUED. See FT18.
+

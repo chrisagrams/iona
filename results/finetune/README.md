@@ -33,6 +33,7 @@ sweep arm configs they cannot be reproduced from this repository alone.
 | `denoise/grid_denoise_50m_earlytest.txt` | The same 50m grid on a reduced evaluation. **Not comparable** — see below. |
 | `checkpoint_provenance.txt` | Which pretrained checkpoint each scale was fine-tuned from. |
 | `denoise/figures/` | `scaling` (denoise vs model size, AUROC and F1) and `pretrain_ablation` (pretrained vs random, AUROC and F1). |
+| `denoise/figures/ladder_*` | Denoise against pretraining checkpoint (PLAN.md D3), from `sweeps/plot_ladder.py`: per scale, per checkpoint, and combined with x = pretraining grad steps (NOT compute). Sparse until job 8850494 runs — only 50m has two checkpoints. |
 | `denoise/figures/extra/` | Supporting: `top_cluster` (why a grid best is not a measurement), `encoder_lr_scale` (how hard to push the encoder, and why it depends on batch size), `probe_heatmap` (`encoder_lr_scale` × epochs at 400m). |
 
 ## What the numbers say
@@ -160,78 +161,40 @@ dropped for exceeding the peak limit. Not confirmed.
 
 # Contrastive
 
-Spectrum embeddings for retrieval and reranking. Historically scored by the separation
-ratio -- out-group over in-group mean distance, floor 1.35 for an untrained encoder.
-**That proxy has now been validated against the task and it fails**; read the ratio
-results below as statements about the ratio, and see the last section.
+Spectrum embeddings for retrieval and reranking, scored on the task: **MAP@R**, with
+Precision@1 and R-Precision beside it (Musgrave, Belongie & Lim, ECCV 2020). The
+separation ratio this line was originally judged by does **not** predict retrieval, so
+the two ratio figures below are records of the proxy, not results. The questions and
+their status are in `notes/PLAN.md` (C0-C6); the evidence is in `notes/OBSERVATIONS.md`.
+
+**Current recipe:** SupCon, lr 1e-4, KL 10 to the frozen pretrained intensity head,
+temperature 0.03, batch of four (P=2 × K=2), mean+max pooling, no projection head.
+Temperature and batch width are still being swept (C1); no number below is final.
 
 | file | what it holds |
 | --- | --- |
-| `contrastive/figures/contrastive_scaling.png` | Separation ratio by model size, 6 seeds per scale. |
-| `contrastive/figures/contrastive_ablation.png` | Pretrained against randomly initialised, 4 scales × 6 seeds. |
-| `contrastive/figures/extra/contrastive_breadth.png` | More negatives, which hurt — a closed question, not a lever. |
-| `contrastive/figures/retrieval_vs_separation.png` | The proxy against the task: Hit@1 and MAP@100 by scale, and the correlation. |
-| `contrastive/retrieval_vs_separation_8848049.json` | Per-arm retrieval metrics for all 24 scale arms plus the untrained control. |
-| `contrastive/contrastive_random_control.txt` | The original random-init control. |
-| `contrastive/layer_probe_all_scales.txt` | Training-free probe of every encoder block. |
-| `contrastive/layer_probe_trajectory.txt` | The same probe across pretraining checkpoints. |
-| `contrastive/random_init_baseline.txt` | Where the 1.35 floor comes from. |
-| `contrastive/layermix_and_contrastive_v2.txt` | The learned depth mixture. |
+| `contrastive/figures/retrieval_vs_separation.png` | The proxy against the task: it fails. |
+| `contrastive/retrieval_vs_separation_*.json` | Per-arm retrieval metrics from `msdelta.eval_retrieval`, one file per rescored job (suffix = arm subset). |
+| `contrastive/ckpt_vs_final.json` | Intermediate checkpoints against `final/`: final is the last step and is not beaten. |
+| `contrastive/figures/contrastive_scaling.png` | *Proxy only, superseded:* separation ratio by model size. |
+| `contrastive/figures/contrastive_ablation.png` | *Proxy only, superseded:* pretrained vs random init on the ratio. The task-metric version is below. |
+| `contrastive/figures/extra/contrastive_breadth.png` | *Retracted:* "more negatives hurt" was a ratio artefact. |
+| `contrastive/*.txt` | Early training-free probes and controls, all on the ratio. |
 
-**The scale curve climbs to 400m _on the proxy_** — 9.37 / 10.36 / 11.50 / 13.84 at 50m/100m/200m/400m,
-+4.47 end to end (t=4.1), though no individual step resolves against a seed sd that
-grows from 0.80 to 2.56. An earlier reading of "saturates at 100m" was measured under a
-sampler that replayed identical batches and at hyperparameters ranked seventh of twelve.
+**What holds** (all measured on the task):
 
-**Pretraining is a precondition, not an advantage.** Matched grids at four scales, six
-seeds, differing only in `--random_init`:
+- **Pretraining is the entire result.** A randomly initialised encoder trained the same
+  way lands at chance at every scale — MAP@100 ≈ 0.01, Hit@1 ≈ 0.03, against 0.34–0.41
+  and 0.75–0.78 pretrained (t = 16–96, 6 seeds). It never reaches even the untrained
+  pretrained encoder (0.17 / 0.65).
+- **Hyperparameter rankings transfer** across all four scales and two checkpoints: same
+  winner in five cells, mean pairwise Spearman +0.81.
+- **Temperature is the dominant knob.** 0.03 beats 0.07 by 0.05–0.14 MAP@R in all four
+  cells tested; KL is bracketed at 10. 0.03 is the edge of the grid.
+- **Best-model selection changes nothing** (−0.002, −0.006, n.s.); `final/` is fine.
+- **50m beats 200m** at the current recipe (p = 0.003 at 330k), but 100m and 400m have
+  not been run at it, so no scaling *curve* is established yet.
 
-| scale | pretrained | random init | gap |
-| --- | --- | --- | --- |
-| 50m | 9.37 ± 0.80 | 1.34 ± 0.02 | 8.03 |
-| 100m | 10.36 ± 1.38 | 1.33 ± 0.03 | 9.03 |
-| 200m | 11.50 ± 1.71 | 1.33 ± 0.02 | 10.17 |
-| 400m | 13.84 ± 2.56 | 1.32 ± 0.03 | 12.52 |
-
-The random encoder sits on the 1.35 floor at **every** scale, sd 0.02–0.03 — it does not
-learn less with more capacity, it learns nothing regardless. Categorically unlike
-denoise, where pretraining is worth a finite +0.033.
-
-**More negatives make contrastive worse here, which is the opposite of usual practice.**
-Only the batch shape varying, 4 seeds per point: 4 rows → 9.40, 16 rows → 7.12, 64 rows
-→ 6.60, a monotone decline of −2.80 at t=−4.5. An earlier verdict of "more negatives do
-not help" was confounded by a different learning rate, a different temperature, the
-pre-FT14 sampler and n=1; re-asked at matched settings the answer is stronger than
-before. No explanation established — with ~900 peptides a 64-row batch may draw
-negatives that are near-duplicates of the positive, but that is speculation.
-
-**The separation ratio does not predict retrieval.** All 24 scale arms were scored on
-the task, on the same 1167 queries and 99 groups, against the 50m arms' own base
-checkpoint as an untrained control. Spearman against the ratio, n=24: Hit@1 +0.28
-(p=0.18), R@5 +0.27 (p=0.20), MAP@100 +0.40 (p=0.055) — none significant. Within one
-scale, where only the seed differs, the mean rank correlation with Hit@1 is **−0.04**:
-the ratio cannot order runs at all.
-
-| scale | ratio | Hit@1 | vs untrained | MAP@100 | vs untrained |
-| --- | --- | --- | --- | --- | --- |
-| untrained | 1.34 | **0.6538** | — | 0.1727 | — |
-| 50m | 9.37 | 0.5137 | p=0.003 ▼ | 0.1751 | n.s. |
-| 100m | 10.36 | 0.4689 | p<0.001 ▼ | 0.1561 | p=0.032 ▼ |
-| 200m | 11.50 | 0.4986 | p<0.001 ▼ | 0.1676 | p=0.017 ▼ |
-| 400m | 13.84 | 0.5261 | p<0.001 ▼ | **0.1976** | p=0.007 ▲ |
-
-**The two task metrics disagree in sign, so quoting one alone misleads.** Hit@1 asks
-whether the single nearest neighbour is a replicate — a local property. MAP@100 scores
-the whole ranked list — a global one. Contrastive training pushes group centroids apart,
-which is what improves the second and damages the first. It costs Hit@1 at every scale
-without exception (0/24 arms beat the untrained encoder) and beats untrained on MAP@100
-only at 400m; at 100m and 200m it is significantly worse than not training at all.
-400m over 50m on MAP@100 is t=+1.77, p=0.11 — suggestive, not established.
-
-Replicate spectra of one peptide are near-identical as raw peaks, so the pretrained
-encoder already solves the local problem (0.654 against ~0.009 for a random ranking).
-
-**Consequence for anything queued:** select arms on MAP@100 with Hit@1 reported beside
-it, never on the ratio. `finetune_contrastive.py` emits both per arm, so grids run with
-current code need no rescoring; older jobs need `msdelta.eval_retrieval` (`--arms` to
-fit a large sweep into a debug hour).
+**Retracted:** every claim decided on the separation ratio — the ratio scale curve, the
+ratio-selected recipe (lr 2e-5 / KL 0 / t 0.2, which scores level with not training at
+all), and "more negatives hurt" (64 vs 4 negatives, p = 0.84 on the task).

@@ -637,6 +637,10 @@ now reaches 40% of the corpus and 10 reaches 82%.
 
 WHAT IS NOT YET MEASURED: ep30 and ep100 are still running. "Flat from 3 to 10" and
 "flat forever" are different claims and only the first is established.
+    UPDATE 2026-09-23: ep30 and ep100 finished, 6/6 each: ratio 6.33 and 6.02. But
+    this whole entry is on the separation ratio, which does not predict retrieval,
+    at lr2e-5, a superseded recipe. Rescoring the saved encoders on MAP@R would settle
+    it; see "Closing the loop" at the end of this file.
 
 ## The separation ratio does not predict retrieval, and contrastive FT trades Hit@1 for MAP@100
 
@@ -685,6 +689,8 @@ no rescoring pass; older jobs need msdelta.eval_retrieval.
 WHAT IS NOT YET MEASURED: whether a different contrastive configuration (temperature,
 loss, or fewer epochs) can raise MAP@100 without spending Hit@1. Every arm here used
 one configuration per scale.
+    UPDATE 2026-09-23: yes -- lr1e-4/KL10/t0.07 raises both (Hit@1 p=0.0007, MAP@100
+    p=0.0002), and t0.03 raises MAP@R further. See the next entries.
 
 ## The ratio picked a contrastive configuration that does nothing; MAP@100 picks one that works
 
@@ -733,6 +739,7 @@ WHAT IS NOT YET MEASURED: whether lr1e-4/KL10/t0.07 is still the winner at other
 checkpoints and scales. Job 8849088 runs the same twelve configurations at 50m
 checkpoint-540423, so the transfer question is answerable on MAP@100 on both sides once
 it lands. Nothing above has been re-measured at 100m/200m/400m.
+    UPDATE 2026-09-23: it is, at 540423 and at all four scales. See "Closing the loop".
 
 ## Contrastive hyperparameters transfer across BOTH scale and pretraining checkpoint
 
@@ -775,6 +782,7 @@ Only 50m@540423 is a canonical rung.
 
 WHAT IS NOT YET MEASURED: 100m. Its 48 arms predate the retrieval code; jobs 8851492
 and 8851650 are rescoring them, which will make this four scales instead of three.
+    UPDATE 2026-09-23: measured. See "Closing the loop" -- same winner at 100m.
 
 ## Report the metric-learning standards, under the names the literature uses
 
@@ -814,3 +822,64 @@ to 1e-6 on all three across four trials, and returns 1.0 on a constructed perfec
 WHAT IS NOT YET MEASURED: every contrastive number in this project is quoted in MAP@100.
 The saved encoders all carry final/, so re-scoring them in MAP@R is a rescore rather
 than a retrain, but it has not been done.
+
+    UPDATE 2026-09-23: the ladder (8851663) is backfilled in MAP@R; the rest is not.
+
+## Closing the loop, 2026-09-23: today's contrastive results in one place
+
+Everything below is scored on the task (MAP@R, Precision@1, R-Precision, and MAP@100
+where the runs predate MAP@R), never on the separation ratio.
+
+TEMPERATURE 0.03 BEATS 0.07 EVERYWHERE, BY A LOT (job 8856116, lr1e-4, KL10, 3 seeds):
+
+    cell        t0.03    t0.07    gain
+    50m@220k    0.4462   0.3087   +0.1375
+    50m@330k    0.4101   0.3548   +0.0553
+    200m@220k   0.3655   0.2552   +0.1103
+    200m@330k   0.3391   0.2170   +0.1221      MAP@R
+
+KL 100 is worse than KL 10 in every cell (0.15-0.29), so KL is bracketed at 10. 0.03 is
+again the LOWEST temperature tried; job 8856399's successor on debug-scaling extends it
+to 0.01. The optimum is still unlocated.
+
+50m STILL BEATS 200m AT THE BETTER TEMPERATURE, so that gap is not a recipe artefact:
++0.0807 at 220k (p=0.028) and +0.0711 at 330k (p=0.003). But only 50m and 200m have
+been run at t0.03 -- 100m and 400m have not, and at t0.07 400m sat ABOVE 200m, so
+"retrieval gets worse with scale" is not established as a curve. PLAN.md C2.
+
+PRETRAINING IS ALL OF IT (jobs 8853557/8854412 vs 8853558/8854760, t0.07, 6 seeds):
+a random-init encoder trained the same way lands at chance at every scale --
+MAP@100 0.010-0.012, Hit@1 0.027-0.036 -- against 0.34-0.41 and 0.75-0.78 pretrained,
+t=16-96. It never reaches even the UNTRAINED pretrained encoder (0.17 / 0.65). Because
+random = chance, the pretraining gain is simply the pretrained score. PLAN.md C3.
+
+HYPERPARAMETER RANKING TRANSFERS ACROSS ALL FOUR SCALES AND TWO CHECKPOINTS. The 100m
+cell (rescored by 8851492/8851650) completes it: lr1e-4/KL10/t0.07 wins in all five
+cells (50m@133k, 100m@138k, 200m@192k, 400m@181k, 50m@540k); 100m ranks with the others
+at rho +0.91/+0.78/+0.74/+0.85; mean pairwise rho over the five cells +0.81, min +0.70.
+
+BEST-MODEL SELECTION DOES NOT MATTER (job 8856159, eval on, select on MAP@R, 6 seeds vs
+the identical ladder cells). In training, MAP@R does peak mid-run (step 800 of 1347,
+0.3783 vs 0.3714 at the end, on the 800-row selection set), but on held-out rows the
+change is -0.0021 (p=0.92) at 50m@330k and -0.0056 (p=0.53) at 200m@330k: selection
+overfits a small eval set. Job 8856348 agrees from the other side -- final/ equals
+checkpoint-1347 exactly and checkpoint-1200 is ~0.003 lower on three seeds.
+
+GRADCACHE IS EXACT END TO END (job 8856115, 50m@330k, 6 seeds a side): chunk 2 vs off,
+MAP@R 0.3441 vs 0.3371, t=+0.46, p=0.65; the off arms reproduce the ladder (0.3318).
+Together with 19 unit tests this licenses sweeping P/K, which needs GradCache above a
+batch of four.
+
+"MORE NEGATIVES HURT" IS RETRACTED. It came from sweep-gradcache-v2 (8848463), decided
+on the separation ratio at lr2e-5/KL0/t0.2. Rescored on the task (8854486), 64 vs 4
+negatives is MAP@100 0.1681 vs 0.1707, t=-0.21, p=0.84 -- the ordering collapses rather
+than inverts, and all three widths sit at the untrained level, as that recipe does. The
+question is open, not answered the other way; job 8856399's successor sweeps it.
+
+THE CONTRASTIVE TRAINING OBJECTIVE IS SOLVED ALMOST AT ONCE: on 50m@330k the loss falls
+below 10% of chance (ln 4) by epoch 0.18 of 3.0, and at a batch of four each logged
+value is one noisy draw (last step 0.142, epoch 2.90 reached 0.0016). A trivially easy
+training task is itself a reason to expect wider batches to matter.
+
+NOT YET MEASURED: the ep30/ep100 encoders on MAP@R; t below 0.03; P/K at the current
+recipe; 100m and 400m at t0.03.
