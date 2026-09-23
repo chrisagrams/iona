@@ -64,6 +64,12 @@ class AlignModelArguments:
 class AlignDataArguments:
     processor_name_or_path: str | None = None
     dataset_repo: str = REPLICATE_REPO
+    # See ContrastiveDataArguments / grouped_retrieval.load_spectrum_datasets: `grouped`
+    # reads ms-contrastive-100k with its own splits. Same defaults as contrastive so a
+    # teacher and its student see the same rows.
+    dataset_format: str = "replicate"
+    include_consensus: bool = False
+    exclude_replicate_peptides: bool = True
     preprocessing_num_workers: int = 24
     max_peaks: int = 512
     validation_fraction: float = 0.1
@@ -271,8 +277,11 @@ def main(argv: list[str] | None = None) -> int:
                       flush=True)
         else:
             with training_args.main_process_first(local=False, desc="alignment data"):
-                datasets = build_alignment_datasets(
-                    data_args.dataset_repo, processor,
+                from msdelta.grouped_retrieval import load_spectrum_datasets
+                datasets = load_spectrum_datasets(
+                    data_args.dataset_format, data_args.dataset_repo, processor,
+                    include_consensus=data_args.include_consensus,
+                    exclude_replicate_peptides=data_args.exclude_replicate_peptides,
                     num_proc=data_args.preprocessing_num_workers or None,
                     validation_fraction=data_args.validation_fraction,
                     seed=training_args.seed,

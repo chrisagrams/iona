@@ -70,10 +70,15 @@ class GroupBatchSampler(Sampler[list[int]]):
         self.replicates = replicates
         self.seed = seed
         self.drop_last = drop_last
-        self.members: dict[int, np.ndarray] = {}
+        # One stable argsort, not a flatnonzero scan per group: that was O(groups * rows),
+        # harmless at 900 x 11k and ~3e10 comparisons at ms-contrastive-100k's
+        # 100k x 300k. Stable, so each group's indices stay ascending exactly as
+        # flatnonzero returned them and every draw is unchanged.
         groups = np.asarray(groups)
-        for group in np.unique(groups):
-            self.members[int(group)] = np.flatnonzero(groups == group)
+        order = np.argsort(groups, kind="stable")
+        keys, starts = np.unique(groups[order], return_index=True)
+        self.members: dict[int, np.ndarray] = {
+            int(k): members for k, members in zip(keys, np.split(order, starts[1:]))}
         self.epoch = 0
 
     def __len__(self) -> int:
@@ -660,6 +665,62 @@ def retrieval_metrics_exact(embeddings: Tensor, groups) -> dict[str, float]:
         "MAP@R": float(ap_r[scorable].mean()),
         "R@5": float(at5[scorable].mean()),
         "MAP@100": float(ap[scorable].mean()),
+    }
+
+
+def retrieval_metrics_topk(embeddings: Tensor, groups, k: int = 100, chunk: int = 2048,
+                           device=None) -> dict[str, float]:
+    """retrieval_metrics_exact's numbers without its n x n matrices.
+
+    The exact version argsorts a full similarity matrix: fine for the ~1,200-spectrum
+    replicate eval, ~30 GB for ms-contrastive-100k's ~36,000-spectrum test split. Every
+    metric it reports only looks at ranks <= max(R, 100), so a top-k per query chunk is
+    identical whenever every query's R is <= k -- asserted, not assumed. On that corpus
+    R is 2 or 3. Only exact ties can order differently.
+    """
+    e = F.normalize(embeddings.float(), dim=-1)
+    if device is not None:
+        e = e.to(device)
+    g = torch.as_tensor(np.asarray(groups), dtype=torch.long, device=e.device)
+    n = len(e)
+    n_rel_all = torch.bincount(g)[g] - 1
+    if int(n_rel_all.max()) > k:
+        raise ValueError(f"a query has R={int(n_rel_all.max())} relevant items > k={k}; "
+                         f"use retrieval_metrics_exact or raise k")
+    k = min(k, n - 1)
+    ranks = torch.arange(1, k + 1, dtype=torch.float32, device=e.device).unsqueeze(0)
+    sums = dict.fromkeys(("hit1", "at5", "ap100", "rprec", "mapr"), 0.0)
+    scorable = 0
+    for start in range(0, n, chunk):
+        q = torch.arange(start, min(start + chunk, n), device=e.device)
+        sim = e[q] @ e.T
+        sim[torch.arange(len(q), device=e.device), q] = float("-inf")
+        idx = sim.topk(k, dim=1).indices
+        hit = (g[idx] == g[q].unsqueeze(1)).float()
+        n_rel = n_rel_all[q].float()
+        keep = n_rel > 0
+        if not keep.any():
+            continue
+        hit, n_rel = hit[keep], n_rel[keep]
+        prec = hit.cumsum(1) / ranks
+        within_r = ranks <= n_rel.unsqueeze(1)
+        sums["hit1"] += float(hit[:, 0].sum())
+        sums["at5"] += float((hit[:, :5].sum(1) / n_rel).sum())
+        sums["ap100"] += float(((prec * hit).sum(1) / n_rel).sum())
+        sums["rprec"] += float(((hit * within_r).sum(1) / n_rel).sum())
+        sums["mapr"] += float(((prec * hit * within_r).sum(1) / n_rel).sum())
+        scorable += int(keep.sum())
+    if not scorable:
+        return {}
+    p1 = sums["hit1"] / scorable
+    return {
+        "Hit@1": p1,
+        "Precision@1": p1,
+        "R-Precision": sums["rprec"] / scorable,
+        "MAP@R": sums["mapr"] / scorable,
+        "R@5": sums["at5"] / scorable,
+        "MAP@100": sums["ap100"] / scorable,
+        "queries": float(scorable),
     }
 
 

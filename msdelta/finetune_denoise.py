@@ -647,6 +647,11 @@ def main(argv: list[str] | None = None) -> int:
         # cleanly and is then IGNORED -- the run restarts from scratch while looking as
         # though it resumed. See pbs/aurora-finetune-sweep.pbs RESUME_JOB.
         trainer.train(resume_from_checkpoint=training_args.resume_from_checkpoint)
+        # FT31: a run whose sampler yields no batch "finishes" at step 0 and then writes
+        # final/ and metrics exactly like a real one; the C2/C4 smoke 8859890 reported
+        # 14/14 ok that way. Fail loudly instead.
+        if trainer.state.global_step == 0:
+            raise SystemExit("trained 0 optimizer steps -- too few groups/rows for one batch?")
 
         if training_args.eval_test_split and datasets.get("test") is not None:
             metrics = trainer.evaluate(datasets["test"], metric_key_prefix="test")
