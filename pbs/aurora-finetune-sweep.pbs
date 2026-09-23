@@ -146,6 +146,7 @@ declare -A GRID_CHECK=(
     [configs/sweep-contrastive-scale-v2-random]="sweeps/make_contrastive_random_v2.py --check"
     # The pretraining-checkpoint ladder, middle two rungs first.
     [configs/sweep-ckpt-denoise]="sweeps/make_checkpoint_grid.py --task denoise --check"
+    [configs/sweep-ckpt-denoise-ends]="sweeps/make_checkpoint_grid.py --task denoise --wave ends --scales 50m 100m --check"
     [configs/sweep-ckpt-contrastive]="sweeps/make_checkpoint_grid.py --task contrastive --check"
     # Does the HP optimum move with pretraining? Asked once, at 50m, between
     # the 25%-trained checkpoint the config came from and the 100% one.
@@ -388,8 +389,17 @@ run_node() {
             fi
             # Sort by the numeric step, not lexically: checkpoint-9000 must not outrank
             # checkpoint-29072.
-            ckpt=$(ls -d "$dir"/checkpoint-* 2>/dev/null \
-                   | sed 's/.*checkpoint-//' | sort -n | tail -1)
+            # And take the newest COMPLETE one. A job killed mid-save leaves a newest
+            # checkpoint with no trainer_state.json (written near the end of a save);
+            # resuming from it failed all five arms of 8856525 within 65 s.
+            ckpt=""
+            for step in $(ls -d "$dir"/checkpoint-* 2>/dev/null \
+                          | sed 's/.*checkpoint-//' | sort -rn); do
+                if [[ -f $dir/checkpoint-$step/trainer_state.json ]]; then
+                    ckpt=$step; break
+                fi
+                echo "  [skip checkpoint-$step of $arm] incomplete: no trainer_state.json"
+            done
             if [[ -n $ckpt ]]; then
                 resume=(--resume_from_checkpoint "$dir/checkpoint-$ckpt")
                 echo "  [resume $arm] from step $ckpt in $RESUME_JOB"
@@ -478,15 +488,27 @@ for i in "${!NODES[@]}"; do
     fi
 done
 
-completed=$(ls -d "$SCRATCH_ROOT"/runs/sweep-*-"$JOB_ID" 2>/dev/null | wc -l)
+# Count arms that FINISHED, in the dirs they actually wrote to. A RESUME_JOB round
+# writes into the original job's dirs, so counting dirs named after this job reported
+# "0/3 ok, 3 never started" and exit 1 for a resume whose three arms all finished
+# (8846565). Existence of a dir is not completion either: denoise marks it with
+# test_results.json, contrastive with final/ plus retrieval_results.json.
+out_job=${RESUME_JOB:-$JOB_ID}
+completed=0
+for arm in "${ARM_LIST[@]}"; do
+    d=$SCRATCH_ROOT/runs/sweep-$arm-$out_job
+    if [[ -f $d/test_results.json || ( -d $d/final && -f $d/retrieval_results.json ) ]]; then
+        completed=$(( completed + 1 ))
+    fi
+done
 # `$(wc -l < missing 2>/dev/null || echo 0)` still prints a shell-level redirect error,
 # because the 2>/dev/null applies to wc and not to the redirect the shell performs first.
 failed_file=$SCRATCH_ROOT/runs/.failed-$JOB_ID
 failed_count=0
 [[ -f $failed_file ]] && failed_count=$(wc -l < "$failed_file")
-ok=$(( completed - failed_count ))
+ok=$completed
 echo; echo "=== done: $ok/${#ARM_LIST[@]} arms ok "\
-     "($failed_count failed, $(( ${#ARM_LIST[@]} - completed )) never started, "\
+     "($failed_count failed, $(( ${#ARM_LIST[@]} - completed - failed_count )) unfinished, "\
      "$node_failures node subshells died) ==="
 [[ $failed_count -gt 0 ]] && sed 's/^/  failed: /' "$failed_file"
 # A sweep that ran nothing must not look like a success to whatever reads the exit code.
