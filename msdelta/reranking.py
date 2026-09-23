@@ -595,7 +595,7 @@ def build_alignment_datasets(repo_id, processor, num_proc=None, validation_fract
 
     def prepare(example):
         if max_peaks is not None and len(example["mz"]) > max_peaks:
-            return {"mz": [], "log_intensity": [], "peptide": "", "charge": 0}
+            return {"mz": [], "log_intensity": [], "peptide": "", "charge": 0, "precursor": 0.0}
         try:
             values = processor(
                 torch.as_tensor(example["mz"], dtype=torch.float32),
@@ -603,7 +603,7 @@ def build_alignment_datasets(repo_id, processor, num_proc=None, validation_fract
                 padding=False,
             )
         except (ValueError, KeyError, TypeError):
-            return {"mz": [], "log_intensity": [], "peptide": "", "charge": 0}
+            return {"mz": [], "log_intensity": [], "peptide": "", "charge": 0, "precursor": 0.0}
         return {
             "mz": values["mz"][0] if values["mz"] and isinstance(values["mz"][0], list)
                   else values["mz"],
@@ -613,6 +613,10 @@ def build_alignment_datasets(repo_id, processor, num_proc=None, validation_fract
                               else values["log_intensity"]),
             "peptide": example.get("peptide") or "",
             "charge": int(example.get("charge") or 0),
+            # The MEASURED precursor m/z. The rescorer compares each candidate's mass to
+            # it; without it the rescorer rebuilt the precursor from the true peptide,
+            # which set the truth's mass error to exactly 0 and leaked the label.
+            "precursor": float(example.get("precursor") or 0.0),
         }
 
     rows = raw[split].map(prepare, remove_columns=raw[split].column_names,
