@@ -37,8 +37,8 @@ Status: ✅ answered · 🟡 partly · ⏳ running/queued · ⬜ not started
 | id | question | status | evidence / job |
 |---|---|---|---|
 | C0 | Is our metric valid? | ✅ | separation ratio does NOT predict retrieval (ρ −0.04 within scale). Use MAP@R |
-| C1 | What is the best training recipe? | ⏳ | wider batches and colder temperature both win by a lot: best MAP@R 0.45 → **0.77** (t0.01, 64 negatives). Both still at their edge → `sweep-conneg` (t 0.003–0.01 × width 64–512, + step-matched controls) |
-| C2 | Does retrieval improve with model size? | 🟡 | at the best cell 400m 0.765 ≈ 100m 0.764 > 50m 0.718 ≈ 200m 0.720 (220k, 3 seeds). The old "worse with scale" was a width-4 artefact. `sweep-conneg` adds seeds |
+| C1 | What is the best training recipe? | ⏳ | temperature ≈0.005 (0.003 at 200m, maybe colder with scale); width 64 beats 128–512 at 3 epochs but that is confounded with step count — step-matched controls in `8856642` (queued). Best MAP@R 0.45 → **0.79** |
+| C2 | Does retrieval improve with model size? | 🟡 | at each scale's best cell 50m 0.751 < 100m 0.783 < 200m 0.788 (220k, 3 seeds) — monotone so far; 400m in `8856642` |
 | C3 | How much does pretraining buy? | ✅ | ALL of it: random init trained contrastively lands at chance at every scale (MAP@100 ≈0.01, Hit@1 ≈0.03 vs 0.33–0.41 / 0.75–0.78 pretrained, t=16–96, 6 seeds). It never reaches even the UNTRAINED pretrained encoder. Since random = chance, the gap is just the pretrained score and updates with C2 |
 | C4 | Does retrieval improve with pretraining checkpoint? | 🟡 | ladder `8851663` ran at t0.07 — superseded recipe. Re-run after C1 |
 | C5 | Do contrastive HPs transfer across scale/checkpoint? | ✅ | same winner in all 5 cells (4 scales + 50m@540k), mean pairwise ρ +0.81; t0.03 beat t0.07 in all 4 cells tested |

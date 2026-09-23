@@ -45,6 +45,13 @@ CONFIG = {"--learning_rate": "2e-4", "--encoder_lr_scale": "0.5",
           "--per_device_train_batch_size": "1"}
 
 
+# Jobs whose test scores are not comparable. 8840345 was the first 216-arm grid, scored
+# on a reduced test set (1,440 spectra, not ~8,600) -- results/finetune/README.md marks
+# it "not comparable". One of its arms (0.8597) sat in the 50m@133k cell and dragged
+# that point from 0.932 to 0.927.
+EXCLUDE_JOBS = {"8840345"}
+
+
 def matches_config(text: str) -> bool:
     fields = dict(zip(text.split()[::2], text.split()[1::2]))
     return all(fields.get(k) == v for k, v in CONFIG.items())
@@ -82,7 +89,7 @@ def collect():
     out = collections.defaultdict(lambda: collections.defaultdict(list))
     for d in glob.glob(f"{RUNS}/sweep-*"):
         m = re.match(r"sweep-(.+)-(\d+)$", os.path.basename(d))
-        if not m or m.group(1) not in meta:
+        if not m or m.group(1) not in meta or m.group(2) in EXCLUDE_JOBS:
             continue
         p = os.path.join(d, "all_results.json")
         if not os.path.exists(p):
@@ -125,11 +132,8 @@ def by_scale(cov, metric, name):
         label_points(ax, x, y)
         ax.set_title(f"{s}   ({len(pts)} checkpoint{'s' if len(pts) > 1 else ''})",
                      loc="left", pad=12)
-        ax.set_xlabel("pretraining grad steps"); ax.set_ylabel(name)
+        ax.set_xlabel("pretraining grad steps (not compute)"); ax.set_ylabel(name)
         ax.grid(); ax.set_axisbelow(True); ax.margins(x=0.18, y=0.22)
-    fig.suptitle(f"{name} against pretraining checkpoint, one panel per scale. "
-                 f"Error bars are seed sem.", x=0.005, ha="left", fontsize=8.5,
-                 color=MUTED, y=1.03)
     fig.tight_layout()
     out = FIGS / f"ladder_by_scale_{metric.replace('test_', '')}.png"
     fig.savefig(out); plt.close(fig); return out
@@ -155,8 +159,6 @@ def by_checkpoint(cov, metric, name):
         ax.set_title(f"step {c:,}", loc="left", pad=12)
         ax.set_xlabel("model size"); ax.set_ylabel(name)
         ax.grid(); ax.set_axisbelow(True); ax.margins(x=0.22, y=0.22)
-    fig.suptitle(f"{name} against model size, one panel per pretraining checkpoint.",
-                 x=0.005, ha="left", fontsize=8.5, color=MUTED, y=1.03)
     fig.tight_layout()
     out = FIGS / f"ladder_by_checkpoint_{metric.replace('test_', '')}.png"
     fig.savefig(out); plt.close(fig); return out
@@ -172,7 +174,7 @@ def combined(cov, metric, name, ax):
         ax.errorbar(x, y, yerr=e, marker="o", ms=5, lw=1.7, capsize=3,
                     color=SCALE_COLOUR[s], label=s)
         label_points(ax, x, y)
-    ax.set_xlabel("pretraining grad steps"); ax.set_ylabel(name)
+    ax.set_xlabel("pretraining grad steps (not compute)"); ax.set_ylabel(name)
     ax.set_title(name, loc="left", pad=12)
     ax.grid(); ax.set_axisbelow(True); ax.margins(x=0.16, y=0.22)
     ax.legend(frameon=False, fontsize=8.5, title="model size", title_fontsize=8.5)
@@ -193,10 +195,6 @@ def main() -> int:
     fig, axes = plt.subplots(1, 2, figsize=(12.4, 4.4))
     for ax, (metric, name) in zip(axes, (("test_auroc", "AUROC"), ("test_f1", "F1"))):
         combined(cov, metric, name, ax)
-    fig.suptitle("Denoise across scale AND pretraining checkpoint. x is pretraining "
-                 "grad steps, NOT compute -- a 400m step costs ~8x a 50m step, so this "
-                 "axis understates the large models.",
-                 x=0.005, ha="left", fontsize=8.5, color=MUTED, y=1.04)
     fig.tight_layout()
     out = FIGS / "ladder_compute.png"
     fig.savefig(out); plt.close(fig); written.append(out)

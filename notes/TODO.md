@@ -773,6 +773,15 @@ The runner now walks down from the newest and takes the first checkpoint that ha
 trainer_state.json, logging each one it skips; the cost is one save interval (200
 steps). Retried as 8856558.
 
+## FT26. The device test suite (tests/gpu) segfaults — **Open**
+
+First recorded run of pbs/run_tests.pbs (job 8856984): the CPU suite passed on the
+compute node (375 passed, 26 skipped, 3 min), then `pytest tests/gpu` died with a
+Segmentation fault. No earlier log of the device suite exists, so this is not a
+regression we can date -- the suite has simply never been seen to pass. Which test
+crashes is being found with a verbose per-test run. Until it passes, commits are gated
+on the CPU suite only.
+
 ## Naming trap: our R@5 is not the literature's Recall@K
 
 Ours is the fraction of a query's relevant spectra in its top 5; the literature's

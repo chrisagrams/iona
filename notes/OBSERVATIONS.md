@@ -917,3 +917,30 @@ STATED AT THE STRENGTH IT HAS: 3 seeds per cell; seed sems at this recipe have r
 0.004-0.02, an order of magnitude below the width and temperature effects. The scale
 ordering at the best cell (gaps of ~0.001-0.05) needs the next grid's seeds before it
 is quoted as a curve.
+
+## Temperature settles near 0.005; wider than 64 loses at fixed epochs; retrieval rises with scale
+
+sweep-conneg, debug-scaling half (job 8856643, 108/108 arms): 50m/100m/200m at
+checkpoint-220000, lr1e-4, KL10, K=4, 3 epochs, 3 seeds, MAP@R.
+
+    best cell per scale       width 64
+    50m    t0.005   0.7508     (t0.003 0.7482, t0.01 0.7186)
+    100m   t0.005   0.7825     (t0.003 0.7731, t0.01 0.7636)
+    200m   t0.003   0.7878     (t0.005 0.7697, t0.01 0.7200)
+
+The t0.01 / width-64 anchor reproduces sweep-conbig to 0.0003 at every scale.
+
+TEMPERATURE: interior at 50m and 100m (0.005 >= 0.003 > 0.01), but at 200m 0.003 is
+best and is the coldest value tried, so the optimum may move colder with scale.
+400m (capacity half, 8856642) decides whether that pattern holds.
+
+WIDTH: beyond 64, MAP@R falls steeply at every scale and temperature, e.g. 50m t0.005
+0.751 / 0.697 / 0.602 / 0.440 at 64 / 128 / 256 / 512. AMBIGUOUS AS IT STANDS: at a
+fixed 3 epochs width 512 takes ~80 optimizer steps against ~660 at 64. The
+step-matched controls (256 x 12 epochs, 512 x 24 epochs, 50m) in 8856642 separate
+"fewer steps" from "more negatives stop helping". Do not quote "64 is optimal" before
+they land.
+
+SCALE: at each scale's best cell, 50m 0.751 < 100m 0.783 < 200m 0.788 -- the first
+monotone contrastive scaling seen in this project. 200m's apparent weakness at t0.01
+was a temperature effect: it needs a colder setting than the small models.
