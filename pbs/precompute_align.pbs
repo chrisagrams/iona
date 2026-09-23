@@ -1,0 +1,36 @@
+#!/bin/bash -l
+# Build a teacher-embedding cache only -- no alignment training afterwards.
+#
+#   qsub -q debug -l select=1 -l walltime=00:30:00 \
+#        -v ARGS_FILE=configs/r1-align-050m/training.args,TARGET_CACHE=/lus/.../align-targets-x \
+#        pbs/precompute_align.pbs
+#
+# aurora-finetune.pbs builds a cache as step one of training a student. This is for when
+# the student already exists and only the cache changes -- e.g. adding the measured
+# precursor column the rescorer needs. Refuses to overwrite an existing cache.
+#PBS -N msdelta-precompute
+#PBS -A UIC-HPC
+#PBS -l place=scatter
+#PBS -l filesystems=home:flare
+#PBS -j oe
+#PBS -o pbs/logs/
+set -uo pipefail
+REPO_DIR=${REPO_DIR:-${PBS_O_WORKDIR:-$PWD}}
+cd "$REPO_DIR"
+ARGS_FILE=${ARGS_FILE:?set ARGS_FILE}
+TARGET_CACHE=${TARGET_CACHE:?set TARGET_CACHE}
+VENV_DIR=${VENV_DIR:-$REPO_DIR/.venv}
+SCRATCH_ROOT=${SCRATCH_ROOT:-/lus/flare/projects/UIC-HPC/$USER/msdelta}
+[[ -e $TARGET_CACHE ]] && { echo "refusing to overwrite existing cache $TARGET_CACHE" >&2; exit 2; }
+set +u
+source /usr/share/lmod/lmod/init/bash
+module load "${FRAMEWORKS_MODULE:-frameworks/2025.3.1}"
+set -u
+export ONEAPI_DEVICE_SELECTOR=level_zero:gpu
+export ZE_FLAT_DEVICE_HIERARCHY=FLAT
+export ZE_AFFINITY_MASK=0
+export OMP_NUM_THREADS=${OMP_NUM_THREADS:-8}
+export PYTHONPATH=$REPO_DIR${PYTHONPATH:+:$PYTHONPATH}
+export HF_HOME=${HF_HOME:-$SCRATCH_ROOT/huggingface}
+export HF_HUB_OFFLINE=1 HF_DATASETS_OFFLINE=1
+"$VENV_DIR/bin/python" -m msdelta.precompute_align --args_file "$ARGS_FILE" --target_cache "$TARGET_CACHE"
