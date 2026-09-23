@@ -13,9 +13,9 @@ datasets:
 
 # Iona
 
-Iona is a transformer encoder for tandem mass spectra (MS/MS). It treats each centroided peak as a
-token and learns how peaks relate to each other through a per-head attention bias over the signed
-m/z difference (Δm/z) between every pair of peaks.
+Iona is a transformer encoder foundation model for tandem mass spectra (MS/MS). It treats each
+centroided peak as a token and learns how peaks relate to each other through a per-head attention
+bias over the signed m/z difference (Δm/z) between every pair of peaks.
 
 ## Model details
 
