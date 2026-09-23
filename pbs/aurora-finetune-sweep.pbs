@@ -94,6 +94,11 @@ done
 # skipping the check for an unrecognised path is how the pinned version stopped covering
 # anything, and SKIP_GRID_CHECK is there for the deliberate exception.
 declare -A GRID_CHECK=(
+    [configs/sweep-conbig]="sweeps/make_conbig.py"
+    [configs/sweep-conhp-eval]="sweeps/make_conhp_eval.py"
+    [configs/sweep-conpk]="sweeps/make_conpk.py"
+    [configs/sweep-gradcache-confirm]="sweeps/make_gradcache_confirm.py"
+    [configs/sweep-conhp-edge]="sweeps/make_conhp_edge.py"
     [configs/sweep-conhp-seeds]="sweeps/make_conhp_seeds.py"
     [configs/sweep-denoise]="sweeps/make_denoise_grid.py --check"
     [configs/sweep-denoise-100m]="sweeps/make_denoise_size_grid.py --size 100m --check"
@@ -166,7 +171,7 @@ fi
 if (( TILES_PER_ARM > 1 )) \
    && ! grep -q -- "--deepspeed" "$SWEEP_ROOT/${ARM_LIST[0]}/training.args"; then
     echo "TILES_PER_ARM=$TILES_PER_ARM but the arms name no --deepspeed config:" >&2
-    echo "  that is the DDP reducer, which takes a GPU page fault. See TODO.md FT7." >&2
+    echo "  that is the DDP reducer, which takes a GPU page fault. See notes/TODO.md FT7." >&2
     exit 2
 fi
 
@@ -373,7 +378,11 @@ run_node() {
         # finishes exactly what is missing and repeats nothing.
         if [[ -n ${RESUME_JOB:-} ]]; then
             dir=$SCRATCH_ROOT/runs/sweep-$arm-$RESUME_JOB
-            if [[ -f $dir/test_results.json ]]; then
+            # Denoise signals completion with test_results.json. Contrastive never
+            # writes one -- it writes final/ and retrieval_results.json -- so testing
+            # only the first re-ran every FINISHED contrastive arm on resume.
+            if [[ -f $dir/test_results.json ]] \
+               || [[ -d $dir/final && -f $dir/retrieval_results.json ]]; then
                 echo "  [skip $arm] already complete in $RESUME_JOB"
                 continue
             fi
