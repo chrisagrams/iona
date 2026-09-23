@@ -37,8 +37,8 @@ Status: ✅ answered · 🟡 partly · ⏳ running/queued · ⬜ not started
 | id | question | status | evidence / job |
 |---|---|---|---|
 | C0 | Is our metric valid? | ✅ | separation ratio does NOT predict retrieval (ρ −0.04 within scale). Use MAP@R |
-| C1 | What is the best training recipe? | ⏳ | lr1e-4 / KL10 / **t0.03** best so far, but t0.03 is the grid edge and P/K (negatives) never varied → `sweep-conbig`, 108 arms, running on debug-scaling in 1h rounds (round 1: `8856460`) |
-| C2 | Does retrieval improve with model size? | 🟡 | 50m > 200m at t0.03 (p=0.003). 100m/400m never run at current recipe → `sweep-conbig`, 108 arms, running on debug-scaling in 1h rounds (round 1: `8856460`) |
+| C1 | What is the best training recipe? | ⏳ | wider batches and colder temperature both win by a lot: best MAP@R 0.45 → **0.77** (t0.01, 64 negatives). Both still at their edge → `sweep-conneg` (t 0.003–0.01 × width 64–512, + step-matched controls) |
+| C2 | Does retrieval improve with model size? | 🟡 | at the best cell 400m 0.765 ≈ 100m 0.764 > 50m 0.718 ≈ 200m 0.720 (220k, 3 seeds). The old "worse with scale" was a width-4 artefact. `sweep-conneg` adds seeds |
 | C3 | How much does pretraining buy? | ✅ | ALL of it: random init trained contrastively lands at chance at every scale (MAP@100 ≈0.01, Hit@1 ≈0.03 vs 0.33–0.41 / 0.75–0.78 pretrained, t=16–96, 6 seeds). It never reaches even the UNTRAINED pretrained encoder. Since random = chance, the gap is just the pretrained score and updates with C2 |
 | C4 | Does retrieval improve with pretraining checkpoint? | 🟡 | ladder `8851663` ran at t0.07 — superseded recipe. Re-run after C1 |
 | C5 | Do contrastive HPs transfer across scale/checkpoint? | ✅ | same winner in all 5 cells (4 scales + 50m@540k), mean pairwise ρ +0.81; t0.03 beat t0.07 in all 4 cells tested |
@@ -66,7 +66,7 @@ encoder that, we now know, was barely better than untrained.
 DENOISE                                   CONTRASTIVE
 ───────                                   ───────────
 D1 ✅  D4 ✅                               C0 ✅  C3 ✅  C5 ✅  C6 ✅
-D2 ⏳ 5 scratch arms 8856558                 C1 ⏳ sweep-conbig (temp × P/K × 4 scales)
+D2 ⏳ 5 scratch arms 8856558                 C1 ⏳ sweep-conneg (colder × wider × 4 scales)
 D3 ⏳ ladder 8850494 → ends wave                │   also answers C2 at 220k
       └─► denoise scaling figures               ▼
           (AUROC and F1)                  freeze recipe R*

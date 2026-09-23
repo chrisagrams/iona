@@ -883,3 +883,37 @@ training task is itself a reason to expect wider batches to matter.
 
 NOT YET MEASURED: the ep30/ep100 encoders on MAP@R; t below 0.03; P/K at the current
 recipe; 100m and 400m at t0.03.
+
+## More negatives help a lot; the four-spectrum batch was holding contrastive back
+
+sweep-conbig (job 8856460, 107/108 arms), all scales at checkpoint-220000, lr1e-4,
+KL10, GradCache chunk 4, 3 seeds per cell, MAP@R:
+
+    t0.01        P*K 4    P*K 16   P*K 64
+    50m          0.5116   0.6642   0.7183
+    100m         0.5391   0.6978   0.7639
+    200m         0.4478   0.6556   0.7197
+    400m         0.5859   0.7082   0.7653
+
+WIDER BATCHES WIN EVERYWHERE: 4 -> 64 adds 0.19-0.27 MAP@R at every scale and at every
+temperature tried. "More negatives hurt" was not just unsupported, it was backwards;
+every contrastive run before this trained at P*K 4.
+
+LOWER TEMPERATURE WINS EVERYWHERE: t0.01 > 0.02 > 0.03 in all 12 (scale, width)
+columns. Best MAP@R goes from 0.45 (t0.03, width 4) to 0.77.
+
+BOTH AXES ARE AT THEIR EDGE AGAIN (64 is the widest, 0.01 the coldest), so the optimum
+is still unlocated. sweep-conneg extends them: t {0.003, 0.005, 0.01} x width
+{64, 128, 256, 512}, plus step-matched controls at 50m, since wider batches at a fixed
+3 epochs take fewer optimizer steps (~660 at 64, ~80 at 512).
+
+THE SCALE PICTURE CHANGES. At the best setting 400m (0.7653) and 100m (0.7639) beat
+50m (0.7183); 200m (0.7197) is level with 50m. The earlier "retrieval gets worse with
+scale" was measured at width 4 and does not survive. 200m being the odd one out at
+220k matches earlier signs that the 200m run at 220k is weak (it also DECLINED from
+220k to 330k in the ladder) -- to be checked at other checkpoints, not assumed.
+
+STATED AT THE STRENGTH IT HAS: 3 seeds per cell; seed sems at this recipe have run
+0.004-0.02, an order of magnitude below the width and temperature effects. The scale
+ordering at the best cell (gaps of ~0.001-0.05) needs the next grid's seeds before it
+is quoted as a curve.

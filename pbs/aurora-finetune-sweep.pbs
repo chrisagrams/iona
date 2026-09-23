@@ -94,6 +94,7 @@ done
 # skipping the check for an unrecognised path is how the pinned version stopped covering
 # anything, and SKIP_GRID_CHECK is there for the deliberate exception.
 declare -A GRID_CHECK=(
+    [configs/sweep-conneg]="sweeps/make_conneg.py --check"
     [configs/sweep-conbig]="sweeps/make_conbig.py"
     [configs/sweep-conhp-eval]="sweeps/make_conhp_eval.py"
     [configs/sweep-conpk]="sweeps/make_conpk.py"
