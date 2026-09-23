@@ -31,6 +31,9 @@ EVERY predicate below must hold. Any one failing skips the run:
   3. final/ exists and holds real weights           -> the model we keep is really there
   4. the run's job id is not queued or running      -> nothing is writing to it
   5. the target is a directory literally named checkpoint-<digits>
+  6. nothing directly under the run dir changed in the last --quiet-hours (default 6):
+     a resubmitted round writes into dirs named after the FIRST job, so a live job's id
+     need not appear in the dir name and predicate 4 alone cannot see it
 """
 
 from __future__ import annotations
@@ -41,6 +44,7 @@ import os
 import re
 import shutil
 import subprocess
+import time
 from pathlib import Path
 
 TASK = "denoise"
@@ -60,13 +64,21 @@ def active_job_ids() -> set[str]:
     return {m.group(1) for m in re.finditer(r"^(\d+)\.", out, re.M)}
 
 
-def candidates(active: set[str]):
+def recently_touched(run: Path, hours: float) -> bool:
+    cutoff = time.time() - hours * 3600
+    return any(e.stat(follow_symlinks=False).st_mtime > cutoff for e in os.scandir(run)) \
+        or run.stat().st_mtime > cutoff
+
+
+def candidates(active: set[str], quiet_hours: float = 6.0):
     for run in sorted(RUNS.glob("sweep-*")):
         run = run.resolve()
         if not str(run).startswith(str(RUNS) + os.sep):       # 1
             continue
         job = run.name.rsplit("-", 1)[-1]
         if job in active:                                      # 4
+            continue
+        if recently_touched(run, quiet_hours):                 # 6
             continue
         results = run / "all_results.json"
         if not results.exists():
@@ -99,20 +111,26 @@ def size_of(path: Path) -> int:
 
 
 def main() -> int:
+    global TASK, RUNS
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--task", choices=("denoise", "contrastive"), default="denoise",
                     help="which task's runs to prune; never both at once")
     ap.add_argument("--limit", type=int, help="only consider the first N runs")
+    ap.add_argument("--runs", type=Path, default=RUNS,
+                    help="runs root; point at a COPY to test the script before a live run")
+    ap.add_argument("--quiet-hours", type=float, default=6.0,
+                    help="skip runs with anything modified this recently")
     ap.add_argument("--execute", action="store_true",
                     help="actually delete. Without it nothing is removed.")
     cli = ap.parse_args()
-    global TASK
     TASK = cli.task
+    RUNS = cli.runs.resolve()
+    print(f"  runs root: {RUNS}   task: {TASK}")
 
     active = active_job_ids()
     print(f"  active job ids (excluded): {sorted(active) or 'none'}")
-    runs = list(candidates(active))
+    runs = list(candidates(active, cli.quiet_hours))
     if cli.limit:
         runs = runs[:cli.limit]
     freed = 0

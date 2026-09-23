@@ -13,11 +13,11 @@ LEGEND  [x] done  [~] RUNNING  [ ] queued / next  [>] blocked on something  [X] 
 JOBS  (each tagged with the PLAN.md question it answers)
 ──────────────────────────────────────────────────────────────────────────
   [~] C1+C2  sweep-conbig on debug-scaling: temp 0.01/0.02/0.03 x P/K 4/16/64
-             x 4 scales @220k, 108 arms. 1h slots, resubmitted until done;
-             interrupted arms restart from step 0 (no mid-run checkpoints)
-  [ ] D3     8850494 denoise ladder 220k+330k x 4 scales -- capacity, queued
-  [>] D2     5 scratch arms of 8847663 incomplete -- need a long-walltime resume
-  [>] D3     ends wave 10k/120k/430k/540k at 50m+100m -- built, not submitted
+             x 4 scales @220k, 108 arms. 1h rounds, resubmitted until done
+             (round 1: 8856460); interrupted arms restart from step 0
+  [~] D3     8850494 denoise ladder 220k+330k x 4 scales -- capacity, running
+  [ ] D2     8856558 resume of the 5 unfinished scratch arms -- capacity, queued
+  [ ] D3     8856549 ends wave 10k/120k/430k/540k x 50m+100m, 24 arms -- queued
 
 
 DENOISE  (AUROC and F1)
@@ -25,7 +25,7 @@ DENOISE  (AUROC and F1)
   [x] D1 model size ...... AUROC 0.9317 / 0.9400 / 0.9447 / 0.9434, 6 seeds
                            400m turnover real (t=-6.3), not a budget artefact
   [~] D2 pretraining ..... +0.046 AUROC at ep4, +0.032 at ep8 (50m)
-                           all-scale scratch grid: 7/12 arms
+                           all-scale scratch grid: 7/12, rest resuming
   [ ] D3 checkpoints ..... only 50m has two points: 0.9272 -> 0.9365, 133k -> 540k
   [x] D4 HP transfer ..... lr2e-4 / es0.5 wins at ckpt 1 and at 540423
 
@@ -45,12 +45,16 @@ CONTRASTIVE  (MAP@R, Precision@1, R-Precision)
   [X] "more negatives hurt" -- retracted, was a ratio artefact
 
 
+RERANKING  (Hit@1, downstream of contrastive)
+──────────────────────────────────────────────────────────────────────────
+  [x] R0 baseline ........ feature-only rescorer Hit@1 0.889
+  [>] R1 best encoders ... waits for C1; last attempt (old recipe) cost -0.109
+  [>] R2 cross-encoder ... only if R1 shows no gain
+
+
 DECISIONS NEEDED
 ──────────────────────────────────────────────────────────────────────────
-  [ ] delete 2.85 TB of contrastive intermediate checkpoints? (dry run done)
-  [ ] submit D2 resume and D3 ends wave?
-  [ ] reranking (feature rescorer Hit@1 0.889; cross-encoder never started)
-      is not in PLAN.md -- in scope or parked?
+  (none -- everything is queued or running)
 ```
 
 Job history is not kept here any more: `pbs/job_history.sh` regenerates it from the

@@ -755,6 +755,24 @@ Adam and the LR schedule mid-run; grids driven by repeated resubmission (sweep-c
 therefore save no intermediate checkpoints, so an interrupted arm restarts cleanly from
 step 0 with its seed.
 
+## FT24. The sweep's closing tally misreported every RESUME_JOB round — **FIXED**
+
+It counted run dirs named after the CURRENT job, but a resume writes into the original
+job's dirs, so 8846565 printed "0/3 arms ok, 3 never started" and exited 1 while all
+three arms had finished and written test results. That false failure is why the D2
+resume sat unsubmitted. The tally now counts arms holding a completion marker
+(test_results.json, or final/ + retrieval_results.json) in the dirs they wrote to.
+
+## FT25. Resume picked a half-written checkpoint — **FIXED**
+
+A job killed while saving leaves its newest checkpoint without trainer_state.json. The
+resume path took the highest step unconditionally, so all five D2 arms of 8856525 died
+in 30-66 s with FileNotFoundError on checkpoint-N/trainer_state.json. Every one of the
+five had exactly this shape: newest checkpoint incomplete, the three before it whole.
+The runner now walks down from the newest and takes the first checkpoint that has a
+trainer_state.json, logging each one it skips; the cost is one save interval (200
+steps). Retried as 8856558.
+
 ## Naming trap: our R@5 is not the literature's Recall@K
 
 Ours is the fraction of a query's relevant spectra in its top 5; the literature's
