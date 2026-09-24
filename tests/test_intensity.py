@@ -7,9 +7,11 @@ from pathlib import Path
 import numpy as np
 import torch
 from pyteomics import mass
+from transformers import TrainingArguments
 
 from msdelta.configuration_msdelta import MSDeltaConfig, MSDeltaIntensityPredictionConfig
 from msdelta.intensity import (
+    IntensityTrainer,
     MSDeltaIntensityProcessor,
     PrositIntensityDataset,
     fit_intensity_prior,
@@ -149,6 +151,48 @@ class IntensityPredictionModelTests(unittest.TestCase):
         valid = self.rows["labels"] >= 0
         self.assertTrue((output.intensities[~valid] == -1).all())
         self.assertTrue(torch.allclose(output.intensities.amax(dim=-1), torch.ones(3)))
+
+    def test_finetuning_trains_every_used_encoder_parameter(self):
+        for checkpointing in (False, True):
+            with self.subTest(gradient_checkpointing=checkpointing):
+                model = MSDeltaForIntensityPrediction(self.config, encoder=MSDeltaModel(ENCODER))
+                if checkpointing:
+                    model.gradient_checkpointing_enable()
+                model.train()
+                self.assertTrue(model.msdelta.training)
+                model(**self.batch).loss.backward()
+                mask_token = model.msdelta.embed.mask_token
+                self.assertFalse(mask_token.requires_grad)
+                # Every other trainable parameter is reached, so DDP can run
+                # with find_unused_parameters=False.
+                missing = [
+                    name
+                    for name, p in model.named_parameters()
+                    if p.requires_grad and p.grad is None
+                ]
+                self.assertEqual(missing, [])
+
+    def test_encoder_gets_its_own_learning_rate(self):
+        model = MSDeltaForIntensityPrediction(self.config, encoder=MSDeltaModel(ENCODER))
+        with tempfile.TemporaryDirectory() as directory:
+            trainer = IntensityTrainer(
+                model=model,
+                args=TrainingArguments(
+                    output_dir=directory, learning_rate=1e-3, weight_decay=0.01, report_to=[]
+                ),
+                ion_pair_budget=1024,
+                encoder_learning_rate=1e-5,
+            )
+            optimizer = trainer.create_optimizer()
+        encoder_ids = {id(p) for p in model.msdelta.parameters()}
+        seen = set()
+        for group in optimizer.param_groups:
+            in_encoder = {id(p) in encoder_ids for p in group["params"]}
+            self.assertEqual(len(in_encoder), 1, "groups must not mix encoder and head")
+            self.assertEqual(group["lr"], 1e-5 if in_encoder.pop() else 1e-3)
+            seen.update(id(p) for p in group["params"])
+        trainable = {id(p) for p in model.parameters() if p.requires_grad}
+        self.assertEqual(seen, trainable)
 
     def test_encoder_free_control_ignores_the_encoder(self):
         config = MSDeltaIntensityPredictionConfig(

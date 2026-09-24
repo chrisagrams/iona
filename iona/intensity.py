@@ -12,6 +12,10 @@ by ``scripts/convert_prosit_hdf5.py`` into memory-mapped ``.npy`` arrays.
 ``--encoder-init`` selects the controls that make the headline number
 interpretable: ``random`` freezes an untrained encoder of the same shape, and
 ``none`` drops the encoder states so the head sees only Prosit's metadata.
+
+By default the encoder is frozen and only the head trains. ``--finetune-encoder``
+trains the encoder as well, at its own ``--encoder-learning-rate``; add
+``--gradient-checkpointing`` (or lower ``--ion-pair-budget``) if memory runs out.
 """
 
 from __future__ import annotations
@@ -216,9 +220,34 @@ class PrositIntensityDataset(Dataset):
 class IntensityTrainer(Trainer):
     """Batch spectra by padded ion-pair count; attention bias memory is O(N^2)."""
 
-    def __init__(self, *args, ion_pair_budget: int, **kwargs):
+    def __init__(
+        self, *args, ion_pair_budget: int, encoder_learning_rate: float | None = None, **kwargs
+    ):
         super().__init__(*args, **kwargs)
         self.ion_pair_budget = ion_pair_budget
+        self.encoder_learning_rate = encoder_learning_rate
+
+    def create_optimizer(self, model=None):
+        # Build the stock optimizer, then give encoder parameters their own
+        # learning rate: a fresh head wants ~1e-3, pretrained weights far less.
+        optimizer = super().create_optimizer(model)
+        if self.encoder_learning_rate is None:
+            return optimizer
+        opt_model = cast(MSDeltaForIntensityPrediction, self.model if model is None else model)
+        encoder_ids = {id(p) for p in opt_model.msdelta.parameters()}
+        groups = []
+        for group in optimizer.param_groups:
+            settings = {k: v for k, v in group.items() if k != "params"}
+            head = [p for p in group["params"] if id(p) not in encoder_ids]
+            encoder = [p for p in group["params"] if id(p) in encoder_ids]
+            if head:
+                groups.append({**settings, "params": head})
+            if encoder:
+                groups.append({**settings, "params": encoder, "lr": self.encoder_learning_rate})
+        optimizer.param_groups.clear()
+        for group in groups:
+            optimizer.add_param_group(group)
+        return optimizer
 
     def _budget_loader(self, dataset: PrositIntensityDataset, num_processes: int) -> DataLoader:
         return DataLoader(
@@ -395,7 +424,23 @@ def main(argv: list[str] | None = None) -> int:
         help="max padded ions^2 summed over a training batch (bounds bias memory)",
     )
     parser.add_argument("--eval-batch-size", type=int, default=64)
-    parser.add_argument("--learning-rate", type=float, default=1e-3)
+    parser.add_argument("--learning-rate", type=float, default=1e-3, help="head learning rate")
+    parser.add_argument(
+        "--finetune-encoder",
+        action="store_true",
+        help="train the encoder too (default: frozen encoder, head only)",
+    )
+    parser.add_argument(
+        "--encoder-learning-rate",
+        type=float,
+        default=1e-5,
+        help="encoder learning rate with --finetune-encoder",
+    )
+    parser.add_argument(
+        "--gradient-checkpointing",
+        action="store_true",
+        help="recompute encoder activations in backward to save memory when fine-tuning",
+    )
     parser.add_argument("--weight-decay", type=float, default=0.01)
     parser.add_argument("--warmup-ratio", type=float, default=0.02)
     parser.add_argument("--eval-steps", type=int, default=1000)
@@ -406,6 +451,10 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--wandb-project", help="log to this W&B project (off when unset)")
     parser.add_argument("--wandb-entity")
     args = parser.parse_args(argv)
+    if args.finetune_encoder and args.encoder_init == "none":
+        parser.error(
+            "--finetune-encoder needs an encoder; it cannot be used with --encoder-init none"
+        )
 
     wandb_run = None
     if args.wandb_project:
@@ -441,13 +490,15 @@ def train_and_evaluate(args: argparse.Namespace, wandb_run: wandb.Run | None) ->
         head_dropout=args.head_dropout,
         use_encoder_states=args.encoder_init != "none",
     )
-    model = MSDeltaForIntensityPrediction(config, encoder=encoder, freeze_encoder=True)
+    model = MSDeltaForIntensityPrediction(
+        config, encoder=encoder, freeze_encoder=not args.finetune_encoder
+    )
     processor = MSDeltaIntensityProcessor(
         fit_intensity_prior(train.subset(args.prior_samples, args.seed + 1), config),
         max_fragment_charge=config.max_fragment_charge,
     )
     trainable = sum(p.numel() for p in model.parameters() if p.requires_grad)
-    print(f"trainable head parameters: {trainable:,}; train spectra: {len(train):,}")
+    print(f"trainable parameters: {trainable:,}; train spectra: {len(train):,}")
     if wandb_run is not None:
         wandb_run.config.update(
             {
@@ -480,6 +531,7 @@ def train_and_evaluate(args: argparse.Namespace, wandb_run: wandb.Run | None) ->
         seed=args.seed,
         data_seed=args.seed,
         report_to=["wandb"] if args.wandb_project else [],
+        gradient_checkpointing=args.gradient_checkpointing and args.finetune_encoder,
         ddp_find_unused_parameters=False,
     )
     trainer = IntensityTrainer(
@@ -491,6 +543,7 @@ def train_and_evaluate(args: argparse.Namespace, wandb_run: wandb.Run | None) ->
         processing_class=processor,
         compute_metrics=intensity_metrics,
         ion_pair_budget=args.ion_pair_budget,
+        encoder_learning_rate=args.encoder_learning_rate if args.finetune_encoder else None,
     )
     trainer.train()
     trainer.save_model()
