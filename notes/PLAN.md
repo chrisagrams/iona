@@ -83,8 +83,8 @@ External reference points; each names the question it serves.
 
 - [x] **Binned cosine** (spectral-library dot product), C7/C2 — in `eval_grouped_retrieval`, scored by 8860250
 - [ ] **GLEAMS** (Bittremieux et al., Nat Methods 2022), spectrum→spectrum, C7 — not on PyPI; GitHub install with an old TensorFlow in its OWN venv (never the project env). ~0.5–1 day. Caveat: trained on MassIVE-KB, which may overlap our test spectra
-- [ ] **Sage + mokapot** (PSMs at 1% FDR), R0–R2 — prebuilt Sage binary + mokapot in their own venv, raw mzML + FASTA; ~1–1.5 days setup, a few CPU node-hours. Wait for the incoming reranking dataset's format first: if it ships search results, only mokapot is needed (~0.5 day)
-- [ ] later, if R needs them: MS²Rescore (~1 day on top of Sage+mokapot), Prosit/Oktoberfest (1–2 days), yHydra (1–3 days, cross-modal, A-track)
+- [x] ~~**Sage + mokapot**~~ — dropped 2026-09-24 (the incoming reranking dataset sets the R baselines)
+- [ ] if R needs them: MS²Rescore, Prosit/Oktoberfest (would need a search engine first; revisit with the reranking dataset); yHydra (1–3 days, cross-modal, A-track)
 
 ## Order of work
 
