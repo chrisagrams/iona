@@ -238,6 +238,7 @@ def fig_zeroshot_layers(res=None):
     handles = [mlines.Line2D([], [], color=SCALE_COLOUR[s], lw=2, label=s) for s in ORDER]
     handles += [mlines.Line2D([], [], color=MUTED, ls=style[c], label=f"ckpt {c}")
                 for c in ("010k", "220k", "540k")]
+    handles[-1].set_label("ckpt 540k (400m: 430k)")
     ax.legend(handles=handles, frameon=False, fontsize=7.8, ncol=2)
     ax.set_xlabel("relative depth (block / number of blocks)"); ax.set_ylabel("MAP@R")
     ax.set_title("frozen encoders, every block", loc="left", pad=12)
