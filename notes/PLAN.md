@@ -56,7 +56,7 @@ library search. Metric: peptide->spectrum Hit@1 / MAP@R on held-out peptides.
 | id | question | status | evidence / job |
 |---|---|---|---|
 | A0 | What does the current student reach, and on what? | 🟡 | R1's student: Hit@1 0.73 on 94 held-out replicate-corpus peptides (50m teacher), trained on ~855. Blind to adjacent-residue swaps (57% vs near-miss decoys). Not yet scored on ms-contrastive-100k |
-| A1 | Does training on ms-contrastive-100k (~88k peptides) give a much better student? | ⏳ | `configs/a1-align-100k-400m-c1` (teacher: C1 400m ep12, 0.711 on 100k test); smoke 8860290 |
+| A1 | Does training on ms-contrastive-100k (~88k peptides) give a much better student? | 🟡 | **yes on validation**: teacher C7-50m step 600, cross-modal Hit@1 **0.932** (MRR 0.945) over 747 candidates, vs 0.73 for R1's student. Test-split score pending. Job 8861093 |
 | A2 | Does student quality track teacher quality? | ⬜ | re-run A1 with the C7 teacher(s); only --pretrained_path changes |
 | A3 | Does order-aware pooling fix the adjacent-swap blindness? | ⬜ | mean+max pooling is nearly a bag of residues; try a CLS/attention pool, scored on the swap test and Hit@1 |
 

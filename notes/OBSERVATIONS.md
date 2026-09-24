@@ -1168,3 +1168,18 @@ The head closes part of its 3-epoch deficit but still loses 0.05 at our full bud
 the pre-head features (SimCLR's readout) lose 0.17. DECISION: keep the no-head design
 (normalised mean+max of the last layer). Nothing is rerun. 100k-test scoring of these arms
 is in 8861096 for the record.
+
+## A1: a peptide encoder trained on ms-contrastive-100k reaches Hit@1 0.93 (2026-09-24)
+
+Teacher: C7 50m continued, step 600, seed 1 (0.831 exp MAP@R on the 100k test). Cache built
+sharded on 12 tiles (8861039 + 8861075); student = configs/a1-align-100k-050m-c7s600
+(PeptideEncoder 4x256, L2 to the teacher's normalised embedding, batch 64, 3 epochs,
+~12k steps, 257 s), job 8861093. In-training cross-modal check on 2,000 validation spectra
+against 747 candidate peptides:
+
+    Hit@1 0.932   Hit@5 0.962   MRR 0.945
+    (R1's student, replicate corpus: Hit@1 0.73 on 94 held-out peptides)
+
+NOT YET MEASURED: the 10k-analyte test split; seeds; a 400m teacher. C9's 100k-test scores
+for the record: head arms 0.534 / 0.550 / 0.551 exp MAP@R vs 0.657 no-head (C2).
+C7 50m keeps rising: step 300 0.81, 600 0.83, 900 0.84.
