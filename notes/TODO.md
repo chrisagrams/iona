@@ -816,7 +816,7 @@ so far used the leaky split. Note the pool is small: 94 held-out peptides in tot
 
 | # | hazard | verdict | evidence |
 |---|---|---|---|
-| H1 | weight decay applied to biases/LayerNorm; `--weight_decay` ignored | **CONFIRMED, open** | custom `create_optimizer` (denoise + contrastive) passes no `weight_decay`; torch AdamW default 0.01 hits every param. Configs say 0.01, so the value coincides. Fix deferred until after C2/C4 + A/B |
+| H1 | weight decay applied to biases/LayerNorm; `--weight_decay` ignored | **CONFIRMED, open -- DENOISE ONLY** (contrastive runs use encoder_lr_scale 1.0, which falls through to HF's own optimizer with proper no-decay groups) | custom `create_optimizer` (denoise + contrastive) passes no `weight_decay`; torch AdamW default 0.01 hits every param. Configs say 0.01, so the value coincides. Fix deferred until after C2/C4 + A/B |
 | H2 | denoise F1 thresholded at logit 0, not tuned | **by design, noted** | `finetune_denoise.py`; same threshold at every scale, so comparisons are fair; absolute F1 may understate |
 | H3 | eval subsets differ between runs | **checked, OK but underpowered** | replicate eval: `eval_alignment_rows` 2000 > 1,167 validation spectra, so every run scores all 99 groups. 99 groups is too few (C2 gap 0.013 invisible); ms-contrastive-100k test (35,734 spectra, 9,950 analytes) replaces it |
 | H4 | KL reference not frozen | **checked, OK** | `MSDeltaForContrastive.__init__`: `reference.requires_grad_(False)`, `.eval()`, re-`eval()` in `train()`; loaded as a separate `from_pretrained` copy |

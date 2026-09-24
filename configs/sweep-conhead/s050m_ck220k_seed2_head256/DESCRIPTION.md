@@ -1,0 +1,1 @@
+C9 PROJECTION-HEAD ARM: 50m at checkpoint 220000, seed 2. The frozen C1 recipe plus master's head shape (pooled -> 512 -> 256, dropout 0.1); the control is sweep-confreeze s050m_ck220k_seed2. Scores both the head output and the pre-head features.

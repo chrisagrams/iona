@@ -56,10 +56,16 @@ FROZEN = "/flare/UIC-HPC/khuss/msdelta/pretrained"
 # cannot reach 540423 at all yet, so those cells are dropped rather than substituted.
 AVAILABLE = {"50m":  ("10000", "120000", "220000", "330000", "430000", "540423"),
              "100m": ("10000", "120000", "220000", "330000", "430000", "540423"),
-             "200m": ("10000", "120000", "220000", "330000", "430000"),
-             "400m": ("10000", "120000", "220000")}
+             # 540423 backed up 2026-09-23 from cgrams/msdelta-runs (canonical).
+             "200m": ("10000", "120000", "220000", "330000", "430000", "540423"),
+             # 400m pretraining STOPPED at 255058 of 540423 (47%; its final/ == that
+             # checkpoint, Sep 21). 255058 is therefore its last rung, not a canonical one.
+             "400m": ("10000", "120000", "220000", "255058")}
 WAVES = {"middle": ("220000", "330000"),
-         "ends":   ("10000", "120000", "430000", "540423")}
+         "ends":   ("10000", "120000", "430000", "540423"),
+         # The same rungs for 200m/400m, which were still pretraining when "ends" ran.
+         # Its own name so its own directory: "ends" is a finished record (8856549).
+         "ends-big": ("10000", "120000", "430000", "540423", "255058")}
 CELLS = [(s, c) for s in AVAILABLE for c in WAVES["middle"] if c in AVAILABLE[s]]
 
 TASKS = {

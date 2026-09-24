@@ -1076,3 +1076,32 @@ peptides (and zero peptide+charge) between train and validation or test. The
 contrastive/alignment split (10% of peptides, seed 0) shares zero, as designed. The
 rescorer's spectrum-level re-split shared 90 of 90 test peptides. Not checkable here:
 overlap between test sets and the pretraining corpus, which needs its manifest.
+
+## C7 (first read): on ms-contrastive-100k, an unlearned binned cosine beats every trained encoder (2026-09-23)
+
+Test split, 9,950 analytes, replicate-corpus peptides excluded, 25,137 experimental-spectrum
+queries (R=2); jobs 8860041/8860206/8860250, `results/finetune/contrastive/grouped100k-test/`.
+
+    experimental MAP@R (Hit@1)                  3 seeds unless noted
+    binned cosine, 0.1 Da bins (no learning)    0.730 (0.819)
+    binned cosine, 1.0005 Da bins               0.671 (0.771)
+    400m C1 recipe, 12 epochs                   0.713 (0.809)   0.711-0.714
+    50m  C1 recipe, 24 epochs                   0.656 (0.766)   0.655-0.657
+    400m 3 epochs t0.003                        0.580 (0.709)
+    50m / 100m / 200m 3 epochs t0.003           0.40 / 0.32 / 0.35
+    untrained pretrained encoder (220k)         0.08-0.16 (50m 0.112, 400m 0.165)
+
+With the consensus spectrum in the gallery ("all", R=3) the gap is large: binned 0.759 vs
+best trained 0.510. The learned space does not place a consensus spectrum near its
+replicates; raw m/z bins do.
+
+READING. (1) The 99-group replicate eval hid both the scale effect (400m 0.713 vs 50m
+0.656 here; 0.873 vs 0.877 there) and the fact that the task is easy for exact-m/z
+matching. (2) Every learned encoder so far is BELOW a zero-parameter baseline. A likely
+cause, not yet tested: peak tokens carry no absolute m/z (iona-base model card: tokens are
+built from normalised log intensity only; m/z enters as pairwise deltas), so the
+embedding cannot use the one signal binned cosine lives on. (3) Contrastive training
+still matters enormously (0.11 -> 0.66 at 50m), and longer training still helps.
+
+NOT YET MEASURED: models trained on this corpus (C7, 8860292); precursor-window
+filtering (what real library search does, for both methods); GLEAMS.

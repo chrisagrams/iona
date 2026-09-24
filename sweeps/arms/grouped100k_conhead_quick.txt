@@ -1,0 +1,4 @@
+# C9 quick (3-epoch head arms, job 8860538) on ms-contrastive-100k test
+c9q_s050m_head256_ep03_seed0 /lus/flare/projects/UIC-HPC/khuss/msdelta/runs/sweep-s050m_ck220k_seed0_head256_ep03-8860538/final
+c9q_s050m_head256_ep03_seed1 /lus/flare/projects/UIC-HPC/khuss/msdelta/runs/sweep-s050m_ck220k_seed1_head256_ep03-8860538/final
+c9q_s050m_head256_ep03_seed2 /lus/flare/projects/UIC-HPC/khuss/msdelta/runs/sweep-s050m_ck220k_seed2_head256_ep03-8860538/final

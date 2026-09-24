@@ -1,0 +1,1 @@
+C7 BEST-FIRST ARM: continue sweep-s050m_t0002_pk256_ep24_seed0-8857593 (a finished C1-recipe encoder) for one epoch of ms-contrastive-100k, seed 0. Same recipe as sweep-con100k (t 0.002, P85 x K3, GradCache 4, experimental spectra only, replicate-corpus peptides excluded). Encoder saved every 300 steps for early scoring against binned cosine (0.730).

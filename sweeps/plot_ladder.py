@@ -66,6 +66,10 @@ plt.rcParams.update({
 })
 
 
+# Test-split metrics plotted. Loss is the per-peak BCE on the test split; lower is better.
+METRICS = (("test_auroc", "AUROC"), ("test_f1", "F1"), ("test_auprc", "AUPRC"),
+           ("test_loss", "Test loss"))
+
 def collect():
     """(scale, checkpoint) -> {metric: [values]}, from every denoise arm on disk."""
     meta = {}
@@ -100,7 +104,7 @@ def collect():
             continue
         if "test_auroc" not in r:
             continue
-        for k in ("test_auroc", "test_f1"):
+        for k, _ in METRICS:
             if k in r:
                 out[meta[m.group(1)]][k].append(r[k])
     return out
@@ -190,10 +194,10 @@ def main() -> int:
         n = len(cov[(s, c)].get("test_auroc", []))
         print(f"    {s:5s} step {c:<7d} n={n}")
     written = []
-    for metric, name in (("test_auroc", "AUROC"), ("test_f1", "F1")):
+    for metric, name in METRICS:
         written += [by_scale(cov, metric, name), by_checkpoint(cov, metric, name)]
-    fig, axes = plt.subplots(1, 2, figsize=(12.4, 4.4))
-    for ax, (metric, name) in zip(axes, (("test_auroc", "AUROC"), ("test_f1", "F1"))):
+    fig, axes = plt.subplots(2, 2, figsize=(12.4, 8.8))
+    for ax, (metric, name) in zip(axes.flat, METRICS):
         combined(cov, metric, name, ax)
     fig.tight_layout()
     out = FIGS / "ladder_compute.png"

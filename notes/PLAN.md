@@ -43,8 +43,9 @@ Status: ✅ answered · 🟡 partly · ⏳ running/queued · ⬜ not started
 | C4 | Does retrieval improve with pretraining checkpoint? | ⏳ | frozen C1 recipe, 50m+100m x 10k/120k/330k/430k/540k (+220k from C2), 3 seeds: **8860093**. Old ladder 8851663 (t0.07) superseded |
 | C5 | Do contrastive HPs transfer across scale/checkpoint? | ✅ | same winner in all 5 cells (4 scales + 50m@540k), mean pairwise ρ +0.81; t0.03 beat t0.07 in all 4 cells tested |
 | C6 | Does best-model selection / early stopping matter? | ✅ | no: −0.002, −0.006 (n.s.); `final/` == last checkpoint |
-| C7 | Does training on ms-contrastive-100k (100k analytes, 10k-analyte test) beat the 900-peptide replicate corpus, and does scale show there? | ⏳ | existing models on its test split (replicate-corpus peptides excluded): scale DOES show -- 400m ep12 0.711 vs 50m ep24 0.656 experimental MAP@R (tied at 0.87 on the 99-group eval); untrained 0.08-0.17. Scoring finishes in 8860206; binned-cosine baseline 8860250. Training smoke 8859995 passed (loss 8.7→5.0). Cost is ~22 s/step at 50m and ~69 s/step at 400m on one tile, so ~7 h (50m) and ~22 h (400m) per epoch; 50m ep1 x3 seeds queued (8860292), 50m ep3 and 400m ep1 pending a decision |
+| C7 | Does training on ms-contrastive-100k (100k analytes, 10k-analyte test) beat the 900-peptide replicate corpus, and does scale show there? | ⏳ | existing models on its test split: scale shows (400m 0.713 vs 50m 0.656 exp MAP@R) but **binned cosine at 0.1 Da, no learning, scores 0.730** -- above every trained encoder (OBSERVATIONS). Training on the corpus: 50m ep1 x3 queued (8860292); ~7 h/epoch at 50m, ~22 h at 400m on one tile |
 | C8 | Does a per-pair sigmoid loss (SigLIP, Zhai et al. 2023) beat SupCon? | ⬜ | SupCon is a softmax over the batch with every positive in every denominator, so positives compete (target 1/(K-1) each). Sigmoid scores each pair independently (learnable temperature + bias). Ablation at the C1 recipe, 50m, 3 seeds, after C7 so data and loss do not change together |
+| C9 | Does an MLP projection head (master's MSDeltaForRetrieval) help the embedding -- retrieving on the head output, or on the pre-head features (SimCLR)? | ⏳ | `configs/sweep-conhead`: frozen C1 recipe + head pooled→512→256, 50m@220k, 3 seeds; control = C2's s050m_ck220k arms. Scored on the small eval and the ms-contrastive-100k test, both readouts. Smoke → capacity chained |
 
 ### Alignment (peptide embedder)
 
@@ -87,30 +88,42 @@ External reference points; each names the question it serves.
 
 ## Order of work
 
+CONTRASTIVE follows four stages (decided 2026-09-23). Training on ms-contrastive-100k
+costs ~7 h/epoch at 50m and ~22 h at 400m on one tile, so the full suite trains on the
+small replicate corpus and the large corpus is used to (a) TEST everything and (b) train
+a few chosen models.
+
 ```
-DENOISE                                   CONTRASTIVE (spectrum embedder)
+DENOISE                                   CONTRASTIVE
 ───────                                   ───────────
-D1 ✅  D2 ✅  D3 ✅  D4 ✅                  C0 ✅  C1 ✅  C3 ✅  C5 ✅  C6 ✅
-      └─► denoise scaling figures         recipe R* frozen (sweep-confreeze)
-          (AUROC and F1)                        │
-                                         ┌──────┴──────┐
-                                         ▼             ▼
-                                   C2 ⏳ 8860092   C4 ⏳ 8860093
-                                   4 scales @220k  50m/100m ladder
-                                         └──────┬──────┘
-                                                ▼
-                                   C7 ⏳ ms-contrastive-100k: eval existing
-                                      models (8860206/8860250), then train
-                                                │
-                                                ▼
-                                   C8 ⬜ sigmoid vs SupCon (after C7)
-                                                │
-                                                ▼
-                                   peptide embedder (alignment student)
-                                   retrained on the best spectrum teacher
-                                                │
-                                                ▼
-                                   R0-R2 on the incoming reranking dataset
+D1 ✅  D2 ✅  D3 ✅  D4 ✅                  STAGE 1  full suite on the replicate corpus
+  D3 at 200m/400m: ends-big wave            C0 ✅ C1 ✅ C3 ✅ C5 ✅ C6 ✅
+  (8860442 smoke → 18 arms)                 C2 ⏳ 8860092   C4 ⏳ 8860093 (50m/100m)
+  400m 330k-540k: not pretrained yet                  │
+      └─► denoise scaling figures                     ▼
+          (AUROC and F1)                  STAGE 2  score every Stage-1 model on the
+                                            ms-contrastive-100k test split
+                                            first check: 27 models, small-eval vs 100k
+                                            MAP@R Spearman 0.98 -- large effects transfer;
+                                            differences below the small eval's resolution
+                                            (50m vs 400m) do NOT, so scaling is read here
+                                                      │
+                                                      ▼
+                                          STAGE 3  a few configs trained ON ms-contrastive-100k
+                                            (C7; 50m ep1 x3 queued 8860292; rest chosen
+                                            from Stage 2)
+                                                      │
+                                                      ▼
+                                          STAGE 4  score those on the same test split,
+                                            vs binned cosine (0.730) and GLEAMS
+                                                      │
+                                   ┌──────────────────┴─────────────┐
+                                   ▼                                ▼
+                         C8 sigmoid vs SupCon          A1-A3 peptide embedder (teacher
+                                                       = best Stage 3/4 encoder)
+                                                                    │
+                                                                    ▼
+                                                     R0-R2 on the incoming reranking dataset
 ```
 
 Reranking waits for the new reranking dataset (2026-09-23: being obtained). Until then
@@ -125,6 +138,7 @@ write-up in TODO.md under the same number.
 - **FT1** — does the denoiser generalise beyond 1024 peaks?
 - **FT8** — is a warm-up freeze on the encoder worth anything?
 - **FT12** — the sign of the pooled-vs-within AUROC gap, measured rather than argued.
+- **Layer mixing (retry candidate)** — `pooling=layer_mix` was dropped (OBSERVATIONS, "Blending encoder depths is worse", job 8842351) on the SEPARATION RATIO at the old recipe (t 0.07, 3 epochs, P2xK2). C0 later showed that ratio does not predict retrieval, so "last layer is best" was never tested on MAP@R. Retry: 50m at the frozen C1 recipe, layer_mix vs last layer, 3 seeds each, scored on the small eval and the ms-contrastive-100k test (~2.4 h/arm, one node). No write-up in TODO.md; this entry is it.
 
 ## Rules
 
