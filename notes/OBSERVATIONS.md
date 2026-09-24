@@ -1203,3 +1203,13 @@ training length. The two groups that break it are the axes this study is about:
 400m models sit ABOVE the trend (the small eval ranked 400m last in C2) and early
 pretraining checkpoints (C4 10k) sit BELOW it. Recipe/length effects transfer; scale and
 checkpoint effects must be read on the 100k test. PLAN Stage 2 note corrected.
+
+C7 400m continued (8860522), 100k test, 3 seeds (job 8862067 for step 600):
+
+    step 300    exp MAP@R 0.839   Hit@1 0.894   all 0.69
+    step 600    exp MAP@R 0.859   Hit@1 0.908   all 0.726   (0.860 / 0.859 / 0.856)
+    50m final   exp MAP@R 0.839   Hit@1 0.893   all 0.677
+    binned 0.1  exp MAP@R 0.730   Hit@1 0.819   all 0.759
+
+On the large corpus 400m pulls ahead of 50m (+0.02 at 600 of 1,062 steps, still rising),
+and the consensus-view gap to binned cosine is nearly closed (0.726 vs 0.759).

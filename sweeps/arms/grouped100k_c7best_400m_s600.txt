@@ -1,0 +1,4 @@
+# C7 best-first 400m, step 600 (8860522)
+c7b_cont400m_s600_seed0 /lus/flare/projects/UIC-HPC/khuss/msdelta/runs/sweep-cont400m_ep01_seed0-8860522/checkpoint-600/encoder
+c7b_cont400m_s600_seed1 /lus/flare/projects/UIC-HPC/khuss/msdelta/runs/sweep-cont400m_ep01_seed1-8860522/checkpoint-600/encoder
+c7b_cont400m_s600_seed2 /lus/flare/projects/UIC-HPC/khuss/msdelta/runs/sweep-cont400m_ep01_seed2-8860522/checkpoint-600/encoder
