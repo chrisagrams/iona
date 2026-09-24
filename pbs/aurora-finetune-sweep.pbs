@@ -155,6 +155,7 @@ declare -A GRID_CHECK=(
     [configs/sweep-ckpt-denoise]="sweeps/make_checkpoint_grid.py --task denoise --check"
     [configs/sweep-ckpt-denoise-ends]="sweeps/make_checkpoint_grid.py --task denoise --wave ends --scales 50m 100m --check"
     [configs/sweep-ckpt-denoise-ends-big]="sweeps/make_checkpoint_grid.py --task denoise --wave ends-big --scales 200m 400m --check"
+    [configs/sweep-ckpt-denoise-late400]="sweeps/make_checkpoint_grid.py --task denoise --wave late400 --scales 400m --check"
     [configs/sweep-ckpt-contrastive]="sweeps/make_checkpoint_grid.py --task contrastive --check"
     # Does the HP optimum move with pretraining? Asked once, at 50m, between
     # the 25%-trained checkpoint the config came from and the 100% one.
