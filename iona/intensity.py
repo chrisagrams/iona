@@ -465,7 +465,7 @@ def train_and_evaluate(args: argparse.Namespace, wandb_run: wandb.Run | None) ->
         per_device_eval_batch_size=args.eval_batch_size,
         learning_rate=args.learning_rate,
         weight_decay=args.weight_decay,
-        warmup_ratio=args.warmup_ratio,
+        warmup_steps=args.warmup_ratio,  # a float < 1 is a fraction of total steps
         lr_scheduler_type="cosine",
         eval_strategy="steps",
         eval_steps=args.eval_steps,
