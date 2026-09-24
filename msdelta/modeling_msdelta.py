@@ -606,6 +606,9 @@ class MSDeltaForIntensityPrediction(MSDeltaPreTrainedModel):
             self.post_init()
         else:
             self.intensity_head.apply(self._init_weights)
+        # No peak is ever masked here, so the mask token would sit unused (and
+        # trip DDP's unused-parameter check) when the encoder is fine-tuned.
+        self.msdelta.embed.mask_token.requires_grad_(False)
         if freeze_encoder:
             self.freeze_encoder()
 
