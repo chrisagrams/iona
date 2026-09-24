@@ -1,0 +1,4 @@
+# C7 best-first 50m, step 300 of 1062 (8860522)
+c7b_cont050m_s300_seed0 /lus/flare/projects/UIC-HPC/khuss/msdelta/runs/sweep-cont050m_ep01_seed0-8860522/checkpoint-300/encoder
+c7b_cont050m_s300_seed1 /lus/flare/projects/UIC-HPC/khuss/msdelta/runs/sweep-cont050m_ep01_seed1-8860522/checkpoint-300/encoder
+c7b_cont050m_s300_seed2 /lus/flare/projects/UIC-HPC/khuss/msdelta/runs/sweep-cont050m_ep01_seed2-8860522/checkpoint-300/encoder

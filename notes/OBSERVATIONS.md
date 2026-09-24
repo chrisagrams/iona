@@ -1121,3 +1121,20 @@ Starting loss 34.5 with the head vs 16.6 without (random head outputs at t 0.002
 5.09 vs 3.58: the head mostly costs training time at this budget. Pre-head edges out the
 head output on the larger test (SimCLR's direction), but both are far below no head.
 NOT YET MEASURED: 24 epochs (8860587, deprioritised behind the denoise ladder).
+
+## C7: a quarter epoch of ms-contrastive-100k puts 50m ABOVE binned cosine (2026-09-24)
+
+sweep-con100k-best, cont050m (continue sweep-s050m_t0002_pk256_ep24 on ms-contrastive-100k,
+same recipe, P85 x K3, experimental spectra, replicate-corpus peptides excluded), encoder at
+step 300 of 1062 (~28% of one epoch), scored on the test split (job 8860719):
+
+                                         exp MAP@R            exp Hit@1     all MAP@R
+    cont050m step 300, seeds 0/1/2       0.808/0.799/0.811    0.871/0.867/0.873   0.65
+    binned cosine 0.1 Da                 0.730                0.819         0.759
+    400m, replicate corpus only          0.713                0.809         0.510
+    50m starting point (replicate only)  0.656                0.766         0.462
+
++0.15 over its own start and +0.08 over binned cosine, seed spread 0.006. The replicate
+corpus (~855 peptides) was the bottleneck. With the consensus spectrum in the gallery
+("all") binned cosine still leads, 0.76 vs 0.65 (gap was 0.25); training never sees
+consensus spectra (include_consensus false). NOT YET MEASURED: later steps, 400m.
