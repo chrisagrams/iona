@@ -1,0 +1,1 @@
+A4 ARM: LiT cross-modal contrastive student, 0 hard negatives, MSE weight 0.0, seed 2. Otherwise configs/a1-align-100k-050m-c7s600 (teacher C7-50m step 600, cache /lus/flare/projects/UIC-HPC/khuss/msdelta/align-targets-a1-050m-c7s600), batch 256. PLAN.md A4.

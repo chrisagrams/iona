@@ -23,11 +23,11 @@ from pathlib import Path
 
 RUNS = Path("/lus/flare/projects/UIC-HPC/khuss/msdelta/runs")
 ORG = "Gaolaboratory"
-PICKS = {
+PICKS = {   # best single run by VALIDATION AUPRC over the full ladder (2026-09-24)
     "50m": "sweep-50m_ck540k_seed1-8856549",
     "100m": "sweep-100m_ck540k_seed2-8856549",
-    "200m": "sweep-200m_ck330k_seed2-8850494",
-    "400m": "sweep-400m_ck220k_seed1-8850494",
+    "200m": "sweep-200m_ck540k_seed1-8860472",      # was 330k seed2 before 430k/540k ran
+    "400m": "sweep-400m_ck220k_seed1-8850494",      # unchanged until 400m@540k is tuned
 }
 SKIP = ["training_args.bin"]
 
@@ -50,9 +50,18 @@ def param_count(final: Path) -> int:
     return total
 
 
-def best_val_auprc(arm: Path) -> float:
-    log = (arm / "logs" / "train.log").read_text(errors="ignore")
-    return max(float(x) for x in re.findall(r"'eval_auprc': '?([0-9.]+)", log))
+def best_val(arm: Path) -> dict:
+    """The validation evaluation that load_best_model_at_end selected (max eval_auprc)."""
+    import ast
+    evals = []
+    for line in (arm / "logs" / "train.log").read_text(errors="ignore").splitlines():
+        i = line.find("{'eval_loss'")
+        if i >= 0:
+            try:
+                evals.append({k: float(v) for k, v in ast.literal_eval(line[i:]).items()})
+            except (ValueError, SyntaxError):
+                pass
+    return max(evals, key=lambda e: e["eval_auprc"])
 
 
 def card(scale: str, arm: Path, params: int) -> str:
@@ -60,6 +69,7 @@ def card(scale: str, arm: Path, params: int) -> str:
     ckpt = {"540": "540,423", "430": "430,000", "330": "330,000", "220": "220,000",
             "120": "120,000", "10": "10,000"}[m[2]]
     test = json.loads((arm / "test_results.json").read_text())
+    val = best_val(arm)
     return f"""---
 library_name: transformers
 tags: [mass-spectrometry, proteomics, denoising, msdelta]
@@ -74,18 +84,19 @@ head on `chrisagrams/ms-denoise-100k`. One logit per peak; **noise is the positi
 (label 1)**. Spectra above 512 peaks are out of scope (they were dropped, not truncated,
 in training).
 
-## Results (held-out test split, peptide-disjoint from train)
+## Results
 
-| metric | value |
-|---|---|
-| AUROC | {test['test_auroc']:.4f} |
-| AUPRC | {test['test_auprc']:.4f} |
-| F1 (threshold logit >= 0) | {test['test_f1']:.4f} |
-| per-spectrum AUROC (mean) | {test['test_auroc_per_spectrum']:.4f} |
+Validation and test splits are peptide-disjoint from train (and from each other).
 
-Selected as the best of 3 seeds x the available pretraining checkpoints at this scale by
-**validation** AUPRC (best: {best_val_auprc(arm):.4f}); the test split was never used
-for selection.
+| metric | validation | test |
+|---|---|---|
+| AUPRC | {val['eval_auprc']:.4f} | {test['test_auprc']:.4f} |
+| AUROC | {val['eval_auroc']:.4f} | {test['test_auroc']:.4f} |
+| F1 (threshold logit >= 0) | {val['eval_f1']:.4f} | {test['test_f1']:.4f} |
+| per-spectrum AUROC (mean) | – | {test['test_auroc_per_spectrum']:.4f} |
+
+Selected as the best of 3 seeds x every pretraining checkpoint run at this scale by
+**validation** AUPRC; the test split was never used for selection.
 
 ## Training
 
@@ -111,6 +122,9 @@ def main() -> int:
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--dry-run", action="store_true")
     ap.add_argument("--scales", default=",".join(PICKS))
+    ap.add_argument("--update", action="store_true",
+                    help="update an EXISTING repo: replace its files with this pick")
+    ap.add_argument("--card-only", action="store_true", help="with --update: README only")
     cli = ap.parse_args()
     from huggingface_hub import HfApi
 
@@ -126,11 +140,13 @@ def main() -> int:
         if cli.dry_run:
             print(card(scale, arm, params).split("## Training")[0][-420:])
             continue
-        if api.repo_exists(repo):
-            raise SystemExit(f"{repo} already exists; refusing to overwrite")
-        api.create_repo(repo, repo_type="model", private=True)
-        api.upload_folder(repo_id=repo, folder_path=str(final), ignore_patterns=SKIP,
-                          commit_message=f"{arm.name} final/ (best validation AUPRC)")
+        if api.repo_exists(repo) and not cli.update:
+            raise SystemExit(f"{repo} already exists; refusing to overwrite (use --update)")
+        if not api.repo_exists(repo):
+            api.create_repo(repo, repo_type="model", private=True)
+        if not cli.card_only:
+            api.upload_folder(repo_id=repo, folder_path=str(final), ignore_patterns=SKIP,
+                              commit_message=f"{arm.name} final/ (best validation AUPRC)")
         api.upload_file(repo_id=repo, path_in_repo="README.md",
                         path_or_fileobj=card(scale, arm, params).encode(),
                         commit_message="model card")

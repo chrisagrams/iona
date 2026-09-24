@@ -1,0 +1,51 @@
+#!/bin/bash -l
+# Full-dataset stage 1 for PSM reranking: every run of Gaolaboratory/psm-rerank-hek-hct116.
+#
+#   qsub -q capacity -l select=4 -l walltime=02:00:00 -v TAG=a1-050m-c7s600 pbs/rerank_psm_full.pbs
+#
+# Writes $SCRATCH/rerank-psm/$TAG/{rows,handfeat}/<run>.parquet (the same tables the
+# 16-run pass made, which are reused). Runs are listed largest first in
+# sweeps/arms/psm_rerank_all_runs.txt and dealt round-robin over nodes x tiles.
+
+#PBS -N msdelta-rerank-full
+#PBS -A UIC-HPC
+#PBS -l place=scatter
+#PBS -l filesystems=home:flare
+#PBS -j oe
+#PBS -o pbs/logs/
+
+set -uo pipefail
+export REPO_DIR=${REPO_DIR:-${PBS_O_WORKDIR:-$PWD}}
+cd "$REPO_DIR"
+export TAG=${TAG:?set TAG}
+export RUNS_FILE=${RUNS_FILE:-$REPO_DIR/sweeps/arms/psm_rerank_all_runs.txt}
+SCRATCH_ROOT=${SCRATCH_ROOT:-/lus/flare/projects/${PROJECT:-UIC-HPC}/$USER/msdelta}
+R=$SCRATCH_ROOT/runs
+export ENCODER=${ENCODER:-$R/sweep-cont050m_ep01_seed1-8860522/checkpoint-600/encoder}
+export STUDENT=${STUDENT:-$R/v2_align-ft-a1-align-100k-050m-c7s600-8861093/final}
+export CACHE=${CACHE:-$SCRATCH_ROOT/align-targets-a1-050m-c7s600}
+export BASE=$SCRATCH_ROOT/rerank-psm/$TAG
+export PY=${VENV_DIR:-$REPO_DIR/.venv}/bin/python
+mkdir -p "$BASE/rows" "$BASE/handfeat" "$BASE/logs"
+
+set +u
+source /usr/share/lmod/lmod/init/bash
+module load "${FRAMEWORKS_MODULE:-frameworks/2025.3.1}"
+source "$REPO_DIR/pbs/load_keys.sh"
+set -u
+[[ -n ${HF_TOKEN:-} ]] || { echo "HF_TOKEN not loaded" >&2; exit 2; }
+export ONEAPI_DEVICE_SELECTOR=level_zero:gpu ZE_FLAT_DEVICE_HIERARCHY=FLAT ZE_AFFINITY_MASK=0
+export OMP_NUM_THREADS=${OMP_NUM_THREADS:-8}
+export PYTHONPATH=$REPO_DIR${PYTHONPATH:+:$PYTHONPATH}
+export HF_HOME=${HF_HOME:-$SCRATCH_ROOT/huggingface} HF_HUB_OFFLINE=0 HF_DATASETS_OFFLINE=0
+P=http://proxy.alcf.anl.gov:3128
+export HTTP_PROXY=$P HTTPS_PROXY=$P http_proxy=$P https_proxy=$P
+export no_proxy="admin,localhost,*.cm.aurora.alcf.anl.gov,aurora-*,*.aurora.alcf.anl.gov,*.alcf.anl.gov,127.0.0.1"
+export NO_PROXY="$no_proxy"
+export NNODES=$(sort -u "$PBS_NODEFILE" | wc -l)
+
+echo "=== $(date -Is) tests"
+"$PY" -m pytest -q -p no:cacheprovider tests/test_rerank_psm.py || { echo "tests failed" >&2; exit 1; }
+echo "=== $(date -Is) $(grep -vc '^#' "$RUNS_FILE") runs on $NNODES nodes x 12 tiles; $(ls "$BASE/rows" | wc -l) already embedded"
+mpiexec --envall --pmi=pmix -n "$NNODES" --ppn 1 --cpu-bind none bash "$REPO_DIR/pbs/rerank_psm_worker.sh"
+echo "=== $(date -Is) rows $(ls "$BASE/rows"/*.parquet | wc -l), handfeat $(ls "$BASE/handfeat"/*.parquet | wc -l)"

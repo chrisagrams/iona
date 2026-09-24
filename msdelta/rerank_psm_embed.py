@@ -143,14 +143,21 @@ def main(argv: list[str] | None = None) -> int:
             for k in KEEP:
                 out[k].append(c.get(k))
     pc = PeptideCollator()
-    cos = []
+    cos, null = [], []
+    perm = np.random.default_rng(0).permutation(len(rows))
+    perm = np.where(perm == np.arange(len(rows)), np.roll(perm, 1), perm)   # never self
     with torch.no_grad():
         for s in range(0, len(peptides), 512):
             b = pc(peptides[s:s + 512], [min(max(z, 0), 7) for z in charges[s:s + 512]])
             emb = student(**{k: v.to(device) for k, v in b.items()}).float().cpu()
             own = spec[torch.tensor(owner[s:s + 512])]
             cos.append((emb * own).sum(-1))
+            null.append((emb * spec[torch.tensor(perm[owner[s:s + 512]])]).sum(-1))
     out["cosine"] = torch.cat(cos).tolist()
+    # LEAKAGE CHECK: the same candidate against a RANDOM other spectrum of the run. A
+    # student that learned sequence-only "decoy-ness" would still separate targets from
+    # decoys on this column; a clean one gives AUROC ~0.5 (rerank_psm_fdr reports it).
+    out["cosine_null"] = torch.cat(null).tolist()
     Path(cli.out).parent.mkdir(parents=True, exist_ok=True)
     pq.write_table(pa.table(out), cli.out)
     print(f"[embed] wrote {len(peptides):,} candidates to {cli.out} "
