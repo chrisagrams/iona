@@ -86,16 +86,20 @@ def theoretical_fragments(residues: list[str], mods: list[float]) -> tuple[np.nd
     return prefix, suffix
 
 
-def _match(observed: np.ndarray, theoretical: np.ndarray, tolerance_ppm: float) -> np.ndarray:
-    """Which theoretical ions appear in the scan, within a ppm window."""
+def _match(observed: np.ndarray, theoretical: np.ndarray, tolerance_ppm: float,
+           da_floor: float = 0.0) -> np.ndarray:
+    """Which theoretical ions appear in the scan, within max(ppm window, da_floor Da).
+
+    da_floor 0 (default) is the original ppm-only behaviour. Low-resolution ion-trap MS2
+    needs a Da floor: the psm-rerank dataset card specifies max(250 ppm, 0.05 Da)."""
     if theoretical.size == 0 or observed.size == 0:
         return np.zeros(theoretical.size, dtype=bool)
     index = np.searchsorted(observed, theoretical)
     found = np.zeros(theoretical.size, dtype=bool)
     for side in (0, -1):
         probe = np.clip(index + side, 0, observed.size - 1)
-        delta = np.abs(observed[probe] - theoretical) / np.maximum(theoretical, 1e-9) * 1e6
-        found |= delta <= tolerance_ppm
+        diff = np.abs(observed[probe] - theoretical)
+        found |= (diff / np.maximum(theoretical, 1e-9) * 1e6 <= tolerance_ppm) | (diff <= da_floor)
     return found
 
 
@@ -148,7 +152,7 @@ def candidate_features(peptide: str, precursor_mz: float, charge: int) -> dict[s
 
 
 def match_features(peptide: str, mz: np.ndarray, intensity: np.ndarray,
-                   tolerance_ppm: float = 20.0) -> dict[str, float]:
+                   tolerance_ppm: float = 20.0, da_floor: float = 0.0) -> dict[str, float]:
     residues, mods = split_peptide(peptide)
     keys = ("matched_peaks", "frag_coverage_b", "frag_coverage_y", "frag_coverage_all",
             "explained_intensity", "longest_b_run", "longest_y_run",
@@ -158,8 +162,8 @@ def match_features(peptide: str, mz: np.ndarray, intensity: np.ndarray,
     order = np.argsort(mz)
     observed, weights = mz[order], intensity[order]
     b_ions, y_ions = theoretical_fragments(residues, mods)
-    b_found, y_found = (_match(observed, b_ions, tolerance_ppm),
-                        _match(observed, y_ions, tolerance_ppm))
+    b_found, y_found = (_match(observed, b_ions, tolerance_ppm, da_floor),
+                        _match(observed, y_ions, tolerance_ppm, da_floor))
 
     matched_mz, errors = [], []
     for ions, found in ((b_ions, b_found), (y_ions, y_found)):
@@ -183,10 +187,10 @@ def match_features(peptide: str, mz: np.ndarray, intensity: np.ndarray,
 def extract_features(peptide: str, mz: np.ndarray, intensity: np.ndarray,
                      precursor_mz: float, charge: int,
                      embedding_cosine: float = 0.0,
-                     tolerance_ppm: float = 20.0) -> np.ndarray:
+                     tolerance_ppm: float = 20.0, da_floor: float = 0.0) -> np.ndarray:
     values = {**spectrum_features(mz, intensity),
               **candidate_features(peptide, precursor_mz, charge),
-              **match_features(peptide, mz, intensity, tolerance_ppm),
+              **match_features(peptide, mz, intensity, tolerance_ppm, da_floor),
               "embedding_cosine": float(embedding_cosine)}
     return np.array([values[name] for name in FEATURE_NAMES], dtype=np.float32)
 

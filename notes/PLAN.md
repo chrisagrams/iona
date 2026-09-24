@@ -93,9 +93,9 @@ ALIGNMENT (peptide embedder; peptide->spectrum Hit@1 / MRR on the test split)
 
 RERANKING (on the incoming reranking dataset)
 - [ ] **FDR vs the existing ranking** — PSMs/peptides at 1% FDR (target-decoy) of our reranking against the dataset's own search-engine ranking
-- [ ] **MS²Rescore** (MS²PIP + DeepLC features, mokapot) — ~1 day on top of the dataset's search results
+- [ ] **MS²Rescore** (MS²PIP + DeepLC features) — ~1 day on top of the dataset's search results
 - [ ] **Prosit / Oktoberfest** — predicted-spectrum rescoring; 1–2 days
-- [x] ~~Sage + mokapot~~ — dropped 2026-09-24 (the dataset supplies the search results)
+- [x] ~~Sage + mokapot~~ — dropped 2026-09-24: no search engine needed (the dataset supplies MSFragger's results) and mokapot is not used as a baseline
 
 ## Order of work
 
