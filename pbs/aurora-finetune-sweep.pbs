@@ -97,6 +97,9 @@ declare -A GRID_CHECK=(
     [configs/sweep-conlong]="sweeps/make_conlong.py --check"
     [configs/sweep-confreeze]="sweeps/make_confreeze.py --check"
     [configs/sweep-con100k]="sweeps/make_con100k.py --check"
+    [configs/sweep-con100k-best]="sweeps/make_c7_best.py --check"
+    [configs/sweep-conhead]="sweeps/make_conhead.py --check"
+    [configs/sweep-conhead-quick]="sweeps/make_conhead.py --quick --check"
     [configs/sweep-conneg]="sweeps/make_conneg.py --check"
     [configs/sweep-conbig]="sweeps/make_conbig.py"
     [configs/sweep-conhp-eval]="sweeps/make_conhp_eval.py"
@@ -151,6 +154,7 @@ declare -A GRID_CHECK=(
     # The pretraining-checkpoint ladder, middle two rungs first.
     [configs/sweep-ckpt-denoise]="sweeps/make_checkpoint_grid.py --task denoise --check"
     [configs/sweep-ckpt-denoise-ends]="sweeps/make_checkpoint_grid.py --task denoise --wave ends --scales 50m 100m --check"
+    [configs/sweep-ckpt-denoise-ends-big]="sweeps/make_checkpoint_grid.py --task denoise --wave ends-big --scales 200m 400m --check"
     [configs/sweep-ckpt-contrastive]="sweeps/make_checkpoint_grid.py --task contrastive --check"
     # Does the HP optimum move with pretraining? Asked once, at 50m, between
     # the 25%-trained checkpoint the config came from and the 100% one.

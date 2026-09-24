@@ -77,6 +77,16 @@ class ContrastiveModelArguments:
         metadata={"help": "Rebalances the two terms when the sampler's positive "
                           "fraction is not 0.5."},
     )
+    projection_dim: int = field(
+        default=0,
+        metadata={"help": "Width of an MLP projection head after pooling (master's "
+                          "SpectrumRetrievalHead shape). 0 = no head: the loss and "
+                          "retrieval use the normalised pooled vector, as every run so "
+                          "far has. With a head, the loss sees the projection and "
+                          "final/projection_head.pt is saved beside the encoder."})
+    projection_hidden: int = field(
+        default=0, metadata={"help": "Hidden width of the head; 0 = the pooled width."})
+    projection_dropout: float = 0.1
     layer_mix_norm: bool = field(
         default=True,
         metadata={"help": "LayerNorm each depth before mixing. Off, the deepest blocks "
@@ -505,7 +515,10 @@ def main(argv: list[str] | None = None) -> int:
                                   layer_mix_norm=model_args.layer_mix_norm,
                                   pair_loss=model_args.pair_loss,
                                   pair_margin=model_args.pair_margin,
-                                  pair_positive_weight=model_args.pair_positive_weight)
+                                  pair_positive_weight=model_args.pair_positive_weight,
+                                  projection_hidden=model_args.projection_hidden,
+                                  projection_dim=model_args.projection_dim,
+                                  projection_dropout=model_args.projection_dropout)
     if model_args.encoder_lr_scale == 0:
         # A zero learning rate would still let weight decay and any stateful optimizer
         # move the encoder. Freezing is the thing being asked for, so freeze it.
@@ -621,11 +634,36 @@ def main(argv: list[str] | None = None) -> int:
                              if isinstance(v, (int, float))})
                 trainer.save_metrics("retrieval", retrieval)
 
+            # With a projection head, also score the PRE-head features on the same rows:
+            # which of the two is the better embedding is the question the head asks.
+            if model.projection is not None:
+                model.readout = "pooled"
+                try:
+                    pooled = retrieval_summary(
+                        model, datasets["validation"], collator, trainer.args.device,
+                        max_rows=training_args.eval_alignment_rows)
+                finally:
+                    model.readout = "head"
+                if trainer.is_world_process_zero():
+                    pooled = {f"retrieval_pooled/{k.split('/', 1)[-1]}": v
+                              for k, v in pooled.items()}
+                    print(f"[contrastive] retrieval (pre-head): {pooled}", flush=True)
+                    trainer.log({k: v for k, v in pooled.items()
+                                 if isinstance(v, (int, float))})
+                    trainer.save_metrics("retrieval_pooled", pooled)
+
         if trainer.is_world_process_zero():
             # save_pretrained on the inner model, so the result is a drop-in
             # --pretrained_path for the alignment run.
             model.model.save_pretrained(str(out_dir / "final"))
             processor.save_pretrained(str(out_dir / "final"))
+            if model.projection is not None:
+                torch.save({"state_dict": model.projection.state_dict(),
+                            "pooling": model_args.pooling,
+                            "projection_hidden": model_args.projection_hidden,
+                            "projection_dim": model_args.projection_dim,
+                            "projection_dropout": model_args.projection_dropout},
+                           out_dir / "final" / "projection_head.pt")
             print(f"[contrastive] saved to {out_dir / 'final'}", flush=True)
     finally:
         if wandb_run is not None:

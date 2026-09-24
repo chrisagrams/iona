@@ -84,15 +84,35 @@ def score_model(path, pooling, rows, groups, experimental, collator, device,
         emb = binned_embeddings(rows, float(path.split(":", 1)[1]))
         return _variants(emb, groups, experimental, device, retrieval_metrics_topk)
     encoder = MSDeltaForPreTraining.from_pretrained(path)
-    model = MSDeltaForContrastive(encoder, None, pooling=pooling, kl_weight=0).to(device)
+    # A projection head saved by finetune_contrastive (--projection_dim) is scored both
+    # ways: `all/...` from the head output (the loss space) and `pooled_all/...` from the
+    # pre-head features. Without a head the two are the same vector, scored once.
+    head_file = Path(path) / "projection_head.pt"
+    head = torch.load(head_file, map_location="cpu") if head_file.exists() else None
+    model = MSDeltaForContrastive(
+        encoder, None, pooling=pooling, kl_weight=0,
+        projection_hidden=head["projection_hidden"] if head else 0,
+        projection_dim=head["projection_dim"] if head else 0,
+        projection_dropout=head["projection_dropout"] if head else 0.1)
+    if head:
+        model.projection.load_state_dict(head["state_dict"])
+    model = model.to(device)
+    out = {}
     try:
-        emb, _ = embed_dataset(model, rows, collator, device, max_rows=len(rows),
-                               batch_size=batch_size)
+        readouts = ("head", "pooled") if head else ("head",)
+        for readout in readouts:
+            model.readout = readout
+            emb, _ = embed_dataset(model, rows, collator, device, max_rows=len(rows),
+                                   batch_size=batch_size)
+            prefix = "pooled_" if readout == "pooled" else ""
+            out |= {prefix + k: v for k, v in
+                    _variants(emb, groups, experimental, device,
+                              retrieval_metrics_topk).items()}
     finally:
         del model, encoder
         if device.type == "xpu":
             torch.xpu.empty_cache()
-    return _variants(emb, groups, experimental, device, retrieval_metrics_topk)
+    return out
 
 
 def _variants(emb, groups, experimental, device, metric) -> dict:
