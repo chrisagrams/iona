@@ -101,6 +101,7 @@ declare -A GRID_CHECK=(
     [configs/sweep-conhead]="sweeps/make_conhead.py --check"
     [configs/sweep-conhead-quick]="sweeps/make_conhead.py --quick --check"
     [configs/sweep-a3]="sweeps/make_a3.py --check"
+    [configs/sweep-a4]="sweeps/make_a4.py --check"
     [configs/sweep-conneg]="sweeps/make_conneg.py --check"
     [configs/sweep-conbig]="sweeps/make_conbig.py"
     [configs/sweep-conhp-eval]="sweeps/make_conhp_eval.py"
