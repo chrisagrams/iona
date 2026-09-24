@@ -1,6 +1,6 @@
 # Casanovo denoising baseline
 
-Trains a peak-level signal/noise classifier on top of a **frozen** Casanovo
+Trains a peak-level signal/noise classifier on top of a **frozen** (or, with `--finetune full`, fine-tuned) Casanovo
 spectrum encoder, using the same labeled dataset
 (`chrisagrams/ms-denoise-100k`), head shape, optimizer defaults, and metrics as
 the MSDelta denoising probe (`msdelta/denoising.py`).
@@ -37,6 +37,27 @@ uv run casanovo-denoising \
   --precision bf16
 ```
 
+### Full fine-tuning
+
+`--finetune full` trains the encoder together with the head, instead of
+freezing it. The encoder gets its own learning rate, `--encoder-learning-rate`
+(default `1e-4`), while the head keeps `--learning-rate`. Encoder dropout is
+active during training. Backpropagating through the encoder uses much more
+memory than training the head alone, so you may need a lower
+`--peak-pair-budget`. The run saves the whole model's `state_dict` to
+`model.pt` in place of `head.pt`. `--finetune full` can be combined with
+`--encoder-init random` to train the architecture from scratch.
+
+```bash
+uv run casanovo-denoising \
+  --checkpoint /path/to/casanovo-orbitrap.ckpt \
+  --finetune full \
+  --encoder-learning-rate 1e-4 \
+  --output-dir outputs/full-finetune \
+  --device cuda \
+  --precision bf16
+```
+
 ### Multiple GPUs
 
 Training uses [Accelerate](https://huggingface.co/docs/accelerate). To split
@@ -65,7 +86,8 @@ hidden size 128, dropout 0.1, and a peak-pair budget of 4,194,304.
 The run writes these files to `--output-dir`:
 
 - `head.pt`: the head's `state_dict` only (the encoder is unchanged, so its
-  weights are not saved).
+  weights are not saved). With `--finetune full`, this is `model.pt` instead,
+  holding the encoder and head.
 - `metrics.json`: two sets of validation metrics, both with noise as the
   positive class (see [Evaluation](#evaluation)):
   - `denoise/*`: `loss`, `accuracy`, `balanced_accuracy`, `precision`,

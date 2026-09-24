@@ -1,7 +1,8 @@
-"""Frozen InstaNovo-FM spectrum encoder with a peak-level noise classifier."""
+"""InstaNovo-FM spectrum encoder with a peak-level noise classifier."""
 
 from __future__ import annotations
 
+import contextlib
 import json
 from importlib import resources
 from pathlib import Path
@@ -64,13 +65,17 @@ class PeakDenoisingHead(nn.Module):
 
 
 class InstaNovoFMDenoiser(nn.Module):
-    """Classify peaks as noise from frozen InstaNovo-FM encoder states."""
+    """Classify peaks as noise from InstaNovo-FM encoder states.
+
+    The encoder is frozen unless ``train_encoder=True`` (full fine-tuning).
+    """
 
     def __init__(
         self,
         encoder: FoundationModel,
         head_hidden_size: int = 128,
         head_dropout: float = 0.1,
+        train_encoder: bool = False,
     ):
         super().__init__()
         if encoder.use_meta_token:
@@ -81,8 +86,10 @@ class InstaNovoFMDenoiser(nn.Module):
         # not counted as encoder parameters.
         del encoder.prediction_heads
         self.encoder = encoder
-        self.encoder.requires_grad_(False)
-        self.encoder.eval()
+        self.train_encoder = train_encoder
+        if not train_encoder:
+            self.encoder.requires_grad_(False)
+            self.encoder.eval()
         self.head = PeakDenoisingHead(encoder.dim_model, head_hidden_size, head_dropout)
 
     @classmethod
@@ -92,6 +99,7 @@ class InstaNovoFMDenoiser(nn.Module):
         head_hidden_size: int = 128,
         head_dropout: float = 0.1,
         random_init: bool = False,
+        train_encoder: bool = False,
     ) -> InstaNovoFMDenoiser:
         """Build from an InstaNovo-FM checkpoint file.
 
@@ -119,14 +127,14 @@ class InstaNovoFMDenoiser(nn.Module):
                 use_meta_token=encoder.use_meta_token,
                 cfg=encoder.cfg,
             )
-        return cls(encoder, head_hidden_size, head_dropout)
+        return cls(encoder, head_hidden_size, head_dropout, train_encoder)
 
     def train(self, mode: bool = True):
         super().train(mode)
-        self.encoder.eval()
+        if not self.train_encoder:
+            self.encoder.eval()
         return self
 
-    @torch.no_grad()
     def encode_peaks(self, spectra: Tensor) -> tuple[Tensor, Tensor]:
         """Return per-peak hidden states ``(B, L, D)`` and the padding mask.
 
@@ -160,7 +168,10 @@ class InstaNovoFMDenoiser(nn.Module):
 
     def forward(self, mz: Tensor, intensity: Tensor, labels: Tensor | None = None):
         """Return ``(loss, logits, valid)``; ``loss`` is ``None`` without labels."""
-        peak_hidden, peak_padding_mask = self.encode_peaks(torch.stack([mz, intensity], dim=-1))
+        with contextlib.nullcontext() if self.train_encoder else torch.no_grad():
+            peak_hidden, peak_padding_mask = self.encode_peaks(
+                torch.stack([mz, intensity], dim=-1)
+            )
         logits = self.head(peak_hidden)
 
         if labels is None:

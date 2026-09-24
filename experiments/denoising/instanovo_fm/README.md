@@ -1,6 +1,6 @@
 # InstaNovo-FM denoising baseline
 
-Trains a peak-level signal/noise classifier on top of a **frozen**
+Trains a peak-level signal/noise classifier on top of a **frozen** (or, with `--finetune full`, fine-tuned)
 [InstaNovo-FM](https://github.com/instadeepai/InstaNovo-FM) spectrum encoder.
 It is the counterpart of the [Casanovo baseline](../casanovo/README.md), with
 the same labeled dataset (`chrisagrams/ms-denoise-100k`), head shape,
@@ -46,6 +46,26 @@ uv run instanovo-fm-denoising \
   --precision bf16
 ```
 
+### Full fine-tuning
+
+`--finetune full` trains the encoder together with the head, instead of
+freezing it. The encoder gets its own learning rate, `--encoder-learning-rate`
+(default `1e-4`), while the head keeps `--learning-rate`. Encoder dropout is
+active during training. Backpropagating through the encoder uses much more
+memory than training the head alone, so you may need a lower
+`--peak-pair-budget`. The run saves the whole model's `state_dict` to
+`model.pt` in place of `head.pt`. `--finetune full` can be combined with
+`--encoder-init random` to train the architecture from scratch.
+
+```bash
+uv run instanovo-fm-denoising \
+  --finetune full \
+  --encoder-learning-rate 1e-4 \
+  --output-dir outputs/full-finetune \
+  --device cuda \
+  --precision bf16
+```
+
 ### Multiple GPUs
 
 Multi-GPU runs work the same way as in the Casanovo baseline (see
@@ -66,7 +86,8 @@ match the MSDelta probe: 1 epoch, AdamW with lr `1e-3` and weight decay
 The run writes these files to `--output-dir`:
 
 - `head.pt`: the head's `state_dict` only (the encoder is unchanged, so its
-  weights are not saved).
+  weights are not saved). With `--finetune full`, this is `model.pt` instead,
+  holding the encoder and head.
 - `metrics.json`: `denoise/*` over the peaks preprocessing keeps and
   `denoise_full/*` over every original peak, as in the
   [Casanovo baseline](../casanovo/README.md#evaluation). The skipped-spectra

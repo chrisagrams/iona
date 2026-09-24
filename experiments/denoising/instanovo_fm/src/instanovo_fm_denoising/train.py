@@ -1,4 +1,6 @@
-"""Train a denoising head on a frozen InstaNovo-FM encoder with Accelerate.
+"""Train a denoising head on a InstaNovo-FM encoder with Accelerate.
+
+The encoder is frozen by default; ``--finetune full`` also trains it.
 
 Single process:  instanovo-fm-denoising --output-dir ...
 Multiple GPUs:   accelerate launch --num_processes 2 -m instanovo_fm_denoising.train ...
@@ -18,7 +20,7 @@ from pathlib import Path
 import numpy as np
 import torch
 from accelerate import Accelerator
-from accelerate.utils import gather_object
+from accelerate.utils import DistributedDataParallelKwargs, gather_object
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
@@ -55,6 +57,13 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="'random' keeps the checkpoint's architecture but uses freshly "
         "initialized encoder weights (seeded by --seed)",
     )
+    parser.add_argument(
+        "--finetune",
+        choices=("head", "full"),
+        default="head",
+        help="'head' trains only the denoising head on a frozen encoder; "
+        "'full' also fine-tunes the encoder at --encoder-learning-rate",
+    )
     parser.add_argument("--dataset-repo", default=DEFAULT_DATASET_REPO)
     parser.add_argument("--train-split", default="train")
     parser.add_argument("--validation-split", default="validation")
@@ -63,6 +72,12 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--num-proc", type=int, default=1)
     parser.add_argument("--epochs", type=int, default=1)
     parser.add_argument("--learning-rate", type=float, default=1e-3)
+    parser.add_argument(
+        "--encoder-learning-rate",
+        type=float,
+        default=1e-4,
+        help="encoder learning rate with --finetune full (--learning-rate is the head's)",
+    )
     parser.add_argument("--weight-decay", type=float, default=1e-2)
     parser.add_argument("--head-hidden-size", type=int, default=128)
     parser.add_argument("--head-dropout", type=float, default=0.1)
@@ -214,9 +229,13 @@ def main(argv: list[str] | None = None) -> None:
     args = parse_args(argv)
     device_type = resolve_device_type(args.device)
     precision = resolve_precision(args.precision, device_type)
+    train_encoder = args.finetune == "full"
     accelerator = Accelerator(
         mixed_precision=ACCELERATE_PRECISION[precision],
         cpu=device_type == "cpu",
+        # A fine-tuned encoder may have parameters the peak-level forward
+        # never touches, which DDP otherwise rejects.
+        kwargs_handlers=[DistributedDataParallelKwargs(find_unused_parameters=train_encoder)],
     )
     if accelerator.device.type != device_type:
         raise RuntimeError(f"Accelerate selected {accelerator.device}, expected {device_type}")
@@ -236,9 +255,11 @@ def main(argv: list[str] | None = None) -> None:
         head_hidden_size=args.head_hidden_size,
         head_dropout=args.head_dropout,
         random_init=args.encoder_init == "random",
+        train_encoder=train_encoder,
     )
     preprocessing = processor_kwargs(model.encoder.cfg)
     accelerator.print(f"encoder init: {args.encoder_init}")
+    accelerator.print(f"finetune: {args.finetune}")
     accelerator.print(f"preprocessing: {preprocessing}")
     with accelerator.main_process_first():
         datasets, raw_validation = build_denoising_datasets(
@@ -275,11 +296,12 @@ def main(argv: list[str] | None = None) -> None:
     for name, count in parameter_counts.items():
         accelerator.print(f"{name} parameters: {count:,}")
 
-    optimizer = torch.optim.AdamW(
-        [p for p in model.parameters() if p.requires_grad],
-        lr=args.learning_rate,
-        weight_decay=args.weight_decay,
-    )
+    parameter_groups = [{"params": list(model.head.parameters()), "lr": args.learning_rate}]
+    if train_encoder:
+        parameter_groups.append(
+            {"params": list(model.encoder.parameters()), "lr": args.encoder_learning_rate}
+        )
+    optimizer = torch.optim.AdamW(parameter_groups, weight_decay=args.weight_decay)
     model, optimizer = accelerator.prepare(model, optimizer)
 
     for epoch in range(args.epochs):
@@ -309,7 +331,10 @@ def main(argv: list[str] | None = None) -> None:
     if accelerator.is_main_process:
         for name, value in metrics.items():
             print(f"{name}: {value:.6f}")
-        torch.save(denoiser.head.state_dict(), args.output_dir / "head.pt")
+        if train_encoder:
+            torch.save(denoiser.state_dict(), args.output_dir / "model.pt")
+        else:
+            torch.save(denoiser.head.state_dict(), args.output_dir / "head.pt")
         (args.output_dir / "metrics.json").write_text(json.dumps(metrics, indent=2) + "\n")
         run_config = {
             **{key: str(value) if isinstance(value, Path) else value for key, value in vars(args).items()},

@@ -1,7 +1,8 @@
-"""Frozen Casanovo spectrum encoder with a peak-level noise classifier."""
+"""Casanovo spectrum encoder with a peak-level noise classifier."""
 
 from __future__ import annotations
 
+import contextlib
 from pathlib import Path
 
 import torch
@@ -33,7 +34,10 @@ class PeakDenoisingHead(nn.Module):
 
 
 class CasanovoDenoiser(nn.Module):
-    """Classify peaks as noise from frozen Casanovo encoder states."""
+    """Classify peaks as noise from Casanovo encoder states.
+
+    The encoder is frozen unless ``train_encoder=True`` (full fine-tuning).
+    """
 
     def __init__(
         self,
@@ -41,11 +45,14 @@ class CasanovoDenoiser(nn.Module):
         hidden_size: int,
         head_hidden_size: int = 128,
         head_dropout: float = 0.1,
+        train_encoder: bool = False,
     ):
         super().__init__()
         self.encoder = encoder
-        self.encoder.requires_grad_(False)
-        self.encoder.eval()
+        self.train_encoder = train_encoder
+        if not train_encoder:
+            self.encoder.requires_grad_(False)
+            self.encoder.eval()
         self.head = PeakDenoisingHead(hidden_size, head_hidden_size, head_dropout)
 
     @classmethod
@@ -55,6 +62,7 @@ class CasanovoDenoiser(nn.Module):
         head_hidden_size: int = 128,
         head_dropout: float = 0.1,
         random_init: bool = False,
+        train_encoder: bool = False,
     ) -> CasanovoDenoiser:
         """Build from a Casanovo checkpoint.
 
@@ -75,16 +83,17 @@ class CasanovoDenoiser(nn.Module):
         hidden_size = int(spec2pep.hparams.get("dim_model", 512))
         encoder = spec2pep.encoder
         del spec2pep
-        return cls(encoder, hidden_size, head_hidden_size, head_dropout)
+        return cls(encoder, hidden_size, head_hidden_size, head_dropout, train_encoder)
 
     def train(self, mode: bool = True):
         super().train(mode)
-        self.encoder.eval()
+        if not self.train_encoder:
+            self.encoder.eval()
         return self
 
     def forward(self, mz: Tensor, intensity: Tensor, labels: Tensor | None = None):
         """Return ``(loss, logits, valid)``; ``loss`` is ``None`` without labels."""
-        with torch.no_grad():
+        with contextlib.nullcontext() if self.train_encoder else torch.no_grad():
             memory, memory_padding_mask = self.encoder(mz, intensity)
         # Position 0 is Casanovo's global spectrum token, not a peak.
         peak_hidden = memory[:, 1:, :]
