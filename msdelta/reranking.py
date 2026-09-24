@@ -262,9 +262,25 @@ class PeptideEncoder(nn.Module):
         mod_n_freqs: int = 16,
         dropout: float = 0.1,
         pooling: str = "mean+max",
+        readout: str = "pool",
     ):
         super().__init__()
         self.pooling = pooling
+        # How the residue tokens become ONE vector. "pool" (default, every model before
+        # A3): `pooling` over the tokens -- mean+max is nearly order-blind, which is why
+        # the A1 student ranks an adjacent-residue swap above the truth 30% of the time.
+        # "cls": a learned token prepended to the sequence, its output is the embedding.
+        # "attn": a learned query attending over the tokens. Both keep order information
+        # the transformer already computed (positions are embedded). PLAN.md A3.
+        if readout not in ("pool", "cls", "attn"):
+            raise ValueError(f"readout must be pool, cls or attn, not {readout!r}")
+        self.readout = readout
+        if readout == "cls":
+            self.cls = nn.Parameter(torch.randn(1, 1, hidden_size) * 0.02)
+        if readout == "attn":
+            self.attn_query = nn.Parameter(torch.randn(1, 1, hidden_size) * 0.02)
+            self.attn = nn.MultiheadAttention(hidden_size, num_heads, dropout=dropout,
+                                              batch_first=True)
         self.residue = nn.Embedding(VOCAB_SIZE, hidden_size, padding_idx=PAD)
         self.position = nn.Embedding(max_length, hidden_size)
         self.charge = nn.Embedding(n_charges, hidden_size)
@@ -282,7 +298,7 @@ class PeptideEncoder(nn.Module):
         self.encoder = nn.TransformerEncoder(layer, num_layers=num_layers,
                                              enable_nested_tensor=False)
         self.norm = nn.LayerNorm(hidden_size)
-        width = pooled_width(hidden_size, pooling)
+        width = pooled_width(hidden_size, pooling) if readout == "pool" else hidden_size
         self.projection = nn.Sequential(
             nn.Linear(width, width), nn.GELU(), nn.Dropout(dropout),
             nn.Linear(width, embedding_size),
@@ -304,6 +320,11 @@ class PeptideEncoder(nn.Module):
         mod = self.mod_projection(self.mod_features(modifications).to(hidden.dtype))
         hidden = hidden + mod * modified
         hidden = hidden + self.charge(charge.clamp(0, self.charge.num_embeddings - 1))[:, None]
+        if self.readout == "cls":
+            hidden = torch.cat([self.cls.expand(hidden.shape[0], -1, -1).to(hidden.dtype),
+                                hidden], dim=1)
+            sequence_mask = torch.cat([torch.ones_like(sequence_mask[:, :1]),
+                                       sequence_mask], dim=1)
         # Run the stack with autocast off, in whatever dtype the weights are.
         #
         # torch's TransformerEncoderLayer has a fused fast path
@@ -333,10 +354,26 @@ class PeptideEncoder(nn.Module):
                     self.encoder(hidden, src_key_padding_mask=~sequence_mask.bool())
                 )
         probe("student.encoded", sync=hidden, hidden=hidden)
-        pooled = pool_sequence(hidden, sequence_mask, self.pooling)
+        if self.readout == "cls":
+            pooled = hidden[:, 0]
+        elif self.readout == "attn":
+            query = self.attn_query.expand(hidden.shape[0], -1, -1).to(hidden.dtype)
+            pooled = self.attn(query, hidden, hidden,
+                               key_padding_mask=~sequence_mask.bool(),
+                               need_weights=False)[0][:, 0]
+        else:
+            pooled = pool_sequence(hidden, sequence_mask, self.pooling)
         out = F.normalize(self.projection(pooled).float(), dim=-1)
         probe("student.out", sync=out, out=out)
         return out
+
+
+
+def student_readout(state: dict, prefix: str = "sequence_encoder.") -> str:
+    """Which PeptideEncoder readout a saved student used, read off its weight names, so
+    loaders need no extra config (every pre-A3 student has neither key -> "pool")."""
+    keys = {k[len(prefix):] if k.startswith(prefix) else k for k in state}
+    return "cls" if "cls" in keys else "attn" if "attn_query" in keys else "pool"
 
 
 class SequenceAlignmentModel(nn.Module):

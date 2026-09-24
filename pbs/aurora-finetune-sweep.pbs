@@ -100,6 +100,7 @@ declare -A GRID_CHECK=(
     [configs/sweep-con100k-best]="sweeps/make_c7_best.py --check"
     [configs/sweep-conhead]="sweeps/make_conhead.py --check"
     [configs/sweep-conhead-quick]="sweeps/make_conhead.py --quick --check"
+    [configs/sweep-a3]="sweeps/make_a3.py --check"
     [configs/sweep-conneg]="sweeps/make_conneg.py --check"
     [configs/sweep-conbig]="sweeps/make_conbig.py"
     [configs/sweep-conhp-eval]="sweeps/make_conhp_eval.py"
@@ -392,7 +393,8 @@ run_node() {
             # writes one -- it writes final/ and retrieval_results.json -- so testing
             # only the first re-ran every FINISHED contrastive arm on resume.
             if [[ -f $dir/test_results.json ]] \
-               || [[ -d $dir/final && -f $dir/retrieval_results.json ]]; then
+               || [[ -d $dir/final && -f $dir/retrieval_results.json ]] \
+               || [[ -d $dir/final && -f $dir/crossmodal_results.json ]]; then
                 echo "  [skip $arm] already complete in $RESUME_JOB"
                 continue
             fi
@@ -506,7 +508,9 @@ out_job=${RESUME_JOB:-$JOB_ID}
 completed=0
 for arm in "${ARM_LIST[@]}"; do
     d=$SCRATCH_ROOT/runs/sweep-$arm-$out_job
-    if [[ -f $d/test_results.json || ( -d $d/final && -f $d/retrieval_results.json ) ]]; then
+    # Alignment (finetune_align) marks completion with final/ plus crossmodal_results.json.
+    if [[ -f $d/test_results.json || ( -d $d/final && -f $d/retrieval_results.json ) \
+          || ( -d $d/final && -f $d/crossmodal_results.json ) ]]; then
         completed=$(( completed + 1 ))
     fi
 done
