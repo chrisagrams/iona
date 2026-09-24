@@ -42,6 +42,8 @@ def prepare(cli) -> int:
     exclude = replicate_corpus_peptides() if cli.exclude_replicate else set()
     print(f"[prepare] excluding {len(exclude):,} replicate-corpus peptides", flush=True)
     raw = load_dataset(cli.repo)[cli.split]
+    if cli.max_analytes and len(raw) > cli.max_analytes:     # e.g. a train sample for PCA
+        raw = raw.shuffle(seed=0).select(range(cli.max_analytes))
     rows = build_grouped_split(raw, processor, include_consensus=True,
                                exclude_peptides=exclude, num_proc=cli.num_proc)
     if Path(cli.out_data).exists():
@@ -82,6 +84,18 @@ def score_model(path, pooling, rows, groups, experimental, collator, device,
 
     if path.startswith("binned:"):
         emb = binned_embeddings(rows, float(path.split(":", 1)[1]))
+        return _variants(emb, groups, experimental, device, retrieval_metrics_topk)
+    if path.startswith("pca:"):
+        # pca:<bin width>:<dims>:<prepared TRAIN sample dir> -- PCA fitted on train
+        # spectra only, test spectra projected; cosine retrieval in the PCA space.
+        from datasets import load_from_disk
+        _, width, dims, fit_dir = path.split(":", 3)
+        fit = binned_embeddings(load_from_disk(fit_dir), float(width))
+        fit = torch.nn.functional.normalize(fit, dim=-1)
+        mean = fit.mean(0, keepdim=True)
+        _, _, v = torch.pca_lowrank(fit - mean, q=int(dims), center=False, niter=4)
+        x = torch.nn.functional.normalize(binned_embeddings(rows, float(width)), dim=-1)
+        emb = (x - mean) @ v[:, :int(dims)]
         return _variants(emb, groups, experimental, device, retrieval_metrics_topk)
     encoder = MSDeltaForPreTraining.from_pretrained(path)
     # A projection head saved by finetune_contrastive (--projection_dim) is scored both
@@ -174,6 +188,7 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--split", default="test")
     p.add_argument("--max-peaks", type=int, default=512)
     p.add_argument("--num-proc", type=int, default=16)
+    p.add_argument("--max-analytes", type=int, default=0, help="random sample (0 = all)")
     p.add_argument("--no-exclude-replicate", dest="exclude_replicate",
                    action="store_false")
     s = sub.add_parser("score")
