@@ -1,0 +1,1 @@
+A3 STUDENT READOUT ARM: readout=attn, seed 2. Identical to configs/a1-align-100k-050m-c7s600 (teacher C7-50m step 600, cache /lus/flare/projects/UIC-HPC/khuss/msdelta/align-targets-a1-050m-c7s600) apart from the PeptideEncoder readout. PLAN.md A3.

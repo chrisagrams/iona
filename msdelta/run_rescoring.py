@@ -88,13 +88,14 @@ def main() -> int:
     student, manifest = None, {}
     if cli.student:
         from safetensors.torch import load_file
-        from msdelta.reranking import PeptideEncoder
+        from msdelta.reranking import PeptideEncoder, student_readout
         manifest = dict(l.split(": ", 1) for l in
                         (cache / "MANIFEST.txt").read_text().splitlines() if ": " in l)
         state = load_file(Path(cli.student) / "model.safetensors")
         student = PeptideEncoder(embedding_size=int(manifest["embedding_size"]),
                                  hidden_size=256, num_layers=4, num_heads=8,
-                                 pooling=manifest["pooling"]).eval()
+                                 pooling=manifest["pooling"],
+                                 readout=student_readout(state)).eval()
         student.load_state_dict({k.removeprefix("sequence_encoder."): v
                                  for k, v in state.items()
                                  if k.startswith("sequence_encoder.")})

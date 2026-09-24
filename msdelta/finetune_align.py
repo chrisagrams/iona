@@ -58,6 +58,8 @@ class AlignModelArguments:
     sequence_num_heads: int = 8
     sequence_dropout: float = 0.1
     max_peptide_length: int = 64
+    # PeptideEncoder readout: pool (the `pooling` op, default), cls or attn. PLAN.md A3.
+    sequence_readout: str = "pool"
 
 
 @dataclass
@@ -218,7 +220,8 @@ def main(argv: list[str] | None = None) -> int:
                            num_heads=model_args.sequence_num_heads,
                            max_length=model_args.max_peptide_length,
                            dropout=model_args.sequence_dropout,
-                           pooling=model_args.pooling),
+                           pooling=model_args.pooling,
+                           readout=model_args.sequence_readout),
             pooling=model_args.pooling)
     else:
         teacher = MSDeltaForPreTraining.from_pretrained(model_args.pretrained_path)
