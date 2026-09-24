@@ -1,0 +1,11 @@
+# frozen pretrained encoders, zero-shot per-layer retrieval on the 100k test
+zs_050m_ck220k /flare/UIC-HPC/khuss/msdelta/pretrained/msdelta-50m-production-01-checkpoint-220000
+zs_100m_ck220k /flare/UIC-HPC/khuss/msdelta/pretrained/msdelta-100m-production-01-checkpoint-220000
+zs_200m_ck220k /flare/UIC-HPC/khuss/msdelta/pretrained/msdelta-200m-production-01-checkpoint-220000
+zs_400m_ck220k /flare/UIC-HPC/khuss/msdelta/pretrained/msdelta-400m-production-01-checkpoint-220000
+zs_050m_ck540k /flare/UIC-HPC/khuss/msdelta/pretrained/msdelta-50m-production-01-checkpoint-540423
+zs_100m_ck540k /flare/UIC-HPC/khuss/msdelta/pretrained/msdelta-100m-production-01-checkpoint-540423
+zs_200m_ck540k /flare/UIC-HPC/khuss/msdelta/pretrained/msdelta-200m-production-01-checkpoint-540423
+zs_400m_ck430k /flare/UIC-HPC/khuss/msdelta/pretrained/msdelta-400m-production-01-checkpoint-430000
+zs_050m_ck010k /flare/UIC-HPC/khuss/msdelta/pretrained/msdelta-50m-production-01-checkpoint-10000
+zs_400m_ck010k /flare/UIC-HPC/khuss/msdelta/pretrained/msdelta-400m-production-01-checkpoint-10000

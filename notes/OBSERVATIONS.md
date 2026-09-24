@@ -1213,3 +1213,33 @@ C7 400m continued (8860522), 100k test, 3 seeds (job 8862067 for step 600):
 
 On the large corpus 400m pulls ahead of 50m (+0.02 at 600 of 1,062 steps, still rising),
 and the consensus-view gap to binned cosine is nearly closed (0.726 vs 0.759).
+
+## Zero-shot redone: frozen encoders DO retrieve, best at ~3/4 depth (2026-09-24)
+
+msdelta.eval_zeroshot_layers (job 8862567): frozen pretrained encoders, mean+max pooling
+of every block, ms-contrastive-100k test, experimental MAP@R. `final` at 220k reproduces
+the earlier zero-shot numbers exactly (0.112 / 0.093 / 0.077 / 0.165).
+
+    encoder      final   best block (of N)   best
+    50m  @10k    0.072   8/10                0.086
+    50m  @220k   0.112   8/10                0.208
+    50m  @540k   0.102   8/10                0.177
+    100m @220k   0.093   10/13               0.140
+    100m @540k   0.087   10/13               0.125
+    200m @220k   0.077   13/16               0.151
+    200m @540k   0.080   13/16               0.191
+    400m @10k    0.168   16/20               0.216
+    400m @220k   0.164   16/20               0.432
+    400m @430k   0.125   16/20               0.293
+
+Same profile everywhere: 0 at the input embedding (intensity only, no m/z), rising to a
+peak at ~75-80% depth, falling to the output -- the last blocks specialise for masked-
+intensity prediction. 400m@220k at block 16 is 2.6x its own final layer. Longer
+pretraining lowers the zero-shot peak at 50m and 400m (220k > 540k/430k), raises it at
+200m.
+
+OVERTURNS the "frozen embedding is indistinguishable from random at every layer" claim
+(it was measured on the separation ratio, which C0 invalidated). Fine-tuning still adds a
+lot (400m: 0.43 frozen best -> 0.70 replicate-FT -> 0.86 C7). NOT YET MEASURED: linear vs
+MLP probe on the frozen ~3/4-depth features (the actual non-linearity test); a random-init
+zero-shot reference on this test. Raises the value of the parked layer-mix retry.

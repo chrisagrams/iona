@@ -41,9 +41,12 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--out-dir", required=True)
     ap.add_argument("--repo", default="chrisagrams/ms-denoise-100k")
     ap.add_argument("--split", default="test")
-    ap.add_argument("--max-peaks", type=int, default=4096)
+    ap.add_argument("--max-peaks", type=int, default=3200)
     ap.add_argument("--shard", type=int, default=0)
     ap.add_argument("--num-shards", type=int, default=1)
+    ap.add_argument("--fp32", action="store_true", help="disable bf16 autocast")
+    ap.add_argument("--fixed-width", type=int, default=1,
+                    help="1: pad to the bucket width; 0: pad each batch to its own max")
     cli = ap.parse_args(argv)
 
     from datasets import load_dataset
@@ -70,27 +73,43 @@ def main(argv: list[str] | None = None) -> int:
         model = MSDeltaForDenoising.from_pretrained(path).to(device).eval()
         per = []           # (n_peaks, logits, labels) per spectrum
         skipped = []
-        order = np.argsort([len(m) for m in data["mz"]])   # short first; OOM only at the tail
+        # FIXED widths, not each spectrum's own length: one shape per call made every
+        # tile take a GPU page fault within seconds (8862542, 4/4 processes; the FT16
+        # mechanism). Padding is masked, so per-peak logits are unchanged; a handful of
+        # shapes also lets the short majority run batched.
+        widths = [w for w in (512, 768, 1024, 1536, 2048, 3200) if w <= cli.max_peaks] \
+            or [cli.max_peaks]
+        lengths = np.array([len(m) for m in data["mz"]])
         with torch.no_grad():
-            for i in order:
-                row = data[int(i)]
-                n = len(row["mz"])
-                mz = torch.tensor([row["mz"]], dtype=torch.float32, device=device)
-                li = torch.tensor([row["log_intensity"]], dtype=torch.float32, device=device)
-                mask = torch.ones_like(mz, dtype=torch.long)
-                try:
-                    with torch.autocast(device_type=device.type, dtype=torch.bfloat16,
-                                        enabled=device.type == "xpu"):
-                        logits = model(mz=mz, log_intensity=li, attention_mask=mask,
-                                       return_dict=True).logits
-                except RuntimeError as error:          # out of memory at the longest
-                    skipped.append(n)
-                    print(f"  {name}: skipped a {n}-peak spectrum ({str(error)[:80]})",
-                          flush=True)
-                    if device.type == "xpu":
-                        torch.xpu.empty_cache()
-                    continue
-                per.append((n, logits.float().cpu().numpy()[0], np.asarray(row["labels"])))
+            for w_i, width in enumerate(widths):
+                lo = widths[w_i - 1] if w_i else 0
+                idx = np.flatnonzero((lengths > lo) & (lengths <= width))
+                bs = max(1, (512 * 512 * 16) // (width * width))   # pairwise bias ~ width^2
+                for start in range(0, len(idx), bs):
+                    chunk = [data[int(i)] for i in idx[start:start + bs]]
+                    w = width if cli.fixed_width else max(len(r["mz"]) for r in chunk)
+                    mz = torch.zeros(len(chunk), w); li = torch.zeros(len(chunk), w)
+                    mask = torch.zeros(len(chunk), w, dtype=torch.long)
+                    for r, row in enumerate(chunk):
+                        n = len(row["mz"])
+                        mz[r, :n] = torch.tensor(row["mz"]); li[r, :n] = torch.tensor(row["log_intensity"])
+                        mask[r, :n] = 1
+                    try:
+                        with torch.autocast(device_type=device.type, dtype=torch.bfloat16,
+                                            enabled=device.type == "xpu" and not cli.fp32):
+                            logits = model(mz=mz.to(device), log_intensity=li.to(device),
+                                           attention_mask=mask.to(device),
+                                           return_dict=True).logits.float().cpu().numpy()
+                    except RuntimeError as error:      # out of memory at the longest
+                        skipped += [len(r["mz"]) for r in chunk]
+                        print(f"  {name}: skipped {len(chunk)} spectra at width {width} "
+                              f"({str(error)[:80]})", flush=True)
+                        if device.type == "xpu":
+                            torch.xpu.empty_cache()
+                        continue
+                    for r, row in enumerate(chunk):
+                        n = len(row["mz"])
+                        per.append((n, logits[r, :n], np.asarray(row["labels"])))
         del model
         if device.type == "xpu":
             torch.xpu.empty_cache()
