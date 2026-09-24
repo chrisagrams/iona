@@ -45,7 +45,8 @@ def main(argv: list[str] | None = None) -> int:
     from msdelta.grouped_retrieval import group_ids
     from msdelta.modeling_msdelta import MSDeltaForPreTraining
     from msdelta.reranking import (AlignmentCollator, PeptideEncoder,
-                                   SequenceAlignmentModel, cross_modal_metrics)
+                                   SequenceAlignmentModel, cross_modal_metrics,
+                                   student_readout)
 
     device = torch.device("xpu" if torch.xpu.is_available() else "cpu")
     manifest = dict(line.split(": ", 1) for line in
@@ -56,15 +57,16 @@ def main(argv: list[str] | None = None) -> int:
                                      args_file_flag="--args_file",
                                      return_remaining_strings=True)
     teacher = MSDeltaForPreTraining.from_pretrained(manifest["teacher"])
+    state = load_file(str(Path(cli.run) / "final" / "model.safetensors"))
     student = PeptideEncoder(embedding_size=int(manifest["embedding_size"]),
                              hidden_size=model_args.sequence_hidden_size,
                              num_layers=model_args.sequence_num_layers,
                              num_heads=model_args.sequence_num_heads,
                              max_length=model_args.max_peptide_length,
                              dropout=model_args.sequence_dropout,
-                             pooling=model_args.pooling)
+                             pooling=model_args.pooling,
+                             readout=student_readout(state))
     model = SequenceAlignmentModel(teacher, student, pooling=manifest["pooling"])
-    state = load_file(str(Path(cli.run) / "final" / "model.safetensors"))
     prefix = "sequence_encoder."
     student_state = {k[len(prefix):]: v for k, v in state.items() if k.startswith(prefix)}
     student.load_state_dict(student_state, strict=True)   # every student weight, no extras
