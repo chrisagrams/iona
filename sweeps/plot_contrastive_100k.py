@@ -94,7 +94,7 @@ def references(ax, res, key):
             if n.startswith("base_") and key in d["metrics"]]
     if base:
         ax.axhspan(min(base), max(base), color="#9ca3af", alpha=0.18,
-                   label="untrained encoders")
+                   label="frozen, final layer")
 
 
 def finish(ax, xlabel, ylabel, title):
@@ -114,10 +114,30 @@ def fig_scale(res):
         for (s, _), xi, yi in zip(pts, x, y):
             ax.scatter([xi], [yi], s=55, color=SCALE_COLOUR[s], zorder=3, label=s)
         label(ax, x, y)
+        # "before": the frozen pretrained encoder's best block at 220k (zero-shot redo)
+        zs = zeroshot_best(key)
+        zx = [PARAMS[s] for s in ORDER if s in zs]; zy = [zs[s] for s in ORDER if s in zs]
+        if zx:
+            ax.plot(zx, zy, ls="--", lw=1.1, color=MUTED, marker="o", mfc="white",
+                    ms=6, label="frozen, best layer")
+            label(ax, zx, zy, below=True)
         references(ax, res, key)
         ax.set_xscale("log"); ax.set_xticks(x); ax.set_xticklabels([s for s, _ in pts])
         finish(ax, "model size", name, f"{name}, checkpoint 220k")
     fig.tight_layout(); out = FIGS / "c100k_scale.png"; fig.savefig(out); plt.close(fig)
+    return out
+
+
+def zeroshot_best(key, ck="220k"):
+    """Frozen encoder's best-block score per scale (eval_zeroshot_layers output)."""
+    out = {}
+    for f in glob.glob(str(REPO / "results" / "finetune" / "contrastive" / "zeroshot-layers"
+                           / f"zs_*_ck{ck}.json")):
+        d = json.load(open(f))
+        m = re.match(r"zs_0*(\d+m)_ck", d["name"])
+        vals = [v[key] for v in d["layers"].values() if key in v]
+        if m and vals:
+            out[m.group(1)] = max(vals)
     return out
 
 

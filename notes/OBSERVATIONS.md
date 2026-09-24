@@ -1243,3 +1243,22 @@ OVERTURNS the "frozen embedding is indistinguishable from random at every layer"
 lot (400m: 0.43 frozen best -> 0.70 replicate-FT -> 0.86 C7). NOT YET MEASURED: linear vs
 MLP probe on the frozen ~3/4-depth features (the actual non-linearity test); a random-init
 zero-shot reference on this test. Raises the value of the parked layer-mix retry.
+
+## Reranking with the best 50m pair: the embedding alone beats real decoys 98-99%, near-miss swaps 70% (2026-09-24)
+
+Spectrum side C7-50m (step 600, seed 1), peptide side A1 student (seed 0); 25,775
+ms-contrastive-100k VALIDATION spectra (cache align-targets-a1-050m-c7s600); candidates =
+truth + 2 near-miss (adjacent swap) + 2 mass-matched real peptides + reverse. Jobs 8862663
+(embedding only), 8862729 (classifier, all decoys), 8862705 (classifier, no near-miss).
+
+    embedding only (argmax cosine):  hit@1 0.701 all decoys | 0.975 without near-miss
+      truth beats: mass_matched 98.7%, reverse 98.2%, near_miss 70.5%
+    classifier, all decoys:          with emb 0.752 +- 0.008, without 0.789 +- 0.008
+                                     embedding -0.037 hit@1 (R1: -0.11), +0.009 AUROC
+    classifier, no near-miss:        with 0.996, without 0.995 (+0.001, n.s.)
+
+The only thing the embedding cannot separate is adjacent-residue swaps: mean+max pooling
+is near order-blind (A3). Without near-misses the hand-built features already solve this
+synthetic benchmark, so it cannot show what the embedding adds -- that needs the incoming
+reranking dataset's real candidates. Caveats FT30 (no ppm cutoff on mass-matched decoys)
+and FT32 (distorted intensity features) apply to both classifier arms equally.
