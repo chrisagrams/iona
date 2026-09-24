@@ -11,11 +11,14 @@ from transformers import (
 from iona.configuration_iona import (
     IonaConfig,
     IonaDenoisingConfig,
+    IonaIntensityPredictionConfig,
     IonaRetrievalConfig,
 )
 from iona.modeling_iona import (
     IonaForDenoising,
     IonaForDenoisingOutput,
+    IonaForIntensityPrediction,
+    IonaForIntensityPredictionOutput,
     IonaForPreTraining,
     IonaForPreTrainingOutput,
     IonaForRetrieval,
@@ -42,7 +45,17 @@ AutoConfig.register(
     IonaRetrievalConfig,
     exist_ok=True,
 )
+AutoConfig.register(
+    IonaIntensityPredictionConfig.model_type,
+    IonaIntensityPredictionConfig,
+    exist_ok=True,
+)
 AutoModel.register(IonaConfig, IonaModel, exist_ok=True)
+AutoModel.register(
+    IonaIntensityPredictionConfig,
+    IonaForIntensityPrediction,
+    exist_ok=True,
+)
 AutoModel.register(IonaRetrievalConfig, IonaForRetrieval, exist_ok=True)
 AutoModelForPreTraining.register(IonaConfig, IonaForPreTraining, exist_ok=True)
 AutoModelForTokenClassification.register(
@@ -57,11 +70,14 @@ AutoProcessor.register(IonaRetrievalConfig, IonaProcessor, exist_ok=True)
 __all__ = [
     "IonaConfig",
     "IonaDenoisingConfig",
+    "IonaIntensityPredictionConfig",
     "IonaRetrievalConfig",
     "IonaDataCollatorForPreTraining",
     "IonaDataCollatorForRetrieval",
     "IonaForDenoising",
     "IonaForDenoisingOutput",
+    "IonaForIntensityPrediction",
+    "IonaForIntensityPredictionOutput",
     "IonaForPreTraining",
     "IonaForPreTrainingOutput",
     "IonaForRetrieval",

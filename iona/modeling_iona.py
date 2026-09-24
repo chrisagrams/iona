@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+import math
 import torch
 import torch.nn.functional as F
 from pytorch_metric_learning.losses import SupConLoss
@@ -20,6 +21,7 @@ from .configuration_iona import (
     IonaConfig,
     IonaDenoisingConfig,
     IonaDenovoConfig,
+    IonaIntensityPredictionConfig,
     IonaRetrievalConfig,
 )
 from .fourier import FourierFeatures
@@ -51,6 +53,14 @@ class IonaForRetrievalOutput(ModelOutput):
 
     loss: Tensor | None = None
     embeddings: Tensor | None = None
+
+
+@dataclass
+class IonaForIntensityPredictionOutput(ModelOutput):
+    """Output of fragment-intensity prediction in Prosit's 174-slot layout."""
+
+    loss: Tensor | None = None
+    intensities: Tensor | None = None
 
 
 class PeakEmbed(nn.Module):
@@ -309,6 +319,57 @@ class SpectrumRetrievalHead(nn.Module):
         pooled = torch.nan_to_num(pooled, neginf=0.0)
         embeddings = self.projection(pooled)
         return F.normalize(embeddings.float(), dim=-1)
+
+
+def masked_spectral_angle(predicted: Tensor, target: Tensor, mask: Tensor) -> Tensor:
+    """Prosit's normalized spectral contrast angle per spectrum, over `mask` slots."""
+    predicted = F.normalize(predicted.float().masked_fill(~mask, 0.0), dim=-1)
+    target = F.normalize(target.float().clamp_min(0.0).masked_fill(~mask, 0.0), dim=-1)
+    cosine = (predicted * target).sum(dim=-1).clamp(-1.0 + 1e-7, 1.0 - 1e-7)
+    return 1.0 - 2.0 * torch.arccos(cosine) / math.pi
+
+
+class FragmentIntensityHead(nn.Module):
+    """Score each theoretical ion from its encoder state and Prosit's inputs."""
+
+    def __init__(self, config: IonaIntensityPredictionConfig):
+        super().__init__()
+        size = config.head_hidden_size
+        self.state_projection = nn.Linear(config.encoder.hidden_size, size)
+        self.slot_embedding = nn.Embedding(config.num_ion_slots, size)
+        self.precursor_charge_embedding = nn.Embedding(config.max_precursor_charge, size)
+        self.length_embedding = nn.Embedding(config.max_sequence_length, size)
+        self.collision_energy_projection = ScalarInputLinear(1, size)
+        self.projection = nn.Sequential(
+            nn.GELU(),
+            nn.Dropout(config.head_dropout),
+            nn.Linear(size, size),
+            nn.GELU(),
+            nn.Dropout(config.head_dropout),
+            nn.Linear(size, 1),
+        )
+
+    def forward(
+        self,
+        hidden_states: Tensor,
+        ion_slots: Tensor,
+        precursor_charge: Tensor,
+        peptide_length: Tensor,
+        collision_energy: Tensor,
+    ) -> Tensor:
+        spectrum = (
+            self.precursor_charge_embedding(precursor_charge.long() - 1)
+            + self.length_embedding(peptide_length.long() - 1)
+            + self.collision_energy_projection(
+                collision_energy.unsqueeze(-1).to(self.state_projection.weight.dtype)
+            )
+        )
+        features = (
+            self.state_projection(hidden_states.to(self.state_projection.weight.dtype))
+            + self.slot_embedding(ion_slots)
+            + spectrum.unsqueeze(1)
+        )
+        return self.projection(features).squeeze(-1).float()
 
 
 class IonaForPreTraining(IonaPreTrainedModel):
@@ -876,8 +937,109 @@ class IonaForDenovo(IonaPreTrainedModel):
         )
 
 
+class IonaForIntensityPrediction(IonaPreTrainedModel):
+    """Iona encoder with a Prosit-style fragment-intensity head.
+
+    Inputs are the theoretical ions of each peptide, built by
+    ``IonaDataCollatorForIntensityPrediction``: packed m/z, prior-weighted
+    log intensities, and each ion's slot in Prosit's flat layout. Predictions
+    are returned in that layout, max-normalized, with -1 for impossible ions.
+    """
+
+    config_class: type[PretrainedConfig] | None = IonaIntensityPredictionConfig
+
+    def __init__(
+        self,
+        config: IonaIntensityPredictionConfig,
+        encoder: IonaModel | None = None,
+        freeze_encoder: bool = False,
+    ):
+        super().__init__(config)
+        self.iona = encoder if encoder is not None else IonaModel(config.encoder)
+        self.intensity_head = FragmentIntensityHead(config)
+        self._encoder_is_frozen = False
+        if encoder is None:
+            self.post_init()
+        else:
+            self.intensity_head.apply(self._init_weights)
+        if freeze_encoder:
+            self.freeze_encoder()
+
+    def freeze_encoder(self) -> None:
+        """Freeze the encoder and keep its stochastic layers disabled."""
+        self._encoder_is_frozen = True
+        self.iona.requires_grad_(False)
+        self.iona.eval()
+
+    def train(self, mode: bool = True):
+        super().train(mode)
+        if self._encoder_is_frozen:
+            self.iona.eval()
+        return self
+
+    def forward(
+        self,
+        mz: Tensor,
+        log_intensity: Tensor,
+        attention_mask: Tensor,
+        ion_slots: Tensor,
+        precursor_charge: Tensor,
+        peptide_length: Tensor,
+        collision_energy: Tensor,
+        labels: Tensor | None = None,
+        return_dict: bool | None = None,
+    ) -> IonaForIntensityPredictionOutput | tuple[Tensor, ...]:
+        if return_dict is None:
+            return_dict = self.config.return_dict
+        if ion_slots.shape != mz.shape:
+            raise ValueError("ion_slots must have the same shape as mz")
+        if not self.config.use_encoder_states:
+            hidden_states = mz.new_zeros((*mz.shape, self.config.encoder.hidden_size))
+        else:
+            with torch.set_grad_enabled(torch.is_grad_enabled() and not self._encoder_is_frozen):
+                hidden_states = self.iona(
+                    mz=mz,
+                    log_intensity=log_intensity,
+                    attention_mask=attention_mask,
+                    return_dict=True,
+                ).last_hidden_state
+        ion_logits = self.intensity_head(
+            hidden_states, ion_slots, precursor_charge, peptide_length, collision_energy
+        )
+
+        # Place each real ion's logit in its slot; padding and impossible ions stay -inf.
+        present = attention_mask.bool()
+        rows = torch.arange(mz.shape[0], device=mz.device).unsqueeze(-1).expand_as(ion_slots)
+        rows, slots = rows[present], ion_slots[present]
+        logits = ion_logits.new_full((mz.shape[0], self.config.num_ion_slots), float("-inf"))
+        logits = logits.index_put((rows, slots), ion_logits[present])
+        valid = torch.zeros_like(logits, dtype=torch.bool).index_put(
+            (rows, slots), torch.ones_like(slots, dtype=torch.bool)
+        )
+        probabilities = torch.nan_to_num(F.softmax(logits, dim=-1), nan=0.0)
+        intensities = probabilities / probabilities.amax(dim=-1, keepdim=True).clamp_min(1e-12)
+        intensities = intensities.masked_fill(~valid, -1.0)
+
+        loss = None
+        if labels is not None:
+            if labels.shape != valid.shape:
+                raise ValueError(f"labels must have shape (batch, {valid.shape[1]})")
+            scored = valid & (labels >= 0)
+            has_signal = (labels.clamp_min(0.0) * scored).sum(dim=-1) > 0
+            angle = masked_spectral_angle(probabilities, labels, scored)
+            loss = (
+                (1.0 - angle[has_signal]).mean() if has_signal.any() else probabilities.sum() * 0.0
+            )
+
+        if not return_dict:
+            result = (intensities,)
+            return ((loss,) + result) if loss is not None else result
+        return IonaForIntensityPredictionOutput(loss=loss, intensities=intensities)
+
+
 IonaModel.register_for_auto_class("AutoModel")
 IonaForPreTraining.register_for_auto_class("AutoModelForPreTraining")
 IonaForDenoising.register_for_auto_class("AutoModelForTokenClassification")
 IonaForRetrieval.register_for_auto_class("AutoModel")
 IonaForDenovo.register_for_auto_class("AutoModel")
+IonaForIntensityPrediction.register_for_auto_class("AutoModel")
