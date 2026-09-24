@@ -1154,3 +1154,17 @@ The small eval ranks 400m LAST; the 100k test ranks it first by +0.045. Scale re
 the 100k test only. 400m at 24 epochs (0.703) sits just below 400m at 12 epochs (0.713,
 C1), so 24 epochs is at or past 400m's optimum while 50m still gained 12 -> 24. All
 replicate-corpus models remain below binned cosine (0.730).
+
+## C9 settled: no projection head (2026-09-24)
+
+24-epoch arms (job 8860587), frozen C1 recipe + master's head (pooled -> 512 -> 256), 50m
+@220k, 3 seeds, small-eval MAP@R; control = C2 s050m_ck220k (identical apart from the head):
+
+    no head (control)      0.878 / 0.879 / 0.874   mean 0.877
+    head, head output      0.829 / 0.828 / 0.817   mean 0.825
+    head, pre-head         0.713 / 0.699 / 0.704   mean 0.705
+
+The head closes part of its 3-epoch deficit but still loses 0.05 at our full budget, and
+the pre-head features (SimCLR's readout) lose 0.17. DECISION: keep the no-head design
+(normalised mean+max of the last layer). Nothing is rerun. 100k-test scoring of these arms
+is in 8861096 for the record.

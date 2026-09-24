@@ -1,0 +1,7 @@
+# C9 full (8860587) and C7 50m step 900 (8860522) on the 100k test
+c9_s050m_ck220k_head256_seed0 /lus/flare/projects/UIC-HPC/khuss/msdelta/runs/sweep-s050m_ck220k_seed0_head256-8860587/final
+c9_s050m_ck220k_head256_seed1 /lus/flare/projects/UIC-HPC/khuss/msdelta/runs/sweep-s050m_ck220k_seed1_head256-8860587/final
+c9_s050m_ck220k_head256_seed2 /lus/flare/projects/UIC-HPC/khuss/msdelta/runs/sweep-s050m_ck220k_seed2_head256-8860587/final
+c7b_cont050m_s900_seed0 /lus/flare/projects/UIC-HPC/khuss/msdelta/runs/sweep-cont050m_ep01_seed0-8860522/checkpoint-900/encoder
+c7b_cont050m_s900_seed1 /lus/flare/projects/UIC-HPC/khuss/msdelta/runs/sweep-cont050m_ep01_seed1-8860522/checkpoint-900/encoder
+c7b_cont050m_s900_seed2 /lus/flare/projects/UIC-HPC/khuss/msdelta/runs/sweep-cont050m_ep01_seed2-8860522/checkpoint-900/encoder

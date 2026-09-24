@@ -828,6 +828,20 @@ so far used the leaky split. Note the pool is small: 94 held-out peptides in tot
 | H10 | seed noise hides effects | **checked, small** | 3-seed spread: C1 50m ep24 0.877/0.880/0.874; ms-contrastive-100k 0.657/0.654/0.656 |
 | H11 | rescorer intensity reconstruction | **CONFIRMED, open (FT32)** | see FT32 |
 
+## FT33. Collecting ONE test file alone segfaults on a compute node — **worked around; root cause open (likely = FT26)**
+
+`pytest tests/<file>.py` exits 139 at COLLECTION with no traceback (faulthandler prints
+nothing) on Aurora compute nodes, for test_precompute_sharded.py and even for
+test_projection_head.py, which passes inside the full suite. The only single file that
+collects cleanly is test_grouped_retrieval.py -- the only one importing `msdelta` at
+module level. Plain `python -c "import msdelta.precompute_align"` is fine. Jobs 8860961
+(blocked A1), 8860988, 8860999, 8861019; fix verified 8861025.
+
+WORKAROUND: a file that must run alone imports msdelta at module level
+(test_precompute_sharded.py). The full suite is unaffected because an earlier module
+imports msdelta first. Worth checking whether the same one-line import fixes FT26
+(tests/gpu segfaults at collection).
+
 ## FT32. run_rescoring rebuilds intensity from a NORMALISED log — **Open, low (reranking on hold)**
 
 `run_rescoring.py:91` does `exp(log_intensity) - 1`, but the processor stores

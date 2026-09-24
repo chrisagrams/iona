@@ -46,6 +46,19 @@ class PrecomputeArguments:
 
     batch_size: int = field(default=16, metadata={"help": "spectra per teacher forward"})
     seed: int = field(default=0, metadata={"help": "must match the run that consumes this"})
+    # Sharded build, for caches too big for one tile inside a debug hour
+    # (ms-contrastive-100k: ~283k spectra, ~1.5 h at 50m on one tile):
+    #   stage prepare   one process: build the flattened splits, save to <cache>/_flat
+    #   stage shard     one process per tile: contiguous shard i of n -> <cache>/_shards
+    #   stage merge     one process: concatenate shards IN ORDER -> <cache>/{train,validation}
+    # Contiguous shards concatenated in index order are exactly the unsharded row order,
+    # so the merged cache is the one stage "all" (the default, unsharded) would write.
+    stage: str = field(default="all", metadata={"help": "all, prepare, shard or merge"})
+    pad_spectra_to: int = field(
+        default=0, metadata={"help": "shard stage: fixed spectrum width per batch (use "
+                                     "max_peaks when 12 shards share a node; see FT16)"})
+    num_shards: int = 1
+    shard_index: int = 0
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -60,11 +73,17 @@ def main(argv: list[str] | None = None) -> int:
         sys.exit("--target_cache is required: it is where the embeddings are written")
 
     device = "xpu" if torch.xpu.is_available() else "cpu"
+    stage = precompute_args.stage
+    if stage not in ("all", "prepare", "shard", "merge"):
+        sys.exit(f"--stage must be all, prepare, shard or merge, not {stage!r}")
+    if stage == "shard":
+        return _shard(cache, model_args, precompute_args, device)
+    if stage == "merge":
+        return _merge(cache, model_args, data_args, precompute_args)
     processor = MSDeltaProcessor.from_pretrained(
         data_args.processor_name_or_path or model_args.pretrained_path,
         max_peaks=data_args.max_peaks,
     )
-    teacher = MSDeltaForPreTraining.from_pretrained(model_args.pretrained_path)
 
     from msdelta.grouped_retrieval import load_spectrum_datasets
     datasets = load_spectrum_datasets(
@@ -78,12 +97,66 @@ def main(argv: list[str] | None = None) -> int:
     datasets = subset_splits(datasets, data_args.max_samples)
     print(f"[precompute] device={device} "
           + " ".join(f"{k}={len(v):,}" for k, v in datasets.items()), flush=True)
+    if stage == "prepare":
+        for name, split in datasets.items():
+            split.save_to_disk(str(cache / "_flat" / name))
+        print(f"[precompute] prepared flat splits under {cache / '_flat'}", flush=True)
+        return 0
 
+    teacher = MSDeltaForPreTraining.from_pretrained(model_args.pretrained_path)
     datasets = attach_teacher_embeddings(
         datasets, teacher, model_args.pooling,
         batch_size=precompute_args.batch_size,
         max_peptide_length=model_args.max_peptide_length, device=device)
 
+    return _write_cache(cache, datasets, model_args, data_args, precompute_args)
+
+
+def _shard(cache, model_args, precompute_args, device) -> int:
+    from datasets import load_from_disk
+
+    n, i = precompute_args.num_shards, precompute_args.shard_index
+    teacher = MSDeltaForPreTraining.from_pretrained(model_args.pretrained_path)
+    for name in ("train", "validation"):
+        flat = cache / "_flat" / name
+        out = cache / "_shards" / name / f"{i:03d}"
+        if not flat.exists():
+            continue
+        if out.exists():
+            # A rerun after some shards faulted: finished pieces are kept, not recomputed.
+            print(f"[precompute] shard {i}/{n} {name}: already done", flush=True)
+            continue
+        part = load_from_disk(str(flat)).shard(num_shards=n, index=i, contiguous=True)
+        part = attach_teacher_embeddings(
+            {name: part}, teacher, model_args.pooling,
+            batch_size=precompute_args.batch_size,
+            max_peptide_length=model_args.max_peptide_length, device=device,
+            pad_spectra_to=getattr(precompute_args, "pad_spectra_to", 0))[name]
+        part.save_to_disk(str(out))
+        print(f"[precompute] shard {i}/{n} {name}: {len(part):,} rows", flush=True)
+    return 0
+
+
+def _merge(cache, model_args, data_args, precompute_args) -> int:
+    from datasets import concatenate_datasets, load_from_disk
+
+    n = precompute_args.num_shards
+    datasets = {}
+    for name in ("train", "validation"):
+        parts = [cache / "_shards" / name / f"{i:03d}" for i in range(n)]
+        if not parts[0].exists():
+            continue
+        missing = [str(p) for p in parts if not p.exists()]
+        if missing:
+            sys.exit(f"missing shards: {missing[:3]}")
+        datasets[name] = concatenate_datasets([load_from_disk(str(p)) for p in parts])
+        expected = len(load_from_disk(str(cache / "_flat" / name)))
+        if len(datasets[name]) != expected:
+            sys.exit(f"{name}: merged {len(datasets[name])} rows, expected {expected}")
+    return _write_cache(cache, datasets, model_args, data_args, precompute_args)
+
+
+def _write_cache(cache, datasets, model_args, data_args, precompute_args) -> int:
     cache.mkdir(parents=True, exist_ok=True)
     for name, split in datasets.items():
         split.save_to_disk(str(cache / name))

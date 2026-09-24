@@ -29,6 +29,9 @@ RUNS = "/lus/flare/projects/UIC-HPC/khuss/msdelta/runs"
 BASE = REPO / "configs" / "finetune-align-contrastive" / "training.args"
 TEACHERS = {
     "400m-c1": f"{RUNS}/sweep-s400m_t0002_pk256_ep12_seed0-8857593/final",
+    # C7 best-first 50m, continued on ms-contrastive-100k, step 600 of 1062, seed 1:
+    # 0.831 exp MAP@R on the 100k test (best of 3 seeds; binned cosine 0.730).
+    "050m-c7s600": f"{RUNS}/sweep-cont050m_ep01_seed1-8860522/checkpoint-600/encoder",
 }
 OVERRIDES = {
     "--dataset_repo": "chrisagrams/ms-contrastive-100k",
