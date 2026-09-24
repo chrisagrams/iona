@@ -1138,3 +1138,19 @@ step 300 of 1062 (~28% of one epoch), scored on the test split (job 8860719):
 corpus (~855 peptides) was the bottleneck. With the consensus spectrum in the gallery
 ("all") binned cosine still leads, 0.76 vs 0.65 (gap was 0.25); training never sees
 consensus spectra (include_consensus false). NOT YET MEASURED: later steps, 400m.
+
+## C2 on the ms-contrastive-100k test: flat 50m-200m, a step at 400m (2026-09-24)
+
+Frozen C1 recipe (24 epochs, t 0.002, P64xK4, GradCache 4) at checkpoint 220k, 3 seeds,
+trained on the replicate corpus; scored on the 100k test split (job 8860863):
+
+              exp MAP@R (seeds)          mean    Hit@1   small eval
+    50m       0.659 / 0.655 / 0.657      0.657   0.766   0.877
+    100m      0.659 / 0.678 / 0.658      0.665   0.768   0.885
+    200m      0.661 / 0.669 / 0.643      0.658   0.764   0.881
+    400m      0.704 / 0.705 / 0.700      0.703   0.799   0.867
+
+The small eval ranks 400m LAST; the 100k test ranks it first by +0.045. Scale reads from
+the 100k test only. 400m at 24 epochs (0.703) sits just below 400m at 12 epochs (0.713,
+C1), so 24 epochs is at or past 400m's optimum while 50m still gained 12 -> 24. All
+replicate-corpus models remain below binned cosine (0.730).

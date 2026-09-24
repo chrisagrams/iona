@@ -1,0 +1,13 @@
+# C2 (8860092) on ms-contrastive-100k test
+c2_s050m_ck220k_seed0 /lus/flare/projects/UIC-HPC/khuss/msdelta/runs/sweep-s050m_ck220k_seed0-8860092/final
+c2_s050m_ck220k_seed1 /lus/flare/projects/UIC-HPC/khuss/msdelta/runs/sweep-s050m_ck220k_seed1-8860092/final
+c2_s050m_ck220k_seed2 /lus/flare/projects/UIC-HPC/khuss/msdelta/runs/sweep-s050m_ck220k_seed2-8860092/final
+c2_s100m_ck220k_seed0 /lus/flare/projects/UIC-HPC/khuss/msdelta/runs/sweep-s100m_ck220k_seed0-8860092/final
+c2_s100m_ck220k_seed1 /lus/flare/projects/UIC-HPC/khuss/msdelta/runs/sweep-s100m_ck220k_seed1-8860092/final
+c2_s100m_ck220k_seed2 /lus/flare/projects/UIC-HPC/khuss/msdelta/runs/sweep-s100m_ck220k_seed2-8860092/final
+c2_s200m_ck220k_seed0 /lus/flare/projects/UIC-HPC/khuss/msdelta/runs/sweep-s200m_ck220k_seed0-8860092/final
+c2_s200m_ck220k_seed1 /lus/flare/projects/UIC-HPC/khuss/msdelta/runs/sweep-s200m_ck220k_seed1-8860092/final
+c2_s200m_ck220k_seed2 /lus/flare/projects/UIC-HPC/khuss/msdelta/runs/sweep-s200m_ck220k_seed2-8860092/final
+c2_s400m_ck220k_seed0 /lus/flare/projects/UIC-HPC/khuss/msdelta/runs/sweep-s400m_ck220k_seed0-8860092/final
+c2_s400m_ck220k_seed1 /lus/flare/projects/UIC-HPC/khuss/msdelta/runs/sweep-s400m_ck220k_seed1-8860092/final
+c2_s400m_ck220k_seed2 /lus/flare/projects/UIC-HPC/khuss/msdelta/runs/sweep-s400m_ck220k_seed2-8860092/final
