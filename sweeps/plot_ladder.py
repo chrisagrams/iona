@@ -50,6 +50,7 @@ CONFIG = {"--learning_rate": "2e-4", "--encoder_lr_scale": "0.5",
 # it "not comparable". One of its arms (0.8597) sat in the 50m@133k cell and dragged
 # that point from 0.932 to 0.927.
 EXCLUDE_JOBS = {"8840345"}
+MIN_TEST_SPECTRA = 8000   # the full test split scores 8,567 spectra
 
 
 def matches_config(text: str) -> bool:
@@ -103,6 +104,11 @@ def collect():
         except Exception:
             continue
         if "test_auroc" not in r:
+            continue
+        # Smoke runs (MAX_SAMPLES) score a ~2,000-spectrum slice of the test split, not
+        # the full ~8,567, and read ~0.05 low; they sit in the same run dirs as real arms.
+        # 8861517 (400m@430k smoke) was the only point in its cell before this.
+        if r.get("test_spectra_scored", MIN_TEST_SPECTRA) < MIN_TEST_SPECTRA:
             continue
         for k, _ in METRICS:
             if k in r:

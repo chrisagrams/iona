@@ -1,0 +1,5 @@
+# best-validation-AUPRC denoise model per scale (the Hub iona-denoise-* picks)
+iona-denoise-50m /lus/flare/projects/UIC-HPC/khuss/msdelta/runs/sweep-50m_ck540k_seed1-8856549/final
+iona-denoise-100m /lus/flare/projects/UIC-HPC/khuss/msdelta/runs/sweep-100m_ck540k_seed2-8856549/final
+iona-denoise-200m /lus/flare/projects/UIC-HPC/khuss/msdelta/runs/sweep-200m_ck330k_seed2-8850494/final
+iona-denoise-400m /lus/flare/projects/UIC-HPC/khuss/msdelta/runs/sweep-400m_ck220k_seed1-8850494/final
