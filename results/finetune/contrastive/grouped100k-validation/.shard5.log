@@ -1,0 +1,3 @@
+[score] shard 5/12: 1 of 12 models on xpu
+Loading weights:   0%|          | 0/170 [00:00<?, ?it/s]Loading weights:  28%|██▊       | 47/170 [00:00<00:00, 426.99it/s]Loading weights:  53%|█████▎    | 90/170 [00:00<00:00, 293.26it/s]Loading weights:  72%|███████▏  | 122/170 [00:00<00:00, 248.49it/s]Loading weights:  88%|████████▊ | 149/170 [00:00<00:00, 214.81it/s]Loading weights: 100%|██████████| 170/170 [00:00<00:00, 248.10it/s]
+  c7b_cont050m_s300_seed2: all MAP@R 0.6596  experimental MAP@R 0.8072  (721s)

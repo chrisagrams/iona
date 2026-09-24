@@ -1276,3 +1276,46 @@ cosine retrieval (job 8863968), experimental MAP@R / Hit@1 / all-view MAP@R:
 At our width, linear unsupervised compression loses almost nothing vs raw binned cosine;
 the learned embeddings are +0.11-0.14 above both on experimental spectra (weaker only on
 the consensus view, which training never sees).
+
+## R baselines: MS²Rescore (full) beats our rescorer by +33% PSMs (2026-09-24)
+
+Same 8 runs, 332,822 spectra, all top-10 candidates, OUR TDC (best per spectrum, runs
+pooled, PSMs at 1% FDR). Built by an agent under baselines_wip/ (untracked); outputs in
+$SCRATCH/baselines/{ms2rescore_out,okt_out}.
+
+    method                                             all 8     HEK (6)   HCT116 (2)
+    MSFragger rank-1                                   89,693    88,543     1,518
+    ours MLP ms+hand                                   96,288    93,791     2,613
+    ours MLP ms+hand+emb                               96,367    94,127     2,618
+    MS²Rescore search-only (Percolator-style)         100,974    97,722     2,950
+    MS²Rescore full (+MS²PIP +DeepLC)                 128,211   120,747     7,139
+    Oktoberfest original (Percolator, search feats)       --    87,128        --
+    Oktoberfest + Prosit                                  --   102,810        --
+
+- MS²Rescore trains per run (Percolator-style internal 3-fold CV, ristretto engine, no
+  mokapot in 4.0.2); ours is CV across runs. Even its search-only arm beats ours, so part
+  of the gap is the training protocol, not features. The rest is predicted-spectrum
+  (MS²PIP) and RT (DeepLC) features, which we do not have.
+- MS²PIP: CID for HEK (ion trap), HCD2021 for HCT116 (CID there: 6,317 < 7,139).
+- Oktoberfest: HEK only; N-term acetyl candidates dropped (~3.6%) and peptides > 30 aa,
+  counted as not accepted (biases against it). Prosit calls went to koina.wilhelmlab.org.
+- Leakage spot check (HEK-0628-5): decoy labels preserved; 172 decoys among 17,527 accepted.
+- Consequence for R: the fair comparison is our embedding ADDED to a strong rescorer
+  (MS²Rescore features, per-run training), not our MLP vs theirs.
+
+## Teacher selection moved to VALIDATION; A1's teacher seed confirmed (2026-09-24)
+
+All 12 C7-50m checkpoints re-scored on ms-contrastive-100k VALIDATION (experimental MAP@R;
+25,057 queries). Test for comparison, never for selection from here on.
+
+    step    seed0 val/test    seed1 val/test    seed2 val/test
+    300     0.804 / --        0.795 / --        0.807 / --
+    600     0.821 / 0.827     0.827 / 0.831     0.823 / 0.829
+    900     0.830 / 0.838     0.835 / 0.837     0.832 / 0.839
+    final   0.831 / 0.838     0.836 / 0.839     0.834 / 0.840
+
+- At step 600 (the A1 teacher) validation picks seed 1, as test did: A1 stands unchanged.
+- The best 50m teacher on validation is FINAL seed 1 (test would have picked final seed 2).
+  Step 600 was used for A1 because it was the newest checkpoint at the time.
+- A2 (400m) now picks its seed on validation (scratchpad auto_a2_val.sh); test is scored
+  afterwards for the record only.
