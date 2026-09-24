@@ -45,11 +45,18 @@ class PeakBudgetBatchSampler(BatchSampler):
         self.seed = seed
         self.num_processes = num_processes
         self.epoch = 0
+        self._cached: tuple[int, list[list[int]]] | None = None
 
     def set_epoch(self, epoch: int) -> None:
         self.epoch = epoch
 
     def _batches(self) -> list[list[int]]:
+        # __len__ and __iter__ both need the plan; build it once per epoch.
+        if self._cached is None or self._cached[0] != self.epoch:
+            self._cached = (self.epoch, self._build_batches())
+        return self._cached[1]
+
+    def _build_batches(self) -> list[list[int]]:
         indices = sorted(range(len(self.lengths)), key=self.lengths.__getitem__)
         batches: list[list[int]] = []
         batch: list[int] = []

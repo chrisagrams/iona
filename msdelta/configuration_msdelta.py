@@ -121,6 +121,51 @@ class MSDeltaRetrievalConfig(PretrainedConfig):
         return self.encoder.initializer_range
 
 
+class MSDeltaIntensityPredictionConfig(PretrainedConfig):
+    """Compose an MSDelta encoder configuration with a fragment-intensity head."""
+
+    model_type = "msdelta-intensity-prediction"
+    sub_configs = {"encoder": MSDeltaConfig}
+
+    def __init__(
+        self,
+        encoder: MSDeltaConfig | dict | None = None,
+        head_hidden_size: int = 256,
+        head_dropout: float = 0.1,
+        max_sequence_length: int = 30,
+        max_precursor_charge: int = 6,
+        max_fragment_charge: int = 3,
+        use_encoder_states: bool = True,
+        **kwargs,
+    ):
+        super().__init__(**kwargs)
+        self.encoder = (
+            encoder if isinstance(encoder, MSDeltaConfig) else MSDeltaConfig(**(encoder or {}))
+        )
+        self.head_hidden_size = head_hidden_size
+        self.head_dropout = head_dropout
+        self.max_sequence_length = max_sequence_length
+        self.max_precursor_charge = max_precursor_charge
+        self.max_fragment_charge = max_fragment_charge
+        self.use_encoder_states = use_encoder_states
+        if head_hidden_size <= 0:
+            raise ValueError("head_hidden_size must be positive")
+        if not 0.0 <= head_dropout < 1.0:
+            raise ValueError("head_dropout must be in [0, 1)")
+        if min(max_sequence_length, max_precursor_charge, max_fragment_charge) <= 0:
+            raise ValueError("sequence length and charge limits must be positive")
+
+    @property
+    def num_ion_slots(self) -> int:
+        """Prosit's flat layout: positions x {y, b} x fragment charges."""
+        return (self.max_sequence_length - 1) * 2 * self.max_fragment_charge
+
+    @property
+    def initializer_range(self) -> float:
+        return self.encoder.initializer_range
+
+
 MSDeltaConfig.register_for_auto_class()
 MSDeltaDenoisingConfig.register_for_auto_class()
 MSDeltaRetrievalConfig.register_for_auto_class()
+MSDeltaIntensityPredictionConfig.register_for_auto_class()

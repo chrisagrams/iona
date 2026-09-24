@@ -9,6 +9,20 @@ RESIDUE_MASSES: dict[str, float] = {
     residue: mass.std_aa_mass[residue] for residue in "GASPVTCLINDQKEMHFRYW"
 }
 
+CARBAMIDOMETHYL_MASS = mass.calculate_mass(formula="C2H3NO")
+OXIDATION_MASS = mass.calculate_mass(formula="O")
+
+# Residue masses indexed by Prosit's integer alphabet (0 = padding). Cysteine
+# is always carbamidomethylated and index 21 is oxidized methionine, as in Prosit.
+PROSIT_RESIDUE_MASSES: tuple[float, ...] = (
+    0.0,
+    *(
+        RESIDUE_MASSES[residue] + (CARBAMIDOMETHYL_MASS if residue == "C" else 0.0)
+        for residue in "ACDEFGHIKLMNPQRSTVWY"
+    ),
+    RESIDUE_MASSES["M"] + OXIDATION_MASS,
+)
+
 RESIDUES_AA20: dict[str, float] = {
     **{residue: value for residue, value in RESIDUE_MASSES.items() if residue not in {"I", "L"}},
     "L/I": RESIDUE_MASSES["L"],

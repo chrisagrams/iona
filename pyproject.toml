@@ -37,6 +37,7 @@ xpu = [
 [project.scripts]
 msdelta-train = "msdelta.train:main"
 msdelta-preprocess = "msdelta.preprocess:main"
+msdelta-intensity = "msdelta.intensity:main"
 
 [dependency-groups]
 dev = [
