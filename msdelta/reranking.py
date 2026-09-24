@@ -416,7 +416,8 @@ class SequenceAlignmentModel(nn.Module):
 @torch.no_grad()
 def attach_teacher_embeddings(datasets: dict, spectrum_model: nn.Module, pooling: str,
                               batch_size: int = 16, max_peptide_length: int = 64,
-                              device: str | torch.device | None = None) -> dict:
+                              device: str | torch.device | None = None,
+                              pad_spectra_to: int = 0) -> dict:
     """Run the frozen teacher once and store its embedding as a `target` column.
 
     The teacher never learns, so its output for a spectrum is the same in epoch 10 as in
@@ -434,7 +435,11 @@ def attach_teacher_embeddings(datasets: dict, spectrum_model: nn.Module, pooling
         pooling=pooling)
     device = device or ("xpu" if torch.xpu.is_available() else "cpu")
     model.spectrum_model.to(device).eval()
-    collator = AlignmentCollator(max_peptide_length=max_peptide_length)
+    # pad_spectra_to=max_peaks makes every batch the same width. Twelve of these on one
+    # node with batch-max padding took GPU page faults (8861039: 5 of 12 tiles, a Write
+    # at 0xff00....) -- the FT16 mechanism, where memory moves with the widest spectrum.
+    collator = AlignmentCollator(max_peptide_length=max_peptide_length,
+                                 pad_spectra_to=pad_spectra_to)
 
     def embed(batch: dict) -> dict:
         rows = [{"mz": mz, "log_intensity": li, "peptide": pep, "charge": ch}
