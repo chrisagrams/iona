@@ -58,14 +58,20 @@ AVAILABLE = {"50m":  ("10000", "120000", "220000", "330000", "430000", "540423")
              "100m": ("10000", "120000", "220000", "330000", "430000", "540423"),
              # 540423 backed up 2026-09-23 from cgrams/msdelta-runs (canonical).
              "200m": ("10000", "120000", "220000", "330000", "430000", "540423"),
-             # 400m pretraining STOPPED at 255058 of 540423 (47%; its final/ == that
-             # checkpoint, Sep 21). 255058 is therefore its last rung, not a canonical one.
              "400m": ("10000", "120000", "220000", "255058")}
+# 400m paused at 255058 (Sep 21) and resumed; 330000 and 430000 were backed up 2026-09-24.
+# Kept OUT of AVAILABLE on purpose: every existing grid's --check derives its cells from
+# AVAILABLE, so adding rungs there made the finished middle grid and the RUNNING ends-big
+# grid (8860472) report themselves stale. Only the late400 wave reads this.
+AVAILABLE_LATE = {"400m": ("330000", "430000")}   # + "540423" once it exists
 WAVES = {"middle": ("220000", "330000"),
          "ends":   ("10000", "120000", "430000", "540423"),
          # The same rungs for 200m/400m, which were still pretraining when "ends" ran.
          # Its own name so its own directory: "ends" is a finished record (8856549).
-         "ends-big": ("10000", "120000", "430000", "540423", "255058")}
+         "ends-big": ("10000", "120000", "430000", "540423", "255058"),
+         # 400m's rungs that did not exist when ends-big was queued (8860472). Own name,
+         # own directory: ends-big is RUNNING and must not change under it.
+         "late400": ("330000", "430000", "540423")}
 CELLS = [(s, c) for s in AVAILABLE for c in WAVES["middle"] if c in AVAILABLE[s]]
 
 TASKS = {
@@ -133,8 +139,9 @@ def main() -> int:
                          "first, so their curves can be completed before the others)")
     cli = ap.parse_args()
     global CELLS
+    have = AVAILABLE_LATE if cli.wave == "late400" else AVAILABLE
     CELLS = [(s, c) for s in cli.scales for c in WAVES[cli.wave]
-             if c in AVAILABLE.get(s, ())]
+             if c in have.get(s, ())]
     spec = TASKS[cli.task]
     # The wave goes in the directory NAME. A queued job reads its config dir at RUN
     # time, so regenerating a different wave into the same path silently changes the

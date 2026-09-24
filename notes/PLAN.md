@@ -103,10 +103,10 @@ D1 ✅  D2 ✅  D3 ✅  D4 ✅                  STAGE 1  full suite on the repli
       └─► denoise scaling figures                     ▼
           (AUROC and F1)                  STAGE 2  score every Stage-1 model on the
                                             ms-contrastive-100k test split
-                                            first check: 27 models, small-eval vs 100k
-                                            MAP@R Spearman 0.98 -- large effects transfer;
-                                            differences below the small eval's resolution
-                                            (50m vs 400m) do NOT, so scaling is read here
+                                            69 models: small-eval vs 100k MAP@R Spearman
+                                            0.78 (0.98 on the first 27). Recipe/length
+                                            effects transfer; SCALE and CHECKPOINT effects
+                                            do not -- they are read here only
                                                       │
                                                       ▼
                                           STAGE 3  a few configs trained ON ms-contrastive-100k

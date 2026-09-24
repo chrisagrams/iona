@@ -1193,3 +1193,13 @@ A1 ON THE TEST SPLIT (8861310, msdelta.eval_align_test): every experimental test
 
 Sequence alone, no precursor filter, ~10k candidates: the right peptide ranks first for
 ~90% of spectra.
+
+## CORRECTION: small-eval -> 100k-test transfer is rho 0.78, not 0.98 (2026-09-24)
+
+With all 69 Stage-1 models scored (sweeps/plot_contrastive_100k.py, c100k_transfer.png),
+Spearman between the replicate-corpus eval MAP@R and the 100k-test exp MAP@R is 0.78. The
+0.98 quoted earlier came from the first 27 models, which varied mainly in recipe and
+training length. The two groups that break it are the axes this study is about:
+400m models sit ABOVE the trend (the small eval ranked 400m last in C2) and early
+pretraining checkpoints (C4 10k) sit BELOW it. Recipe/length effects transfer; scale and
+checkpoint effects must be read on the 100k test. PLAN Stage 2 note corrected.
