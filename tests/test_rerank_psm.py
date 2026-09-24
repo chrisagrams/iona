@@ -63,3 +63,14 @@ def test_notation_parses_back():
                                                     {"position": 2, "mass": 57.02146}]))
     assert ids[0] == RESIDUE_TO_ID["n"] and masses[0] == pytest.approx(42.0106)
     assert masses[2] == pytest.approx(57.0215, abs=1e-4)
+
+
+def test_da_floor_matching():
+    """Ion-trap tolerance. 1000.2 vs 1000.0 is 200 ppm (inside 250 ppm); 100.04 vs 100.0
+    is 400 ppm (outside 250 ppm) but only 0.04 Da, inside a 0.05 Da floor."""
+    from msdelta.rescoring import _match
+    obs = np.array([100.04, 1000.2])            # sorted, as _match requires
+    theo = np.array([1000.0, 100.0])
+    assert _match(obs, theo, 20.0).tolist() == [False, False]          # old default
+    assert _match(obs, theo, 250.0).tolist() == [True, False]
+    assert _match(obs, theo, 250.0, da_floor=0.05).tolist() == [True, True]

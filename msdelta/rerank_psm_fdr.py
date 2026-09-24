@@ -15,8 +15,10 @@ Methods:
   msfragger    MSFragger's rank-1 candidate, scored by -log10 e-value (the dataset's own
                baseline: 16.5% of HEK spectra at 1% FDR on its tuning run)
   embedding    the candidate with the highest student-encoder cosine, scored by it
-  linear       Percolator-style linear rescorer on MSFragger's features (no cosine)
-  linear+emb   the same with `cosine` added
+  <model>:<features>[+emb]   a rescorer, model in {linear, mlp}, features in
+               {ms (MSFragger's scores), hand (our 22 fragment features, stage 1b),
+                ms+hand}; `+emb` adds the embedding cosine. `linear:ms` is the
+               Percolator-style baseline; each +emb pair isolates the embedding's effect.
 
 Rescorers are CROSS-VALIDATED BY RUN (a spectrum is never scored by a model trained on
 its own run; HEK runs are correlated MudPIT steps, so rows are not independent). Training
@@ -70,12 +72,36 @@ def top_per_spectrum(spectrum_codes, score):
     return order[first]
 
 
+def fit_mlp(Xtr, y, Xte, seed: int = 0, epochs: int = 8, hidden: int = 64) -> np.ndarray:
+    """Two-layer MLP (torch, CPU), class-balanced BCE; returns logits for Xte."""
+    import torch
+    torch.manual_seed(seed)
+    net = torch.nn.Sequential(torch.nn.Linear(Xtr.shape[1], hidden), torch.nn.ReLU(),
+                              torch.nn.Dropout(0.1), torch.nn.Linear(hidden, hidden),
+                              torch.nn.ReLU(), torch.nn.Linear(hidden, 1))
+    X = torch.tensor(Xtr, dtype=torch.float32); Y = torch.tensor(y, dtype=torch.float32)
+    pos_weight = torch.tensor((len(y) - y.sum()) / max(y.sum(), 1.0), dtype=torch.float32)
+    loss_fn = torch.nn.BCEWithLogitsLoss(pos_weight=pos_weight)
+    opt = torch.optim.Adam(net.parameters(), lr=1e-3, weight_decay=1e-5)
+    g = torch.Generator().manual_seed(seed)
+    for _ in range(epochs):
+        net.train()
+        for batch in torch.randperm(len(X), generator=g).split(4096):
+            opt.zero_grad(); loss_fn(net(X[batch]).squeeze(-1), Y[batch]).backward(); opt.step()
+    net.eval()
+    with torch.no_grad():
+        return torch.cat([net(chunk).squeeze(-1) for chunk in
+                          torch.tensor(Xte, dtype=torch.float32).split(65536)]).numpy()
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--rows", required=True)
     ap.add_argument("--out", required=True)
     ap.add_argument("--folds", type=int, default=3)
+    ap.add_argument("--handfeat", default="", help="dir of stage-1b hand-feature tables")
+    ap.add_argument("--models", default="linear,mlp")
     cli = ap.parse_args(argv)
 
     import pyarrow.parquet as pq
@@ -87,7 +113,17 @@ def main(argv: list[str] | None = None) -> int:
     df = pd.concat([pq.read_table(f).to_pandas() for f in files], ignore_index=True)
     df["matched_fraction"] = df["num_matched_ions"] / df["tot_num_ions"].clip(lower=1)
     df["abs_massdiff"] = df["massdiff"].abs()
-    for c in BASE_FEATURES + ("cosine",):
+    hand: tuple = ()
+    if cli.handfeat:
+        hf = pd.concat([pq.read_table(f).to_pandas() for f in
+                        sorted(glob.glob(str(Path(cli.handfeat) / "*.parquet")))],
+                       ignore_index=True)
+        before = len(df)
+        df = df.merge(hf, on="candidate", how="inner")
+        if len(df) != before:
+            raise SystemExit(f"hand features cover {len(df):,} of {before:,} candidates")
+        hand = tuple(c for c in hf.columns if c.startswith("hf_"))
+    for c in BASE_FEATURES + hand + ("cosine",):
         df[c] = pd.to_numeric(df[c], errors="coerce")
         df[c] = df[c].fillna(df[c].median())
     spec = df["spectrum_id"].astype("category").cat.codes.to_numpy()
@@ -124,24 +160,35 @@ def main(argv: list[str] | None = None) -> int:
     fold_of_run = {r: i % cli.folds for i, r in enumerate(uniq)}
     fold = np.array([fold_of_run[r] for r in runs])
     rank1 = df["search_rank"].to_numpy() == 1
-    for name, cols in (("linear", BASE_FEATURES), ("linear+emb", BASE_FEATURES + ("cosine",))):
-        X = df[list(cols)].to_numpy(float)
-        score = np.zeros(len(df))
-        for f in range(cli.folds):
-            tr, te = fold != f, fold == f
-            tr_top = np.flatnonzero(tr & rank1)
-            q = qvalues(ms[tr_top], decoy[tr_top])
-            pos = tr_top[(q <= 0.01) & ~decoy[tr_top]]
-            neg = np.flatnonzero(tr & decoy)
-            idx = np.r_[pos, neg]; y = np.r_[np.ones(len(pos)), np.zeros(len(neg))]
-            scaler = StandardScaler().fit(X[idx])
-            clf = LogisticRegression(max_iter=2000, class_weight="balanced")
-            clf.fit(scaler.transform(X[idx]), y)
-            score[te] = clf.decision_function(scaler.transform(X[te]))
-            if f == 0:
-                report.setdefault("weights_fold0", {})[name] = {
-                    k: float(v) for k, v in zip(cols, clf.coef_[0].round(4))}
-        evaluate(name, score)
+    sets = {"ms": BASE_FEATURES}
+    if hand:
+        sets |= {"hand": hand, "ms+hand": BASE_FEATURES + hand}
+    for model in cli.models.split(","):
+        for set_name, base in sets.items():
+            for emb in (False, True):
+                cols = base + (("cosine",) if emb else ())
+                name = f"{model}:{set_name}" + ("+emb" if emb else "")
+                X = df[list(cols)].to_numpy(float)
+                score = np.zeros(len(df))
+                for f in range(cli.folds):
+                    tr, te = fold != f, fold == f
+                    tr_top = np.flatnonzero(tr & rank1)
+                    q = qvalues(ms[tr_top], decoy[tr_top])
+                    pos = tr_top[(q <= 0.01) & ~decoy[tr_top]]
+                    neg = np.flatnonzero(tr & decoy)
+                    idx = np.r_[pos, neg]; y = np.r_[np.ones(len(pos)), np.zeros(len(neg))]
+                    scaler = StandardScaler().fit(X[idx])
+                    Xtr, Xte = scaler.transform(X[idx]), scaler.transform(X[te])
+                    if model == "linear":
+                        clf = LogisticRegression(max_iter=2000, class_weight="balanced")
+                        clf.fit(Xtr, y)
+                        score[te] = clf.decision_function(Xte)
+                        if f == 0:
+                            report.setdefault("weights_fold0", {})[name] = {
+                                k: float(v) for k, v in zip(cols, clf.coef_[0].round(4))}
+                    else:
+                        score[te] = fit_mlp(Xtr, y, Xte, seed=f)
+                evaluate(name, score)
 
     Path(cli.out).parent.mkdir(parents=True, exist_ok=True)
     Path(cli.out).write_text(json.dumps(report, indent=1))
