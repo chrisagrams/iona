@@ -1262,3 +1262,17 @@ is near order-blind (A3). Without near-misses the hand-built features already so
 synthetic benchmark, so it cannot show what the embedding adds -- that needs the incoming
 reranking dataset's real candidates. Caveats FT30 (no ppm cutoff on mass-matched decoys)
 and FT32 (distorted intensity features) apply to both classifier arms equally.
+
+## PCA baseline: linear compression of binned spectra ~ binned cosine, well below ours (2026-09-24)
+
+PCA fitted on 10k ms-contrastive-100k TRAIN analytes (35,731 spectra), test projected,
+cosine retrieval (job 8863968), experimental MAP@R / Hit@1 / all-view MAP@R:
+
+    PCA 0.1 Da -> 1280 dims   0.723 / 0.814 / 0.755    (binned cosine 0.1 Da: 0.730 / 0.819 / 0.759)
+    PCA 1 Da   -> 256 dims    0.553 / 0.672 / 0.595
+    PCA 0.1 Da -> 256 dims    0.488 / 0.611 / 0.533
+    ours: C7 400m step 600    0.859 / 0.908 / 0.726;  C7 50m final 0.839 / 0.893 / 0.677
+
+At our width, linear unsupervised compression loses almost nothing vs raw binned cosine;
+the learned embeddings are +0.11-0.14 above both on experimental spectra (weaker only on
+the consensus view, which training never sees).

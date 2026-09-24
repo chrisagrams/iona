@@ -74,6 +74,7 @@ peptide among each spectrum's candidates, paired seeds (arms share split and ini
 | R0 | What do we have to beat? | 🟡 | feature-only rescorer 0.893, but on an unfit benchmark: decoys not mass-matched (FT30), leaky split (FT29, fixed). To be re-taken on a realistic benchmark |
 | R1 | Do the encoders that win on contrastive improve the rescorer over that baseline? | 🟡 | embedding costs ~0.11 Hit@1 for both teachers, but only because near-miss decoys (adjacent swaps) are the benchmark's only hard case and the student is blind to them; the benchmark needs truly mass-matched decoys (FT30) before this answers anything |
 | R2 | If not, does a formulation without a shared per-spectrum vector (cross-encoder) fix it? | ⬜ | the −0.109 was diagnosed as errors correlated within a spectrum: every candidate is scored against the SAME cached teacher vector. Only if R1 fails |
+| R3 | On the FULL Gaolaboratory/psm-rerank-hek-hct116 (175 runs, 7.8M spectra), how many more PSMs/peptides at 1% FDR does our rescorer accept than MSFragger, and what does the embedding add? | ⏳ | first pass on 16 runs (8 train / 8 held-out): MLP on engine + hand-built + embedding 96,367 vs MSFragger 89,693 PSMs@1% (+7.4%, CV by run); embedding adds ~0.1% on top. **Full dataset**: stage 1 (embeddings + hand features) on all runs; split by ACQUISITION SERIES for HEK293 (whole series held out; MudPIT runs of one series are one sample) and by fraction for HCT116; mixed and per-dataset rescorers; optional peptide-disjoint test (unmodified sequence, I/L collapsed) |
 
 R1's first pass runs now with the current best encoders: they are ~2.3x better than the
 one behind the −0.109, which is the question, and it proves the pipeline so the final
@@ -85,7 +86,7 @@ External reference points, by track. Each is scored on the same split and metric
 
 CONTRASTIVE (spectrum embedder; ms-contrastive-100k test, MAP@R / Hit@1)
 - [x] **Binned cosine** (spectral-library dot product) — 0.730 exp MAP@R at 0.1 Da, 0.671 at 1 Da (8860250)
-- [ ] **PCA** — PCA of the binned spectrum vectors to our embedding width, cosine retrieval; says how much a linear unsupervised compression of the same input already gets
+- [x] **PCA** — fitted on 10k ms-contrastive-100k TRAIN analytes, test projected (job 8863968): 0.1 Da bins -> 1280 dims 0.723 exp MAP@R (Hit@1 0.814), -> 256 dims 0.488; 1 Da -> 256 dims 0.553. Our C7 400m 0.859, 50m 0.839
 - [ ] **GLEAMS** (Bittremieux et al., Nat Methods 2022) — GitHub install with an old TensorFlow in its OWN venv; needs raw m/z + intensity + precursor m/z + charge exported to MGF. ~0.5–1 day. Caveats: uses precursor info (we do not); trained on MassIVE-KB, which may overlap our test
 
 ALIGNMENT (peptide embedder; peptide->spectrum Hit@1 / MRR on the test split)
