@@ -407,7 +407,8 @@ class MSDeltaForContrastive(nn.Module):
                  pooling: str = "mean+max", temperature: float = 0.07,
                  kl_weight: float = 1.0, layer_mix_norm: bool = True,
                  pair_loss: bool = False, pair_margin: float = 1.0,
-                 pair_positive_weight: float = 1.0):
+                 pair_positive_weight: float = 1.0, projection_hidden: int = 0,
+                 projection_dim: int = 0, projection_dropout: float = 0.1):
         super().__init__()
         self.model = model
         self.reference = reference
@@ -429,6 +430,25 @@ class MSDeltaForContrastive(nn.Module):
         self.pooling = pooling
         self.temperature = temperature
         self.kl_weight = kl_weight
+        # Optional projection head, master's SpectrumRetrievalHead minus its pooling:
+        # Linear(pooled -> hidden) -> GELU -> Dropout -> Linear(hidden -> dim). Off
+        # (projection_dim 0) by default, which leaves every existing run's forward
+        # untouched. With it on, the LOSS sees the projection; `readout` picks which
+        # vector embed() returns for evaluation: "head" (the loss space, master's
+        # choice) or "pooled" (the pre-head features, SimCLR/SupCon's choice).
+        self.projection = None
+        self.readout = "head"
+        if projection_dim > 0:
+            width = embedding_size(model, pooling)
+            hidden = projection_hidden or width
+            self.projection = nn.Sequential(
+                nn.Linear(width, hidden), nn.GELU(), nn.Dropout(projection_dropout),
+                nn.Linear(hidden, projection_dim))
+            std = getattr(getattr(model, "config", None), "initializer_range", 0.02)
+            for layer in self.projection:
+                if isinstance(layer, nn.Linear):
+                    nn.init.normal_(layer.weight, std=std)
+                    nn.init.zeros_(layer.bias)
         # Pair mode replaces the in-batch softmax with independent per-pair terms; see
         # pair_contrastive_loss. It expects rows arranged as (2i, 2i+1) pairs, which is
         # what PairBatchSampler yields, so the two must be switched on together.
@@ -472,6 +492,8 @@ class MSDeltaForContrastive(nn.Module):
             hidden = encoder(mz=mz, log_intensity=log_intensity,
                              attention_mask=attention_mask).last_hidden_state
             pooled = pool_sequence(hidden, attention_mask, self.pooling)
+        if self.projection is not None and self.readout == "head":
+            pooled = self.projection(pooled)
         return F.normalize(pooled.float(), dim=-1), hidden
 
     def forward(self, mz, log_intensity, attention_mask, group,
