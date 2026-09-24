@@ -56,8 +56,8 @@ library search. Metric: peptide->spectrum Hit@1 / MAP@R on held-out peptides.
 | id | question | status | evidence / job |
 |---|---|---|---|
 | A0 | What does the current student reach, and on what? | 🟡 | R1's student: Hit@1 0.73 on 94 held-out replicate-corpus peptides (50m teacher), trained on ~855. Blind to adjacent-residue swaps (57% vs near-miss decoys). Not yet scored on ms-contrastive-100k |
-| A1 | Does training on ms-contrastive-100k (~88k peptides) give a much better student? | 🟡 | **yes on validation**: teacher C7-50m step 600, cross-modal Hit@1 **0.932** (MRR 0.945) over 747 candidates, vs 0.73 for R1's student. Test-split score pending. Job 8861093 |
-| A2 | Does student quality track teacher quality? | ⬜ | re-run A1 with the C7 teacher(s); only --pretrained_path changes |
+| A1 | Does training on ms-contrastive-100k (~88k peptides) give a much better student? | ✅ | **yes**: teacher C7-50m step 600; on the TEST split, all 25,137 spectra vs all 9,771 candidates: Hit@1 **0.898** (3 seeds, ±0.001), Hit@5 0.932, MRR 0.914 -- vs 0.73 for R1's student on 94 peptides. Jobs 8861093/8861292/8861309/8861310 |
+| A2 | Does student quality track teacher quality? | ⬜ | **to do**: when C7 best-first (8860522) finishes, rebuild the teacher cache from its FINAL 50m and 400m encoders (sharded, `pbs/precompute_align_sharded.pbs`; ~10 min at 50m, ~25 min at 400m) and retrain the student on each (`sweeps/make_a1.py` TEACHERS; only --pretrained_path changes), 3 seeds, scored with `pbs/eval_align_test.pbs` on the test split |
 | A3 | Does order-aware pooling fix the adjacent-swap blindness? | ⬜ | mean+max pooling is nearly a bag of residues; try a CLS/attention pool, scored on the swap test and Hit@1 |
 
 ### Reranking (downstream of contrastive)

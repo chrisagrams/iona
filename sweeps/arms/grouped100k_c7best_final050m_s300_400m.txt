@@ -1,0 +1,7 @@
+# C7 best-first: 50m final (1 epoch) and 400m step 300 (8860522)
+c7b_cont050m_final_seed0 /lus/flare/projects/UIC-HPC/khuss/msdelta/runs/sweep-cont050m_ep01_seed0-8860522/final
+c7b_cont050m_final_seed1 /lus/flare/projects/UIC-HPC/khuss/msdelta/runs/sweep-cont050m_ep01_seed1-8860522/final
+c7b_cont050m_final_seed2 /lus/flare/projects/UIC-HPC/khuss/msdelta/runs/sweep-cont050m_ep01_seed2-8860522/final
+c7b_cont400m_s300_seed0 /lus/flare/projects/UIC-HPC/khuss/msdelta/runs/sweep-cont400m_ep01_seed0-8860522/checkpoint-300/encoder
+c7b_cont400m_s300_seed1 /lus/flare/projects/UIC-HPC/khuss/msdelta/runs/sweep-cont400m_ep01_seed1-8860522/checkpoint-300/encoder
+c7b_cont400m_s300_seed2 /lus/flare/projects/UIC-HPC/khuss/msdelta/runs/sweep-cont400m_ep01_seed2-8860522/checkpoint-300/encoder

@@ -1183,3 +1183,13 @@ against 747 candidate peptides:
 NOT YET MEASURED: the 10k-analyte test split; seeds; a 400m teacher. C9's 100k-test scores
 for the record: head arms 0.534 / 0.550 / 0.551 exp MAP@R vs 0.657 no-head (C2).
 C7 50m keeps rising: step 300 0.81, 600 0.83, 900 0.84.
+
+A1 ON THE TEST SPLIT (8861310, msdelta.eval_align_test): every experimental test spectrum
+(25,137) against every test analyte (9,771 peptide+charge candidates), 3 student seeds:
+
+    Hit@1 0.899 / 0.898 / 0.898   Hit@5 0.932   MRR 0.914
+    (teacher's own spectrum->spectrum MAP@R on these rows: 0.8311, identical to its
+    eval_grouped_retrieval score -- the two pipelines agree)
+
+Sequence alone, no precursor filter, ~10k candidates: the right peptide ranks first for
+~90% of spectra.
