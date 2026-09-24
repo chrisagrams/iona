@@ -60,6 +60,14 @@ class AlignModelArguments:
     max_peptide_length: int = 64
     # PeptideEncoder readout: pool (the `pooling` op, default), cls or attn. PLAN.md A3.
     sequence_readout: str = "pool"
+    # A4. align_loss "mse" (A1 default) or "lit": LiT-style cross-modal SupCon against
+    # the frozen teacher, + mse_weight x MSE, + hard_negatives distinguishable
+    # rearrangements per peptide (never reversals; see reranking.hard_negatives).
+    align_loss: str = "mse"
+    align_temperature: float = 0.05
+    mse_weight: float = 0.0
+    hard_negatives: int = 0
+    neg_min_delta: float = 0.05
 
 
 @dataclass
@@ -222,7 +230,8 @@ def main(argv: list[str] | None = None) -> int:
                            dropout=model_args.sequence_dropout,
                            pooling=model_args.pooling,
                            readout=model_args.sequence_readout),
-            pooling=model_args.pooling)
+            pooling=model_args.pooling, loss=model_args.align_loss,
+            temperature=model_args.align_temperature, mse_weight=model_args.mse_weight)
     else:
         teacher = MSDeltaForPreTraining.from_pretrained(model_args.pretrained_path)
         model = build_alignment_model(
@@ -233,7 +242,10 @@ def main(argv: list[str] | None = None) -> int:
             dropout=model_args.sequence_dropout,
             max_peptide_length=model_args.max_peptide_length,
         )
-    collator = AlignmentCollator(max_peptide_length=model_args.max_peptide_length)
+    collator = AlignmentCollator(max_peptide_length=model_args.max_peptide_length,
+                                 hard_negatives=model_args.hard_negatives,
+                                 neg_min_delta=model_args.neg_min_delta,
+                                 neg_seed=training_args.seed)
 
     student = sum(p.numel() for p in model.sequence_encoder.parameters())
     frozen = (sum(p.numel() for p in model.spectrum_model.parameters())

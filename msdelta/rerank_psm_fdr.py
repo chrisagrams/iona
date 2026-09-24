@@ -72,6 +72,17 @@ def top_per_spectrum(spectrum_codes, score):
     return order[first]
 
 
+def series_of(run_id: str) -> str:
+    """Acquisition series of a run: HEK293 MudPIT runs share a prefix and differ in a
+    trailing salt-step index (0718-5 -> 0718, HEK-U100ug-V2-3_10 -> HEK-U100ug-V2-3,
+    HEK-U100ug-exp33-500c-h10 -> HEK-U100ug-exp33-500c, 0310-9a -> 0310). HCT116 runs are
+    fractions of one sample and stay individual groups."""
+    import re
+    if "HCT116" in run_id:
+        return run_id
+    return re.sub(r"[-_]h?\d+a?$", "", run_id)
+
+
 def fit_mlp(Xtr, y, Xte, seed: int = 0, epochs: int = 8, hidden: int = 64) -> np.ndarray:
     """Two-layer MLP (torch, CPU), class-balanced BCE; returns logits for Xte."""
     import torch
@@ -102,6 +113,13 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--folds", type=int, default=3)
     ap.add_argument("--handfeat", default="", help="dir of stage-1b hand-feature tables")
     ap.add_argument("--models", default="linear,mlp")
+    ap.add_argument("--group", default="run", choices=["run", "series"],
+                    help="CV unit: single runs, or whole acquisition series (HEK293 MudPIT "
+                         "series; each HCT116 fraction is its own group)")
+    ap.add_argument("--max-neg", type=int, default=3_000_000,
+                    help="decoy candidates subsampled per training fold (0 = all)")
+    ap.add_argument("--sets", default="", help="comma list of feature sets to fit "
+                    "(default all: ms,hand,ms+hand)")
     cli = ap.parse_args(argv)
 
     import pyarrow.parquet as pq
@@ -147,6 +165,20 @@ def main(argv: list[str] | None = None) -> int:
             print(f"  [{sub:6s}] {name:11s} PSMs@1% {r['psms_1pct']:>8,} ({100 * r['rate']:5.2f}% "
                   f"of {n:,})  peptides@1% {r['peptides_1pct']:>7,}", flush=True)
 
+    # Leakage check (A4): can a candidate's cosine to a RANDOM spectrum tell targets from
+    # decoys? It must not (~0.5); the real cosine is reported beside it for scale.
+    from sklearn.metrics import roc_auc_score
+    for col in ("cosine", "cosine_null"):
+        if col in df.columns:
+            v = pd.to_numeric(df[col], errors="coerce").to_numpy()
+            ok = np.isfinite(v)          # tables made before cosine_null existed lack it
+            if ok.sum() == 0:
+                continue
+            report.setdefault("leakage_auroc_target_vs_decoy", {})[col] = float(
+                roc_auc_score(~decoy[ok], v[ok]))
+            print(f"  [leak] AUROC target-vs-decoy on {col}: "
+                  f"{report['leakage_auroc_target_vs_decoy'][col]:.4f}", flush=True)
+
     # 1. MSFragger rank-1 by e-value (rank-1 wins ties by construction).
     ms = df["search_neglog10_evalue"].to_numpy(float) - 1e-6 * df["search_rank"].to_numpy(float)
     evaluate("msfragger", ms)
@@ -154,15 +186,20 @@ def main(argv: list[str] | None = None) -> int:
     evaluate("embedding", df["cosine"].to_numpy(float))
 
     # 3/4. Percolator-style linear rescorer, cross-validated by run
-    runs = df["run_id"].to_numpy()
-    uniq = np.array(sorted(set(runs)))
+    units = df["run_id"].map(series_of).to_numpy() if cli.group == "series" \
+        else df["run_id"].to_numpy()
+    uniq = np.array(sorted(set(units)))
     rng = np.random.default_rng(0); rng.shuffle(uniq)
-    fold_of_run = {r: i % cli.folds for i, r in enumerate(uniq)}
-    fold = np.array([fold_of_run[r] for r in runs])
+    fold_of = {u: i % cli.folds for i, u in enumerate(uniq)}
+    fold = np.array([fold_of[u] for u in units])
+    report["cv"] = {"group": cli.group, "folds": cli.folds, "units": len(uniq)}
+    print(f"[fdr] CV over {len(uniq)} {cli.group} groups in {cli.folds} folds", flush=True)
     rank1 = df["search_rank"].to_numpy() == 1
     sets = {"ms": BASE_FEATURES}
     if hand:
         sets |= {"hand": hand, "ms+hand": BASE_FEATURES + hand}
+    if cli.sets:
+        sets = {k: v for k, v in sets.items() if k in cli.sets.split(",")}
     for model in cli.models.split(","):
         for set_name, base in sets.items():
             for emb in (False, True):
@@ -176,6 +213,9 @@ def main(argv: list[str] | None = None) -> int:
                     q = qvalues(ms[tr_top], decoy[tr_top])
                     pos = tr_top[(q <= 0.01) & ~decoy[tr_top]]
                     neg = np.flatnonzero(tr & decoy)
+                    if cli.max_neg and len(neg) > cli.max_neg:
+                        neg = np.sort(np.random.default_rng(f).choice(neg, cli.max_neg,
+                                                                      replace=False))
                     idx = np.r_[pos, neg]; y = np.r_[np.ones(len(pos)), np.zeros(len(neg))]
                     scaler = StandardScaler().fit(X[idx])
                     Xtr, Xte = scaler.transform(X[idx]), scaler.transform(X[te])

@@ -369,6 +369,26 @@ class PeptideEncoder(nn.Module):
 
 
 
+def lit_contrastive_loss(target, predicted, group, negatives=None, neg_valid=None,
+                         temperature: float = 0.05) -> Tensor:
+    """Cross-modal SupCon against frozen targets. Anchor = spectrum target (row i);
+    candidates = every peptide embedding in the batch (positives: same `group`) plus
+    that row's hard negatives. Unit vectors in, mean over anchors and positives out."""
+    t = F.normalize(target.float(), dim=-1)
+    p = F.normalize(predicted.float(), dim=-1)
+    logits = t @ p.T / temperature                                  # (B, B)
+    positive = (group[:, None] == group[None, :]).float()
+    all_logits = logits
+    if negatives is not None:
+        n = F.normalize(negatives.float(), dim=-1)                  # (B, K, D)
+        hard = torch.einsum("bd,bkd->bk", t, n) / temperature
+        hard = hard.masked_fill(~neg_valid, float("-inf"))
+        all_logits = torch.cat([logits, hard], dim=1)
+    log_prob = logits - torch.logsumexp(all_logits, dim=1, keepdim=True)
+    per_anchor = -(log_prob * positive).sum(1) / positive.sum(1)
+    return per_anchor.mean()
+
+
 def student_readout(state: dict, prefix: str = "sequence_encoder.") -> str:
     """Which PeptideEncoder readout a saved student used, read off its weight names, so
     loaders need no extra config (every pre-A3 student has neither key -> "pool")."""
@@ -380,7 +400,8 @@ class SequenceAlignmentModel(nn.Module):
     """Frozen spectrum teacher, trainable peptide student, L2 between them."""
 
     def __init__(self, spectrum_model: nn.Module | None, sequence_encoder: PeptideEncoder,
-                 pooling: str = "mean+max"):
+                 pooling: str = "mean+max", loss: str = "mse", temperature: float = 0.05,
+                 mse_weight: float = 0.0):
         """`spectrum_model=None` trains against PRECOMPUTED targets.
 
         The teacher is frozen, so its embedding for a given spectrum is identical in every
@@ -399,6 +420,14 @@ class SequenceAlignmentModel(nn.Module):
                 f"teacher pooling {pooling!r} != student pooling {sequence_encoder.pooling!r}"
             )
         self.pooling = pooling
+        # "mse" (A1): regress onto the teacher embedding. "lit" (A4): LiT-style
+        # cross-modal contrastive against the FROZEN teacher (Zhai et al., CVPR 2022),
+        # SupCon-style multi-positive (every spectrum of the batch's same peptide is a
+        # positive), negatives = the batch's other peptides + synthetic hard negatives;
+        # plus mse_weight x the A1 term to stay in the teacher's space.
+        if loss not in ("mse", "lit"):
+            raise ValueError(f"loss must be mse or lit, not {loss!r}")
+        self.loss, self.temperature, self.mse_weight = loss, temperature, mse_weight
         # Frozen AND in eval mode. requires_grad_(False) alone leaves dropout active, so
         # the teacher would emit a different target for the same spectrum every epoch and
         # the student would be chasing noise.
@@ -413,6 +442,18 @@ class SequenceAlignmentModel(nn.Module):
         return self
 
     @torch.no_grad()
+    def _lit_loss(self, predicted, target, group, neg_residues, neg_modifications,
+                  neg_sequence_mask, neg_charge, neg_valid) -> Tensor:
+        if group is None:        # no collator groups: each row is its own peptide
+            group = torch.arange(len(predicted), device=predicted.device)
+        negatives = None
+        if neg_residues is not None:
+            b, k = neg_valid.shape
+            negatives = self.sequence_encoder(neg_residues, neg_modifications,
+                                              neg_sequence_mask, neg_charge).view(b, k, -1)
+        return lit_contrastive_loss(target, predicted, group, negatives, neg_valid,
+                                    self.temperature)
+
     def embed_spectrum(self, mz, log_intensity, attention_mask) -> Tensor:
         encoder = getattr(self.spectrum_model, "msdelta", self.spectrum_model)
         hidden = encoder(mz=mz, log_intensity=log_intensity,
@@ -421,7 +462,9 @@ class SequenceAlignmentModel(nn.Module):
 
     def forward(self, residues, modifications, sequence_mask, charge,
                 mz=None, log_intensity=None, attention_mask=None, target=None,
-                return_dict: bool = True, return_loss: bool = True):
+                return_dict: bool = True, return_loss: bool = True,
+                neg_residues=None, neg_modifications=None, neg_sequence_mask=None,
+                neg_charge=None, neg_valid=None, peptide_group=None):
         # return_loss is not read here; it exists so transformers' can_return_loss() finds
         # it in the signature (utils/generic.py looks for exactly this name defaulting to
         # True). This task is self-supervised against a frozen teacher, so there is no
@@ -443,7 +486,13 @@ class SequenceAlignmentModel(nn.Module):
         probe("loss.in", sync=predicted, predicted=predicted, target=target)
         # Mean squared L2. On unit vectors this equals 2 - 2*cos, so it is simultaneously
         # the requested L2 loss and alignment in the geometry the space is searched with.
-        loss = ((predicted - target) ** 2).sum(dim=-1).mean()
+        mse = ((predicted - target) ** 2).sum(dim=-1).mean()
+        if self.loss == "mse":
+            loss = mse
+        else:
+            loss = self._lit_loss(predicted, target, peptide_group, neg_residues,
+                                  neg_modifications, neg_sequence_mask, neg_charge,
+                                  neg_valid) + self.mse_weight * mse
         if not return_dict:
             return (loss, predicted, target)
         return {"loss": loss, "embeddings": predicted, "target": target}
@@ -685,11 +734,71 @@ def build_alignment_datasets(repo_id, processor, num_proc=None, validation_fract
     }
 
 
+
+def hard_negatives(peptide: str, rng, k: int, min_delta: float = 0.05,
+                   windows=(3, 4)) -> list[str]:
+    """Up to k spectrally DISTINGUISHABLE rearrangements of a peptide (PLAN.md A4).
+
+    Adjacent swaps and local shuffles only -- never reversals, which is how the FDR
+    decoys are made, so a student trained on these cannot learn "decoy-looking".
+    A rearrangement changes the masses of the b-ions (and matching y-ions) that end
+    inside it; it is kept only if at least one of those shifts by more than min_delta Da
+    (the fragment tolerance: 0.05 Da for ion-trap MS2), so I<->L, K<->Q (0.036 Da) and
+    identical residues never become negatives. The C-terminal residue never moves;
+    modifications stay attached to their residue.
+    """
+    from msdelta.chemistry import RESIDUE_MASSES
+    from msdelta.rescoring import split_peptide
+    residues, mods = split_peptide(peptide)
+    n = len(residues)
+    if n < 3:
+        return []
+    mass = [RESIDUE_MASSES.get(r, 0.0) + m for r, m in zip(residues, mods)]
+
+    def fmt(order):
+        return "".join(residues[i] + (f"[{mods[i]:.4f}]" if abs(mods[i]) > 1e-6 else "")
+                       for i in order)
+
+    def distinguishable(order):
+        prefix_old = prefix_new = 0.0
+        for j in range(n - 1):
+            prefix_old += mass[j]; prefix_new += mass[order[j]]
+            if abs(prefix_new - prefix_old) > min_delta:
+                return True
+        return False
+
+    pool = set()
+    base = list(range(n))
+    for i in range(n - 2):                                  # adjacent swaps, C-term fixed
+        o = base.copy(); o[i], o[i + 1] = o[i + 1], o[i]
+        if distinguishable(o):
+            pool.add(tuple(o))
+    for _ in range(4 * k):                                  # local shuffles
+        w = int(rng.choice(windows))
+        if n - 1 < w:
+            continue
+        i = int(rng.integers(0, n - w))                     # window within [0, n-1)
+        seg = [int(x) for x in rng.permutation(base[i:i + w])]
+        o = base[:i] + seg + base[i + w:]
+        if o != base and distinguishable(o):
+            pool.add(tuple(o))
+    own = fmt(base)
+    cands = sorted({fmt(o) for o in pool} - {own})
+    if len(cands) > k:
+        cands = [cands[i] for i in rng.choice(len(cands), k, replace=False)]
+    return cands
+
 @dataclass
 class AlignmentCollator:
     """Pad spectra and their peptides into one batch."""
 
     max_peptide_length: int = 64
+    # A4: per row, this many distinguishable rearrangements of its peptide (0 = none,
+    # the A1 behaviour), plus a within-batch peptide group id for multi-positive loss.
+    hard_negatives: int = 0
+    neg_min_delta: float = 0.05
+    neg_seed: int = 0
+
     # Only meaningful on the cached-target path, where it makes every batch the same
     # shape; with a live teacher the spectra dominate and vary anyway.
     fixed_shapes: bool = True
@@ -701,6 +810,22 @@ class AlignmentCollator:
     def __post_init__(self):
         self.peptides = PeptideCollator(max_length=self.max_peptide_length)
         self.padded = PeptideCollator(max_length=self.max_peptide_length, pad_to_max=True)
+        self._rng = np.random.default_rng(self.neg_seed)
+
+    def _negatives(self, features) -> dict[str, Tensor]:
+        k = self.hard_negatives
+        peps = [f["peptide"] for f in features]
+        charges = [int(f.get("charge", 0)) for f in features]
+        flat, valid = [], []
+        for pep in peps:
+            neg = hard_negatives(pep, self._rng, k, self.neg_min_delta)
+            valid.append([True] * len(neg) + [False] * (k - len(neg)))
+            flat += neg + [pep] * (k - len(neg))            # padding rows are masked out
+        tok = self.padded(flat, [c for c in charges for _ in range(k)])
+        group = {p: i for i, p in enumerate(dict.fromkeys(peps))}
+        return {**{f"neg_{name}": v for name, v in tok.items()},
+                "neg_valid": torch.tensor(valid, dtype=torch.bool),
+                "peptide_group": torch.tensor([group[p] for p in peps], dtype=torch.long)}
 
     def __call__(self, features: list[dict]) -> dict[str, Tensor]:
         if not features:
@@ -752,9 +877,11 @@ class AlignmentCollator:
             padded = (self.padded if self.fixed_shapes else self.peptides)(
                 [f["peptide"] for f in features],
                 [int(f.get("charge", 0)) for f in features])
-            return {"target": torch.as_tensor([f["target"] for f in features],
-                                              dtype=torch.float32),
-                    **padded}
+            out = {"target": torch.as_tensor([f["target"] for f in features],
+                                             dtype=torch.float32), **padded}
+            if self.hard_negatives:
+                out |= self._negatives(features)
+            return out
         return {"mz": mz, "log_intensity": log_intensity,
                 "attention_mask": attention_mask, **peptide_batch}
 
