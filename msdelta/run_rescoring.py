@@ -21,6 +21,32 @@ import torch
 from msdelta.rescoring import FEATURE_NAMES, build_candidates, extract_features, train_rescorer
 
 
+def embedding_only_hit1(cosine, labels, groups, kinds) -> dict[str, float]:
+    """Rerank by the embedding alone: per spectrum, is the true candidate the argmax cosine?
+
+    `hit@1` over every candidate set; `vs_<kind>` restricts each set to the truth plus
+    that decoy kind only, so the result says which decoys the embedding can and cannot
+    separate. Ties count as misses (argmax takes the first, and the truth is not
+    guaranteed to come first).
+    """
+    out, hits = {}, []
+    for g in np.unique(groups):
+        idx = np.flatnonzero(groups == g)
+        best = idx[np.argmax(cosine[idx])]
+        hits.append(labels[best] == 1 and np.sum(cosine[idx] == cosine[best]) == 1)
+    out["hit@1"] = float(np.mean(hits))
+    for kind in sorted(set(kinds) - {"true"}):
+        wins = []
+        for g in np.unique(groups):
+            idx = np.flatnonzero(groups == g)
+            truth = idx[labels[idx] == 1]
+            rivals = idx[kinds[idx] == kind]
+            if len(truth) and len(rivals):
+                wins.append(cosine[truth[0]] > cosine[rivals].max())
+        out[f"vs_{kind}"] = float(np.mean(wins)) if wins else float("nan")
+    return out
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--target_cache", required=True,
@@ -138,6 +164,12 @@ def main() -> int:
           f"{np.median(te):.2f} ppm, p95 {np.percentile(te, 95):.2f} ppm, max {te.max():.1f} "
           f"(0 everywhere would mean the precursor is still derived from the answer)",
           flush=True)
+    if student is not None:
+        cos = np.asarray([f[FEATURE_NAMES.index("embedding_cosine")] for f in features])
+        emb_only = embedding_only_hit1(cos, labels, groups, np.asarray(kinds))
+        print("[rescore] EMBEDDING ONLY (argmax student-teacher cosine per spectrum, no "
+              "classifier, all spectra): " + "  ".join(f"{k} {v:.4f}" for k, v in emb_only.items()),
+              flush=True)
     if cli.diagnose:
         diagnose(np.asarray([f[FEATURE_NAMES.index("embedding_cosine")] for f in features]),
                  np.asarray(labels), np.asarray(groups), np.asarray(kinds))
