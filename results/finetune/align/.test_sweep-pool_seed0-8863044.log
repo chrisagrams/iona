@@ -1,0 +1,15 @@
+Loading weights:   0%|          | 0/170 [00:00<?, ?it/s]Loading weights:  34%|███▍      | 58/170 [00:00<00:00, 454.30it/s]Loading weights:  61%|██████    | 104/170 [00:00<00:00, 240.68it/s]Loading weights:  78%|███████▊  | 133/170 [00:00<00:00, 173.11it/s]Loading weights:  91%|█████████ | 154/170 [00:00<00:00, 161.14it/s]Loading weights: 100%|██████████| 170/170 [00:00<00:00, 197.80it/s]
+{
+ "crossmodal/hit@1": 0.8997,
+ "crossmodal/hit@5": 0.9319,
+ "crossmodal/mrr": 0.9148,
+ "crossmodal/n_spectra": 25848.0,
+ "crossmodal/n_candidates": 9771.0,
+ "teacher_spectrum/Hit@1": 0.8874,
+ "teacher_spectrum/Precision@1": 0.8874,
+ "teacher_spectrum/R-Precision": 0.8339,
+ "teacher_spectrum/MAP@R": 0.8311,
+ "teacher_spectrum/R@5": 0.872,
+ "teacher_spectrum/MAP@100": 0.856,
+ "teacher_spectrum/queries": 25137.0
+}

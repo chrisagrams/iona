@@ -31,7 +31,7 @@ import numpy as np
 
 REPO = Path(__file__).resolve().parent.parent
 RESULTS = REPO / "results" / "finetune" / "contrastive" / "grouped100k-test"
-FIGS = REPO / "results" / "finetune" / "contrastive" / "figures"
+FIGS = REPO / "results" / "figures" / "C_contrastive"
 RUNS = "/lus/flare/projects/UIC-HPC/khuss/msdelta/runs"
 INK, MUTED, GRID = "#1a1a1a", "#6b7280", "#e5e7eb"
 SCALE_COLOUR = {"50m": "#93c5fd", "100m": "#60a5fa", "200m": "#2563eb", "400m": "#1e3a8a"}
@@ -212,14 +212,64 @@ def fig_transfer(res):
     return out
 
 
+def fig_zeroshot_layers(res=None):
+    """Frozen pretrained encoders: exp MAP@R at every depth (eval_zeroshot_layers)."""
+    import matplotlib.lines as mlines
+    files = sorted(glob.glob(str(REPO / "results" / "finetune" / "contrastive"
+                                 / "zeroshot-layers" / "zs_*.json")))
+    if not files:
+        return None
+    key = "experimental/MAP@R"
+    style = {"010k": ":", "220k": "-", "430k": "--", "540k": "--"}
+    fig, (ax, bx) = plt.subplots(1, 2, figsize=(12.4, 4.4),
+                                 gridspec_kw={"width_ratios": [1.5, 1]})
+    best = collections.defaultdict(dict)
+    for f in files:
+        d = json.load(open(f))
+        m = re.match(r"zs_0*(\d+m)_ck(\d+k)", d["name"])
+        scale, ck = m.group(1), m.group(2)
+        blocks = sorted(k for k in d["layers"] if k.startswith("block"))
+        y = [d["layers"][b][key] for b in blocks]
+        x = [i / (len(blocks) - 1) for i in range(len(blocks))]
+        ax.plot(x, y, ls=style.get(ck, "-"), lw=1.6, color=SCALE_COLOUR[scale])
+        i = int(np.argmax(y))
+        ax.scatter([x[i]], [y[i]], s=22, color=SCALE_COLOUR[scale], zorder=3)
+        best[ck][scale] = (y[i], d["layers"]["final"][key])
+    handles = [mlines.Line2D([], [], color=SCALE_COLOUR[s], lw=2, label=s) for s in ORDER]
+    handles += [mlines.Line2D([], [], color=MUTED, ls=style[c], label=f"ckpt {c}")
+                for c in ("010k", "220k", "540k")]
+    ax.legend(handles=handles, frameon=False, fontsize=7.8, ncol=2)
+    ax.set_xlabel("relative depth (block / number of blocks)"); ax.set_ylabel("MAP@R")
+    ax.set_title("frozen encoders, every block", loc="left", pad=12)
+    ax.grid(); ax.set_axisbelow(True)
+    for ck, marker in (("220k", "o"), ("latest", "s")):
+        pts = best["220k"] if ck == "220k" else {**best.get("540k", {}), **best.get("430k", {})}
+        xs = [PARAMS[s] for s in ORDER if s in pts]
+        bx.plot(xs, [pts[s][0] for s in ORDER if s in pts], marker=marker, lw=1.5,
+                color=INK if ck == "220k" else MUTED,
+                label=f"best block, {'220k' if ck == '220k' else 'latest ckpt'}")
+        bx.plot(xs, [pts[s][1] for s in ORDER if s in pts], marker=marker, lw=1, ls=":",
+                color=INK if ck == "220k" else MUTED,
+                label=f"final layer, {'220k' if ck == '220k' else 'latest ckpt'}")
+        label(bx, xs, [pts[s][0] for s in ORDER if s in pts])
+    bx.set_xscale("log"); bx.set_xticks([PARAMS[s] for s in ORDER])
+    bx.set_xticklabels(ORDER)
+    finish(bx, "model size", "MAP@R", "best block vs final layer")
+    fig.tight_layout(); out = FIGS / "c100k_zeroshot_layers.png"
+    fig.savefig(out); plt.close(fig)
+    return out
+
+
 def main() -> int:
     FIGS.mkdir(parents=True, exist_ok=True)
     res = load()
     if not res:
         raise SystemExit(f"no results under {RESULTS}")
     print(f"  {len(res)} scored models")
-    for f in (fig_scale, fig_checkpoint, fig_c7, fig_transfer):
-        print(f"  wrote {f(res).relative_to(REPO)}")
+    for f in (fig_scale, fig_checkpoint, fig_c7, fig_transfer, fig_zeroshot_layers):
+        out = f(res)
+        if out is not None:
+            print(f"  wrote {out.relative_to(REPO)}")
     return 0
 
 

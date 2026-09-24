@@ -36,11 +36,11 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 REPO = Path(__file__).resolve().parent.parent
-FIGS = REPO / "results" / "finetune" / "contrastive" / "figures"
+FIGS = REPO / "results" / "figures" / "C_contrastive" / "superseded"
 # Supporting figures: results that closed a question without changing what
 # we do. GradCache is here because more negatives measurably hurt, so the
 # lever is not one we will pull.
-EXTRA = FIGS / "extra"
+EXTRA = FIGS   # superseded figures are kept flat, no extra/ subfolder
 RUNS = "/lus/flare/projects/UIC-HPC/khuss/msdelta/runs"
 INK, MUTED, GRID = "#1a1a1a", "#6b7280", "#e5e7eb"
 BLUE, RED, GREY = "#2563eb", "#dc2626", "#9ca3af"

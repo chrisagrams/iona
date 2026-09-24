@@ -21,7 +21,7 @@ module load "${FRAMEWORKS_MODULE:-frameworks/2025.3.1}"
 set -u
 export PYTHONPATH=$REPO_DIR${PYTHONPATH:+:$PYTHONPATH}
 rc=0
-for s in ${SCRIPTS:-sweeps/plot_ladder.py sweeps/plot_c1.py sweeps/plot_contrastive_ladder.py sweeps/plot_contrastive_100k.py}; do
+for s in ${SCRIPTS:-sweeps/plot_ladder.py sweeps/plot_c1.py sweeps/plot_contrastive_100k.py}; do
     echo "=== $s"
     "$VENV_DIR/bin/python" "$s" || { echo "FAILED: $s"; rc=1; }
 done

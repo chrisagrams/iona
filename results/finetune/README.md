@@ -1,4 +1,6 @@
 # Fine-tuning results
+> **Figures moved (2026-09-24):** all figures now live in `results/figures/`, one folder per track, with an index in `results/figures/README.md`. References to `*/figures/` below are historical.
+
 
 Two lines of work, in their own directories:
 

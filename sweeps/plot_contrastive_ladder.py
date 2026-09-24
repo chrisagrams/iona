@@ -28,7 +28,7 @@ import numpy as np
 
 REPO = Path(__file__).resolve().parent.parent
 RUNS = "/lus/flare/projects/UIC-HPC/khuss/msdelta/runs"
-FIGS = REPO / "results" / "finetune" / "contrastive" / "figures"
+FIGS = REPO / "results" / "figures" / "C_contrastive" / "superseded"
 METRIC = "retrieval/MAP@100"
 INK, MUTED, GRID = "#1a1a1a", "#6b7280", "#e5e7eb"
 ORDER = ("50m", "100m", "200m", "400m")

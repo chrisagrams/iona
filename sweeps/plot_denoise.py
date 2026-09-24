@@ -30,10 +30,10 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 REPO = Path(__file__).resolve().parent.parent
-FIGS = REPO / "results" / "finetune" / "denoise" / "figures"
+FIGS = REPO / "results" / "figures" / "D_denoise" / "superseded"
 # Supporting figures: the three that explain HOW the headline numbers were
 # reached rather than what they are.
-EXTRA = FIGS / "extra"
+EXTRA = FIGS   # superseded figures are kept flat, no extra/ subfolder
 
 INK, MUTED, GRID = "#1a1a1a", "#6b7280", "#e5e7eb"
 BLUE, RED, AMBER, GREEN = "#2563eb", "#dc2626", "#d97706", "#059669"

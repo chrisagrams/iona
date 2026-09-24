@@ -32,7 +32,7 @@ import numpy as np
 
 REPO = Path(__file__).resolve().parent.parent
 RUNS = "/lus/flare/projects/UIC-HPC/khuss/msdelta/runs"
-FIGS = REPO / "results" / "finetune" / "denoise" / "figures"
+FIGS = REPO / "results" / "figures" / "D_denoise"
 INK, MUTED, GRID = "#1a1a1a", "#6b7280", "#e5e7eb"
 SCALE_COLOUR = {"50m": "#93c5fd", "100m": "#60a5fa", "200m": "#2563eb", "400m": "#1e3a8a"}
 ORDER = ["50m", "100m", "200m", "400m"]

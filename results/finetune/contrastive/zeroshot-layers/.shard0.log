@@ -1,0 +1,2 @@
+Loading weights:   0%|          | 0/170 [00:00<?, ?it/s]Loading weights:  26%|██▌       | 44/170 [00:00<00:00, 423.16it/s]Loading weights:  51%|█████     | 87/170 [00:00<00:00, 401.11it/s]Loading weights:  75%|███████▌  | 128/170 [00:00<00:00, 268.06it/s]Loading weights:  94%|█████████▎| 159/170 [00:00<00:00, 269.47it/s]Loading weights: 100%|██████████| 170/170 [00:00<00:00, 302.27it/s]
+  zs_050m_ck220k (752s): final 0.1123  best block08 0.2080

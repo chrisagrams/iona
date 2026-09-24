@@ -1,0 +1,2 @@
+Loading weights:   0%|          | 0/330 [00:00<?, ?it/s]Loading weights:  48%|████▊     | 158/330 [00:00<00:00, 1578.62it/s]Loading weights:  96%|█████████▌| 316/330 [00:00<00:00, 1260.74it/s]Loading weights: 100%|██████████| 330/330 [00:00<00:00, 1353.50it/s]
+  zs_400m_ck430k (2098s): final 0.1246  best block16 0.2933
