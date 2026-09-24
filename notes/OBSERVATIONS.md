@@ -1105,3 +1105,19 @@ still matters enormously (0.11 -> 0.66 at 50m), and longer training still helps.
 
 NOT YET MEASURED: models trained on this corpus (C7, 8860292); precursor-window
 filtering (what real library search does, for both methods); GLEAMS.
+
+## C9 (quick): a projection head halves retrieval at 3 epochs (2026-09-24)
+
+50m @220k, frozen C1 recipe at 3 epochs, 3 seeds; head = master's shape (pooled -> 512 ->
+256, dropout 0.1), randomly initialised. Control = sweep-conlong s050m_t0002_pk256_ep03
+(identical apart from the head). Jobs 8860538 (train), 8860569 (100k test).
+
+                          small eval MAP@R    100k test exp MAP@R
+    no head (control)     0.604               0.382
+    head, pre-head        0.292               0.184
+    head, head output     0.300               0.155
+
+Starting loss 34.5 with the head vs 16.6 without (random head outputs at t 0.002), final
+5.09 vs 3.58: the head mostly costs training time at this budget. Pre-head edges out the
+head output on the larger test (SimCLR's direction), but both are far below no head.
+NOT YET MEASURED: 24 epochs (8860587, deprioritised behind the denoise ladder).
