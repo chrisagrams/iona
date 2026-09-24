@@ -138,6 +138,7 @@ write-up in TODO.md under the same number.
 - **FT1** — does the denoiser generalise beyond 1024 peaks?
 - **FT8** — is a warm-up freeze on the encoder worth anything?
 - **FT12** — the sign of the pooled-vs-within AUROC gap, measured rather than argued.
+- **ms-contrastive-100k only (lowest priority)** — C7's encoders are two-stage (replicate corpus, then ms-contrastive-100k). Training from the pretrained checkpoint on ms-contrastive-100k alone would show whether stage one adds anything. Not needed for the conclusions; two-stage is the recipe (decided 2026-09-24).
 - **Layer mixing (retry candidate)** — `pooling=layer_mix` was dropped (OBSERVATIONS, "Blending encoder depths is worse", job 8842351) on the SEPARATION RATIO at the old recipe (t 0.07, 3 epochs, P2xK2). C0 later showed that ratio does not predict retrieval, so "last layer is best" was never tested on MAP@R. Retry: 50m at the frozen C1 recipe, layer_mix vs last layer, 3 seeds each, scored on the small eval and the ms-contrastive-100k test (~2.4 h/arm, one node). No write-up in TODO.md; this entry is it.
 
 ## Rules
