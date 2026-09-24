@@ -91,3 +91,27 @@ def test_collator_emits_negatives_and_groups():
     assert b["neg_residues"].shape[0] == 9
     assert b["peptide_group"].tolist() == [0, 0, 1]
     assert b["neg_valid"][2].tolist() == [True, False, False]     # GWK has one swap
+
+
+@pytest.mark.parametrize("mse_weight", [0.0, 0.1])
+def test_lit_loss_trains_the_student(mse_weight):
+    """A4 ran 6 arms with a constant loss (5.579 at every step): a stray @torch.no_grad()
+    on _lit_loss cut the student out of the graph. Gradients must reach the student from
+    the contrastive term alone, with and without hard negatives."""
+    from msdelta.reranking import AlignmentCollator, PeptideEncoder, SequenceAlignmentModel
+    torch.manual_seed(0)
+    student = PeptideEncoder(embedding_size=8, hidden_size=16, num_layers=1, num_heads=2,
+                             dropout=0.0)
+    model = SequenceAlignmentModel(None, student, loss="lit", mse_weight=mse_weight).train()
+    feats = [{"peptide": p, "charge": 2, "mz": [1.0], "log_intensity": [1.0],
+              "target": torch.nn.functional.normalize(torch.randn(8), dim=0).tolist()}
+             for p in ("PEPTIDEWK", "ACDEFGWK", "GWHK")]
+    for hn in (0, 2):
+        student.zero_grad()
+        batch = AlignmentCollator(hard_negatives=hn)(feats)
+        batch.pop("mz", None); batch.pop("log_intensity", None); batch.pop("attention_mask", None)
+        out = model(**batch)
+        assert out["loss"].requires_grad
+        out["loss"].backward()
+        grads = [p.grad for p in student.parameters() if p.requires_grad]
+        assert any(g is not None and g.abs().sum() > 0 for g in grads), f"no gradient, hn={hn}"

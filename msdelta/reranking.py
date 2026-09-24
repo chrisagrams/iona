@@ -441,7 +441,6 @@ class SequenceAlignmentModel(nn.Module):
             self.spectrum_model.eval()
         return self
 
-    @torch.no_grad()
     def _lit_loss(self, predicted, target, group, neg_residues, neg_modifications,
                   neg_sequence_mask, neg_charge, neg_valid) -> Tensor:
         if group is None:        # no collator groups: each row is its own peptide
@@ -454,6 +453,7 @@ class SequenceAlignmentModel(nn.Module):
         return lit_contrastive_loss(target, predicted, group, negatives, neg_valid,
                                     self.temperature)
 
+    @torch.no_grad()
     def embed_spectrum(self, mz, log_intensity, attention_mask) -> Tensor:
         encoder = getattr(self.spectrum_model, "msdelta", self.spectrum_model)
         hidden = encoder(mz=mz, log_intensity=log_intensity,
