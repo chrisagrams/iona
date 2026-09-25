@@ -15,10 +15,14 @@ Methods:
   msfragger    MSFragger's rank-1 candidate, scored by -log10 e-value (the dataset's own
                baseline: 16.5% of HEK spectra at 1% FDR on its tuning run)
   embedding    the candidate with the highest student-encoder cosine, scored by it
-  <model>:<features>[+emb]   a rescorer, model in {linear, mlp}, features in
+  embedding:delta   the same pick, scored ACROSS spectra by its lead over the best other
+               candidate of its own spectrum (deltaCn-style) instead of the raw level
+  <model>:<features>[+emb|+embws]   a rescorer, model in {linear, mlp}, features in
                {ms (MSFragger's scores), hand (our 22 fragment features, stage 1b),
-                ms+hand}; `+emb` adds the embedding cosine. `linear:ms` is the
-               Percolator-style baseline; each +emb pair isolates the embedding's effect.
+                ms+hand}; `+emb` adds the embedding cosine, `+embws` adds it with its
+               within-spectrum versions (WS_FEATURES; Percolator's deltaCn/rank idea
+               applied to our score). `linear:ms` is the Percolator-style baseline; each
+               +emb pair isolates the embedding's effect.
 
 Rescorers are CROSS-VALIDATED BY RUN (a spectrum is never scored by a model trained on
 its own run; HEK runs are correlated MudPIT steps, so rows are not independent). Training
@@ -39,6 +43,32 @@ import numpy as np
 BASE_FEATURES = ("msfragger_hyperscore", "search_delta_score", "search_neglog10_evalue",
                  "matched_fraction", "num_matched_ions", "abs_massdiff", "num_tol_term",
                  "num_missed_cleavages", "length", "charge", "search_rank")
+
+
+WS_FEATURES = ("cosine", "cos_delta", "cos_rank", "cos_z", "cos_gap12")
+
+
+def within_spectrum(spectrum, cosine) -> dict[str, np.ndarray]:
+    """The cosine relative to the other candidates of the SAME spectrum (the raw level
+    depends on the spectrum, so it ranks badly across spectra):
+      cos_delta  minus the best OTHER candidate (the top one: minus the second best)
+      cos_rank   1 = highest cosine in the pool
+      cos_z      standardised within the pool (0 when the pool has no spread)
+      cos_gap12  best - second best, the same for the whole pool
+    A single-candidate pool gets delta 0, rank 1, z 0, gap 0. Same definitions as the
+    MS2Rescore converter (baselines_wip/ms2rescore/convert.py)."""
+    import pandas as pd
+    s = pd.Series(np.asarray(cosine, dtype=np.float64))
+    g = s.groupby(np.asarray(spectrum))
+    rank = g.rank(ascending=False, method="first").to_numpy()
+    best = g.transform("max").to_numpy()
+    second = s.where(rank != 1).groupby(np.asarray(spectrum)).transform("max").to_numpy()
+    second = np.where(np.isnan(second), best, second)
+    best_other = np.where(rank == 1, second, best)
+    mean, sd = g.transform("mean").to_numpy(), g.transform("std", ddof=0).to_numpy()
+    z = np.divide(s.to_numpy() - mean, sd, out=np.zeros(len(s)), where=sd > 0)
+    return {"cos_delta": s.to_numpy() - best_other, "cos_rank": rank, "cos_z": z,
+            "cos_gap12": best - second}
 
 
 def qvalues(scores: np.ndarray, is_decoy: np.ndarray) -> np.ndarray:
@@ -145,6 +175,8 @@ def main(argv: list[str] | None = None) -> int:
         df[c] = pd.to_numeric(df[c], errors="coerce")
         df[c] = df[c].fillna(df[c].median())
     spec = df["spectrum_id"].astype("category").cat.codes.to_numpy()
+    for k, v in within_spectrum(spec, df["cosine"].to_numpy(float)).items():
+        df[k] = v
     decoy = df["is_decoy"].to_numpy(bool)
     peptide = df["peptide"].to_numpy()
     n_spectra = int(spec.max() + 1)
@@ -184,6 +216,8 @@ def main(argv: list[str] | None = None) -> int:
     evaluate("msfragger", ms)
     # 2. embedding alone: the candidate with the highest cosine
     evaluate("embedding", df["cosine"].to_numpy(float))
+    # the same pick (delta > 0 exactly for the top cosine), ranked across spectra by lead
+    evaluate("embedding:delta", df["cos_delta"].to_numpy(float))
 
     # 3/4. Percolator-style linear rescorer, cross-validated by run
     units = df["run_id"].map(series_of).to_numpy() if cli.group == "series" \
@@ -202,9 +236,9 @@ def main(argv: list[str] | None = None) -> int:
         sets = {k: v for k, v in sets.items() if k in cli.sets.split(",")}
     for model in cli.models.split(","):
         for set_name, base in sets.items():
-            for emb in (False, True):
-                cols = base + (("cosine",) if emb else ())
-                name = f"{model}:{set_name}" + ("+emb" if emb else "")
+            for emb in ("", "+emb", "+embws"):
+                cols = base + {"": (), "+emb": ("cosine",), "+embws": WS_FEATURES}[emb]
+                name = f"{model}:{set_name}{emb}"
                 X = df[list(cols)].to_numpy(float)
                 score = np.zeros(len(df))
                 for f in range(cli.folds):
