@@ -32,6 +32,16 @@ TEACHERS = {
     # C7 best-first 50m, continued on ms-contrastive-100k, step 600 of 1062, seed 1:
     # 0.831 exp MAP@R on the 100k test (best of 3 seeds; binned cosine 0.730).
     "050m-c7s600": f"{RUNS}/sweep-cont050m_ep01_seed1-8860522/checkpoint-600/encoder",
+    # C7 best-first 400m, FINAL (one epoch on ms-contrastive-100k), best seed on the 100k VALIDATION split.
+    "400m-c7final": f"{RUNS}/sweep-cont400m_ep01_seed0-8860522/final",
+    # teacher chosen automatically (teacher_downstream.sh)
+    "400m-oodsel": "/lus/flare/projects/UIC-HPC/khuss/msdelta/runs/sweep-cont400m_ep01_seed1-8860522/checkpoint-600/encoder",
+    # teacher chosen automatically (teacher_downstream.sh)
+    "400m-frozen220k": "/flare/UIC-HPC/khuss/msdelta/pretrained/msdelta-400m-production-01-checkpoint-220000",
+    # teacher chosen automatically (teacher_downstream.sh)
+    "400m-c1rep": "/lus/flare/projects/UIC-HPC/khuss/msdelta/runs/sweep-s400m_t0002_pk256_ep12_seed0-8857593/final",
+    # A7 lower bound: the 400m architecture at RANDOM init (seed 0), never trained.
+    "400m-random": "/lus/flare/projects/UIC-HPC/khuss/msdelta/pretrained-random/msdelta-400m-random-init-seed0",
 }
 OVERRIDES = {
     "--dataset_repo": "chrisagrams/ms-contrastive-100k",
