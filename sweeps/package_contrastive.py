@@ -213,8 +213,9 @@ def fig_zeroshot(zs):
         fig.savefig(FIG / "C_zeroshot.png"); plt.close(fig)
 
 
-def fig_transfer(rows, zs):
-    """Per benchmark: every model of ours scored there vs GLEAMS vs binned cosine."""
+def fig_transfer(rows, zs, panels=None, baselines=True, out="C_transfer.png",
+                 title="Our models vs baselines, in-distribution and on unseen data"):
+    """Per benchmark: every model of ours scored there (optionally vs GLEAMS and binned cosine)."""
     c7 = "C7 (replicate corpus -> ms-contrastive-100k)"
     def rep(b, sc):
         return pick(rows, b, "replicate corpus only (12 ep)", sc) or pick(rows, b, "replicate corpus only (24 ep)", sc)
@@ -234,13 +235,15 @@ def fig_transfer(rows, zs):
               ("binned cosine", BINNED, lambda b: ([max(pick(rows, b, "binned cosine (1 Da bins)")
                                                        + pick(rows, b, "binned cosine (0.1 Da bins)"))]
                                                   if pick(rows, b, "binned cosine (1 Da bins)") + pick(rows, b, "binned cosine (0.1 Da bins)") else [], ""))]
-    panels = [("ms-contrastive-100k", "ms-contrastive-100k test\n(in-distribution)"),
-              ("oodval-8species", "8 other species\n(unseen, validation)"),
-              ("yeast-20k", "yeast 20k subset\n(unseen, test)")]
+    panels = panels or [("ms-contrastive-100k", "ms-contrastive-100k test\n(in-distribution)", 8),
+                        ("oodval-8species", "8 other species\n(unseen, validation)", 4),
+                        ("yeast-20k", "yeast 20k subset\n(unseen, test)", 8)]
+    if not baselines:
+        series = [t for t in series if t[0] not in ("GLEAMS", "binned cosine")]
     with plt.rc_context(STYLE):
-        fig, axes = plt.subplots(1, 3, figsize=(14, 4.8), sharey=True,
-                                 gridspec_kw={"width_ratios": [8, 4, 8]})
-        for ax, (b, title) in zip(axes, panels):
+        fig, axes = plt.subplots(1, len(panels), figsize=(4.7 * len(panels) + (0 if baselines else -1), 4.8),
+                                 sharey=True, gridspec_kw={"width_ratios": [w for *_, w in panels]})
+        for ax, (b, ptitle, _) in zip(axes, panels):
             ax.yaxis.grid(True, color=GRIDC, lw=0.8); ax.set_axisbelow(True)
             x = 0
             for name, col, get in series:
@@ -256,14 +259,14 @@ def fig_transfer(rows, zs):
                 if sub:
                     ax.text(x, 0.02, sub, rotation=90, ha="center", va="bottom", fontsize=7.5, color="white")
                 x += 1
-            ax.set_xticks([]); ax.set_xlim(-0.7, x - 0.3); ax.set_title(title, loc="left", fontsize=10.5)
+            ax.set_xticks([]); ax.set_xlim(-0.7, x - 0.3); ax.set_title(ptitle, loc="left", fontsize=10.5)
         axes[0].set_ylim(0, 1.0); axes[0].set_ylabel("MAP@R (experimental spectra)")
-        fig.suptitle("Our models vs baselines, in-distribution and on unseen data", x=0.07, ha="left",
+        fig.suptitle(title, x=0.07, ha="left",
                      fontsize=13, fontweight="bold", y=1.03)
         fig.legend(handles=[plt.Rectangle((0, 0), 1, 1, color=c) for _, c, _ in series],
-                   labels=[n for n, _, _ in series], frameon=False, fontsize=8.5, ncol=4,
+                   labels=[n for n, _, _ in series], frameon=False, fontsize=8.5, ncol=4 if baselines else 3,
                    loc="upper center", bbox_to_anchor=(0.5, 0.03))
-        fig.savefig(FIG / "C_transfer.png"); plt.close(fig)
+        fig.savefig(FIG / out); plt.close(fig)
 
 
 RUNS = Path("/lus/flare/projects/UIC-HPC/khuss/msdelta/runs")
@@ -335,6 +338,9 @@ def main():
             w.writerow({k: (f"{v:.5f}" if isinstance(v, float) else v) for k, v in r.items()})
     print("ablation rows", len(ab))
     fig_benchmarks(rows); fig_pretraining(rows); fig_zeroshot(zs); fig_transfer(rows, zs); fig_ablation(ab)
+    fig_transfer(rows, zs, panels=[("ms-contrastive-100k", "ms-contrastive-100k test\n(in-distribution)", 1),
+                                   ("yeast-20k", "yeast 20k subset\n(unseen)", 1)],
+                 baselines=False, out="C_transfer_ours.png", title="Our models in-distribution vs unseen")
     print(f"rows {len(rows)}, zero-shot rows {len(zs)}")
     agg = defaultdict(list)
     for r in rows:
