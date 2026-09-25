@@ -1339,3 +1339,22 @@ Global model (CV by run, fixed labels, decoys capped at 1M per fold), same 8 run
 - A1 embedding (50m teacher): +0.9% with the MLP, ~0 with the linear model; seed noise not
   yet measured. Within-spectrum versions add nothing over the raw cosine here.
 - Embedding alone: 0 PSMs even ranked by lead (embedding:delta). Leakage AUROC 0.52.
+
+## R4 C/D: per-run Percolator-style on the lab features = 129k, level with MS2Rescore full (2026-09-25)
+
+Per run, 3-fold by spectrum, 10 label-refinement rounds, linear, mokapot calibration;
+same 8 runs (job 8865619, results/rerank/psm/a1-050m-c7s600_r4_perrun.json):
+
+    features            per-run linear    (global MLP)
+    ms                  99,154            93,206
+    ms + emb            100,490 (+1,336)  93,787
+    ms + embws          100,614 (+1,460)  93,843
+    lab                 129,041           104,785
+    lab + emb           129,245 (+204)    105,755
+    lab + embws         129,345 (+304)    105,179
+    MS2Rescore: search-only 100,974; full (MS2PIP + DeepLC) 128,211
+
+- Our per-run ms arm (99.2k) ~ MS2Rescore search-only (101.0k): the protocol reproduces.
+- lab + per-run matches/exceeds MS2Rescore full without predicted-spectrum or RT features.
+- The A1 embedding helps a weak base (+1.3-1.5%) and fades on a strong one (+0.2%).
+- NOT YET VERIFIED: shuffled-label control (must collapse) and fold-seed noise.
