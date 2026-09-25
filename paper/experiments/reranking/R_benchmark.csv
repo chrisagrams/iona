@@ -1,0 +1,16 @@
+method,seed,source,psms
+MSFragger (e-value),,a2-400m_r4_global+perrun_seed1.json:methods/all/msfragger,89693
+"MS2Rescore, search features only",,results_ms2rescore.json:ms2rescore:searchonly,100974
+MS2Rescore full (MS2PIP + DeepLC),,results_ms2rescore.json:ms2rescore:full,128211
+"our per-run classifier, MSFragger features only",0,a2-400m_r4_seed0.log,99154
+"our per-run classifier, MSFragger features only + embedding",0,a2-400m_r4_seed0.log,101885
+our per-run classifier,0,a2-400m_r4_seed0.log,129041
+our per-run classifier + embedding,0,a2-400m_r4_seed0.log,129618
+"our per-run classifier, MSFragger features only",1,a2-400m_r4_global+perrun_seed1.json,99182
+"our per-run classifier, MSFragger features only + embedding",1,a2-400m_r4_global+perrun_seed1.json,101840
+our per-run classifier,1,a2-400m_r4_global+perrun_seed1.json,128751
+our per-run classifier + embedding,1,a2-400m_r4_global+perrun_seed1.json,129965
+"our per-run classifier, MSFragger features only",2,a2-400m_r4_global+perrun_seed2.json,99405
+"our per-run classifier, MSFragger features only + embedding",2,a2-400m_r4_global+perrun_seed2.json,101853
+our per-run classifier,2,a2-400m_r4_global+perrun_seed2.json,128934
+our per-run classifier + embedding,2,a2-400m_r4_global+perrun_seed2.json,129684
