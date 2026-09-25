@@ -1717,3 +1717,16 @@ B. iona-rerank (per-run linear) on MS2Rescore's own features (all-ranks export; 
     + null 124,892 / 124,843 / 124,860 (124,865). Net embedding - null per seed +166 / +127 / +141 (+145, +0.12%):
     small but positive in every seed. Note iona-rerank on MS2Rescore's features (124.8k) is below MS2Rescore's own
     classifier on them (128.2k); with the rich features iona-rerank reaches 128.9k.
+
+## MS2Rescore without MS2PIP (+ Iona embedding / + null in its place), 8 runs (job 8870729, 23:42 UTC)
+
+    plain 111,421 (HEK 106,181 / HCT116 5,006); + Iona embedding 112,342 (107,182 / 4,955); + null 111,511 (106,271 / 4,887)
+    net embedding - null = +831 (+0.75%): HEK +911 (null +90), HCT116 +68 (noise level).
+    MS2PIP is worth +16,790 (128,211 with vs 111,421 without); the embedding in its place recovers +921 (net +831), so it
+    does NOT replace predicted fragment spectra either, but its net gain is 2.5x the no-DeepLC case (+332).
+
+## 18-run HCT116 MS2Rescore jobs killed by memory (8867717, 8870275, 8870544: PBS exit -20 after ~16-18 min)
+
+MS2Rescore peak RSS 37 GB on HILIC14 (240k PSMs, 8-run set); the 18-run set's runs are ~5.7x larger (HILIC1: 1.37M PSMs,
+144k spectra) -> ~200 GB each; 18 or 9 in parallel exceed the ~1 TB node. Would need MAXPAR<=3 and ~70 min per run:
+~7 h per arm (plain, + embedding, + null) -> not feasible before the deadline alongside the other capacity jobs.
