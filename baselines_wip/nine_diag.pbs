@@ -1,0 +1,44 @@
+#!/bin/bash -l
+# C13 diagnostic on a 20k subset of nine-species yeast: C7 400m over training (300/600/900/
+# final), 3 final seeds, replicate-only, binned; FROZEN 400m (220k = C7's base, 430k) at every
+# layer, raw and ABTT fitted on the 8 OTHER species; GLEAMS. One node, all in parallel.
+#PBS -N nine-diag
+#PBS -A UIC-HPC
+#PBS -l filesystems=home:flare
+#PBS -j oe
+#PBS -o /home/khuss/code/msdelta/pbs/logs/
+set -uo pipefail
+cd /home/khuss/code/msdelta
+S=/lus/flare/projects/UIC-HPC/khuss/msdelta; B=$S/baselines
+SRC=$B/nine_yeast; D=$B/nine_yeast20k; FIT=$S/eval-data/nine-species-train-fit25k; G=$B/gleams
+set +u; source /usr/share/lmod/lmod/init/bash; module load frameworks/2025.3.1; set -u
+export ONEAPI_DEVICE_SELECTOR=level_zero:gpu ZE_FLAT_DEVICE_HIERARCHY=FLAT PYTHONPATH=$PWD OMP_NUM_THREADS=8
+export HF_HOME=$S/huggingface HF_HUB_OFFLINE=0 HF_DATASETS_OFFLINE=1
+source pbs/load_keys.sh
+ALCF_PROXY=http://proxy.alcf.anl.gov:3128; export HTTP_PROXY=$ALCF_PROXY HTTPS_PROXY=$ALCF_PROXY http_proxy=$ALCF_PROXY https_proxy=$ALCF_PROXY
+export no_proxy="admin,localhost,*.cm.aurora.alcf.anl.gov,aurora-*,*.aurora.alcf.anl.gov,*.alcf.anl.gov,127.0.0.1"; export NO_PROXY=$no_proxy
+PY=.venv/bin/python
+echo "=== $(date -Is) build"; ZE_AFFINITY_MASK=0 $PY baselines_wip/nine_diag_build.py $SRC $D $FIT || exit 1
+cat $D/prepared/PREPARED.json | grep -E '"spectra"|"groups"'; cat $FIT/PREPARED.json
+echo "=== $(date -Is) GLEAMS (CPU, background)"
+( cd $G && env -u PYTHONPATH CUDA_VISIBLE_DEVICES="" TF_CPP_MIN_LOG_LEVEL=2 $G/env/bin/python \
+    /home/khuss/code/msdelta/baselines_wip/gleams/embed_gleams.py $D/export 64 > $D/gleams_embed.log 2>&1 ) &
+gpid=$!
+OUT=results/finetune/contrastive/nine20k; ZOUT=results/finetune/contrastive/nine20k_zeroshot; mkdir -p $OUT $ZOUT
+echo "=== $(date -Is) frozen 400m + ABTT on tiles 0-1"
+pids=()
+for i in 0 1; do
+  ZE_AFFINITY_MASK=$i $PY -m msdelta.eval_zeroshot_layers --models sweeps/arms/nine20k_zeroshot_models.txt \
+    --data $D/prepared --out-dir $ZOUT --shard $i --num-shards 2 --abtt 8:32:64:128 --fit-data $FIT \
+    > $ZOUT/.shard$i.log 2>&1 & pids+=($!)
+done
+echo "=== $(date -Is) trained models + binned on tiles 2-10"
+for i in $(seq 0 8); do
+  ZE_AFFINITY_MASK=$((i + 2)) $PY -m msdelta.eval_grouped_retrieval score --data $D/prepared \
+    --models sweeps/arms/nine20k_models.txt --out-dir $OUT --shard $i --num-shards 9 > $OUT/.shard$i.log 2>&1 & pids+=($!)
+done
+for p in "${pids[@]}"; do wait $p || echo "a scoring process failed"; done
+grep -h "MAP@R\|Error" $OUT/.shard*.log | cut -c1-140; grep -h "s): final\|Error" $ZOUT/.shard*.log
+wait $gpid; tail -1 $D/gleams_embed.log
+$PY baselines_wip/gleams/score_retrieval.py $D/export $D/export/gleams_embed.npy $D/gleams_metrics.json 2>&1 | grep "mp512/experimental"
+echo "=== $(date -Is) done"
