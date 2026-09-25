@@ -1,0 +1,1 @@
+C16 STAGE 1: C7 recipe from the FINAL 200m checkpoint (540,423). Start: /flare/UIC-HPC/khuss/msdelta/pretrained/msdelta-200m-production-01-checkpoint-540423. Otherwise identical to s400m_t0002_pk256_ep12_seed0 (sweep-conlong). PLAN.md C16.
