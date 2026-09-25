@@ -1,0 +1,25 @@
+# name  checkpoint-dir (relative to CKPT_ROOT; copy these from Aurora /flare/UIC-HPC/khuss/msdelta/pretrained/)
+zs_050m_ck010k msdelta-50m-production-01-checkpoint-10000
+zs_050m_ck120k msdelta-50m-production-01-checkpoint-120000
+zs_050m_ck220k msdelta-50m-production-01-checkpoint-220000
+zs_050m_ck330k msdelta-50m-production-01-checkpoint-330000
+zs_050m_ck430k msdelta-50m-production-01-checkpoint-430000
+zs_050m_ck540k msdelta-50m-production-01-checkpoint-540423
+zs_100m_ck010k msdelta-100m-production-01-checkpoint-10000
+zs_100m_ck120k msdelta-100m-production-01-checkpoint-120000
+zs_100m_ck220k msdelta-100m-production-01-checkpoint-220000
+zs_100m_ck330k msdelta-100m-production-01-checkpoint-330000
+zs_100m_ck430k msdelta-100m-production-01-checkpoint-430000
+zs_100m_ck540k msdelta-100m-production-01-checkpoint-540423
+zs_200m_ck010k msdelta-200m-production-01-checkpoint-10000
+zs_200m_ck120k msdelta-200m-production-01-checkpoint-120000
+zs_200m_ck220k msdelta-200m-production-01-checkpoint-220000
+zs_200m_ck330k msdelta-200m-production-01-checkpoint-330000
+zs_200m_ck430k msdelta-200m-production-01-checkpoint-430000
+zs_200m_ck540k msdelta-200m-production-01-checkpoint-540423
+zs_400m_ck010k msdelta-400m-production-01-checkpoint-10000
+zs_400m_ck120k msdelta-400m-production-01-checkpoint-120000
+zs_400m_ck220k msdelta-400m-production-01-checkpoint-220000
+zs_400m_ck330k msdelta-400m-production-01-checkpoint-330000
+zs_400m_ck430k msdelta-400m-production-01-checkpoint-430000
+zs_400m_ck540k msdelta-400m-production-01-checkpoint-540423

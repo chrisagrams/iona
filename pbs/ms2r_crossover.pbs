@@ -7,7 +7,8 @@
 #      -> $M/nodeeplc8/{nodeeplc,cosws/nodeeplc,null/nodeeplc}, counted -> baselines_wip/results_ms2rescore_nodeeplc8.json
 #   A. (PARTS includes lab) MS2Rescore full + the lab's feature table, plain / + embedding / + null
 #   D. (PARTS includes noms2pip) MS2Rescore full WITHOUT MS2PIP, plain / + embedding / + null in its place
-# PARTS (default "all nodeeplc"; add "lab" for A, "noms2pip" for D), SETS for the classifier (default ms+ms2r).
+#   E. (PARTS includes searchonly) MS2Rescore with MSFragger features only, plain / + embedding / + null
+# PARTS (default "all nodeeplc"; add "lab" for A, "noms2pip" for D, "searchonly" for E), SETS for the classifier (default ms+ms2r).
 # Smoke: -v SMOKE=1 (2 runs x LIMIT spectra, one seed, outputs under $M/smoke*). Always smoke first.
 #PBS -N ms2r-cross
 #PBS -A UIC-HPC
@@ -31,7 +32,7 @@ else
 fi
 IDS=$(for r in $RUNS; do echo -n "${r##*/},"; done); IDS=${IDS%,}
 PARTS=${PARTS:-"all nodeeplc"}; SETS=${SETS:-ms+ms2r}
-NDL8=${LAB8/lab8/nodeeplc8}; NMP8=${LAB8/lab8/noms2pip8}
+NDL8=${LAB8/lab8/nodeeplc8}; NMP8=${LAB8/lab8/noms2pip8}; SRO8=${LAB8/lab8/searchonly8}
 mkdir -p $RES
 set +u; source /usr/share/lmod/lmod/init/bash; module load frameworks/2025.3.1; set -u
 export ONEAPI_DEVICE_SELECTOR=level_zero:gpu ZE_FLAT_DEVICE_HIERARCHY=FLAT ZE_AFFINITY_MASK=0
@@ -57,6 +58,10 @@ fi
 if [[ " $PARTS " == *" noms2pip "* ]]; then
   ( env OUT=$NMP8 LAB=0 EMB_SETS="none cosws null" EMB_ROWS=$ROWS ARMS=noms2pip LIMIT=$LIMIT RUNS="$RUNS" NPROC=8 \
       bash baselines_wip/ms2rescore/run_ms2rescore.pbs > $NMP8.log 2>&1 ) & pids+=($!); logs+=($NMP8.log)
+fi
+if [[ " $PARTS " == *" searchonly "* ]]; then
+  ( env OUT=$SRO8 LAB=0 EMB_SETS="none cosws null" EMB_ROWS=$ROWS ARMS=searchonly LIMIT=$LIMIT RUNS="$RUNS" NPROC=8 \
+      bash baselines_wip/ms2rescore/run_ms2rescore.pbs > $SRO8.log 2>&1 ) & pids+=($!); logs+=($SRO8.log)
 fi
 if [[ " $PARTS " == *" lab "* ]]; then
   ( env OUT=$LAB8 LAB=1 EMB_SETS="none cosws null" EMB_ROWS=$ROWS ARMS=full LIMIT=$LIMIT RUNS="$RUNS" NPROC=8 \
@@ -94,6 +99,11 @@ if [[ " $PARTS " == *" noms2pip "* ]]; then
   echo "=== $(date -Is) count D: MS2Rescore without MS2PIP, plain / + embedding / + null"
   d=/home/khuss/code/msdelta/baselines_wip/results_ms2rescore_noms2pip8.json; [[ -n $TAGOUT ]] && d=$RES/${TAGOUT}ms2r_noms2pip8.json
   count $NMP8 noms2pip nmp8 $d || exit 1
+fi
+if [[ " $PARTS " == *" searchonly "* ]]; then
+  echo "=== $(date -Is) count E: MS2Rescore with MSFragger features only, plain / + embedding / + null"
+  d=/home/khuss/code/msdelta/baselines_wip/results_ms2rescore_searchonly8.json; [[ -n $TAGOUT ]] && d=$RES/${TAGOUT}ms2r_searchonly8.json
+  count $SRO8 searchonly sro8 $d || exit 1
 fi
 if [[ " $PARTS " == *" lab "* ]]; then
   echo "=== $(date -Is) count A: MS2Rescore + lab features, plain / + embedding / + null"
