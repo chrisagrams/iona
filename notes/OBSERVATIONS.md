@@ -1454,3 +1454,18 @@ HEK confident PSMs (psm-rerank-hek-hct116, 8 runs; <=512 peaks; groups capped at
 - Consequences: the C claim vs GLEAMS is domain-limited (wins on ms-contrastive-100k
   0.714 vs 0.646, loses badly here); expect the same for A vs yHydra on this data; R's
   small embedding gain on these runs is consistent.
+
+## A vs yHydra on UNSEEN data (C11 HEK ion-trap set): ours ahead everywhere, both degrade (2026-09-25)
+
+26,628 spectra yHydra can represent (of 27,637); candidates 6,201 sequences (yHydra) /
+7,380 peptide+charge (ours); A1 3 seeds within 0.002. $SCRATCH/baselines/c11_cap20/xmodal.
+
+    candidates   truth inside   yHydra   A1
+    open         100%           0.016    0.061
+    +-1.1 Da     95.9%          0.345    0.601
+    20 ppm       75.7%          0.606    0.679
+
+- Ours ahead in every setting (widest at 1.1 Da); both collapse without a mass filter --
+  the same low-res domain shift as C11 (our spectrum encoder: MAP@R 0.17 here).
+- 20 ppm drops the true peptide for 24% of spectra (precursor accuracy of these runs), so
+  it caps at 0.757; +-1.1 Da is the sensible window here.

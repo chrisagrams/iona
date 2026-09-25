@@ -10,7 +10,7 @@
 set -uo pipefail
 cd /home/khuss/code/msdelta
 S=/lus/flare/projects/UIC-HPC/khuss/msdelta
-C=$S/baselines/c11; OUT=$C/xmodal; mkdir -p $OUT
+C=${C11_DIR:-$S/baselines/c11_cap20}; OUT=$C/xmodal; mkdir -p $OUT
 CACHE=$S/align-targets-a1-050m-c7s600
 ARGS=configs/a1-align-100k-050m-c7s600/training.args
 RUNS="$S/runs/v2_align-ft-a1-align-100k-050m-c7s600-8861093 $S/runs/v2_align-ft-a1-align-100k-050m-c7s600-8861292 $S/runs/v2_align-ft-a1-align-100k-050m-c7s600-8861309"
