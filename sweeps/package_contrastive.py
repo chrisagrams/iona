@@ -213,43 +213,53 @@ def fig_zeroshot(zs):
         fig.savefig(FIG / "C_zeroshot.png"); plt.close(fig)
 
 
-def fig_transfer(rows):
-    meth = "C7 (replicate corpus -> ms-contrastive-100k)"
-    steps = [("s300", "C7, step 300"), ("s600", "C7, step 600"), ("s900", "C7, step 900"), ("final", "C7, end of epoch")]
-    blues = ["#bfdbfe", "#60a5fa", "#2563eb", "#1e3a8a"]
+def fig_transfer(rows, zs):
+    """Per benchmark: our best model (any of ours, labelled) vs GLEAMS vs binned cosine."""
+    c7 = "C7 (replicate corpus -> ms-contrastive-100k)"
+    step_name = {"s300": "step 300", "s600": "step 600", "s900": "step 900", "final": "end of epoch"}
+    def ours_best(b):
+        cands = []
+        for sc in ("50m", "400m"):
+            for st, nm in step_name.items():
+                v = pick(rows, b, c7, sc, stage=st)
+                if v:
+                    cands.append((f"C7 {sc.upper()}, {nm}", v))
+            v = pick(rows, b, "replicate corpus only (12 ep)", sc)
+            if v:
+                cands.append((f"replicate corpus only {sc.upper()}", v))
+        for r in zs:
+            if r["benchmark"] == b:
+                cands.append((f"frozen {r['encoder'].upper().replace('K', 'k')} + ABTT", [r["abtt_best"]]))
+        return max(cands, key=lambda c: np.mean(c[1]))
     panels = [("ms-contrastive-100k", "ms-contrastive-100k test\n(in-distribution)"),
               ("oodval-8species", "8 other species\n(unseen, validation)"),
               ("yeast-20k", "yeast 20k subset\n(unseen, test)")]
-    others = [("replicate corpus only", "#14b8a6", lambda b: pick(rows, b, "replicate corpus only (12 ep)", "400m")),
-              ("GLEAMS", GLEAMS, lambda b: pick(rows, b, "GLEAMS (pretrained)")),
-              ("binned cosine", BINNED, lambda b: [max(pick(rows, b, "binned cosine (1 Da bins)")
-                                                      + pick(rows, b, "binned cosine (0.1 Da bins)"))]
-               if pick(rows, b, "binned cosine (1 Da bins)") + pick(rows, b, "binned cosine (0.1 Da bins)") else [])]
-    series = [(lab, blues[k], (lambda st: lambda b: pick(rows, b, meth, "400m", stage=st))(st))
-              for k, (st, lab) in enumerate(steps)] + others
+    binned = lambda b: [max(pick(rows, b, "binned cosine (1 Da bins)") + pick(rows, b, "binned cosine (0.1 Da bins)"))]
     with plt.rc_context(STYLE):
-        fig, axes = plt.subplots(1, 3, figsize=(13, 4.4), sharey=True)
+        fig, axes = plt.subplots(1, 3, figsize=(11, 4.4), sharey=True)
         for ax, (b, title) in zip(axes, panels):
             ax.yaxis.grid(True, color=GRIDC, lw=0.8); ax.set_axisbelow(True)
+            lab, v = ours_best(b)
+            bars = [("ours (best)", OURS, v, lab), ("GLEAMS", GLEAMS, pick(rows, b, "GLEAMS (pretrained)"), ""),
+                    ("binned cosine", BINNED, binned(b), "")]
             x = 0
-            for lab, col, get in series:
-                v = get(b)
-                if v:
-                    m, s_ = msd(v)
-                    ax.bar(x, m, 0.8, color=col, yerr=s_ if len(v) > 1 else None, capsize=3,
-                           error_kw=dict(elinewidth=1, capthick=1, ecolor=INK), zorder=2)
-                    ax.text(x, m + (s_ if len(v) > 1 else 0) + 0.015, f"{m:.2f}", ha="center", fontsize=8)
-                    x += 1
-                if lab == steps[-1][1]:
-                    x += 0.6                                   # gap between our trajectory and the baselines
-            ax.set_xticks([]); ax.set_title(title, loc="left", fontsize=10.5)
-            ax.set_xlim(-0.7, x - 0.3)
+            for name, col, vals, sub in bars:
+                if not vals:
+                    continue
+                m, s_ = msd(vals)
+                ax.bar(x, m, 0.72, color=col, yerr=s_ if len(vals) > 1 else None, capsize=3,
+                       error_kw=dict(elinewidth=1, capthick=1, ecolor=INK), zorder=2)
+                ax.text(x, m + (s_ if len(vals) > 1 else 0) + 0.015, f"{m:.2f}", ha="center", fontsize=9)
+                if sub:
+                    ax.text(x, 0.02, sub, rotation=90, ha="center", va="bottom", fontsize=8, color="white")
+                x += 1
+            ax.set_xticks([]); ax.set_xlim(-0.6, 2.6); ax.set_title(title, loc="left", fontsize=10.5)
         axes[0].set_ylim(0, 1.0); axes[0].set_ylabel("MAP@R (experimental spectra)")
-        fig.suptitle("Fine-tuning helps in-distribution; on unseen data it peaks early and trails the baselines",
-                     x=0.07, ha="left", fontsize=13, fontweight="bold", y=1.03)
-        fig.legend(handles=[plt.Rectangle((0, 0), 1, 1, color=c) for _, c, _ in series],
-                   labels=[l for l, _, _ in series], frameon=False, fontsize=9, ncol=7,
-                   loc="upper center", bbox_to_anchor=(0.5, 0.02))
+        fig.suptitle("Our best model vs baselines on each benchmark", x=0.07, ha="left", fontsize=13,
+                     fontweight="bold", y=1.03)
+        fig.legend(handles=[plt.Rectangle((0, 0), 1, 1, color=c) for c in (OURS, GLEAMS, BINNED)],
+                   labels=["ours (best; model written on the bar)", "GLEAMS", "binned cosine"], frameon=False,
+                   fontsize=9, ncol=3, loc="upper center", bbox_to_anchor=(0.5, 0.02))
         fig.savefig(FIG / "C_transfer.png"); plt.close(fig)
 
 
@@ -266,7 +276,7 @@ def main():
         w = csv.DictWriter(fh, list(zs[0])); w.writeheader()
         for r in zs:
             w.writerow({k: (f"{v:.5f}" if isinstance(v, float) else v) for k, v in r.items()})
-    fig_benchmarks(rows); fig_pretraining(rows); fig_zeroshot(zs); fig_transfer(rows)
+    fig_benchmarks(rows); fig_pretraining(rows); fig_zeroshot(zs); fig_transfer(rows, zs)
     print(f"rows {len(rows)}, zero-shot rows {len(zs)}")
     agg = defaultdict(list)
     for r in rows:
