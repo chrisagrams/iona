@@ -8,7 +8,8 @@
 # Stage 1 (msdelta.rerank_psm_embed) runs one dataset file per tile, downloading through the
 # ALCF proxy with the HF token (the dataset is private). Stage 2 (msdelta.rerank_psm_fdr)
 # reads every stage-1 table and writes results/rerank/psm/$TAG.json. Stage-1 tables that
-# already exist are reused, so a timed-out job resumes.
+# already exist are reused, so a timed-out job resumes. By default (SAVE_VECTORS=1) it also writes the unit
+# vectors for R5 under $SCRATCH_ROOT/rerank-psm/$TAG/vectors/<run>/ (~1 GB per run).
 
 #PBS -N msdelta-rerank-psm
 #PBS -A UIC-HPC
@@ -25,6 +26,7 @@ ENCODER=${ENCODER:?set ENCODER}; STUDENT=${STUDENT:?set STUDENT}; CACHE=${CACHE:
 VENV_DIR=${VENV_DIR:-$REPO_DIR/.venv}
 SCRATCH_ROOT=${SCRATCH_ROOT:-/lus/flare/projects/${PROJECT:-UIC-HPC}/$USER/msdelta}
 ROWS=${ROWS:-$SCRATCH_ROOT/rerank-psm/$TAG/rows}
+SAVE_VECTORS=${SAVE_VECTORS-1}     # R5; SAVE_VECTORS= (empty) to skip
 
 set +u
 source /usr/share/lmod/lmod/init/bash
@@ -55,7 +57,9 @@ for run in $RUNS; do
     out="$ROWS/$(basename "$run")"
     if [[ -f $out ]]; then echo "  reuse $out"; continue; fi
     ZE_AFFINITY_MASK=$i "$PY" -m msdelta.rerank_psm_embed --run "$run" --encoder "$ENCODER" \
-        --student "$STUDENT" --cache "$CACHE" --out "$out" > "$ROWS/.$(basename "$run").log" 2>&1 &
+        --student "$STUDENT" --cache "$CACHE" --out "$out" \
+        ${SAVE_VECTORS:+--vectors-out "$SCRATCH_ROOT/rerank-psm/$TAG/vectors/$(basename "$run" .parquet)"} \
+        > "$ROWS/.$(basename "$run").log" 2>&1 &
     pids+=($!); i=$((i + 1))
 done
 failed=0
