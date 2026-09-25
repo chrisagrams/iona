@@ -994,7 +994,13 @@ against each scale's pretrained arms at its original checkpoint (FT5, 6 seeds):
     400m      0.9434       0.8981         +0.045
 
 The gain is flat across scale. Scratch improves with size by about as much as pretrained
-does (+0.013 from 50m to 400m). Extra fine-tuning does not close it: 50m from scratch at
+does (+0.013 from 50m to 400m).
+
+CORRECTION (2026-09-25): the 50m scratch cell above is NOT a 3-seed mean at the shared config. It
+is the best of the 50m scratch HP grid (8841984, arm lr5e4_ep4_b48, one run). At the config the
+100m-400m scratch arms use (lr 2e-4, eff. batch 12, 4 epochs) 50m scratch is 0.8821 (one run),
+so the matched gain at 50m is +0.050. Scratch per-seed: 100m 0.8907/0.8899/0.8854, 200m
+0.8967/0.8961/0.8959, 400m 0.8956/0.8994/0.8993. The conclusion (~+0.05 at every scale) holds. Extra fine-tuning does not close it: 50m from scratch at
 16 epochs reaches 0.9051, still 0.027 below pretrained 50m at 4.
 
 ## D3: denoise saturates by ~330k-430k pretraining steps; even 10k steps is most of the gain

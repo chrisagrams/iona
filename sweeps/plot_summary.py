@@ -20,8 +20,13 @@ plt.rcParams.update({"figure.dpi": 130, "axes.spines.top": False, "axes.spines.r
                      "font.size": 9})
 
 # ---------------------------------------------------------------- D (denoise)
-D_SCALE = {"50m": 0.9317, "100m": 0.9400, "200m": 0.9447, "400m": 0.9434}      # D1, 6 seeds
-D_SCRATCH = {"50m": 0.8856, "100m": 0.8886, "200m": 0.8963, "400m": 0.8981}     # D2, scratch grid 8847663, 3 seeds
+D_SCALE = {"50m": 0.9317, "100m": 0.9400, "200m": 0.9447, "400m": 0.9434}      # D1, 6 seeds (FT5, 8845262)
+D_SCALE_SD = {"50m": 0.00055, "100m": 0.00029, "200m": 0.00025, "400m": 0.00045}
+# from scratch at the same config at every scale (lr 2e-4, eff. batch 12, 4 epochs). 100m-400m: 3 seeds
+# each (8847663 + resume 8856558); 50m: ONE run (arm lr2e4_ep4_b12 of grid 8841984) -- no error bar.
+D_SCRATCH_SEEDS = {"50m": [0.8821], "100m": [0.89065, 0.88986, 0.88539],
+                   "200m": [0.89673, 0.89610, 0.89593], "400m": [0.89564, 0.89939, 0.89927]}
+D_SCRATCH = {k: float(np.mean(v)) for k, v in D_SCRATCH_SEEDS.items()}
 
 # ---------------------------------------------------------------- C (spectrum embeddings)
 # exp MAP@R. ms-contrastive-100k test (in-distribution for C7); unseen: HEK (C11, low-res MS2),
@@ -95,15 +100,14 @@ def save(fig, name):
 def fig_d():
     fig, ax = plt.subplots(figsize=(5.2, 3.4))
     xs = list(D_SCALE)
-    ax.plot(xs, list(D_SCALE.values()), "o-", color=OURS, label="pretrained + fine-tuned (6 seeds)")
-    ax.plot(xs, list(D_SCRATCH.values()), "s--", color=BASE, label="from scratch (3 seeds)")
-    for x in xs:
-        ax.annotate(f"{D_SCALE[x]:.3f}", (x, D_SCALE[x]), textcoords="offset points", xytext=(0, 6), ha="center", fontsize=7)
-        ax.annotate(f"{D_SCRATCH[x]:.3f}", (x, D_SCRATCH[x]), textcoords="offset points", xytext=(0, -12), ha="center", fontsize=7)
-        ax.annotate(f"+{D_SCALE[x] - D_SCRATCH[x]:.3f}", (x, (D_SCALE[x] + D_SCRATCH[x]) / 2), ha="center", fontsize=7, color=OURS)
+    sd = lambda v: float(np.std(v, ddof=1)) if len(v) > 1 else 0.0
+    ax.errorbar(xs, list(D_SCALE.values()), yerr=list(D_SCALE_SD.values()), fmt="o-", color=OURS,
+                capsize=3, label="pretrained + fine-tuned")
+    ax.errorbar(xs, list(D_SCRATCH.values()), yerr=[sd(D_SCRATCH_SEEDS[x]) for x in xs], fmt="s--",
+                color=BASE, capsize=3, label="from scratch")
     ax.set_ylim(0.87, 0.955); ax.set_xlabel("model size"); ax.set_ylabel("denoise test AUROC")
-    ax.set_title("D: pretraining vs from scratch (4 fine-tuning epochs)", loc="left")
-    ax.legend(frameon=False, fontsize=7, ncol=2, loc="upper center", bbox_to_anchor=(0.5, -0.18))
+    ax.set_title("Scaling improvements for denoising", loc="left")
+    ax.legend(frameon=False, fontsize=8, loc="center right")
     save(fig, "D_denoise.png")
 
 
@@ -203,7 +207,8 @@ def tables():
     L = ["# Summary tables (2026-09-25)", "", "Source: notes/OBSERVATIONS.md (job ids there). Figures: results/figures/SUMMARY/.", ""]
     L += ["## D: denoise", "", "| scale | pretrained + fine-tuned | from scratch | gain |", "|---|---|---|---|"]
     L += [f"| {s} | {D_SCALE[s]:.4f} | {D_SCRATCH[s]:.4f} | +{D_SCALE[s] - D_SCRATCH[s]:.3f} |" for s in D_SCALE]
-    L += ["", "Caveat: the Hub cards show training-logged numbers; reloaded models re-evaluate ~0.014 AUROC lower (unresolved).", ""]
+    L += ["", "Pretrained: mean ± sd over 6 seeds. Scratch: 3 seeds at 100m–400m; 50m is a single run at the same config (lr 2e-4, eff. batch 12, 4 epochs).",
+          "Caveat: the Hub cards show training-logged numbers; reloaded models re-evaluate ~0.014 AUROC lower (unresolved).", ""]
     L += ["## C: spectrum retrieval (experimental MAP@R)", "", "| dataset | ours C7 400m (3 seeds) | ours replicate-only | frozen + ABTT | GLEAMS | binned cosine |", "|---|---|---|---|---|---|"]
     for ds, v in C_BENCH.items():
         f = lambda k: ("—" if k not in v else (f"{v[k][1]:.3f} ({v[k][0]:.3f}–{v[k][2]:.3f})" if isinstance(v[k], tuple) else f"{v[k]:.3f}"))

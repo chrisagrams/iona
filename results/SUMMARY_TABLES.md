@@ -6,11 +6,12 @@ Source: notes/OBSERVATIONS.md (job ids there). Figures: results/figures/SUMMARY/
 
 | scale | pretrained + fine-tuned | from scratch | gain |
 |---|---|---|---|
-| 50m | 0.9317 | 0.8856 | +0.046 |
+| 50m | 0.9317 | 0.8821 | +0.050 |
 | 100m | 0.9400 | 0.8886 | +0.051 |
 | 200m | 0.9447 | 0.8963 | +0.048 |
 | 400m | 0.9434 | 0.8981 | +0.045 |
 
+Pretrained: mean ± sd over 6 seeds. Scratch: 3 seeds at 100m–400m; 50m is a single run at the same config (lr 2e-4, eff. batch 12, 4 epochs).
 Caveat: the Hub cards show training-logged numbers; reloaded models re-evaluate ~0.014 AUROC lower (unresolved).
 
 ## C: spectrum retrieval (experimental MAP@R)
