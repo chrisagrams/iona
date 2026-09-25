@@ -5,12 +5,14 @@
 # qsub -A PROJECT -q QUEUE \
 #   -l select=1 -l place=scatter -l walltime=06:00:00 \
 #   -l filesystems=home:flare -j oe -o /path/to/pbs/logs \
-#   -v DATA_DIR=/flare/PROJECT/prosit-dataset/arrays,ENCODER_CHECKPOINT=/flare/PROJECT/msdelta-200m-production-01-final,OUTPUT_ROOT=/flare/PROJECT/msdelta-intensity,RUN_NAME=200m-finetune \
+#   -v DATA_DIR=/flare/PROJECT/prosit-dataset/arrays,ENCODER_CHECKPOINT=/flare/PROJECT/msdelta-200m-production-01-final,OUTPUT_ROOT=/flare/PROJECT/msdelta-intensity,RUN_NAME=200m-finetune,INTENSITY_ARGS \
 #   pbs/aurora-intensity.pbs
 # DATA_DIR holds the train/val/holdout .npy arrays from scripts/convert_prosit_hdf5.py.
-# Extra msdelta.intensity flags go in INTENSITY_ARGS; export it before qsub
-# because its spaces cannot pass through -v, e.g.
+# Extra msdelta.intensity flags go in INTENSITY_ARGS. Its spaces cannot be written
+# inside -v, so export it first and list it in -v by name only (no "="), which
+# makes qsub copy the exported value, e.g.
 #   export INTENSITY_ARGS="--finetune-encoder --gradient-checkpointing --ion-budget 32768"
+# The -o log directory must exist before submission.
 # Outputs, checkpoints, logs and W&B files go to $OUTPUT_ROOT/$RUN_NAME.
 # Set RESUME_FROM_CHECKPOINT=latest with the same RUN_NAME to continue a run; the
 # job saves and exits cleanly CHECKPOINT_MARGIN_SECONDS (default 15 min) before
