@@ -32,7 +32,9 @@ export OMP_NUM_THREADS=4 MKL_NUM_THREADS=4 OPENBLAS_NUM_THREADS=4
 export MPLCONFIGDIR=$B/.mpl XDG_CACHE_HOME=$B/.cache
 mkdir -p "$OUT"
 echo "=== $(date -Is) start OUT=$OUT LIMIT=$LIMIT ARMS=$ARMS host=$(hostname) nproc=$(nproc)"
+MAXPAR=${MAXPAR:-0}   # >0: at most this many runs processed at once (memory headroom for many runs)
 for r in $RUNS; do
+  if (( MAXPAR > 0 )); then while (( $(jobs -rp | wc -l) >= MAXPAR )); do wait -n; done; fi
   (
     ds=${r%%/*}; name=${r##*/}
     for set in $EMB_SETS; do
