@@ -1486,3 +1486,11 @@ The in-training validation check (2,000 spectra vs a few hundred peptides) ranke
 above A1; that does not hold on test. A4's purpose (near-miss swaps) is judged by its FDR
 eval (re-embed 8866354). A2 (400m C7-final teacher) validation 0.943-0.946 vs A1 0.929-0.932:
 test eval 8866468 running.
+
+## A2: the 400m teacher lifts the student to 0.923 test Hit@1 (+2.5 over A1) (2026-09-25)
+
+ms-contrastive-100k test, 25,848 spectra vs 9,771 candidates. Teacher = C7 400m final,
+seed 0 (chosen on validation; its own MAP@R 0.868). Students 8866356/7/9:
+    A2  0.9229 / 0.9227 / 0.9226   Hit@5 0.949   MRR 0.935
+    A1  0.8989 / 0.8982 / 0.8975   (teacher C7 50m step 600, MAP@R 0.831)
+Student quality tracks teacher quality (A2 answered). Downstream (reranking, yHydra) next.

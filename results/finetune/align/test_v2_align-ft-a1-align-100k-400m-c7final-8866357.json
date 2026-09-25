@@ -1,0 +1,22 @@
+{
+ "run": "/lus/flare/projects/UIC-HPC/khuss/msdelta/runs/v2_align-ft-a1-align-100k-400m-c7final-8866357",
+ "cache": "/lus/flare/projects/UIC-HPC/khuss/msdelta/align-targets-a2-400m-c7final",
+ "teacher": "/lus/flare/projects/UIC-HPC/khuss/msdelta/runs/sweep-cont400m_ep01_seed0-8860522/final",
+ "data": "/lus/flare/projects/UIC-HPC/khuss/msdelta/eval-data/ms-contrastive-100k-test-mp512",
+ "n_spectra": 25848,
+ "n_candidates": 9771,
+ "metrics": {
+  "crossmodal/hit@1": 0.9226632714271545,
+  "crossmodal/hit@5": 0.94842928647995,
+  "crossmodal/mrr": 0.9351192116737366,
+  "crossmodal/n_spectra": 25848.0,
+  "crossmodal/n_candidates": 9771.0,
+  "teacher_spectrum/Hit@1": 0.9133945976051239,
+  "teacher_spectrum/Precision@1": 0.9133945976051239,
+  "teacher_spectrum/R-Precision": 0.8705294983490472,
+  "teacher_spectrum/MAP@R": 0.8681624696662291,
+  "teacher_spectrum/R@5": 0.9021164021164021,
+  "teacher_spectrum/MAP@100": 0.8895066607257852,
+  "teacher_spectrum/queries": 25137.0
+ }
+}
