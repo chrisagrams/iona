@@ -10,7 +10,7 @@ spectrum/peptide embedding similarity as a feature lets the classifier identify 
 | file | content |
 |---|---|
 | `R_embedding_gain.png`, `R_embedding_gain.csv` | % more PSMs at 1% FDR from adding the embedding features vs adding a null control |
-| `R_benchmark.png`, `R_benchmark.csv` | PSMs at 1% FDR for MSFragger, MS2Rescore and iona-rerank, with a grid showing which features each method uses |
+| `R_benchmark.png`, `R_benchmark.csv` | PSMs at 1% FDR for MSFragger, MS2Rescore and Iona-rerank, with a grid showing which features each method uses |
 | `plot_reranking.py` | regenerates both figures from the CSVs (`python plot_reranking.py`; matplotlib + numpy) |
 
 `R_embedding_gain.csv`: one row per (dataset, embedding, feature set, arm, seed) with the PSMs of the
@@ -30,20 +30,20 @@ the result file each number was read from.
 
 ## Methods
 
-- **iona-rerank** (our per-run classifier): Percolator-style rescoring trained separately on each run: 3-fold
+- **Iona-rerank** (our per-run classifier): Percolator-style rescoring trained separately on each run: 3-fold
   cross-validation by spectrum, iterative target/decoy labels, linear model. PSMs at 1% FDR are
   counted over all runs.
   - **rich features**: the lab's per-candidate feature table: scores from four search engines (MSFragger,
     Comet, SEQUEST, ProLuCID), fragment-ion coverage/intensity, cross-candidate context and peptide features.
     Its predicted-spectrum and retention-time columns are empty in the published table and are not used.
   - **MSFragger features**: MSFragger's search scores alone.
-- **+ iona embedding**: the cosine similarity between the spectrum's embedding and the candidate peptide's
+- **+ Iona embedding**: the cosine similarity between the spectrum's embedding and the candidate peptide's
   embedding, plus four features of that cosine relative to the spectrum's other candidates (rank,
   difference to the best other candidate, z-score within the spectrum, gap between the top two).
   Spectrum embeddings come from the fine-tuned spectrum encoder (the teacher); peptide embeddings from
   the peptide embedder trained on it (the student).
-  - **iona embedding (50M)**: fine-tuned 50M spectrum encoder (step 600) and its peptide student.
-  - **iona embedding (400M)**: fine-tuned 400M spectrum encoder (end of epoch, seed 0) and its peptide student
+  - **Iona embedding (50M)**: fine-tuned 50M spectrum encoder (step 600) and its peptide student.
+  - **Iona embedding (400M)**: fine-tuned 400M spectrum encoder (end of epoch, seed 0) and its peptide student
     (released as `Gaolaboratory/iona-peptide-embedder-400m`).
 - **+ null control**: the same five features computed with the embedding of a random other spectrum
   in place of the query's. It adds the same number of features with the same distributions but no
@@ -58,17 +58,17 @@ the result file each number was read from.
 
 Embedding minus null control (the net gain), PSMs at 1% FDR, 8 runs, per seed:
 
-| features | iona embedding (50M) | iona embedding (400M) |
+| features | Iona embedding (50M) | Iona embedding (400M) |
 |---|---|---|
 | MSFragger features | +1,495 / +1,215 / +1,186 (+1.3%) | +2,705 / +2,373 / +2,386 (+2.5%) |
 | rich features | +398 / +738 / +473 (+0.4%) | +564 / +924 / +544 (+0.5%) |
 
-HCT116, 18 runs, iona embedding (400M): +20,763 (+5.6%) with MSFragger features, +8,624 (+1.65%) with rich
+HCT116, 18 runs, Iona embedding (400M): +20,763 (+5.6%) with MSFragger features, +8,624 (+1.65%) with rich
 features.
 
-- The null control adds nothing (-0.1% to +0.2%); the iona embedding adds identifications in every setting.
+- The null control adds nothing (-0.1% to +0.2%); the Iona embedding adds identifications in every setting.
 - The better teacher (400M) gives the larger gain; the gain is largest on the unseen HCT116 runs and
-  with MSFragger features, and persists on top of the rich features; iona-rerank with rich features alone
+  with MSFragger features, and persists on top of the rich features; Iona-rerank with rich features alone
   matches MS2Rescore with MS2PIP + DeepLC (128,909 vs 128,211) using different information.
 
 ## Controls and caveats
@@ -76,7 +76,7 @@ features.
 - With shuffled target/decoy labels the classifier finds 0 PSMs at 1% FDR.
 - The embedding cosine alone barely separates targets from decoys (AUROC 0.52-0.53; null 0.50), so the
   gain is not a leak of the target/decoy label.
-- Across the 3 seeds, iona-rerank without the embedding ranges 128,751-129,041 PSMs (rich features)
+- Across the 3 seeds, Iona-rerank without the embedding ranges 128,751-129,041 PSMs (rich features)
   and 99,154-99,405 (MSFragger features); gains are compared within each seed.
 - Oktoberfest was run on the 6 HEK runs only and is not comparable with these 8-run numbers, so it is
   not shown.
@@ -85,7 +85,7 @@ features.
   the 2 HCT116 runs the null gained more than the embedding (+452 vs +343), i.e. within MS2Rescore's
   sensitivity to added features on those small runs. `R_benchmark.png` shows the embedding row;
   the null-control row is omitted there (it is noise-dominated, see above). The 18-run HCT116 MS2Rescore
-  comparison is pending. (MS2Rescore + MS2PIP + DeepLC + iona embedding and iona-rerank
+  comparison is pending. (MS2Rescore + MS2PIP + DeepLC + Iona embedding and Iona-rerank
   with rich features both read 128,909: the first is one run, the second the mean of 129,041 / 128,751 / 128,934.)
 
 Provenance: msdelta repository, `sweeps/package_rerank.py` (from `results/rerank/psm/` and

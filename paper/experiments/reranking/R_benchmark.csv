@@ -2,16 +2,16 @@ method,seed,source,psms
 MSFragger (e-value),,a2-400m_r4_global+perrun_seed1.json:methods/all/msfragger,89693
 "MS2Rescore, MSFragger features",,results_ms2rescore.json:ms2rescore:searchonly,100974
 "MS2Rescore, MSFragger features + MS2PIP + DeepLC",,results_ms2rescore.json:ms2rescore:full,128211
-"MS2Rescore, MSFragger features + MS2PIP + DeepLC + iona embedding",,"results_ms2rescore_emb8_a2.json:ms2rescore:full+embedding(400M teacher, cosws)",128909
-"iona-rerank, MSFragger features",0,a2-400m_r4_seed0.log,99154
-"iona-rerank, MSFragger features + iona embedding",0,a2-400m_r4_seed0.log,101885
-"iona-rerank, rich features",0,a2-400m_r4_seed0.log,129041
-"iona-rerank, rich features + iona embedding",0,a2-400m_r4_seed0.log,129618
-"iona-rerank, MSFragger features",1,a2-400m_r4_global+perrun_seed1.json,99182
-"iona-rerank, MSFragger features + iona embedding",1,a2-400m_r4_global+perrun_seed1.json,101840
-"iona-rerank, rich features",1,a2-400m_r4_global+perrun_seed1.json,128751
-"iona-rerank, rich features + iona embedding",1,a2-400m_r4_global+perrun_seed1.json,129965
-"iona-rerank, MSFragger features",2,a2-400m_r4_global+perrun_seed2.json,99405
-"iona-rerank, MSFragger features + iona embedding",2,a2-400m_r4_global+perrun_seed2.json,101853
-"iona-rerank, rich features",2,a2-400m_r4_global+perrun_seed2.json,128934
-"iona-rerank, rich features + iona embedding",2,a2-400m_r4_global+perrun_seed2.json,129684
+"MS2Rescore, MSFragger features + MS2PIP + DeepLC + Iona embedding",,"results_ms2rescore_emb8_a2.json:ms2rescore:full+embedding(400M teacher, cosws)",128909
+"Iona-rerank, MSFragger features",0,a2-400m_r4_seed0.log,99154
+"Iona-rerank, MSFragger features + Iona embedding",0,a2-400m_r4_seed0.log,101885
+"Iona-rerank, rich features",0,a2-400m_r4_seed0.log,129041
+"Iona-rerank, rich features + Iona embedding",0,a2-400m_r4_seed0.log,129618
+"Iona-rerank, MSFragger features",1,a2-400m_r4_global+perrun_seed1.json,99182
+"Iona-rerank, MSFragger features + Iona embedding",1,a2-400m_r4_global+perrun_seed1.json,101840
+"Iona-rerank, rich features",1,a2-400m_r4_global+perrun_seed1.json,128751
+"Iona-rerank, rich features + Iona embedding",1,a2-400m_r4_global+perrun_seed1.json,129965
+"Iona-rerank, MSFragger features",2,a2-400m_r4_global+perrun_seed2.json,99405
+"Iona-rerank, MSFragger features + Iona embedding",2,a2-400m_r4_global+perrun_seed2.json,101853
+"Iona-rerank, rich features",2,a2-400m_r4_global+perrun_seed2.json,128934
+"Iona-rerank, rich features + Iona embedding",2,a2-400m_r4_global+perrun_seed2.json,129684

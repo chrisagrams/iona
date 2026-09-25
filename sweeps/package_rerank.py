@@ -34,8 +34,8 @@ STYLE = {"font.family": "DejaVu Sans", "font.size": 10, "axes.edgecolor": "#9ca3
          "axes.spines.top": False, "axes.spines.right": False, "savefig.bbox": "tight", "figure.dpi": 200}
 # embedding -> (label, per-seed sources for the 8-run per-run results)
 EMB = {
-    "A1": ("iona embedding (50M)", [PSM / f"a1-rerun_r4_global+perrun_seed{s}.json" for s in (0, 1, 2)]),
-    "A2": ("iona embedding (400M)", [PSM / "a2-400m_r4_seed0.log"] + [PSM / f"a2-400m_r4_global+perrun_seed{s}.json" for s in (1, 2)]),
+    "A1": ("Iona embedding (50M)", [PSM / f"a1-rerun_r4_global+perrun_seed{s}.json" for s in (0, 1, 2)]),
+    "A2": ("Iona embedding (400M)", [PSM / "a2-400m_r4_seed0.log"] + [PSM / f"a2-400m_r4_global+perrun_seed{s}.json" for s in (1, 2)]),
 }
 BASES = {"ms": "MSFragger features", "lab": "rich features"}   # rich = the lab's per-candidate feature table
 VARIANTS = ["", "+embws", "+nullws"]
@@ -80,7 +80,7 @@ def fig_gain(rows):
     panels = [("8 runs (6 HEK, 2 HCT116)", BASES["ms"]), ("8 runs (6 HEK, 2 HCT116)", BASES["lab"]),
               ("HCT116, 18 runs (unseen)", None)]
     titles = ["8 runs\niona-rerank, MSFragger features", "8 runs\niona-rerank, rich features",
-              "HCT116, 18 runs (unseen)\niona-rerank, iona embedding (400M)"]
+              "HCT116, 18 runs (unseen)\niona-rerank, Iona embedding (400M)"]
     with plt.rc_context(STYLE):
         fig, axes = plt.subplots(1, 3, figsize=(12, 4.4), gridspec_kw={"width_ratios": [2, 2, 2]})
         for ax, (ds, base), title in zip(axes, panels, titles):
@@ -100,14 +100,14 @@ def fig_gain(rows):
             ax.set_xticks(range(len(groups)))
             ax.set_xticklabels([g.replace(" (", "\n(") for g in groups], fontsize=8.5)
             ax.set_title(title, loc="left", fontsize=10.5)
-        axes[0].set_ylabel("% more PSMs at 1% FDR\n(vs iona-rerank without it)")
+        axes[0].set_ylabel("% more PSMs at 1% FDR\n(vs Iona-rerank without it)")
         top = max(a.get_ylim()[1] for a in axes)
         for a in axes:
             a.set_ylim(-0.6, top)
-        fig.suptitle("The iona embedding adds identifications; a random-spectrum control does not", x=0.07, ha="left",
+        fig.suptitle("The Iona embedding adds identifications; a random-spectrum control does not", x=0.07, ha="left",
                      fontsize=13, fontweight="bold", y=1.05)
         fig.legend(handles=[plt.Rectangle((0, 0), 1, 1, color=c) for c in cols.values()],
-                   labels=["+ null control (random-spectrum embedding)", "+ iona embedding"], frameon=False,
+                   labels=["+ null control (random-spectrum embedding)", "+ Iona embedding"], frameon=False,
                    fontsize=9, ncol=2, loc="upper center", bbox_to_anchor=(0.5, 0.0))
         fig.savefig(FIG / "R_embedding_gain.png"); plt.close(fig)
 
@@ -123,12 +123,12 @@ def benchmark_rows():
                    ("ms2rescore:full", "MS2Rescore, MSFragger features + MS2PIP + DeepLC")):
         rows.append(dict(method=lab, seed="", psms=ms2r[k]["all"]["pooled"], source=f"results_ms2rescore.json:{k}"))
     emb = json.loads((REPO / "baselines_wip" / "results_ms2rescore_emb8_a2.json").read_text())
-    for k, lab in (("ms2rescore:full+embedding(400M teacher, cosws)", "MS2Rescore, MSFragger features + MS2PIP + DeepLC + iona embedding"),):
+    for k, lab in (("ms2rescore:full+embedding(400M teacher, cosws)", "MS2Rescore, MSFragger features + MS2PIP + DeepLC + Iona embedding"),):
         rows.append(dict(method=lab, seed="", psms=emb[k]["all"]["pooled"], source=f"results_ms2rescore_emb8_a2.json:{k}"))
     for seed, src in enumerate(EMB["A2"][1]):
         p = perrun(src)
-        for feat, lab in (("ms", "iona-rerank, MSFragger features"), ("ms+embws", "iona-rerank, MSFragger features + iona embedding"),
-                          ("lab", "iona-rerank, rich features"), ("lab+embws", "iona-rerank, rich features + iona embedding")):
+        for feat, lab in (("ms", "Iona-rerank, MSFragger features"), ("ms+embws", "Iona-rerank, MSFragger features + Iona embedding"),
+                          ("lab", "Iona-rerank, rich features"), ("lab+embws", "Iona-rerank, rich features + Iona embedding")):
             rows.append(dict(method=lab, seed=seed, psms=p[feat], source=src.name))
     assert d0  # A2 seed 0 parsed from its log
     return rows
