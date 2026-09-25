@@ -1588,3 +1588,25 @@ random spectrum). Jobs A1 8866860/8866890/8867044, A2 8866608/8867047/8867050.
     MSFragger   A1    +1,495   +1,215   +1,186   +1,299 (+1.3%)
 
 Null arms: -96 to +290. Positive on every seed; A2 > A1 on every seed and base.
+
+## C diagnostic (nine-species yeast 20k subset, UNSEEN): the pretrained representation transfers better than any fine-tuned model (2026-09-25)
+
+20,019 spectra in 4,773 groups (subset of C13's yeast set; easier, so absolute numbers are
+higher than C13). ABTT fitted on 25k spectra of the 8 OTHER species. Job 8867207. Exp MAP@R:
+
+    binned cosine 0.1 / 1 Da                     0.916 / 0.916
+    GLEAMS                                       0.770  (Hit@1 0.886)
+    FROZEN 400m@220k + ABTT (block14, D128)      0.709  (raw: best block 0.510, final 0.355)
+    FROZEN 400m@430k + ABTT (block09, D128)      0.634
+    C7 400m seed0: step 300 / 600 / 900 / final  0.606 / 0.655 / 0.596 / 0.596
+    C7 400m final seeds 0 / 1 / 2                0.596 / 0.656 / 0.550
+    C7 50m seed1: step 600 / final               0.543 / 0.523
+    replicate-only 400m / 50m                    0.521 / 0.499
+
+- Frozen 400m + ABTT (no labels) beats every contrastively fine-tuned model out of
+  distribution: fine-tuning SPECIALISES (in-distribution 0.868) at the cost of transfer.
+- Transfer peaks mid-epoch (step 600) then declines; seeds differ by 0.1 OOD (vs 0.002 in
+  distribution). 400m > 50m OOD. For the frozen encoder 220k > 430k.
+- Nothing beats binned cosine on these clean high-res spectra; GLEAMS stays ahead of us.
+- Next: an OOD VALIDATION set from the 8 other species (nine-species train split) to select
+  checkpoints/teachers for transfer; a student on the best-transferring C7 teacher -> R.

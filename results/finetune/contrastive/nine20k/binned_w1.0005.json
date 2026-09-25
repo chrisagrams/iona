@@ -1,0 +1,22 @@
+{
+ "name": "binned_w1.0005",
+ "path": "binned:1.0005",
+ "pooling": "mean+max",
+ "data": "/lus/flare/projects/UIC-HPC/khuss/msdelta/baselines/nine_yeast20k/prepared",
+ "metrics": {
+  "all/Hit@1": 0.9666316998851091,
+  "all/Precision@1": 0.9666316998851091,
+  "all/R-Precision": 0.9263261547038126,
+  "all/MAP@R": 0.9157017691103608,
+  "all/R@5": 0.7748668793942629,
+  "all/MAP@100": 0.9524433050808763,
+  "all/queries": 20019.0,
+  "experimental/Hit@1": 0.9666316998851091,
+  "experimental/Precision@1": 0.9666316998851091,
+  "experimental/R-Precision": 0.9263261547038126,
+  "experimental/MAP@R": 0.9157017691103608,
+  "experimental/R@5": 0.7748668793942629,
+  "experimental/MAP@100": 0.9524433050808763,
+  "experimental/queries": 20019.0
+ }
+}

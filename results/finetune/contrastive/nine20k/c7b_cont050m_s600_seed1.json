@@ -1,0 +1,22 @@
+{
+ "name": "c7b_cont050m_s600_seed1",
+ "path": "/lus/flare/projects/UIC-HPC/khuss/msdelta/runs/sweep-cont050m_ep01_seed1-8860522/checkpoint-600/encoder",
+ "pooling": "mean+max",
+ "data": "/lus/flare/projects/UIC-HPC/khuss/msdelta/baselines/nine_yeast20k/prepared",
+ "metrics": {
+  "all/Hit@1": 0.7526849492981668,
+  "all/Precision@1": 0.7526849492981668,
+  "all/R-Precision": 0.5588511043902824,
+  "all/MAP@R": 0.5434047371793671,
+  "all/R@5": 0.4987270515861494,
+  "all/MAP@100": 0.5758721841203981,
+  "all/queries": 20019.0,
+  "experimental/Hit@1": 0.7526849492981668,
+  "experimental/Precision@1": 0.7526849492981668,
+  "experimental/R-Precision": 0.5588511043902824,
+  "experimental/MAP@R": 0.5434047371793671,
+  "experimental/R@5": 0.4987270515861494,
+  "experimental/MAP@100": 0.5758721841203981,
+  "experimental/queries": 20019.0
+ }
+}

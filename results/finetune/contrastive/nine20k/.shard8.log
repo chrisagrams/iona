@@ -1,0 +1,2 @@
+[score] shard 8/9: 1 of 12 models on xpu
+  binned_w1.0005: all MAP@R 0.9157  experimental MAP@R 0.9157  (4s)
