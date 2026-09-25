@@ -1319,3 +1319,23 @@ All 12 C7-50m checkpoints re-scored on ms-contrastive-100k VALIDATION (experimen
   Step 600 was used for A1 because it was the newest checkpoint at the time.
 - A2 (400m) now picks its seed on validation (scratchpad auto_a2_val.sh); test is scored
   afterwards for the record only.
+
+## R4 A/B: the lab's 254 features lift our rescorer to 104.8k; the A1 embedding adds ~1% (2026-09-25)
+
+Global model (CV by run, fixed labels, decoys capped at 1M per fold), same 8 runs, PSMs at
+1% FDR (job 8865505, results/rerank/psm/a1-050m-c7s600_r4_global.json):
+
+    features                  linear     mlp
+    ms (MSFragger)            91,780    93,206
+    ms + emb                  92,345    93,787
+    lab (254 non-empty)       99,512   104,785
+    lab + emb                 99,206   105,755   (+970, +0.9%)
+    lab + embws               99,611   105,179
+    refs: MSFragger 89,693; old best mlp ms+hand+emb 96,367; MS2Rescore search-only
+    100,974; MS2Rescore full (MS2PIP + DeepLC) 128,211
+
+- lab features: +8.5k PSMs over our 22 hand features; the MLP beats MS2Rescore's
+  search-only arm, still 23k below its predicted-spectrum arm.
+- A1 embedding (50m teacher): +0.9% with the MLP, ~0 with the linear model; seed noise not
+  yet measured. Within-spectrum versions add nothing over the raw cosine here.
+- Embedding alone: 0 PSMs even ranked by lead (embedding:delta). Leakage AUROC 0.52.
