@@ -1698,3 +1698,8 @@ Frozen encoders on the C14 HCT116 20k set, ABTT fitted on nine-species-train-fit
 human data; same as the yeast run). Pre-registered setting = the layer / D each encoder preferred
 on yeast 20k (train fit): 400m@220k block14 D128 (yeast 0.709), 200m@540k block12 D128 (0.654),
 50m@220k block07 D128 (0.602). The best-over-layers/D number on C14 is reported only as an upper bound.
+Result (job 8870383, 22:32 UTC): all near chance on C14 (MAP@R; pre-registered / best-over-settings upper bound / raw best layer):
+400m@220k 0.033 / 0.038 / 0.034; 200m@540k 0.015 / 0.017 / 0.016; 50m@220k 0.006 / 0.007 / 0.006 (ABTT fitted on the
+C14 spectra themselves: at most 0.047). Yeast 20k for the same encoders: 0.709 / 0.654 / 0.602. So frozen embeddings do not
+transfer to HCT116 at all; fine-tuned C7 400M reaches 0.23-0.32, GLEAMS 0.658, binned 1 Da 0.742. Not a data-loading issue:
+same 20,002 queries and prepared data as the fine-tuned eval. No further C compute (user, 2026-09-25).
