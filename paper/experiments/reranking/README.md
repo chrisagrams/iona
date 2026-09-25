@@ -42,8 +42,8 @@ the result file each number was read from.
   difference to the best other candidate, z-score within the spectrum, gap between the top two).
   Spectrum embeddings come from the fine-tuned spectrum encoder (the teacher); peptide embeddings from
   the peptide embedder trained on it (the student).
-  - **50M teacher**: fine-tuned 50M spectrum encoder (step 600) and its student.
-  - **400M teacher**: fine-tuned 400M spectrum encoder (end of epoch, seed 0) and its student
+  - **iona embedding (50M)**: fine-tuned 50M spectrum encoder (step 600) and its peptide student.
+  - **iona embedding (400M)**: fine-tuned 400M spectrum encoder (end of epoch, seed 0) and its peptide student
     (released as `Gaolaboratory/iona-peptide-embedder-400m`).
 - **+ null control**: the same five features computed with the embedding of a random other spectrum
   in place of the query's. It adds the same number of features with the same distributions but no
@@ -84,8 +84,8 @@ features.
   null control, a net +251 (+0.2%). On the 6 HEK runs the gain is clean (+257 vs +6 for the null); on
   the 2 HCT116 runs the null gained more than the embedding (+452 vs +343), i.e. within MS2Rescore's
   sensitivity to added features on those small runs. Both rows are shown in `R_benchmark.png`; the
-  18-run HCT116 MS2Rescore comparison is pending. (MS2Rescore full + embedding and our per-run
-  classifier both read 128,909: the first is one run, the second the mean of 129,041 / 128,751 / 128,934.)
+  18-run HCT116 MS2Rescore comparison is pending. (MS2Rescore + MS2PIP + DeepLC + iona embedding and iona-rerank
+  with rich features both read 128,909: the first is one run, the second the mean of 129,041 / 128,751 / 128,934.)
 
 Provenance: msdelta repository, `sweeps/package_rerank.py` (from `results/rerank/psm/` and
 `baselines_wip/results_ms2rescore.json`, `baselines_wip/results_ms2rescore_emb8_a2.json`).
