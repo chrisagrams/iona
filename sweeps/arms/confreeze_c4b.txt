@@ -1,0 +1,10 @@
+s200m_ck010k_seed0
+s200m_ck120k_seed0
+s200m_ck330k_seed0
+s200m_ck430k_seed0
+s200m_ck540k_seed0
+s400m_ck010k_seed0
+s400m_ck120k_seed0
+s400m_ck330k_seed0
+s400m_ck430k_seed0
+s400m_ck540k_seed0

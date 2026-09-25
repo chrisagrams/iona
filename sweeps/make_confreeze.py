@@ -56,6 +56,9 @@ RECIPE = {
 SEEDS = ("0", "1", "2")
 C2 = [(s, "220000") for s in ("50m", "100m", "200m", "400m")]
 C4 = [(s, c) for s in ("50m", "100m") for c in ("10000", "120000", "330000", "430000", "540423")]
+# C4b (user 2026-09-25): 200m and 400m across the same ladder, ONE seed (their 220k point is C2).
+C4B = [(s, c) for s in ("200m", "400m") for c in ("10000", "120000", "330000", "430000", "540423")]
+SEEDS_C4B = ("0",)
 
 
 def checkpoint(scale: str, ck: str) -> str:
@@ -89,14 +92,16 @@ def render_arm(scale: str, ck: str, seed: str) -> tuple[str, str]:
 def description(scale: str, ck: str, seed: str) -> str:
     question = "C2 (scale) and C4 (checkpoint)" if ck == "220000" and scale in ("50m", "100m") \
         else "C2 (scale)" if ck == "220000" else "C4 (checkpoint)"
+    n = len(SEEDS_C4B) if (scale, ck) in C4B else len(SEEDS)
     return (f"CONTRASTIVE FROZEN-RECIPE ARM for {question}: {scale} at pretraining "
-            f"checkpoint {ck}, seed {seed} of {len(SEEDS)}. Recipe is C1's best cell "
+            f"checkpoint {ck}, seed {seed} of {n}. Recipe is C1's best cell "
             f"(lr 1e-4, KL 10, t 0.002, P64xK4, 24 epochs, GradCache 4), identical across "
             f"every arm of this grid; only the pretrained checkpoint varies.\n")
 
 
 def combos():
-    return [(s, c, seed) for s, c in C2 + C4 for seed in SEEDS]
+    return ([(s, c, seed) for s, c in C2 + C4 for seed in SEEDS]
+            + [(s, c, seed) for s, c in C4B for seed in SEEDS_C4B])
 
 
 def main() -> int:
@@ -104,7 +109,7 @@ def main() -> int:
     ap.add_argument("--check", action="store_true")
     ap.add_argument("--clean", action="store_true")
     cli = ap.parse_args()
-    for s, c in C2 + C4:
+    for s, c in C2 + C4 + C4B:
         if not Path(checkpoint(s, c), "model.safetensors").exists():
             raise SystemExit(f"{s}@{c} not frozen at {checkpoint(s, c)}")
 
@@ -129,10 +134,12 @@ def main() -> int:
     STAMP.write_text(f"{TEMPLATE.relative_to(REPO)}\ncontrastive-hp\n")
     arms = REPO / "sweeps" / "arms"
     c2 = [arm_name(*c) for c in combos() if c[1] == "220000"]
-    c4 = [arm_name(*c) for c in combos() if c[1] != "220000"]
+    c4 = [arm_name(*c) for c in combos() if c[1] != "220000" and (c[0], c[1]) not in C4B]
+    c4b = [arm_name(*c) for c in combos() if (c[0], c[1]) in C4B]
+    (arms / "confreeze_c4b.txt").write_text("\n".join(c4b) + "\n")
     (arms / "confreeze_c2.txt").write_text("\n".join(c2) + "\n")
     (arms / "confreeze_c4.txt").write_text("\n".join(c4) + "\n")
-    print(f"arms={len(combos())} under {OUT.relative_to(REPO)}/  (C2 {len(c2)}, C4 {len(c4)})")
+    print(f"arms={len(combos())} under {OUT.relative_to(REPO)}/  (C2 {len(c2)}, C4 {len(c4)}, C4b {len(c4b)})")
     return 0
 
 
