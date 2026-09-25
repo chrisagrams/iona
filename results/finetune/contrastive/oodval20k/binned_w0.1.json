@@ -1,0 +1,22 @@
+{
+ "name": "binned_w0.1",
+ "path": "binned:0.1",
+ "pooling": "mean+max",
+ "data": "/lus/flare/projects/UIC-HPC/khuss/msdelta/baselines/nine_oodval20k/prepared",
+ "metrics": {
+  "all/Hit@1": 0.9753049390121976,
+  "all/Precision@1": 0.9753049390121976,
+  "all/R-Precision": 0.910550885428383,
+  "all/MAP@R": 0.905557841068505,
+  "all/R@5": 0.7445041936436931,
+  "all/MAP@100": 0.9296644577334533,
+  "all/queries": 20004.0,
+  "experimental/Hit@1": 0.9753049390121976,
+  "experimental/Precision@1": 0.9753049390121976,
+  "experimental/R-Precision": 0.910550885428383,
+  "experimental/MAP@R": 0.905557841068505,
+  "experimental/R@5": 0.7445041936436931,
+  "experimental/MAP@100": 0.9296644577334533,
+  "experimental/queries": 20004.0
+ }
+}

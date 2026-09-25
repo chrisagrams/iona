@@ -1,0 +1,15 @@
+Loading weights:   0%|          | 0/330 [00:00<?, ?it/s]Loading weights:  22%|██▏       | 71/330 [00:00<00:00, 681.28it/s]Loading weights:  42%|████▏     | 140/330 [00:00<00:00, 234.48it/s]Loading weights:  54%|█████▍    | 178/330 [00:00<00:00, 198.80it/s]Loading weights:  62%|██████▏   | 206/330 [00:00<00:00, 190.26it/s]Loading weights:  70%|██████▉   | 230/330 [00:01<00:00, 177.35it/s]Loading weights:  76%|███████▌  | 250/330 [00:01<00:00, 174.22it/s]Loading weights:  82%|████████▏ | 269/330 [00:01<00:00, 153.85it/s]Loading weights:  87%|████████▋ | 286/330 [00:01<00:00, 156.73it/s]Loading weights:  92%|█████████▏| 304/330 [00:01<00:00, 142.48it/s]Loading weights: 100%|██████████| 330/330 [00:01<00:00, 192.29it/s]
+{
+ "crossmodal/hit@1": 0.9229,
+ "crossmodal/hit@5": 0.9489,
+ "crossmodal/mrr": 0.9354,
+ "crossmodal/n_spectra": 25848.0,
+ "crossmodal/n_candidates": 9771.0,
+ "teacher_spectrum/Hit@1": 0.9134,
+ "teacher_spectrum/Precision@1": 0.9134,
+ "teacher_spectrum/R-Precision": 0.8705,
+ "teacher_spectrum/MAP@R": 0.8682,
+ "teacher_spectrum/R@5": 0.9021,
+ "teacher_spectrum/MAP@100": 0.8895,
+ "teacher_spectrum/queries": 25137.0
+}

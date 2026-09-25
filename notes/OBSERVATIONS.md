@@ -1626,3 +1626,32 @@ Same 8 runs, same MS2Rescore config; extra rescoring:emb_* columns (job 8867053)
   two small runs is hundreds of PSMs. CORRECTION: the earlier A1 "+4.1% on HCT116" is within
   that noise and should not be cited. Measured noise: plain repeat 8867056 (queued) and the
   18-run HCT116 jobs.
+
+## Overnight batch 2026-09-25 (afternoon UTC)
+
+**OOD-selected teacher.** OOD validation = nine-species TRAIN split (8 non-yeast species),
+20k spectra. C7 400m checkpoints (exp MAP@R): best s600_seed1 0.689; final seeds 0.665 /
+0.682 / 0.642; seed 2 worst at every step. Student on s600_seed1 ("400m-oodsel"):
+test Hit@1 0.918 / 0.918 / 0.917 (A2 0.923); in-distribution yHydra comparison 20 ppm 0.994.
+
+**A vs yHydra on nine-species yeast (UNSEEN)**, 75,476 spectra:
+
+    candidates   yHydra   A1      A2      A-oodsel
+    open         0.060    0.253   0.388   0.410
+    +-1.1 Da     0.650    0.537   0.639   0.659
+    20 ppm       0.890    0.691   0.761   0.765
+
+Selecting the teacher by OOD validation closes the gap: level with yHydra at +-1.1 Da,
+still behind at 20 ppm; 7x better open.
+
+**MS2Rescore noise.** Plain repeat of MS2Rescore full on the 8 runs: 128,209 (first run
+128,211); HEK 120,706 (-41), HCT116 7,226 (+87). So run-to-run noise ~+-50 total, ~+-90 on
+HCT116. A2 real +698 / null +447 (HCT116 null +452 >> noise): the null arm DOES carry signal
+in MS2Rescore on HCT116 (student(peptide) . random spectrum is a peptide-only feature) --
+real - null (+251, HEK) is the defensible number.
+
+**Zero-shot + ABTT on yeast 20k (OOD scaling, frozen encoders, fitted on other species):**
+50m@220k 0.602, 100m@220k 0.421, 200m@220k 0.609, 200m@540k 0.654, 400m@220k 0.709,
+400m@430k 0.634 (raw best block 0.18-0.51). D=128 best everywhere (edge of range).
+
+**HCT116 x18 A2 re-embed** done (2 h 41 min on 3 nodes; runs are ~144k spectra each).

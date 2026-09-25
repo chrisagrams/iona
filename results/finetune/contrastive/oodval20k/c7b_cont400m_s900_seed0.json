@@ -1,0 +1,22 @@
+{
+ "name": "c7b_cont400m_s900_seed0",
+ "path": "/lus/flare/projects/UIC-HPC/khuss/msdelta/runs/sweep-cont400m_ep01_seed0-8860522/checkpoint-900/encoder",
+ "pooling": "mean+max",
+ "data": "/lus/flare/projects/UIC-HPC/khuss/msdelta/baselines/nine_oodval20k/prepared",
+ "metrics": {
+  "all/Hit@1": 0.8328834233153369,
+  "all/Precision@1": 0.8328834233153369,
+  "all/R-Precision": 0.6757261859395699,
+  "all/MAP@R": 0.6652431324037926,
+  "all/R@5": 0.5746299745177917,
+  "all/MAP@100": 0.6976261485984053,
+  "all/queries": 20004.0,
+  "experimental/Hit@1": 0.8328834233153369,
+  "experimental/Precision@1": 0.8328834233153369,
+  "experimental/R-Precision": 0.6757261859395699,
+  "experimental/MAP@R": 0.6652431324037926,
+  "experimental/R@5": 0.5746299745177917,
+  "experimental/MAP@100": 0.6976261485984053,
+  "experimental/queries": 20004.0
+ }
+}
