@@ -214,52 +214,55 @@ def fig_zeroshot(zs):
 
 
 def fig_transfer(rows, zs):
-    """Per benchmark: our best model (any of ours, labelled) vs GLEAMS vs binned cosine."""
+    """Per benchmark: every model of ours scored there vs GLEAMS vs binned cosine."""
     c7 = "C7 (replicate corpus -> ms-contrastive-100k)"
-    step_name = {"s300": "step 300", "s600": "step 600", "s900": "step 900", "final": "end of epoch"}
-    def ours_best(b):
-        cands = []
-        for sc in ("50m", "400m"):
-            for st, nm in step_name.items():
-                v = pick(rows, b, c7, sc, stage=st)
-                if v:
-                    cands.append((f"C7 {sc.upper()}, {nm}", v))
-            v = pick(rows, b, "replicate corpus only (12 ep)", sc)
-            if v:
-                cands.append((f"replicate corpus only {sc.upper()}", v))
-        for r in zs:
-            if r["benchmark"] == b:
-                cands.append((f"frozen {r['encoder'].upper().replace('K', 'k')} + ABTT", [r["abtt_best"]]))
-        return max(cands, key=lambda c: np.mean(c[1]))
+    def rep(b, sc):
+        return pick(rows, b, "replicate corpus only (12 ep)", sc) or pick(rows, b, "replicate corpus only (24 ep)", sc)
+    def frozen(b):
+        r = [r for r in zs if r["benchmark"] == b]
+        if not r:
+            return [], ""
+        best = max(r, key=lambda t: t["abtt_best"])
+        return [best["abtt_best"]], best["encoder"].upper().replace("K", "k")
+    series = [("C7 400M, end of epoch", "#1e3a8a", lambda b: (pick(rows, b, c7, "400m", stage="final"), "")),
+              ("C7 400M, step 600", "#3b82f6", lambda b: (pick(rows, b, c7, "400m", stage="s600"), "")),
+              ("C7 50M, end of epoch", "#93c5fd", lambda b: (pick(rows, b, c7, "50m", stage="final"), "")),
+              ("replicate corpus only 400M", "#0d9488", lambda b: (rep(b, "400m"), "")),
+              ("replicate corpus only 50M", "#5eead4", lambda b: (rep(b, "50m"), "")),
+              ("frozen + ABTT (best encoder)", "#7c3aed", frozen),
+              ("GLEAMS", GLEAMS, lambda b: (pick(rows, b, "GLEAMS (pretrained)"), "")),
+              ("binned cosine", BINNED, lambda b: ([max(pick(rows, b, "binned cosine (1 Da bins)")
+                                                       + pick(rows, b, "binned cosine (0.1 Da bins)"))]
+                                                  if pick(rows, b, "binned cosine (1 Da bins)") + pick(rows, b, "binned cosine (0.1 Da bins)") else [], ""))]
     panels = [("ms-contrastive-100k", "ms-contrastive-100k test\n(in-distribution)"),
               ("oodval-8species", "8 other species\n(unseen, validation)"),
               ("yeast-20k", "yeast 20k subset\n(unseen, test)")]
-    binned = lambda b: [max(pick(rows, b, "binned cosine (1 Da bins)") + pick(rows, b, "binned cosine (0.1 Da bins)"))]
     with plt.rc_context(STYLE):
-        fig, axes = plt.subplots(1, 3, figsize=(11, 4.4), sharey=True)
+        fig, axes = plt.subplots(1, 3, figsize=(14, 4.8), sharey=True,
+                                 gridspec_kw={"width_ratios": [8, 4, 8]})
         for ax, (b, title) in zip(axes, panels):
             ax.yaxis.grid(True, color=GRIDC, lw=0.8); ax.set_axisbelow(True)
-            lab, v = ours_best(b)
-            bars = [("ours (best)", OURS, v, lab), ("GLEAMS", GLEAMS, pick(rows, b, "GLEAMS (pretrained)"), ""),
-                    ("binned cosine", BINNED, binned(b), "")]
             x = 0
-            for name, col, vals, sub in bars:
+            for name, col, get in series:
+                vals, sub = get(b)
                 if not vals:
                     continue
+                if name == "GLEAMS" or (name == "binned cosine" and not pick(rows, b, "GLEAMS (pretrained)")):
+                    x += 0.5                                   # gap between ours and the baselines
                 m, s_ = msd(vals)
-                ax.bar(x, m, 0.72, color=col, yerr=s_ if len(vals) > 1 else None, capsize=3,
+                ax.bar(x, m, 0.8, color=col, yerr=s_ if len(vals) > 1 else None, capsize=3,
                        error_kw=dict(elinewidth=1, capthick=1, ecolor=INK), zorder=2)
-                ax.text(x, m + (s_ if len(vals) > 1 else 0) + 0.015, f"{m:.2f}", ha="center", fontsize=9)
+                ax.text(x, m + (s_ if len(vals) > 1 else 0) + 0.015, f"{m:.2f}", ha="center", fontsize=8)
                 if sub:
-                    ax.text(x, 0.02, sub, rotation=90, ha="center", va="bottom", fontsize=8, color="white")
+                    ax.text(x, 0.02, sub, rotation=90, ha="center", va="bottom", fontsize=7.5, color="white")
                 x += 1
-            ax.set_xticks([]); ax.set_xlim(-0.6, 2.6); ax.set_title(title, loc="left", fontsize=10.5)
+            ax.set_xticks([]); ax.set_xlim(-0.7, x - 0.3); ax.set_title(title, loc="left", fontsize=10.5)
         axes[0].set_ylim(0, 1.0); axes[0].set_ylabel("MAP@R (experimental spectra)")
-        fig.suptitle("Our best model vs baselines on each benchmark", x=0.07, ha="left", fontsize=13,
-                     fontweight="bold", y=1.03)
-        fig.legend(handles=[plt.Rectangle((0, 0), 1, 1, color=c) for c in (OURS, GLEAMS, BINNED)],
-                   labels=["ours (best; model written on the bar)", "GLEAMS", "binned cosine"], frameon=False,
-                   fontsize=9, ncol=3, loc="upper center", bbox_to_anchor=(0.5, 0.02))
+        fig.suptitle("Our models vs baselines, in-distribution and on unseen data", x=0.07, ha="left",
+                     fontsize=13, fontweight="bold", y=1.03)
+        fig.legend(handles=[plt.Rectangle((0, 0), 1, 1, color=c) for _, c, _ in series],
+                   labels=[n for n, _, _ in series], frameon=False, fontsize=8.5, ncol=4,
+                   loc="upper center", bbox_to_anchor=(0.5, 0.03))
         fig.savefig(FIG / "C_transfer.png"); plt.close(fig)
 
 
