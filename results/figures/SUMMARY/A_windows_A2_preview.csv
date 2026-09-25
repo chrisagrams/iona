@@ -1,0 +1,37 @@
+dataset,method,training,teacher,job,window,hit_at_1,queries,true_outside_window,series
+yhydra,yHydra (L2),,,,open search,0.19546,22869,,yHydra
+yhydra,yHydra (L2),,,,±1.1 Da,0.75395,22869,0.00000,yHydra
+yhydra,yHydra (L2),,,,20 ppm,0.94176,22869,0.00000,yHydra
+yhydra,"ours, 400M teacher",standard,"C7 400M seed 0, end of epoch",8866356,open search,0.92505,22869,,ours
+yhydra,"ours, 400M teacher",standard,"C7 400M seed 0, end of epoch",8866356,±1.1 Da,0.97919,22869,0.00000,ours
+yhydra,"ours, 400M teacher",standard,"C7 400M seed 0, end of epoch",8866356,20 ppm,0.99414,22869,0.00000,ours
+yhydra,"ours, 400M teacher",standard,"C7 400M seed 0, end of epoch",8866357,open search,0.92475,22869,,ours
+yhydra,"ours, 400M teacher",standard,"C7 400M seed 0, end of epoch",8866357,±1.1 Da,0.97919,22869,0.00000,ours
+yhydra,"ours, 400M teacher",standard,"C7 400M seed 0, end of epoch",8866357,20 ppm,0.99392,22869,0.00000,ours
+yhydra,"ours, 400M teacher",standard,"C7 400M seed 0, end of epoch",8866359,open search,0.92470,22869,,ours
+yhydra,"ours, 400M teacher",standard,"C7 400M seed 0, end of epoch",8866359,±1.1 Da,0.97879,22869,0.00000,ours
+yhydra,"ours, 400M teacher",standard,"C7 400M seed 0, end of epoch",8866359,20 ppm,0.99423,22869,0.00000,ours
+c11_cap20,yHydra (L2),,,,open search,0.01570,26628,,yHydra
+c11_cap20,yHydra (L2),,,,±1.1 Da,0.34498,26628,0.04097,yHydra
+c11_cap20,yHydra (L2),,,,20 ppm,0.60575,26628,0.24309,yHydra
+c11_cap20,"ours, 50M teacher",standard,"C7 50M, step 600",8861093,open search,0.06238,26628,,ours (stand-in)
+c11_cap20,"ours, 50M teacher",standard,"C7 50M, step 600",8861093,±1.1 Da,0.60470,26628,0.04097,ours (stand-in)
+c11_cap20,"ours, 50M teacher",standard,"C7 50M, step 600",8861093,20 ppm,0.67981,26628,0.24309,ours (stand-in)
+c11_cap20,"ours, 50M teacher",standard,"C7 50M, step 600",8861292,open search,0.06106,26628,,ours (stand-in)
+c11_cap20,"ours, 50M teacher",standard,"C7 50M, step 600",8861292,±1.1 Da,0.60061,26628,0.04097,ours (stand-in)
+c11_cap20,"ours, 50M teacher",standard,"C7 50M, step 600",8861292,20 ppm,0.67801,26628,0.24309,ours (stand-in)
+c11_cap20,"ours, 50M teacher",standard,"C7 50M, step 600",8861309,open search,0.06121,26628,,ours (stand-in)
+c11_cap20,"ours, 50M teacher",standard,"C7 50M, step 600",8861309,±1.1 Da,0.60117,26628,0.04097,ours (stand-in)
+c11_cap20,"ours, 50M teacher",standard,"C7 50M, step 600",8861309,20 ppm,0.67820,26628,0.24309,ours (stand-in)
+nine_yeast,yHydra (L2),,,,open search,0.06030,75476,,yHydra
+nine_yeast,yHydra (L2),,,,±1.1 Da,0.65010,75476,0.00000,yHydra
+nine_yeast,yHydra (L2),,,,20 ppm,0.89010,75476,0.00000,yHydra
+nine_yeast,"ours, 400M teacher",standard,"C7 400M seed 0, end of epoch",8866356,open search,0.38818,75476,,ours
+nine_yeast,"ours, 400M teacher",standard,"C7 400M seed 0, end of epoch",8866356,±1.1 Da,0.63887,75476,0.00000,ours
+nine_yeast,"ours, 400M teacher",standard,"C7 400M seed 0, end of epoch",8866356,20 ppm,0.76108,75476,0.00000,ours
+nine_yeast,"ours, 400M teacher",standard,"C7 400M seed 0, end of epoch",8866357,open search,0.38420,75476,,ours
+nine_yeast,"ours, 400M teacher",standard,"C7 400M seed 0, end of epoch",8866357,±1.1 Da,0.63792,75476,0.00000,ours
+nine_yeast,"ours, 400M teacher",standard,"C7 400M seed 0, end of epoch",8866357,20 ppm,0.76035,75476,0.00000,ours
+nine_yeast,"ours, 400M teacher",standard,"C7 400M seed 0, end of epoch",8866359,open search,0.38705,75476,,ours
+nine_yeast,"ours, 400M teacher",standard,"C7 400M seed 0, end of epoch",8866359,±1.1 Da,0.63926,75476,0.00000,ours
+nine_yeast,"ours, 400M teacher",standard,"C7 400M seed 0, end of epoch",8866359,20 ppm,0.76118,75476,0.00000,ours

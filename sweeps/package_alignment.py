@@ -89,8 +89,9 @@ def best_of(rows, ds, training):
     return max(by, key=lambda k: np.mean(by[k])) if by else None
 
 
-def fig_windows(rows):
-    """One line per method: yHydra, our best standard model, our best mass-aware model (when evaluated)."""
+def fig_windows(rows, fixed=None, out="A_windows.png"):
+    """One line per method: yHydra, our model (the best per dataset, or `fixed` in every panel, falling back
+    to the best available where `fixed` was not evaluated), our best mass-aware model (when evaluated)."""
     wl = [w[2] for w in WINDOWS]
     plotted = []
     with plt.rc_context(STYLE):
@@ -98,8 +99,12 @@ def fig_windows(rows):
         for ax, (ds, title) in zip(axes, DATASETS):
             ax.yaxis.grid(True, color=GRIDC, lw=0.8); ax.set_axisbelow(True)
             lines = [("yHydra (L2)", "yHydra", YHYDRA, "s", "--")]
-            if (b := best_of(rows, ds, "standard")):
-                lines.append((b, "ours", "#1e3a8a", "o", "-"))
+            have = {r["method"] for r in rows if r["dataset"] == ds}
+            if fixed and fixed in have:
+                lines.append((fixed, "ours", "#1e3a8a", "o", "-"))
+            elif (b := best_of(rows, ds, "standard")):
+                lines.append((b, "ours (stand-in)" if fixed else "ours", "#93c5fd" if fixed else "#1e3a8a",
+                              "o", ":" if fixed else "-"))
             if (b := best_of(rows, ds, "mass-aware")):
                 lines.append((b, "ours, mass-aware training", "#7c3aed", "D", "-"))
             for method, lab, col, mk, ls in lines:
@@ -111,7 +116,8 @@ def fig_windows(rows):
                 for xi, (m, _) in enumerate(ms):
                     ax.annotate(f"{m:.2f}", (xi, m), textcoords="offset points",
                                 xytext=(0, 8 if lab != "yHydra" else -14), ha="center", fontsize=8, color=col)
-            names = [m.replace("ours, ", "") for m, lab, *_ in lines if lab.startswith("ours")]
+            names = [m.replace("ours, ", "") + ("\n(stand-in: 400M teacher not run here yet)" if lab == "ours (stand-in)" else "")
+                     for m, lab, *_ in lines if lab.startswith("ours")]
             outside = [r["true_outside_window"] for r in rows if r["dataset"] == ds and r["window"] == "20 ppm"
                        and r["method"] != "yHydra (L2)" and r["true_outside_window"] != ""]
             if outside and max(outside) > 0:
@@ -119,18 +125,19 @@ def fig_windows(rows):
                 ax.plot([1.75, 2.25], [ceil, ceil], color=MUTED, lw=1.2, ls=":")
                 ax.text(1.7, ceil + 0.03, f"ceiling {ceil:.2f}", ha="right", va="center", fontsize=7.5, color=MUTED)
             ax.set_xticks(range(3)); ax.set_xticklabels(wl); ax.set_xlim(-0.3, 2.3)
-            ax.set_title(title + "\nours: " + "; ".join(names), loc="left", fontsize=10.5)
+            ax.set_title(title + ("\nours: " + "; ".join(names) if fixed else ""), loc="left", fontsize=10.5)
         axes[0].set_ylim(0, 1.05); axes[0].set_ylabel("Hit@1 (spectrum → peptide)")
         axes[1].set_xlabel("candidate peptides restricted to the precursor-mass window", labelpad=8)
         fig.suptitle("Peptide retrieval vs yHydra: open search and precursor-mass windows", x=0.07, ha="left",
-                     fontsize=13, fontweight="bold", y=1.1)
-        leg = [("yHydra", YHYDRA, "s", "--"), ("ours (best model on each dataset)", "#1e3a8a", "o", "-")]
+                     fontsize=13, fontweight="bold", y=1.1 if fixed else 1.03)
+        leg = [("yHydra", YHYDRA, "s", "--"),
+               (f"ours ({fixed.replace('ours, ', '')})" if fixed else "ours", "#1e3a8a", "o", "-")]
         if any(r["training"] == "mass-aware" for r in rows):
             leg.append(("ours, mass-aware training", "#7c3aed", "D", "-"))
         fig.legend(handles=[Line2D([], [], color=c, marker=mk, ls=ls, lw=2, ms=7, mec="white", mew=1.2)
                             for _, c, mk, ls in leg], labels=[l for l, *_ in leg], frameon=False,
                    fontsize=9, ncol=3, loc="upper center", bbox_to_anchor=(0.5, -0.02))
-        fig.savefig(FIG / "A_windows.png"); plt.close(fig)
+        fig.savefig(FIG / out); plt.close(fig)
     return plotted
 
 
@@ -216,8 +223,17 @@ def write(name, rows):
 def main():
     FIG.mkdir(parents=True, exist_ok=True)
     wr = window_rows(); write("A_windows.csv", fig_windows(wr))
+    write("A_windows_A2_preview.csv", fig_windows(wr, fixed="ours, 400M teacher", out="A_windows_A2_preview.png"))
     sr = student_rows()
-    write("A_teacher_student.csv", fig_teacher_student(sr))
+    ts = fig_teacher_student(sr); write("A_teacher_student.csv", ts)
+    lines = ["| teacher | teacher spectrum MAP@R (test) | student peptide Hit@1 (test, 3 seeds) | Hit@5 | MRR |",
+             "|---|---|---|---|---|"]
+    for key, (lab, _, teacher) in STUDENTS.items():
+        rs = [r for r in ts if r["student"] == lab]
+        m, sd = msd([r["hit_at_1"] for r in rs])
+        lines.append(f"| {teacher} | {rs[0]['teacher_map_at_r']:.3f} | {m:.3f} ± {sd:.4f} | "
+                     f"{np.mean([r['hit_at_5'] for r in rs]):.3f} | {np.mean([r['mrr'] for r in rs]):.3f} |")
+    (FIG / "A_teacher_student.md").write_text("\n".join(lines) + "\n")
     write("A_ablations.csv", fig_ablations(sr))
     agg = defaultdict(list)
     for r in wr:
