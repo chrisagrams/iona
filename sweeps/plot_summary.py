@@ -97,18 +97,51 @@ def save(fig, name):
     print("wrote", (OUT / name).relative_to(REPO))
 
 
+D_CKPTS = [10000, 120000, 220000, 330000, 430000, 540423]   # pretraining steps shared by all four scales
+D_CSV = REPO / "results" / "denoise_scaling_pretraining.csv"
+
+
+def denoise_cells():
+    """(scale, pretraining steps; 0 = from scratch) -> per-seed test AUROCs, read from the run dirs.
+    Pretrained: plot_ladder.collect (fixed config lr 2e-4 / es 0.5 / 4 ep / head 512 / eff. batch 12).
+    Scratch: random encoder at lr 2e-4 / eff. batch 12 / 4 ep -- 100m-400m 3 seeds (8847663),
+    50m one run (arm lr2e4_ep4_b12 of 8841984)."""
+    import sys; sys.path.insert(0, str(REPO / "sweeps"))
+    import json, plot_ladder
+    cov = plot_ladder.collect()
+    cells = {(sc, c): list(cov[(sc, c)]["test_auroc"]) for sc in D_SCALE for c in D_CKPTS if (sc, c) in cov}
+    runs = Path(plot_ladder.RUNS)
+    for sc in D_SCALE:
+        dirs = ([runs / "sweep-lr2e4_ep4_b12-8841984"] if sc == "50m"
+                else [runs / f"sweep-{sc}_ep04_seed{i}-8847663" for i in (1, 2, 3)])
+        cells[(sc, 0)] = [json.loads((d / "all_results.json").read_text())["test_auroc"] for d in dirs]
+    return cells
+
+
 def fig_d():
-    fig, ax = plt.subplots(figsize=(5.2, 3.4))
+    cells = denoise_cells()
     xs = list(D_SCALE)
     sd = lambda v: float(np.std(v, ddof=1)) if len(v) > 1 else 0.0
-    ax.errorbar(xs, list(D_SCALE.values()), yerr=list(D_SCALE_SD.values()), fmt="o-", color=OURS,
-                capsize=3, label="pretrained + fine-tuned")
-    ax.errorbar(xs, list(D_SCRATCH.values()), yerr=[sd(D_SCRATCH_SEEDS[x]) for x in xs], fmt="s--",
-                color=BASE, capsize=3, label="from scratch")
-    ax.set_ylim(0.87, 0.955); ax.set_xlabel("model size"); ax.set_ylabel("denoise test AUROC")
+    fig, ax = plt.subplots(figsize=(6.2, 4.0))
+    cmap = plt.get_cmap("Blues")
+    for i, c in enumerate(D_CKPTS):
+        v = [cells[(x, c)] for x in xs]
+        ax.errorbar(xs, [np.mean(u) for u in v], yerr=[sd(u) for u in v], fmt="o-", ms=4, capsize=3,
+                    color=cmap(0.35 + 0.65 * i / (len(D_CKPTS) - 1)), label=f"pretrained {c // 1000}k steps")
+    v = [cells[(x, 0)] for x in xs]
+    ax.errorbar(xs, [np.mean(u) for u in v], yerr=[sd(u) for u in v], fmt="s--", ms=4, capsize=3,
+                color=BASE, label="from scratch")
+    ax.set_xlabel("model size"); ax.set_ylabel("denoise test AUROC")
     ax.set_title("Scaling improvements for denoising", loc="left")
-    ax.legend(frameon=False, fontsize=8, loc="center right")
+    ax.legend(frameon=False, fontsize=7, loc="upper left", bbox_to_anchor=(1.0, 1.0))
     save(fig, "D_denoise.png")
+    rows = ["scale,pretraining_steps,n_seeds,mean_auroc,sd_auroc,min_auroc,max_auroc,per_seed_auroc"]
+    for x in xs:
+        for c in [0] + D_CKPTS:
+            u = cells[(x, c)]
+            rows.append(f"{x},{c},{len(u)},{np.mean(u):.5f},{sd(u) if len(u) > 1 else float('nan'):.5f},"
+                        f"{min(u):.5f},{max(u):.5f},{' '.join(f'{t:.5f}' for t in u)}")
+    D_CSV.write_text("\n".join(rows).replace("nan", "") + "\n"); print("wrote", D_CSV.relative_to(REPO))
 
 
 def fig_c_bench():
