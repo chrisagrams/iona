@@ -49,9 +49,9 @@ C_SCALE_FT = {"50m": 0.657, "100m": 0.665, "200m": 0.658, "400m": 0.703}        
 C_SCALE_C7 = {"50m": 0.839, "400m": 0.868}                                       # C7
 C_ZS_ID = {"50m": (0.208, 0.401), "100m": (0.140, 0.328), "200m": (0.191, 0.432),
            "400m": (0.216, 0.414)}   # frozen best block raw -> ABTT, 100k test (400m @10k; 200m @540k)
-C_ZS_OOD = {"50m": (None, 0.602), "100m": (None, 0.421), "200m": (None, 0.654),
+C_ZS_OOD = {"50m": (0.385, 0.602), "100m": (0.178, 0.421), "200m": (0.339, 0.654),
             "400m": (0.510, 0.709)}  # yeast 20k, frozen best block raw -> ABTT (50m/100m/400m @220k, 200m @540k);
-                                     # raw only recorded for 400m
+                                     # from results/finetune/contrastive/nine20k_zeroshot/
 C_TRAJ_OOD = {0: [0.606, 0.655, 0.596, 0.596]}  # seed0 yeast20k at step 300/600/900/final
 
 # ---------------------------------------------------------------- A (peptide embeddings)
@@ -286,4 +286,4 @@ def tables():
 
 
 if __name__ == "__main__":
-    fig_d(); fig_c_bench(); fig_c_scaling(); fig_c_transfer(); fig_a(); fig_r(); tables()
+    fig_d(); fig_a(); fig_r(); tables()   # C figures: sweeps/package_contrastive.py

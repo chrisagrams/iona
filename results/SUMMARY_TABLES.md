@@ -25,9 +25,9 @@ Caveat: the Hub cards show training-logged numbers; reloaded models re-evaluate 
 
 | scale | C2 (replicate corpus) | C7 (+ms-contrastive-100k) | zero-shot raw → ABTT (100k test) | zero-shot raw → ABTT (unseen yeast) |
 |---|---|---|---|---|
-| 50m | 0.657 | 0.839 | 0.208 → 0.401 | — → 0.602 |
-| 100m | 0.665 | — | 0.140 → 0.328 | — → 0.421 |
-| 200m | 0.658 | — | 0.191 → 0.432 | — → 0.654 |
+| 50m | 0.657 | 0.839 | 0.208 → 0.401 | 0.385 → 0.602 |
+| 100m | 0.665 | — | 0.140 → 0.328 | 0.178 → 0.421 |
+| 200m | 0.658 | — | 0.191 → 0.432 | 0.339 → 0.654 |
 | 400m | 0.703 | 0.868 | 0.216 → 0.414 | 0.510 → 0.709 |
 
 Pretraining (C3): random init trained contrastively stays at chance at every scale.
