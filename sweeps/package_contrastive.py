@@ -210,36 +210,46 @@ def fig_zeroshot(zs):
         axes[1].legend(frameon=False, fontsize=8.5, loc="upper left")
         fig.suptitle("Zero-shot retrieval from the pretrained encoder (no contrastive training)", x=0.07, ha="left",
                      fontsize=13, fontweight="bold", y=1.02)
-        fig.text(0.07, -0.08, "ABTT = remove the mean and top principal components (fit on training spectra). "
-                 "Layer and number of components are the best on each benchmark, so these are upper bounds.",
-                 fontsize=8, color=MUTED)
         fig.savefig(FIG / "C_zeroshot.png"); plt.close(fig)
 
 
 def fig_transfer(rows):
-    steps = ["s300", "s600", "s900", "final"]
     meth = "C7 (replicate corpus -> ms-contrastive-100k)"
-    lines = [("ms-contrastive-100k", "in-distribution test", OURS),
-             ("oodval-8species", "unseen: 8 other species (validation)", "#7c3aed"),
-             ("yeast-20k", "unseen: yeast 20k (test)", "#db2777")]
+    steps = [("s300", "C7, step 300"), ("s600", "C7, step 600"), ("s900", "C7, step 900"), ("final", "C7, end of epoch")]
+    blues = ["#bfdbfe", "#60a5fa", "#2563eb", "#1e3a8a"]
+    panels = [("ms-contrastive-100k", "ms-contrastive-100k test\n(in-distribution)"),
+              ("oodval-8species", "8 other species\n(unseen, validation)"),
+              ("yeast-20k", "yeast 20k subset\n(unseen, test)")]
+    others = [("replicate corpus only", "#14b8a6", lambda b: pick(rows, b, "replicate corpus only (12 ep)", "400m")),
+              ("GLEAMS", GLEAMS, lambda b: pick(rows, b, "GLEAMS (pretrained)")),
+              ("binned cosine", BINNED, lambda b: [max(pick(rows, b, "binned cosine (1 Da bins)")
+                                                      + pick(rows, b, "binned cosine (0.1 Da bins)"))]
+               if pick(rows, b, "binned cosine (1 Da bins)") + pick(rows, b, "binned cosine (0.1 Da bins)") else [])]
+    series = [(lab, blues[k], (lambda st: lambda b: pick(rows, b, meth, "400m", stage=st))(st))
+              for k, (st, lab) in enumerate(steps)] + others
     with plt.rc_context(STYLE):
-        fig, ax = plt.subplots(figsize=(7.2, 4.4))
-        ax.yaxis.grid(True, color=GRIDC, lw=0.8); ax.set_axisbelow(True)
-        for b, lab, col in lines:
-            pts = [(i, pick(rows, b, meth, "400m", stage=s)) for i, s in enumerate(steps)]
-            pts = [(i, msd(v)) for i, v in pts if v]
-            ax.errorbar([p[0] for p in pts], [p[1][0] for p in pts], yerr=[p[1][1] for p in pts], color=col,
-                        lw=2, marker="o", ms=6.5, mec="white", mew=1.2, capsize=3.5, elinewidth=1.2, label=lab, zorder=3)
-        g = pick(rows, "yeast-20k", "GLEAMS (pretrained)")
-        if g:
-            ax.axhline(g[0], color=GLEAMS, lw=1.2, ls="--"); ax.text(3.05, g[0], "GLEAMS\n(yeast 20k)", va="center", fontsize=8, color=GLEAMS)
-        ax.set_xticks(range(4)); ax.set_xticklabels(["300", "600", "900", "end (1 epoch)"])
-        ax.set_xlabel("ms-contrastive-100k fine-tuning step", labelpad=6); ax.set_ylabel("MAP@R", labelpad=6)
-        ax.set_title("Fine-tuning improves in-distribution, peaks early on unseen data", loc="left", fontsize=12,
-                     fontweight="bold", pad=12)
-        ax.legend(frameon=False, fontsize=8.5, loc="lower left")
-        fig.text(0.01, -0.04, "C7 400M. Mean ± sd over 3 seeds where available (yeast 20k steps 300–900: seed 0 only).",
-                 fontsize=8, color=MUTED)
+        fig, axes = plt.subplots(1, 3, figsize=(13, 4.4), sharey=True)
+        for ax, (b, title) in zip(axes, panels):
+            ax.yaxis.grid(True, color=GRIDC, lw=0.8); ax.set_axisbelow(True)
+            x = 0
+            for lab, col, get in series:
+                v = get(b)
+                if v:
+                    m, s_ = msd(v)
+                    ax.bar(x, m, 0.8, color=col, yerr=s_ if len(v) > 1 else None, capsize=3,
+                           error_kw=dict(elinewidth=1, capthick=1, ecolor=INK), zorder=2)
+                    ax.text(x, m + (s_ if len(v) > 1 else 0) + 0.015, f"{m:.2f}", ha="center", fontsize=8)
+                    x += 1
+                if lab == steps[-1][1]:
+                    x += 0.6                                   # gap between our trajectory and the baselines
+            ax.set_xticks([]); ax.set_title(title, loc="left", fontsize=10.5)
+            ax.set_xlim(-0.7, x - 0.3)
+        axes[0].set_ylim(0, 1.0); axes[0].set_ylabel("MAP@R (experimental spectra)")
+        fig.suptitle("Fine-tuning helps in-distribution; on unseen data it peaks early and trails the baselines",
+                     x=0.07, ha="left", fontsize=13, fontweight="bold", y=1.03)
+        fig.legend(handles=[plt.Rectangle((0, 0), 1, 1, color=c) for _, c, _ in series],
+                   labels=[l for l, _, _ in series], frameon=False, fontsize=9, ncol=7,
+                   loc="upper center", bbox_to_anchor=(0.5, 0.02))
         fig.savefig(FIG / "C_transfer.png"); plt.close(fig)
 
 
