@@ -8,3 +8,6 @@ c7b_cont400m_final_seed2 /lus/flare/projects/UIC-HPC/khuss/msdelta/runs/sweep-co
 s400m_t0002_pk256_ep12_seed0 /lus/flare/projects/UIC-HPC/khuss/msdelta/runs/sweep-s400m_t0002_pk256_ep12_seed0-8857593/final
 binned_w0.1 binned:0.1
 binned_w1.0005 binned:1.0005
+c7b_cont050m_final_seed1 /lus/flare/projects/UIC-HPC/khuss/msdelta/runs/sweep-cont050m_ep01_seed1-8860522/final
+c7b_cont050m_s600_seed1 /lus/flare/projects/UIC-HPC/khuss/msdelta/runs/sweep-cont050m_ep01_seed1-8860522/checkpoint-600/encoder
+s050m_t0002_pk256_ep24_seed1 /lus/flare/projects/UIC-HPC/khuss/msdelta/runs/sweep-s050m_t0002_pk256_ep24_seed1-8857593/final
