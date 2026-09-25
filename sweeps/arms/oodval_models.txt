@@ -1,0 +1,14 @@
+# OOD validation (nine-species 8 other species): C7 400m, 3 seeds x steps, to select a transferring teacher
+c7b_cont400m_s300_seed0 /lus/flare/projects/UIC-HPC/khuss/msdelta/runs/sweep-cont400m_ep01_seed0-8860522/checkpoint-300/encoder
+c7b_cont400m_s600_seed0 /lus/flare/projects/UIC-HPC/khuss/msdelta/runs/sweep-cont400m_ep01_seed0-8860522/checkpoint-600/encoder
+c7b_cont400m_s900_seed0 /lus/flare/projects/UIC-HPC/khuss/msdelta/runs/sweep-cont400m_ep01_seed0-8860522/checkpoint-900/encoder
+c7b_cont400m_final_seed0 /lus/flare/projects/UIC-HPC/khuss/msdelta/runs/sweep-cont400m_ep01_seed0-8860522/final
+c7b_cont400m_s300_seed1 /lus/flare/projects/UIC-HPC/khuss/msdelta/runs/sweep-cont400m_ep01_seed1-8860522/checkpoint-300/encoder
+c7b_cont400m_s600_seed1 /lus/flare/projects/UIC-HPC/khuss/msdelta/runs/sweep-cont400m_ep01_seed1-8860522/checkpoint-600/encoder
+c7b_cont400m_s900_seed1 /lus/flare/projects/UIC-HPC/khuss/msdelta/runs/sweep-cont400m_ep01_seed1-8860522/checkpoint-900/encoder
+c7b_cont400m_final_seed1 /lus/flare/projects/UIC-HPC/khuss/msdelta/runs/sweep-cont400m_ep01_seed1-8860522/final
+c7b_cont400m_s300_seed2 /lus/flare/projects/UIC-HPC/khuss/msdelta/runs/sweep-cont400m_ep01_seed2-8860522/checkpoint-300/encoder
+c7b_cont400m_s600_seed2 /lus/flare/projects/UIC-HPC/khuss/msdelta/runs/sweep-cont400m_ep01_seed2-8860522/checkpoint-600/encoder
+c7b_cont400m_s900_seed2 /lus/flare/projects/UIC-HPC/khuss/msdelta/runs/sweep-cont400m_ep01_seed2-8860522/checkpoint-900/encoder
+c7b_cont400m_final_seed2 /lus/flare/projects/UIC-HPC/khuss/msdelta/runs/sweep-cont400m_ep01_seed2-8860522/final
+binned_w0.1 binned:0.1

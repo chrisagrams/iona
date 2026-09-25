@@ -12,11 +12,17 @@ MAX_PER_GROUP drawn at random (seed 0), as in C11. Modifications are converted t
 notation: C(+57.02) -> C[57.0215], M(+15.99) -> M[15.9949], N/Q(+.98) -> [0.9840]; any other
 modification string stops the build (never silently mapped).
 
+NINE_SPLIT=train (environment) builds from the TRAIN split instead (the 8 other species) --
+an out-of-distribution VALIDATION set for choosing checkpoints/teachers by transfer without
+touching the yeast test set; NINE_TARGET=N then keeps whole groups drawn at random (seed 0)
+until N spectra.
+
 Writes the same two formats as c11_build.py, from the SAME rows in the SAME order:
   OUT/prepared/   eval_grouped_retrieval `score` format
   OUT/export/     meta.parquet + experimental.mgf (+ empty consensus.mgf)
 """
 import json
+import os
 import re
 import sys
 from collections import Counter
@@ -28,7 +34,11 @@ import pyarrow.parquet as pq
 
 REPO = "InstaDeepAI/ms_ninespecies_benchmark"
 REVISION = "95d03bc005e512bd20c6abb3f8650e327272973a"
-FILE = "data/test-00000-of-00001.parquet"
+SPLIT = os.environ.get("NINE_SPLIT", "test")
+FILES = {"test": ["data/test-00000-of-00001.parquet"],
+         "train": ["data/train-00000-of-00002.parquet", "data/train-00001-of-00002.parquet"]}[SPLIT]
+FILE = FILES[0]
+TARGET = int(os.environ.get("NINE_TARGET", "0"))
 PROCESSOR = "/flare/UIC-HPC/khuss/msdelta/pretrained/msdelta-50m-production-01-checkpoint-220000"
 MAX_PEAKS = 512
 MAX_PER_GROUP = 20
@@ -55,8 +65,24 @@ def main(out_dir, *_ignored):
     if out.exists():
         raise SystemExit(f"{out} exists; refusing to overwrite")
     processor = MSDeltaProcessor.from_pretrained(PROCESSOR, max_peaks=MAX_PEAKS)
-    path = hf_hub_download(REPO, FILE, repo_type="dataset", revision=REVISION)
-    rows = pq.read_table(path).to_pylist()
+    rows = pa.concat_tables([pq.read_table(hf_hub_download(REPO, f, repo_type="dataset",
+                                                         revision=REVISION)) for f in FILES])
+    if TARGET:          # pre-sample groups here: the train split is ~500k spectra
+        key = [f"{m}_{c}" for m, c in zip(rows.column("modified_sequence").to_pylist(),
+                                         rows.column("precursor_charge").to_pylist())]
+        from collections import defaultdict
+        idx = defaultdict(list)
+        for i, k in enumerate(key):
+            idx[k].append(i)
+        keys = [k for k, v in idx.items() if len(v) >= 2]
+        pick, n = [], 0
+        for j in np.random.default_rng(0).permutation(len(keys)):
+            members = idx[keys[j]][:MAX_PER_GROUP]
+            pick.extend(members); n += len(members)
+            if n >= TARGET:
+                break
+        rows = rows.take(pa.array(sorted(pick)))
+    rows = rows.to_pylist()
     recs = []
     for i, r in enumerate(rows):
         mz = np.asarray(r["mz_array"], np.float64); it = np.asarray(r["intensity_array"], np.float64)
@@ -65,7 +91,7 @@ def main(out_dir, *_ignored):
         if not (0 < len(mz) <= MAX_PEAKS):
             raise SystemExit(f"row {i}: {len(mz)} peaks -- outside 1..{MAX_PEAKS}, refusing to "
                              f"trim or drop silently")
-        recs.append({"spectrum_id": f"yeast:{i}", "peptide": to_notation(r["modified_sequence"]),
+        recs.append({"spectrum_id": f"{SPLIT}:{i}", "peptide": to_notation(r["modified_sequence"]),
                      "charge": int(r["precursor_charge"]), "precursor": float(r["precursor_mz"]),
                      "mz": mz, "intensity": it})
     n_all = len(recs)
@@ -91,7 +117,9 @@ def main(out_dir, *_ignored):
         prep["precursor"].append(r["precursor"]); prep["source"].append("experimental")
         prep["analyte_id"].append(f"{r['peptide']}_{r['charge']}")
     Dataset.from_dict(prep).save_to_disk(str(out / "prepared"))
-    info = {"source": f"{REPO}@{REVISION}/{FILE}", "species": "S. cerevisiae (test split)",
+    info = {"source": f"{REPO}@{REVISION}/{','.join(FILES)}",
+            "species": "S. cerevisiae (test split)" if SPLIT == "test" else "8 non-yeast species (train split)",
+            "target": TARGET,
             "spectra_total": n_all, "spectra": len(recs), "groups": groups,
             "max_peaks_seen": int(max(len(r["mz"]) for r in recs)),
             "max_per_group": MAX_PER_GROUP, "trimmed": False,

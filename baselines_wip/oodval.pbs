@@ -1,0 +1,26 @@
+#!/bin/bash -l
+# OOD VALIDATION: nine-species TRAIN split (8 non-yeast species), 20k spectra in whole groups
+# (nine_build.py, NINE_SPLIT=train). Scores MODELS there to choose checkpoints/teachers for
+# transfer without touching the yeast test set.
+#PBS -N oodval
+#PBS -A UIC-HPC
+#PBS -l filesystems=home:flare
+#PBS -j oe
+#PBS -o /home/khuss/code/msdelta/pbs/logs/
+set -uo pipefail
+cd /home/khuss/code/msdelta
+S=/lus/flare/projects/UIC-HPC/khuss/msdelta; D=$S/baselines/nine_oodval20k
+MODELS=${MODELS:-sweeps/arms/oodval_models.txt}
+set +u; source /usr/share/lmod/lmod/init/bash; module load frameworks/2025.3.1; set -u
+export ONEAPI_DEVICE_SELECTOR=level_zero:gpu ZE_FLAT_DEVICE_HIERARCHY=FLAT PYTHONPATH=$PWD OMP_NUM_THREADS=8
+export HF_HOME=$S/huggingface HF_HUB_OFFLINE=1 HF_DATASETS_OFFLINE=1
+[ -d $D/prepared ] || NINE_SPLIT=train NINE_TARGET=20000 ZE_AFFINITY_MASK=0 .venv/bin/python baselines_wip/nine_build.py $D || exit 1
+grep -E '"spectra"|"groups"' $D/prepared/PREPARED.json
+OUT=results/finetune/contrastive/oodval20k; mkdir -p $OUT
+n=$(grep -cv '^#' $MODELS); pids=()
+for i in $(seq 0 $((n - 1))); do
+  ZE_AFFINITY_MASK=$((i % 12)) .venv/bin/python -m msdelta.eval_grouped_retrieval score --data $D/prepared \
+    --models $MODELS --out-dir $OUT --shard $i --num-shards $n > $OUT/.shard$i.log 2>&1 & pids+=($!)
+done
+for p in "${pids[@]}"; do wait $p || echo "a shard failed"; done
+grep -h "MAP@R\|Error" $OUT/.shard*.log | cut -c1-140
