@@ -1,41 +1,29 @@
 dataset,embedding,base,arm,seed,base_psms,psms,gain_psms,gain_pct,source
-"8 runs (6 HEK, 2 HCT116)",50M teacher,MSFragger features,embedding,0,99154,100616,1462,1.4745,a1-rerun_r4_global+perrun_seed0.json
-"8 runs (6 HEK, 2 HCT116)",50M teacher,MSFragger features,null control,0,99154,99121,-33,-0.0333,a1-rerun_r4_global+perrun_seed0.json
-"8 runs (6 HEK, 2 HCT116)",50M teacher,lab features (≈ MS2Rescore level),embedding,0,129041,129352,311,0.2410,a1-rerun_r4_global+perrun_seed0.json
-"8 runs (6 HEK, 2 HCT116)",50M teacher,lab features (≈ MS2Rescore level),null control,0,129041,128954,-87,-0.0674,a1-rerun_r4_global+perrun_seed0.json
-"8 runs (6 HEK, 2 HCT116)",50M teacher,MSFragger features,embedding,1,99182,100544,1362,1.3732,a1-rerun_r4_global+perrun_seed1.json
-"8 runs (6 HEK, 2 HCT116)",50M teacher,MSFragger features,null control,1,99182,99329,147,0.1482,a1-rerun_r4_global+perrun_seed1.json
-"8 runs (6 HEK, 2 HCT116)",50M teacher,lab features (≈ MS2Rescore level),embedding,1,128751,129667,916,0.7115,a1-rerun_r4_global+perrun_seed1.json
-"8 runs (6 HEK, 2 HCT116)",50M teacher,lab features (≈ MS2Rescore level),null control,1,128751,128929,178,0.1383,a1-rerun_r4_global+perrun_seed1.json
-"8 runs (6 HEK, 2 HCT116)",50M teacher,MSFragger features,embedding,2,99405,100495,1090,1.0965,a1-rerun_r4_global+perrun_seed2.json
-"8 runs (6 HEK, 2 HCT116)",50M teacher,MSFragger features,null control,2,99405,99309,-96,-0.0966,a1-rerun_r4_global+perrun_seed2.json
-"8 runs (6 HEK, 2 HCT116)",50M teacher,lab features (≈ MS2Rescore level),embedding,2,128934,129522,588,0.4560,a1-rerun_r4_global+perrun_seed2.json
-"8 runs (6 HEK, 2 HCT116)",50M teacher,lab features (≈ MS2Rescore level),null control,2,128934,129049,115,0.0892,a1-rerun_r4_global+perrun_seed2.json
-"8 runs (6 HEK, 2 HCT116)",400M teacher,MSFragger features,embedding,0,99154,101885,2731,2.7543,a2-400m_r4_seed0.log
-"8 runs (6 HEK, 2 HCT116)",400M teacher,MSFragger features,null control,0,99154,99180,26,0.0262,a2-400m_r4_seed0.log
-"8 runs (6 HEK, 2 HCT116)",400M teacher,lab features (≈ MS2Rescore level),embedding,0,129041,129618,577,0.4471,a2-400m_r4_seed0.log
-"8 runs (6 HEK, 2 HCT116)",400M teacher,lab features (≈ MS2Rescore level),null control,0,129041,129054,13,0.0101,a2-400m_r4_seed0.log
-"8 runs (6 HEK, 2 HCT116)",400M teacher,MSFragger features,embedding,1,99182,101840,2658,2.6799,a2-400m_r4_global+perrun_seed1.json
-"8 runs (6 HEK, 2 HCT116)",400M teacher,MSFragger features,null control,1,99182,99467,285,0.2874,a2-400m_r4_global+perrun_seed1.json
-"8 runs (6 HEK, 2 HCT116)",400M teacher,lab features (≈ MS2Rescore level),embedding,1,128751,129965,1214,0.9429,a2-400m_r4_global+perrun_seed1.json
-"8 runs (6 HEK, 2 HCT116)",400M teacher,lab features (≈ MS2Rescore level),null control,1,128751,129041,290,0.2252,a2-400m_r4_global+perrun_seed1.json
-"8 runs (6 HEK, 2 HCT116)",400M teacher,MSFragger features,embedding,2,99405,101853,2448,2.4627,a2-400m_r4_global+perrun_seed2.json
-"8 runs (6 HEK, 2 HCT116)",400M teacher,MSFragger features,null control,2,99405,99467,62,0.0624,a2-400m_r4_global+perrun_seed2.json
-"8 runs (6 HEK, 2 HCT116)",400M teacher,lab features (≈ MS2Rescore level),embedding,2,128934,129684,750,0.5817,a2-400m_r4_global+perrun_seed2.json
-"8 runs (6 HEK, 2 HCT116)",400M teacher,lab features (≈ MS2Rescore level),null control,2,128934,129140,206,0.1598,a2-400m_r4_global+perrun_seed2.json
-"8 runs (6 HEK, 2 HCT116)","400M teacher, OOD-selected",MSFragger features,embedding,0,99154,101326,2172,2.1905,400m-oodsel_r4_global+perrun_seed0.json
-"8 runs (6 HEK, 2 HCT116)","400M teacher, OOD-selected",MSFragger features,null control,0,99154,99230,76,0.0766,400m-oodsel_r4_global+perrun_seed0.json
-"8 runs (6 HEK, 2 HCT116)","400M teacher, OOD-selected",lab features (≈ MS2Rescore level),embedding,0,129041,129782,741,0.5742,400m-oodsel_r4_global+perrun_seed0.json
-"8 runs (6 HEK, 2 HCT116)","400M teacher, OOD-selected",lab features (≈ MS2Rescore level),null control,0,129041,128881,-160,-0.1240,400m-oodsel_r4_global+perrun_seed0.json
-"8 runs (6 HEK, 2 HCT116)","400M teacher, OOD-selected",MSFragger features,embedding,1,99182,101245,2063,2.0800,400m-oodsel_r4_global+perrun_seed1.json
-"8 runs (6 HEK, 2 HCT116)","400M teacher, OOD-selected",MSFragger features,null control,1,99182,99333,151,0.1522,400m-oodsel_r4_global+perrun_seed1.json
-"8 runs (6 HEK, 2 HCT116)","400M teacher, OOD-selected",lab features (≈ MS2Rescore level),embedding,1,128751,129874,1123,0.8722,400m-oodsel_r4_global+perrun_seed1.json
-"8 runs (6 HEK, 2 HCT116)","400M teacher, OOD-selected",lab features (≈ MS2Rescore level),null control,1,128751,128962,211,0.1639,400m-oodsel_r4_global+perrun_seed1.json
-"8 runs (6 HEK, 2 HCT116)","400M teacher, OOD-selected",MSFragger features,embedding,2,99405,101277,1872,1.8832,400m-oodsel_r4_global+perrun_seed2.json
-"8 runs (6 HEK, 2 HCT116)","400M teacher, OOD-selected",MSFragger features,null control,2,99405,99405,0,0.0000,400m-oodsel_r4_global+perrun_seed2.json
-"8 runs (6 HEK, 2 HCT116)","400M teacher, OOD-selected",lab features (≈ MS2Rescore level),embedding,2,128934,129682,748,0.5801,400m-oodsel_r4_global+perrun_seed2.json
-"8 runs (6 HEK, 2 HCT116)","400M teacher, OOD-selected",lab features (≈ MS2Rescore level),null control,2,128934,129110,176,0.1365,400m-oodsel_r4_global+perrun_seed2.json
-"HCT116, 18 runs (unseen)",400M teacher,MSFragger features,embedding,0,370982,392350,21368,5.7598,a2-400m_r4_hct116_perrun_seed0.json
-"HCT116, 18 runs (unseen)",400M teacher,MSFragger features,null control,0,370982,371587,605,0.1631,a2-400m_r4_hct116_perrun_seed0.json
-"HCT116, 18 runs (unseen)",400M teacher,lab features (≈ MS2Rescore level),embedding,0,522539,530977,8438,1.6148,a2-400m_r4_hct116_perrun_seed0.json
-"HCT116, 18 runs (unseen)",400M teacher,lab features (≈ MS2Rescore level),null control,0,522539,522353,-186,-0.0356,a2-400m_r4_hct116_perrun_seed0.json
+"8 runs (6 HEK, 2 HCT116)",50M teacher,MSFragger features only,embedding,0,99154,100616,1462,1.4745,a1-rerun_r4_global+perrun_seed0.json
+"8 runs (6 HEK, 2 HCT116)",50M teacher,MSFragger features only,null control,0,99154,99121,-33,-0.0333,a1-rerun_r4_global+perrun_seed0.json
+"8 runs (6 HEK, 2 HCT116)",50M teacher,all features,embedding,0,129041,129352,311,0.2410,a1-rerun_r4_global+perrun_seed0.json
+"8 runs (6 HEK, 2 HCT116)",50M teacher,all features,null control,0,129041,128954,-87,-0.0674,a1-rerun_r4_global+perrun_seed0.json
+"8 runs (6 HEK, 2 HCT116)",50M teacher,MSFragger features only,embedding,1,99182,100544,1362,1.3732,a1-rerun_r4_global+perrun_seed1.json
+"8 runs (6 HEK, 2 HCT116)",50M teacher,MSFragger features only,null control,1,99182,99329,147,0.1482,a1-rerun_r4_global+perrun_seed1.json
+"8 runs (6 HEK, 2 HCT116)",50M teacher,all features,embedding,1,128751,129667,916,0.7115,a1-rerun_r4_global+perrun_seed1.json
+"8 runs (6 HEK, 2 HCT116)",50M teacher,all features,null control,1,128751,128929,178,0.1383,a1-rerun_r4_global+perrun_seed1.json
+"8 runs (6 HEK, 2 HCT116)",50M teacher,MSFragger features only,embedding,2,99405,100495,1090,1.0965,a1-rerun_r4_global+perrun_seed2.json
+"8 runs (6 HEK, 2 HCT116)",50M teacher,MSFragger features only,null control,2,99405,99309,-96,-0.0966,a1-rerun_r4_global+perrun_seed2.json
+"8 runs (6 HEK, 2 HCT116)",50M teacher,all features,embedding,2,128934,129522,588,0.4560,a1-rerun_r4_global+perrun_seed2.json
+"8 runs (6 HEK, 2 HCT116)",50M teacher,all features,null control,2,128934,129049,115,0.0892,a1-rerun_r4_global+perrun_seed2.json
+"8 runs (6 HEK, 2 HCT116)",400M teacher,MSFragger features only,embedding,0,99154,101885,2731,2.7543,a2-400m_r4_seed0.log
+"8 runs (6 HEK, 2 HCT116)",400M teacher,MSFragger features only,null control,0,99154,99180,26,0.0262,a2-400m_r4_seed0.log
+"8 runs (6 HEK, 2 HCT116)",400M teacher,all features,embedding,0,129041,129618,577,0.4471,a2-400m_r4_seed0.log
+"8 runs (6 HEK, 2 HCT116)",400M teacher,all features,null control,0,129041,129054,13,0.0101,a2-400m_r4_seed0.log
+"8 runs (6 HEK, 2 HCT116)",400M teacher,MSFragger features only,embedding,1,99182,101840,2658,2.6799,a2-400m_r4_global+perrun_seed1.json
+"8 runs (6 HEK, 2 HCT116)",400M teacher,MSFragger features only,null control,1,99182,99467,285,0.2874,a2-400m_r4_global+perrun_seed1.json
+"8 runs (6 HEK, 2 HCT116)",400M teacher,all features,embedding,1,128751,129965,1214,0.9429,a2-400m_r4_global+perrun_seed1.json
+"8 runs (6 HEK, 2 HCT116)",400M teacher,all features,null control,1,128751,129041,290,0.2252,a2-400m_r4_global+perrun_seed1.json
+"8 runs (6 HEK, 2 HCT116)",400M teacher,MSFragger features only,embedding,2,99405,101853,2448,2.4627,a2-400m_r4_global+perrun_seed2.json
+"8 runs (6 HEK, 2 HCT116)",400M teacher,MSFragger features only,null control,2,99405,99467,62,0.0624,a2-400m_r4_global+perrun_seed2.json
+"8 runs (6 HEK, 2 HCT116)",400M teacher,all features,embedding,2,128934,129684,750,0.5817,a2-400m_r4_global+perrun_seed2.json
+"8 runs (6 HEK, 2 HCT116)",400M teacher,all features,null control,2,128934,129140,206,0.1598,a2-400m_r4_global+perrun_seed2.json
+"HCT116, 18 runs (unseen)",400M teacher,MSFragger features only,embedding,0,370982,392350,21368,5.7598,a2-400m_r4_hct116_perrun_seed0.json
+"HCT116, 18 runs (unseen)",400M teacher,MSFragger features only,null control,0,370982,371587,605,0.1631,a2-400m_r4_hct116_perrun_seed0.json
+"HCT116, 18 runs (unseen)",400M teacher,all features,embedding,0,522539,530977,8438,1.6148,a2-400m_r4_hct116_perrun_seed0.json
+"HCT116, 18 runs (unseen)",400M teacher,all features,null control,0,522539,522353,-186,-0.0356,a2-400m_r4_hct116_perrun_seed0.json

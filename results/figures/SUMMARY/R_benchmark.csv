@@ -1,16 +1,16 @@
-method,seed,psms,source
-MSFragger (e-value),,89693,"per-run results, methods/all/msfragger"
-"MS2Rescore, search features only",,100974,results_ms2rescore.json:ms2rescore:searchonly
-MS2Rescore full (MS2PIP + DeepLC),,128211,results_ms2rescore.json:ms2rescore:full
-"ours per-run, MSFragger features",0,99154,a2-400m_r4_seed0.log
-"ours per-run, MSFragger features + embedding",0,101885,a2-400m_r4_seed0.log
-"ours per-run, lab features",0,129041,a2-400m_r4_seed0.log
-"ours per-run, lab features + embedding",0,129618,a2-400m_r4_seed0.log
-"ours per-run, MSFragger features",1,99182,a2-400m_r4_global+perrun_seed1.json
-"ours per-run, MSFragger features + embedding",1,101840,a2-400m_r4_global+perrun_seed1.json
-"ours per-run, lab features",1,128751,a2-400m_r4_global+perrun_seed1.json
-"ours per-run, lab features + embedding",1,129965,a2-400m_r4_global+perrun_seed1.json
-"ours per-run, MSFragger features",2,99405,a2-400m_r4_global+perrun_seed2.json
-"ours per-run, MSFragger features + embedding",2,101853,a2-400m_r4_global+perrun_seed2.json
-"ours per-run, lab features",2,128934,a2-400m_r4_global+perrun_seed2.json
-"ours per-run, lab features + embedding",2,129684,a2-400m_r4_global+perrun_seed2.json
+method,seed,source,psms
+MSFragger (e-value),,a2-400m_r4_global+perrun_seed1.json:methods/all/msfragger,89693
+"MS2Rescore, search features only",,results_ms2rescore.json:ms2rescore:searchonly,100974
+MS2Rescore full (MS2PIP + DeepLC),,results_ms2rescore.json:ms2rescore:full,128211
+"our per-run classifier, MSFragger features only",0,a2-400m_r4_seed0.log,99154
+"our per-run classifier, MSFragger features only + embedding",0,a2-400m_r4_seed0.log,101885
+our per-run classifier,0,a2-400m_r4_seed0.log,129041
+our per-run classifier + embedding,0,a2-400m_r4_seed0.log,129618
+"our per-run classifier, MSFragger features only",1,a2-400m_r4_global+perrun_seed1.json,99182
+"our per-run classifier, MSFragger features only + embedding",1,a2-400m_r4_global+perrun_seed1.json,101840
+our per-run classifier,1,a2-400m_r4_global+perrun_seed1.json,128751
+our per-run classifier + embedding,1,a2-400m_r4_global+perrun_seed1.json,129965
+"our per-run classifier, MSFragger features only",2,a2-400m_r4_global+perrun_seed2.json,99405
+"our per-run classifier, MSFragger features only + embedding",2,a2-400m_r4_global+perrun_seed2.json,101853
+our per-run classifier,2,a2-400m_r4_global+perrun_seed2.json,128934
+our per-run classifier + embedding,2,a2-400m_r4_global+perrun_seed2.json,129684

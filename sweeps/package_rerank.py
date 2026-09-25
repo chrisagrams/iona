@@ -36,9 +36,8 @@ STYLE = {"font.family": "DejaVu Sans", "font.size": 10, "axes.edgecolor": "#9ca3
 EMB = {
     "A1": ("50M teacher", [PSM / f"a1-rerun_r4_global+perrun_seed{s}.json" for s in (0, 1, 2)]),
     "A2": ("400M teacher", [PSM / "a2-400m_r4_seed0.log"] + [PSM / f"a2-400m_r4_global+perrun_seed{s}.json" for s in (1, 2)]),
-    "A-oodsel": ("400M teacher, OOD-selected", [PSM / f"400m-oodsel_r4_global+perrun_seed{s}.json" for s in (0, 1, 2)]),
 }
-BASES = {"ms": "MSFragger features", "lab": "lab features (≈ MS2Rescore level)"}
+BASES = {"ms": "MSFragger features only", "lab": "all features"}   # all = the lab's full feature table
 VARIANTS = ["", "+embws", "+nullws"]
 
 
@@ -80,10 +79,9 @@ def fig_gain(rows):
     cols = {"null control": "#9ca3af", "embedding": "#2563eb"}
     panels = [("8 runs (6 HEK, 2 HCT116)", BASES["ms"]), ("8 runs (6 HEK, 2 HCT116)", BASES["lab"]),
               ("HCT116, 18 runs (unseen)", None)]
-    titles = ["8 runs, MSFragger features", "8 runs, lab features\n(≈ MS2Rescore level)",
-              "HCT116, 18 runs (unseen)\n400M-teacher embedding"]
+    titles = ["8 runs\nMSFragger features only", "8 runs\nall features", "HCT116, 18 runs (unseen)\n400M-teacher embedding"]
     with plt.rc_context(STYLE):
-        fig, axes = plt.subplots(1, 3, figsize=(13, 4.4), gridspec_kw={"width_ratios": [3, 3, 2]})
+        fig, axes = plt.subplots(1, 3, figsize=(12, 4.4), gridspec_kw={"width_ratios": [2, 2, 2]})
         for ax, (ds, base), title in zip(axes, panels, titles):
             ax.yaxis.grid(True, color=GRIDC, lw=0.8); ax.set_axisbelow(True); ax.axhline(0, color="#9ca3af", lw=0.8)
             groups = [e[0] for e in EMB.values()] if base else list(BASES.values())
@@ -99,10 +97,9 @@ def fig_gain(rows):
                         ax.scatter(np.full(len(v), x), v, s=10, color=INK, zorder=3)
                     ax.text(x, max(v.max(), 0) + 0.12, f"{v.mean():+.1f}%", ha="center", fontsize=8)
             ax.set_xticks(range(len(groups)))
-            ax.set_xticklabels([g.replace(", OOD-selected", "\nOOD-selected").replace(" (≈ MS2Rescore level)", "")
-                                for g in groups], fontsize=8.5)
+            ax.set_xticklabels(groups, fontsize=8.5)
             ax.set_title(title, loc="left", fontsize=10.5)
-        axes[0].set_ylabel("% more PSMs at 1% FDR\n(vs the same rescorer without it)")
+        axes[0].set_ylabel("% more PSMs at 1% FDR\n(vs our per-run classifier without it)")
         top = max(a.get_ylim()[1] for a in axes)
         for a in axes:
             a.set_ylim(-0.6, top)
@@ -118,24 +115,26 @@ def benchmark_rows():
     ms2r = json.loads((REPO / "baselines_wip" / "results_ms2rescore.json").read_text())
     rows = []
     d0 = perrun(EMB["A2"][1][0])
-    rows.append(dict(method="MSFragger (e-value)", seed="", psms=89693, source="per-run results, methods/all/msfragger"))
+    src = EMB["A2"][1][1]
+    rows.append(dict(method="MSFragger (e-value)", seed="", source=f"{src.name}:methods/all/msfragger",
+                     psms=json.loads(src.read_text())["methods"]["all"]["msfragger"]["psms_1pct"]))
     for k, lab in (("ms2rescore:searchonly", "MS2Rescore, search features only"),
                    ("ms2rescore:full", "MS2Rescore full (MS2PIP + DeepLC)")):
         rows.append(dict(method=lab, seed="", psms=ms2r[k]["all"]["pooled"], source=f"results_ms2rescore.json:{k}"))
     for seed, src in enumerate(EMB["A2"][1]):
         p = perrun(src)
-        for feat, lab in (("ms", "ours per-run, MSFragger features"), ("ms+embws", "ours per-run, MSFragger features + embedding"),
-                          ("lab", "ours per-run, lab features"), ("lab+embws", "ours per-run, lab features + embedding")):
+        for feat, lab in (("ms", "our per-run classifier, MSFragger features only"), ("ms+embws", "our per-run classifier, MSFragger features only + embedding"),
+                          ("lab", "our per-run classifier"), ("lab+embws", "our per-run classifier + embedding")):
             rows.append(dict(method=lab, seed=seed, psms=p[feat], source=src.name))
     assert d0  # A2 seed 0 parsed from its log
     return rows
 
 
 def fig_benchmark(rows):
-    order = ["MSFragger (e-value)", "ours per-run, MSFragger features", "ours per-run, MSFragger features + embedding",
-             "MS2Rescore, search features only", "MS2Rescore full (MS2PIP + DeepLC)", "ours per-run, lab features",
-             "ours per-run, lab features + embedding"]
-    col = lambda m: "#2563eb" if "+ embedding" in m else ("#93c5fd" if m.startswith("ours") else
+    order = ["MSFragger (e-value)", "our per-run classifier, MSFragger features only", "our per-run classifier, MSFragger features only + embedding",
+             "MS2Rescore, search features only", "MS2Rescore full (MS2PIP + DeepLC)", "our per-run classifier",
+             "our per-run classifier + embedding"]
+    col = lambda m: "#2563eb" if "+ embedding" in m else ("#93c5fd" if m.startswith("our ") else
                                                           ("#f59e0b" if "MS2Rescore" in m else "#9ca3af"))
     with plt.rc_context(STYLE):
         fig, ax = plt.subplots(figsize=(8.5, 4.2))
@@ -148,7 +147,7 @@ def fig_benchmark(rows):
         ax.set_yticks(range(len(order))); ax.set_yticklabels(order); ax.invert_yaxis()
         ax.set_xlim(80000, 138000); ax.set_xlabel("PSMs at 1% FDR (8 runs: 6 HEK, 2 HCT116)")
         ax.set_title("PSM rescoring: identifications at 1% FDR", loc="left", fontsize=13, fontweight="bold", pad=10)
-        fig.text(0.01, -0.03, "Ours: per-run linear rescoring, mean ± sd over 3 seeds; embedding = 400M-teacher peptide embedder.",
+        fig.text(0.01, -0.03, "Our per-run classifier: mean ± sd over 3 seeds; embedding = 400M-teacher peptide embedder.",
                  fontsize=8, color=MUTED)
         fig.savefig(FIG / "R_benchmark.png"); plt.close(fig)
 
