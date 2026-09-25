@@ -123,8 +123,7 @@ def benchmark_rows():
                    ("ms2rescore:full", "MS2Rescore, MSFragger features + MS2PIP + DeepLC")):
         rows.append(dict(method=lab, seed="", psms=ms2r[k]["all"]["pooled"], source=f"results_ms2rescore.json:{k}"))
     emb = json.loads((REPO / "baselines_wip" / "results_ms2rescore_emb8_a2.json").read_text())
-    for k, lab in (("ms2rescore:full+null control", "MS2Rescore, MSFragger features + MS2PIP + DeepLC + null control"),
-                   ("ms2rescore:full+embedding(400M teacher, cosws)", "MS2Rescore, MSFragger features + MS2PIP + DeepLC + iona embedding")):
+    for k, lab in (("ms2rescore:full+embedding(400M teacher, cosws)", "MS2Rescore, MSFragger features + MS2PIP + DeepLC + iona embedding"),):
         rows.append(dict(method=lab, seed="", psms=emb[k]["all"]["pooled"], source=f"results_ms2rescore_emb8_a2.json:{k}"))
     for seed, src in enumerate(EMB["A2"][1]):
         p = perrun(src)

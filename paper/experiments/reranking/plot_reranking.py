@@ -61,7 +61,7 @@ def embedding_gain():
 
 
 FEATURE_COLS = [("MSFragger\nfeatures", "msf"), ("rich\nfeatures", "rich"), ("MS2PIP", "ms2pip"),
-                ("DeepLC", "deeplc"), ("iona\nembedding", "iona"), ("null\ncontrol", "null")]
+                ("DeepLC", "deeplc"), ("iona\nembedding", "iona")]
 
 
 def features_of(method):
@@ -122,7 +122,7 @@ def benchmark(csv_path=None, out_path=None):
         fig.text(0.06, -0.05, "iona-rerank: our per-run classifier, mean ± sd over 3 seeds; MS2Rescore rows: one run each. "
                  "Rich features: the lab's per-candidate table (scores from 4 search engines incl. MSFragger,\n"
                  "fragment-ion and cross-candidate features). MS2Rescore also computes its own fragment-match features. "
-                 "iona embedding: 400M; null control: the same features from a random spectrum's embedding.",
+                 "iona embedding: 400M.",
                  fontsize=8, color=MUTED)
         fig.savefig(out_path or HERE / "R_benchmark.png"); plt.close(fig)
 

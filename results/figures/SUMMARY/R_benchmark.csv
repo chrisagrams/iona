@@ -2,7 +2,6 @@ method,seed,source,psms
 MSFragger (e-value),,a2-400m_r4_global+perrun_seed1.json:methods/all/msfragger,89693
 "MS2Rescore, MSFragger features",,results_ms2rescore.json:ms2rescore:searchonly,100974
 "MS2Rescore, MSFragger features + MS2PIP + DeepLC",,results_ms2rescore.json:ms2rescore:full,128211
-"MS2Rescore, MSFragger features + MS2PIP + DeepLC + null control",,results_ms2rescore_emb8_a2.json:ms2rescore:full+null control,128658
 "MS2Rescore, MSFragger features + MS2PIP + DeepLC + iona embedding",,"results_ms2rescore_emb8_a2.json:ms2rescore:full+embedding(400M teacher, cosws)",128909
 "iona-rerank, MSFragger features",0,a2-400m_r4_seed0.log,99154
 "iona-rerank, MSFragger features + iona embedding",0,a2-400m_r4_seed0.log,101885

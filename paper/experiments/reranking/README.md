@@ -83,8 +83,9 @@ features.
 - MS2Rescore full with the embedding features added (one run): 128,909 PSMs, against 128,658 with the
   null control, a net +251 (+0.2%). On the 6 HEK runs the gain is clean (+257 vs +6 for the null); on
   the 2 HCT116 runs the null gained more than the embedding (+452 vs +343), i.e. within MS2Rescore's
-  sensitivity to added features on those small runs. Both rows are shown in `R_benchmark.png`; the
-  18-run HCT116 MS2Rescore comparison is pending. (MS2Rescore + MS2PIP + DeepLC + iona embedding and iona-rerank
+  sensitivity to added features on those small runs. `R_benchmark.png` shows the embedding row;
+  the null-control row is omitted there (it is noise-dominated, see above). The 18-run HCT116 MS2Rescore
+  comparison is pending. (MS2Rescore + MS2PIP + DeepLC + iona embedding and iona-rerank
   with rich features both read 128,909: the first is one run, the second the mean of 129,041 / 128,751 / 128,934.)
 
 Provenance: msdelta repository, `sweeps/package_rerank.py` (from `results/rerank/psm/` and
