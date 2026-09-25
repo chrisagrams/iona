@@ -1,0 +1,13 @@
+# zero-shot scaling, part A (12): remaining 400m + 200m + 50m@120k-330k
+zs_400m_ck120k /flare/UIC-HPC/khuss/msdelta/pretrained/msdelta-400m-production-01-checkpoint-120000
+zs_400m_ck220k /flare/UIC-HPC/khuss/msdelta/pretrained/msdelta-400m-production-01-checkpoint-220000
+zs_400m_ck330k /flare/UIC-HPC/khuss/msdelta/pretrained/msdelta-400m-production-01-checkpoint-330000
+zs_400m_ck430k /flare/UIC-HPC/khuss/msdelta/pretrained/msdelta-400m-production-01-checkpoint-430000
+zs_400m_ck540k /flare/UIC-HPC/khuss/msdelta/pretrained/msdelta-400m-production-01-checkpoint-540423
+zs_200m_ck010k /flare/UIC-HPC/khuss/msdelta/pretrained/msdelta-200m-production-01-checkpoint-10000
+zs_200m_ck120k /flare/UIC-HPC/khuss/msdelta/pretrained/msdelta-200m-production-01-checkpoint-120000
+zs_200m_ck330k /flare/UIC-HPC/khuss/msdelta/pretrained/msdelta-200m-production-01-checkpoint-330000
+zs_200m_ck430k /flare/UIC-HPC/khuss/msdelta/pretrained/msdelta-200m-production-01-checkpoint-430000
+zs_050m_ck120k /flare/UIC-HPC/khuss/msdelta/pretrained/msdelta-50m-production-01-checkpoint-120000
+zs_050m_ck330k /flare/UIC-HPC/khuss/msdelta/pretrained/msdelta-50m-production-01-checkpoint-330000
+zs_050m_ck430k /flare/UIC-HPC/khuss/msdelta/pretrained/msdelta-50m-production-01-checkpoint-430000

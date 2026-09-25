@@ -1,0 +1,5 @@
+# zero-shot scaling, part B (4): remaining 100m
+zs_100m_ck010k /flare/UIC-HPC/khuss/msdelta/pretrained/msdelta-100m-production-01-checkpoint-10000
+zs_100m_ck120k /flare/UIC-HPC/khuss/msdelta/pretrained/msdelta-100m-production-01-checkpoint-120000
+zs_100m_ck330k /flare/UIC-HPC/khuss/msdelta/pretrained/msdelta-100m-production-01-checkpoint-330000
+zs_100m_ck430k /flare/UIC-HPC/khuss/msdelta/pretrained/msdelta-100m-production-01-checkpoint-430000
