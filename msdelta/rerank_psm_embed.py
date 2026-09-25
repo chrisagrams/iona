@@ -62,6 +62,9 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--max-peaks", type=int, default=512)
     ap.add_argument("--max-spectra", type=int, default=0)
     ap.add_argument("--batch-size", type=int, default=16)
+    ap.add_argument("--vectors-out", default="", help="also save the unit vectors (R5): "
+                    "spectrum.npy (spectra x D), peptide.npy (candidates x D), fp16, and "
+                    "index.parquet (candidate, owner, null_owner), rows in --out order")
     cli = ap.parse_args(argv)
 
     import pyarrow as pa
@@ -146,7 +149,7 @@ def main(argv: list[str] | None = None) -> int:
             for k in KEEP:
                 out[k].append(c.get(k))
     pc = PeptideCollator()
-    cos, null = [], []
+    cos, null, pep_vecs = [], [], []
     perm = np.random.default_rng(0).permutation(len(rows))
     perm = np.where(perm == np.arange(len(rows)), np.roll(perm, 1), perm)   # never self
     with torch.no_grad():
@@ -155,6 +158,8 @@ def main(argv: list[str] | None = None) -> int:
             emb = student(**{k: v.to(device) for k, v in b.items()}).float().cpu()
             own = spec[torch.tensor(owner[s:s + 512])]
             cos.append((emb * own).sum(-1))
+            if cli.vectors_out:
+                pep_vecs.append(emb.half().numpy())
             null.append((emb * spec[torch.tensor(perm[owner[s:s + 512]])]).sum(-1))
     out["cosine"] = torch.cat(cos).tolist()
     # LEAKAGE CHECK: the same candidate against a RANDOM other spectrum of the run. A
@@ -163,6 +168,15 @@ def main(argv: list[str] | None = None) -> int:
     out["cosine_null"] = torch.cat(null).tolist()
     Path(cli.out).parent.mkdir(parents=True, exist_ok=True)
     pq.write_table(pa.table(out), cli.out)
+    if cli.vectors_out:
+        vd = Path(cli.vectors_out); vd.mkdir(parents=True, exist_ok=True)
+        np.save(vd / "spectrum.npy", spec.half().numpy())
+        np.save(vd / "peptide.npy", np.concatenate(pep_vecs))
+        pq.write_table(pa.table({"candidate": out["candidate"],
+                                 "owner": np.asarray(owner, dtype=np.int64),
+                                 "null_owner": perm[np.asarray(owner)].astype(np.int64)}),
+                       vd / "index.parquet")
+        print(f"[embed] vectors -> {vd}", flush=True)
     print(f"[embed] wrote {len(peptides):,} candidates to {cli.out} "
           f"({time.time() - t0:.0f}s)", flush=True)
     return 0

@@ -24,7 +24,25 @@ Methods:
                applied to our score). `linear:ms` is the Percolator-style baseline; each
                +emb pair isolates the embedding's effect.
 
-Rescorers are CROSS-VALIDATED BY RUN (a spectrum is never scored by a model trained on
+Feature sets: `ms` (MSFragger), `hand` / `ms+hand` (stage 1b), `lab` (--labfeat: the
+dataset's own published features/ tables, 380 columns of which the all-NaN and constant
+ones are dropped over the loaded runs; mod_count_* columns are per-run dynamic, absent ->
+0). `+embvec` (--vectors, R5) adds WS_FEATURES plus the element-wise product
+spectrum * peptide projected by PCA fitted on the TRAINING rows of each fold (cosine is
+the product's sum, so a linear model on it learns a weighted cosine); `+nullvec` is its
+leakage control -- the product with a RANDOM other spectrum; it must add nothing.
+
+Regimes (--regime):
+  global   one model over runs, CV by run/series, fixed labels (below). The plug-and-play
+           model: it scores a new run without training on it.
+  perrun   Percolator's protocol, comparable to MS2Rescore/Percolator/mokapot numbers:
+           each run separately, 3-fold CV by SPECTRUM within the run, labels re-derived
+           from the current model for `--iters` rounds (positives = targets at q <= 1%
+           among each spectrum's current top candidate; negatives = the fold's decoys),
+           linear model only; fold scores calibrated as in mokapot,
+           (s - s@1%) / (s@1% - median decoy s), so folds and runs pool into one list.
+
+Global rescorers are CROSS-VALIDATED BY RUN (a spectrum is never scored by a model trained on
 its own run; HEK runs are correlated MudPIT steps, so rows are not independent). Training
 data, as in mokapot/Percolator: positives = targets that MSFragger ranks first AND that
 pass 1% FDR on its e-value within the training folds; negatives = every decoy candidate.
@@ -113,6 +131,120 @@ def series_of(run_id: str) -> str:
     return re.sub(r"[-_]h?\d+a?$", "", run_id)
 
 
+LAB_REVISION = "a6df7948d4500a1f303b0dcf4b6a6a040784d0c6"   # features/ first published
+
+
+def load_lab_features(lab_dir: str, run_ids) -> "tuple":
+    """The dataset's features/<dataset>/<run>.parquet for these runs, one frame keyed on
+    `candidate`. Returns (frame, usable feature columns)."""
+    import pandas as pd
+    import pyarrow.parquet as pq
+    frames = []
+    for run in sorted(set(run_ids)):
+        hits = glob.glob(str(Path(lab_dir) / "**" / f"{run}.parquet"), recursive=True)
+        if len(hits) != 1:
+            raise SystemExit(f"lab features for {run}: {len(hits)} files under {lab_dir}")
+        names = pq.ParquetFile(hits[0]).schema.names
+        cols = ["candidate_id"] + [c for c in names if c.startswith("feat__")]
+        frames.append(pq.read_table(hits[0], columns=cols).to_pandas())
+    lab = pd.concat(frames, ignore_index=True).rename(columns={"candidate_id": "candidate"})
+    feat = [c for c in lab.columns if c.startswith("feat__")]
+    for c in feat:
+        if "mod_count_" in c:
+            lab[c] = lab[c].fillna(0.0)
+    keep = [c for c in feat
+            if lab[c].notna().any() and lab[c].nunique(dropna=True) > 1]
+    return lab[["candidate"] + keep], tuple(keep)
+
+
+def fit_linear(Xtr, y, w0=None, l2: float = 1e-4, steps: int = 60):
+    """Class-balanced L2 logistic regression by full-batch L-BFGS (torch, CPU); returns
+    (weights incl. bias). Warm-starts from w0, so Percolator's iterations stay cheap."""
+    import torch
+    X = torch.tensor(Xtr, dtype=torch.float32)
+    Y = torch.tensor(y, dtype=torch.float32)
+    n_pos = float(Y.sum()); n_neg = float(len(Y) - n_pos)
+    sw = torch.where(Y > 0, 0.5 / max(n_pos, 1.0), 0.5 / max(n_neg, 1.0))
+    w = torch.zeros(X.shape[1] + 1) if w0 is None else torch.tensor(w0, dtype=torch.float32)
+    w.requires_grad_(True)
+    opt = torch.optim.LBFGS([w], lr=1.0, max_iter=steps, line_search_fn="strong_wolfe")
+
+    def closure():
+        opt.zero_grad()
+        z = X @ w[:-1] + w[-1]
+        loss = (sw * torch.nn.functional.binary_cross_entropy_with_logits(
+            z, Y, reduction="none")).sum() + l2 * (w[:-1] ** 2).sum()
+        loss.backward()
+        return loss
+    opt.step(closure)
+    return w.detach().numpy().astype(np.float64)
+
+
+def calibrate(train_scores, train_decoy, train_spec, test_scores):
+    """mokapot's cross-fold calibration: 0 at the training fold's 1% FDR threshold, -1 at
+    its median decoy (top-per-spectrum)."""
+    top = top_per_spectrum(train_spec, train_scores)
+    s, d = train_scores[top], train_decoy[top]
+    q = qvalues(s, d)
+    passing = s[(q <= 0.01) & ~d]
+    thr = passing.min() if len(passing) else np.quantile(s[~d], 0.99)
+    med = np.median(s[d]) if d.any() else thr - 1.0
+    return (test_scores - thr) / max(thr - med, 1e-9)
+
+
+class ProductPCA:
+    """Element-wise product spectrum * peptide for rows, projected on the top-k principal
+    directions of the product over `fit_rows` (a training sample). Vectors: unit-norm
+    fp16 arrays, spectrum[owner[i]] and peptide[i] for candidate row i."""
+
+    def __init__(self, spectrum, peptide, owner, k: int):
+        self.s, self.p, self.owner, self.k = spectrum, peptide, owner, k
+
+    def product(self, rows, owner=None):
+        o = self.owner if owner is None else owner
+        return self.s[o[rows]].astype(np.float32) * self.p[rows].astype(np.float32)
+
+    def fit(self, fit_rows, max_rows: int = 200_000, seed: int = 0):
+        import torch
+        if len(fit_rows) > max_rows:
+            fit_rows = np.sort(np.random.default_rng(seed).choice(fit_rows, max_rows,
+                                                                  replace=False))
+        x = torch.from_numpy(self.product(fit_rows))
+        self.mean = x.mean(0)
+        _, _, v = torch.pca_lowrank(x - self.mean, q=self.k, center=False, niter=4)
+        self.components = v[:, :self.k]
+        return self
+
+    def transform(self, rows, owner=None, chunk: int = 262_144) -> np.ndarray:
+        import torch
+        out = [((torch.from_numpy(self.product(rows[s:s + chunk], owner)) - self.mean)
+                @ self.components).numpy() for s in range(0, len(rows), chunk)]
+        return np.concatenate(out) if out else np.zeros((0, self.k), np.float32)
+
+
+def load_vectors(vec_dir: str, candidates) -> "tuple":
+    """Stage-1 vectors (rerank_psm_embed --vectors-out) for these candidate rows, in their
+    order: (spectrum matrix, peptide matrix, owner, null owner) with global indices."""
+    import pyarrow.parquet as pq
+    specs, peps, owners, nulls, cands = [], [], [], [], []
+    offset = 0
+    for d in sorted(p for p in Path(vec_dir).iterdir() if p.is_dir()):
+        s = np.load(d / "spectrum.npy", mmap_mode="r"); p = np.load(d / "peptide.npy")
+        idx = pq.read_table(d / "index.parquet").to_pandas()
+        specs.append(np.asarray(s)); peps.append(p)
+        owners.append(idx["owner"].to_numpy() + offset)
+        nulls.append(idx["null_owner"].to_numpy() + offset)
+        cands.append(idx["candidate"].to_numpy()); offset += len(s)
+    import pandas as pd
+    where = pd.Series(np.arange(sum(len(c) for c in cands)), index=np.concatenate(cands))
+    pos = where.reindex(np.asarray(candidates)).to_numpy()
+    if np.isnan(pos).any():
+        raise SystemExit(f"vectors missing for {int(np.isnan(pos).sum()):,} candidates")
+    pos = pos.astype(np.int64)
+    return (np.concatenate(specs), np.concatenate(peps)[pos],
+            np.concatenate(owners)[pos], np.concatenate(nulls)[pos])
+
+
 def fit_mlp(Xtr, y, Xte, seed: int = 0, epochs: int = 8, hidden: int = 64) -> np.ndarray:
     """Two-layer MLP (torch, CPU), class-balanced BCE; returns logits for Xte."""
     import torch
@@ -149,7 +281,16 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--max-neg", type=int, default=3_000_000,
                     help="decoy candidates subsampled per training fold (0 = all)")
     ap.add_argument("--sets", default="", help="comma list of feature sets to fit "
-                    "(default all: ms,hand,ms+hand)")
+                    "(default all: ms,hand,ms+hand[,lab])")
+    ap.add_argument("--variants", default="", help="comma list of embedding variants "
+                    "(default all available: none,emb,embws[,embvec,nullvec])")
+    ap.add_argument("--runs", default="", help="only these run ids (comma list); default "
+                    "every table under --rows")
+    ap.add_argument("--labfeat", default="", help="dir holding the dataset's features/ tables")
+    ap.add_argument("--regime", default="global", help="global, perrun, or global,perrun")
+    ap.add_argument("--iters", type=int, default=10, help="perrun: label-refinement rounds")
+    ap.add_argument("--vectors", default="", help="stage-1 vectors dir (R5 product features)")
+    ap.add_argument("--pca-k", type=int, default=64)
     cli = ap.parse_args(argv)
 
     import pyarrow.parquet as pq
@@ -158,6 +299,11 @@ def main(argv: list[str] | None = None) -> int:
     from sklearn.preprocessing import StandardScaler
 
     files = sorted(glob.glob(str(Path(cli.rows) / "*.parquet")))
+    if cli.runs:
+        want = set(cli.runs.split(","))
+        files = [f for f in files if Path(f).stem in want]
+        if len(files) != len(want):
+            raise SystemExit(f"--runs: found {len(files)} of {len(want)} tables in {cli.rows}")
     df = pd.concat([pq.read_table(f).to_pandas() for f in files], ignore_index=True)
     df["matched_fraction"] = df["num_matched_ions"] / df["tot_num_ions"].clip(lower=1)
     df["abs_massdiff"] = df["massdiff"].abs()
@@ -171,7 +317,15 @@ def main(argv: list[str] | None = None) -> int:
         if len(df) != before:
             raise SystemExit(f"hand features cover {len(df):,} of {before:,} candidates")
         hand = tuple(c for c in hf.columns if c.startswith("hf_"))
-    for c in BASE_FEATURES + hand + ("cosine",):
+    lab: tuple = ()
+    if cli.labfeat:
+        lf, lab = load_lab_features(cli.labfeat, df["run_id"].unique())
+        before = len(df)
+        df = df.merge(lf, on="candidate", how="inner")
+        if len(df) != before:
+            raise SystemExit(f"lab features cover {len(df):,} of {before:,} candidates")
+        print(f"[fdr] lab features: {len(lab)} usable columns", flush=True)
+    for c in BASE_FEATURES + hand + lab + ("cosine",):
         df[c] = pd.to_numeric(df[c], errors="coerce")
         df[c] = df[c].fillna(df[c].median())
     spec = df["spectrum_id"].astype("category").cat.codes.to_numpy()
@@ -232,37 +386,104 @@ def main(argv: list[str] | None = None) -> int:
     sets = {"ms": BASE_FEATURES}
     if hand:
         sets |= {"hand": hand, "ms+hand": BASE_FEATURES + hand}
+    if lab:
+        sets |= {"lab": lab}
     if cli.sets:
         sets = {k: v for k, v in sets.items() if k in cli.sets.split(",")}
-    for model in cli.models.split(","):
+    # variant -> (extra scalar columns, product vectors: None | "real" | "null")
+    variants = {"": ((), None), "+emb": (("cosine",), None), "+embws": (WS_FEATURES, None)}
+    pca = None
+    if cli.vectors:
+        spec_v, pep_v, owner, null_owner = load_vectors(cli.vectors, df["candidate"])
+        pca = ProductPCA(spec_v, pep_v, owner, cli.pca_k)
+        variants |= {"+embvec": (WS_FEATURES, "real"), "+nullvec": ((), "null")}
+        print(f"[fdr] vectors: {spec_v.shape[0]:,} spectra x {spec_v.shape[1]}, "
+              f"PCA k={cli.pca_k}", flush=True)
+    if cli.variants:
+        keep = {("" if v == "none" else "+" + v) for v in cli.variants.split(",")}
+        variants = {k: v for k, v in variants.items() if k in keep}
+
+    def design(cols, vec, fit_rows, rows):
+        """Feature matrix for `rows`; product PCA (if any) fitted on `fit_rows` only."""
+        X = df[list(cols)].to_numpy(float)[rows]
+        if vec is None:
+            return X
+        pca.fit(fit_rows)
+        extra = pca.transform(rows, owner=null_owner if vec == "null" else None)
+        return np.hstack([X, extra.astype(np.float64)])
+
+    regimes = cli.regime.split(",")
+    if "global" in regimes:
+        for model in cli.models.split(","):
+            for set_name, base in sets.items():
+                for emb, (more, vec) in variants.items():
+                    cols = base + more
+                    name = f"{model}:{set_name}{emb}"
+                    score = np.zeros(len(df))
+                    for f in range(cli.folds):
+                        tr, te = fold != f, np.flatnonzero(fold == f)
+                        tr_top = np.flatnonzero(tr & rank1)
+                        q = qvalues(ms[tr_top], decoy[tr_top])
+                        pos = tr_top[(q <= 0.01) & ~decoy[tr_top]]
+                        neg = np.flatnonzero(tr & decoy)
+                        if cli.max_neg and len(neg) > cli.max_neg:
+                            neg = np.sort(np.random.default_rng(f).choice(
+                                neg, cli.max_neg, replace=False))
+                        idx = np.r_[pos, neg]
+                        y = np.r_[np.ones(len(pos)), np.zeros(len(neg))]
+                        Xall = design(cols, vec, np.flatnonzero(tr), np.r_[idx, te])
+                        scaler = StandardScaler().fit(Xall[:len(idx)])
+                        Xtr, Xte = scaler.transform(Xall[:len(idx)]), scaler.transform(Xall[len(idx):])
+                        if model == "linear":
+                            clf = LogisticRegression(max_iter=2000, class_weight="balanced")
+                            clf.fit(Xtr, y)
+                            score[te] = clf.decision_function(Xte)
+                            if f == 0 and vec is None:
+                                report.setdefault("weights_fold0", {})[name] = {
+                                    k: float(v) for k, v in zip(cols, clf.coef_[0].round(4))}
+                        else:
+                            score[te] = fit_mlp(Xtr, y, Xte, seed=f)
+                    evaluate(name, score)
+
+    if "perrun" in regimes:
+        runs = df["run_id"].to_numpy()
         for set_name, base in sets.items():
-            for emb in ("", "+emb", "+embws"):
-                cols = base + {"": (), "+emb": ("cosine",), "+embws": WS_FEATURES}[emb]
-                name = f"{model}:{set_name}{emb}"
-                X = df[list(cols)].to_numpy(float)
+            for emb, (more, vec) in variants.items():
+                cols = base + more
+                name = f"perrun/linear:{set_name}{emb}"
                 score = np.zeros(len(df))
-                for f in range(cli.folds):
-                    tr, te = fold != f, fold == f
-                    tr_top = np.flatnonzero(tr & rank1)
-                    q = qvalues(ms[tr_top], decoy[tr_top])
-                    pos = tr_top[(q <= 0.01) & ~decoy[tr_top]]
-                    neg = np.flatnonzero(tr & decoy)
-                    if cli.max_neg and len(neg) > cli.max_neg:
-                        neg = np.sort(np.random.default_rng(f).choice(neg, cli.max_neg,
-                                                                      replace=False))
-                    idx = np.r_[pos, neg]; y = np.r_[np.ones(len(pos)), np.zeros(len(neg))]
-                    scaler = StandardScaler().fit(X[idx])
-                    Xtr, Xte = scaler.transform(X[idx]), scaler.transform(X[te])
-                    if model == "linear":
-                        clf = LogisticRegression(max_iter=2000, class_weight="balanced")
-                        clf.fit(Xtr, y)
-                        score[te] = clf.decision_function(Xte)
-                        if f == 0:
-                            report.setdefault("weights_fold0", {})[name] = {
-                                k: float(v) for k, v in zip(cols, clf.coef_[0].round(4))}
-                    else:
-                        score[te] = fit_mlp(Xtr, y, Xte, seed=f)
+                for run in sorted(set(runs)):
+                    rows = np.flatnonzero(runs == run)
+                    codes = np.unique(spec[rows])
+                    sfold = dict(zip(codes, np.random.default_rng(0).permutation(len(codes))
+                                     % cli.folds))
+                    rfold = np.array([sfold[c] for c in spec[rows]])
+                    for f in range(cli.folds):
+                        tr, te = rows[rfold != f], rows[rfold == f]
+                        Xall = design(cols, vec, tr, np.r_[tr, te])
+                        scaler = StandardScaler().fit(Xall[:len(tr)])
+                        Xtr, Xte = scaler.transform(Xall[:len(tr)]), scaler.transform(Xall[len(tr):])
+                        cur, w = ms[tr], None
+                        for _ in range(cli.iters):
+                            top = top_per_spectrum(spec[tr], cur)
+                            qq = qvalues(cur[top], decoy[tr][top])
+                            pos = top[(qq <= 0.01) & ~decoy[tr][top]]
+                            neg = np.flatnonzero(decoy[tr])
+                            if len(pos) == 0 or len(neg) == 0:
+                                break
+                            if cli.max_neg and len(neg) > cli.max_neg:
+                                neg = np.random.default_rng(f).choice(neg, cli.max_neg,
+                                                                      replace=False)
+                            sel = np.r_[pos, neg]
+                            yy = np.r_[np.ones(len(pos)), np.zeros(len(neg))]
+                            w = fit_linear(Xtr[sel], yy, w0=w)
+                            cur = Xtr @ w[:-1] + w[-1]
+                        if w is None:      # no confident targets at all: fall back to the engine
+                            score[te] = calibrate(ms[tr], decoy[tr], spec[tr], ms[te])
+                            continue
+                        score[te] = calibrate(cur, decoy[tr], spec[tr], Xte @ w[:-1] + w[-1])
                 evaluate(name, score)
+        report["perrun"] = {"folds": cli.folds, "iters": cli.iters, "model": "linear"}
 
     Path(cli.out).parent.mkdir(parents=True, exist_ok=True)
     Path(cli.out).write_text(json.dumps(report, indent=1))
