@@ -1,0 +1,38 @@
+#!/bin/bash -l
+# Nine-species MOUSE (Noble nine-species-balanced, Mus-musculus): Iona peptide embedder vs yHydra,
+# open search / +-1.1 Da / 20 ppm. Same scripts as portable_eval/mouse (the CPU package).
+#   qsub -q debug -l select=1 -l walltime=01:00:00 pbs/mouse_vs_yhydra.pbs
+#PBS -N mouse-yhydra
+#PBS -A UIC-HPC
+#PBS -l filesystems=home:flare
+#PBS -j oe
+#PBS -o /home/khuss/code/msdelta/pbs/logs/
+set -uo pipefail
+REPO=/home/khuss/code/msdelta; cd $REPO
+SC=/lus/flare/projects/UIC-HPC/khuss/msdelta
+ZIP=$SC/eval-data/nine-species-noble/nine-species-balanced.zip
+D=${D:-$SC/baselines/mouse_noble}
+YE=$SC/baselines/yhydra
+OUT=results/finetune/align/mouse_yhydra; mkdir -p $OUT
+set +u; source /usr/share/lmod/lmod/init/bash; module load frameworks/2025.3.1; set -u
+source pbs/load_keys.sh
+export ONEAPI_DEVICE_SELECTOR=level_zero:gpu ZE_FLAT_DEVICE_HIERARCHY=FLAT ZE_AFFINITY_MASK=0
+export PYTHONPATH=$REPO HF_HOME=$SC/huggingface OMP_NUM_THREADS=16
+PY=$REPO/.venv/bin/python
+echo "=== $(date -Is) build"
+[[ -f $D/meta.parquet ]] || $PY portable_eval/mouse/build_mouse.py $ZIP $D || { echo "build failed"; exit 1; }
+echo "=== $(date -Is) yHydra spectrum tower (CPU, background)"
+( [[ -f $D/yhydra_embed.npy ]] || env -u PYTHONPATH YHYDRA_MODEL=$YE/saved_27_06_2021 CUDA_VISIBLE_DEVICES="" TF_CPP_MIN_LOG_LEVEL=2 \
+    $YE/env/bin/python portable_eval/mouse/embed_yhydra.py $D > $OUT/.yhydra_embed.log 2>&1 ) &
+ypid=$!
+echo "=== $(date -Is) Iona embeddings (encoder iona-contrastive-400m, student iona-peptide-embedder-400m)"
+[[ -f $D/ours.npz ]] || $PY portable_eval/mouse/embed_ours.py $D $D/ours.npz --batch-size 32 > $OUT/.ours_embed.log 2>&1 \
+  || { echo "Iona embedding failed"; tail -5 $OUT/.ours_embed.log; exit 1; }
+tail -1 $OUT/.ours_embed.log
+wait $ypid || { echo "yHydra embedding failed"; tail -5 $OUT/.yhydra_embed.log; exit 1; }
+tail -1 $OUT/.yhydra_embed.log
+echo "=== $(date -Is) comparison"
+env -u PYTHONPATH YHYDRA_MODEL=$YE/saved_27_06_2021 CUDA_VISIBLE_DEVICES="" TF_CPP_MIN_LOG_LEVEL=2 \
+  $YE/env/bin/python portable_eval/mouse/compare.py $D $D/ours.npz $OUT/compare_mouse.json 2>&1 \
+  | grep -vE "Warning|warn|WARNING" | tail -14
+echo "=== $(date -Is) done"
