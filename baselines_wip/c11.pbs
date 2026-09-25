@@ -16,7 +16,7 @@ export ONEAPI_DEVICE_SELECTOR=level_zero:gpu ZE_FLAT_DEVICE_HIERARCHY=FLAT PYTHO
 export HF_HOME=$S/huggingface HF_HUB_OFFLINE=1 HF_DATASETS_OFFLINE=1
 PY=.venv/bin/python
 if [ ! -d $C/prepared ]; then
-  echo "=== $(date -Is) build"; ZE_AFFINITY_MASK=0 $PY baselines_wip/c11_build.py $C $RUNS || exit 1
+  echo "=== $(date -Is) build"; ZE_AFFINITY_MASK=0 $PY ${BUILDER:-baselines_wip/c11_build.py} $C $RUNS || exit 1
 fi
 cat $C/prepared/PREPARED.json | head -30
 echo "=== $(date -Is) GLEAMS embed (CPU, background)"
