@@ -86,8 +86,10 @@ def test_load_vectors_aligns_by_candidate(tmp_path):
 
 def _synthetic_run(run, dataset, n_spec, rng, k=4, dim=8):
     """Rows + lab features + vectors for one run. The true target (rank 1 for most
-    spectra) has a higher e-value, a higher lab feature and a vector aligned with its
-    spectrum; decoys are random."""
+    spectra) has a higher e-value, a much higher lab feature and a vector aligned
+    with its spectrum; decoys are random. Signals are deliberately strong: at 1% FDR on a
+    few hundred spectra a single high decoy empties the list (the +1 correction), and the
+    test is about the plumbing, not about statistics."""
     rows = {c: [] for c in ("spectrum_id", "run_id", "dataset", "charge", "n_peaks",
                             "candidate", "peptide", "sequence", "is_decoy", "label",
                             "length", "cosine", "cosine_null", "msfragger_hyperscore",
@@ -102,7 +104,7 @@ def _synthetic_run(run, dataset, n_spec, rng, k=4, dim=8):
         for r in range(k):
             is_t = true and r == 0
             decoy = (not is_t) and rng.random() < 0.5
-            v = spec[i] + (0.2 if is_t else 2.0) * rng.normal(size=dim)
+            v = spec[i] + (0.05 if is_t else 3.0) * rng.normal(size=dim)
             v /= np.linalg.norm(v)
             cand = f"{run}:{i}:{r + 1}"
             vals = dict(spectrum_id=f"{run}:scan={i}", run_id=run, dataset=dataset,
@@ -117,7 +119,7 @@ def _synthetic_run(run, dataset, n_spec, rng, k=4, dim=8):
             for c, x in vals.items():
                 rows[c].append(x)
             lab["candidate_id"].append(cand)
-            lab["feat__signal"].append(float(rng.normal() + 2 * is_t))
+            lab["feat__signal"].append(float(0.3 * rng.normal() + 4 * is_t))
             lab["feat__noise"].append(float(rng.normal()))
             peps.append(v); owners.append(i)
     return rows, lab, spec, np.array(peps), np.array(owners)
@@ -127,7 +129,7 @@ def _synthetic_run(run, dataset, n_spec, rng, k=4, dim=8):
 def test_end_to_end_regimes_with_lab_and_vectors(tmp_path, regime):
     rng = np.random.default_rng(0)
     for run, ds in (("runA", "HEK293"), ("runB", "HEK293"), ("runC", "HCT116")):
-        rows, lab, spec, peps, owners = _synthetic_run(run, ds, 150, rng)
+        rows, lab, spec, peps, owners = _synthetic_run(run, ds, 400, rng)
         _write(rows, tmp_path / "rows" / f"{run}.parquet")
         _write(lab, tmp_path / "features" / ds / f"{run}.parquet")
         d = tmp_path / "vectors" / run; d.mkdir(parents=True)
@@ -147,10 +149,12 @@ def test_end_to_end_regimes_with_lab_and_vectors(tmp_path, regime):
     for s in ("ms", "lab"):
         for v in ("", "+emb", "+embws", "+embvec", "+nullvec"):
             assert f"{prefix}:{s}{v}" in m
-    # the informative lab feature helps; the real vectors help; the null ones do not
-    assert m[f"{prefix}:lab"]["psms_1pct"] >= m[f"{prefix}:ms"]["psms_1pct"]
-    assert m[f"{prefix}:ms+embvec"]["psms_1pct"] > m[f"{prefix}:ms"]["psms_1pct"]
-    assert m[f"{prefix}:ms+nullvec"]["psms_1pct"] <= m[f"{prefix}:ms+embvec"]["psms_1pct"]
+    # the strong lab feature beats the weak engine scores; the real vectors help; the
+    # null vectors (random spectrum) do not
+    ms_ = m[f"{prefix}:ms"]["psms_1pct"]
+    assert m[f"{prefix}:lab"]["psms_1pct"] > ms_
+    assert m[f"{prefix}:ms+embvec"]["psms_1pct"] > ms_
+    assert m[f"{prefix}:ms+nullvec"]["psms_1pct"] < m[f"{prefix}:ms+embvec"]["psms_1pct"]
 
 
 def test_runs_filter_refuses_missing(tmp_path):
