@@ -1472,3 +1472,17 @@ HEK confident PSMs (psm-rerank-hek-hct116, 8 runs; <=512 peaks; groups capped at
 - Lab, 2026-09-25: HEK runs are high-res MS1 / LOW-res MS2 (ion-trap fragments); HCT116 is
   high-res in both. C11's collapse is therefore the low-res MS2 domain. HCT116 = the unseen
   high-res test (C11-HCT116, queued; >512-peak spectra trimmed to top-512 for all methods).
+
+## A4 on the TEST split: no retrieval gain over A1; A2 validation +1.4 (2026-09-25)
+
+ms-contrastive-100k test, 25,848 spectra vs 9,771 candidates (job 8866281):
+
+    A1 (MSE, 3 seeds)                       0.8975-0.8989
+    A4 LiT only, no MSE (3 seeds)           0.8975-0.8980
+    A4 LiT + 4 hard negatives (3 seeds)     0.8950-0.8971   <- picked on validation (0.934)
+    A4 LiT + MSE 0.1, +-hard negatives      0.8923-0.8959
+
+The in-training validation check (2,000 spectra vs a few hundred peptides) ranked A4 +0.2
+above A1; that does not hold on test. A4's purpose (near-miss swaps) is judged by its FDR
+eval (re-embed 8866354). A2 (400m C7-final teacher) validation 0.943-0.946 vs A1 0.929-0.932:
+test eval 8866468 running.
