@@ -429,6 +429,9 @@ def main(argv: list[str] | None = None) -> int:
                         if cli.max_neg and len(neg) > cli.max_neg:
                             neg = np.sort(np.random.default_rng(f).choice(
                                 neg, cli.max_neg, replace=False))
+                        if len(pos) == 0:
+                            raise SystemExit(f"{name} fold {f}: no MSFragger target passes 1% "
+                                             f"FDR in the training runs -- nothing to learn")
                         idx = np.r_[pos, neg]
                         y = np.r_[np.ones(len(pos)), np.zeros(len(neg))]
                         Xall = design(cols, vec, np.flatnonzero(tr), np.r_[idx, te])
