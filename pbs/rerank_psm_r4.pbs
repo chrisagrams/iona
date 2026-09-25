@@ -27,7 +27,8 @@ REGIME=${REGIME:-global}; REGIME=${REGIME//+/,}
 MODELS=${MODELS:-linear+mlp}; MODELS=${MODELS//+/,}
 MAX_NEG=${MAX_NEG:-1000000}
 VECTORS=${VECTORS:-}
-OUT_NAME=${OUT_NAME:-${TAG}_r4_${REGIME//,/+}}
+SEED=${SEED:-0}
+OUT_NAME=${OUT_NAME:-${TAG}_r4_${REGIME//,/+}_seed${SEED}}
 VENV_DIR=${VENV_DIR:-$REPO_DIR/.venv}
 SCRATCH_ROOT=${SCRATCH_ROOT:-/lus/flare/projects/${PROJECT:-UIC-HPC}/$USER/msdelta}
 BASE=$SCRATCH_ROOT/rerank-psm/$TAG
@@ -77,6 +78,6 @@ echo "  lab features under $LAB"
 RUN_LIST=$(echo $RUNS | tr ' ' ',')
 echo "=== $(date -Is) FDR: regime $REGIME, runs $RUN_LIST"
 "$PY" -m msdelta.rerank_psm_fdr --rows "$BASE/rows" --runs "$RUN_LIST" --labfeat "$LAB" \
-    --sets ms,lab --models "$MODELS" --regime "$REGIME" --max-neg "$MAX_NEG" \
+    --sets ms,lab --models "$MODELS" --regime "$REGIME" --max-neg "$MAX_NEG" --seed "$SEED" \
     ${VECTORS:+--vectors "$VECTORS"} --out "results/rerank/psm/$OUT_NAME.json"
 rc=$?; echo "=== $(date -Is) done rc=$rc"; exit $rc
