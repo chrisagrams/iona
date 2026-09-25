@@ -4,12 +4,12 @@ Source: notes/OBSERVATIONS.md (job ids there). Figures: results/figures/SUMMARY/
 
 ## D: denoise
 
-| scale | test AUROC | gain from pretraining |
-|---|---|---|
-| 50m | 0.9317 | +0.046 |
-| 100m | 0.9400 | +0.051 |
-| 200m | 0.9447 | +0.048 |
-| 400m | 0.9434 | +0.045 |
+| scale | pretrained + fine-tuned | from scratch | gain |
+|---|---|---|---|
+| 50m | 0.9317 | 0.8856 | +0.046 |
+| 100m | 0.9400 | 0.8886 | +0.051 |
+| 200m | 0.9447 | 0.8963 | +0.048 |
+| 400m | 0.9434 | 0.8981 | +0.045 |
 
 Caveat: the Hub cards show training-logged numbers; reloaded models re-evaluate ~0.014 AUROC lower (unresolved).
 

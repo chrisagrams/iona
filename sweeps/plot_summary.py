@@ -21,8 +21,7 @@ plt.rcParams.update({"figure.dpi": 130, "axes.spines.top": False, "axes.spines.r
 
 # ---------------------------------------------------------------- D (denoise)
 D_SCALE = {"50m": 0.9317, "100m": 0.9400, "200m": 0.9447, "400m": 0.9434}      # D1, 6 seeds
-D_PRETRAIN_GAIN = {"50m": 0.046, "100m": 0.051, "200m": 0.048, "400m": 0.045}   # D2
-D_CKPT = {"50m": [(10, 0.910), (540, 0.936)], "100m": [(10, 0.919), (540, 0.943)]}
+D_SCRATCH = {"50m": 0.8856, "100m": 0.8886, "200m": 0.8963, "400m": 0.8981}     # D2, scratch grid 8847663, 3 seeds
 
 # ---------------------------------------------------------------- C (spectrum embeddings)
 # exp MAP@R. ms-contrastive-100k test (in-distribution for C7); unseen: HEK (C11, low-res MS2),
@@ -94,13 +93,17 @@ def save(fig, name):
 
 
 def fig_d():
-    fig, (a, b) = plt.subplots(1, 2, figsize=(9, 3.2))
-    xs = list(D_SCALE); a.plot(xs, list(D_SCALE.values()), "o-", color=OURS)
-    for x, y in D_SCALE.items():
-        a.annotate(f"{y:.3f}", (x, y), textcoords="offset points", xytext=(0, 6), ha="center")
-    a.set_title("D1: denoise test AUROC vs model size", loc="left"); a.set_ylabel("AUROC")
-    b.bar(list(D_PRETRAIN_GAIN), list(D_PRETRAIN_GAIN.values()), color=OURS)
-    b.set_title("D2: AUROC gain from pretraining (vs scratch)", loc="left"); b.set_ylabel("ΔAUROC")
+    fig, ax = plt.subplots(figsize=(5.2, 3.4))
+    xs = list(D_SCALE)
+    ax.plot(xs, list(D_SCALE.values()), "o-", color=OURS, label="pretrained + fine-tuned (6 seeds)")
+    ax.plot(xs, list(D_SCRATCH.values()), "s--", color=BASE, label="from scratch (3 seeds)")
+    for x in xs:
+        ax.annotate(f"{D_SCALE[x]:.3f}", (x, D_SCALE[x]), textcoords="offset points", xytext=(0, 6), ha="center", fontsize=7)
+        ax.annotate(f"{D_SCRATCH[x]:.3f}", (x, D_SCRATCH[x]), textcoords="offset points", xytext=(0, -12), ha="center", fontsize=7)
+        ax.annotate(f"+{D_SCALE[x] - D_SCRATCH[x]:.3f}", (x, (D_SCALE[x] + D_SCRATCH[x]) / 2), ha="center", fontsize=7, color=OURS)
+    ax.set_ylim(0.87, 0.955); ax.set_xlabel("model size"); ax.set_ylabel("denoise test AUROC")
+    ax.set_title("D: pretraining vs from scratch (4 fine-tuning epochs)", loc="left")
+    ax.legend(frameon=False, fontsize=7, ncol=2, loc="upper center", bbox_to_anchor=(0.5, -0.18))
     save(fig, "D_denoise.png")
 
 
@@ -198,8 +201,8 @@ def fig_r():
 
 def tables():
     L = ["# Summary tables (2026-09-25)", "", "Source: notes/OBSERVATIONS.md (job ids there). Figures: results/figures/SUMMARY/.", ""]
-    L += ["## D: denoise", "", "| scale | test AUROC | gain from pretraining |", "|---|---|---|"]
-    L += [f"| {s} | {D_SCALE[s]:.4f} | +{D_PRETRAIN_GAIN[s]:.3f} |" for s in D_SCALE]
+    L += ["## D: denoise", "", "| scale | pretrained + fine-tuned | from scratch | gain |", "|---|---|---|---|"]
+    L += [f"| {s} | {D_SCALE[s]:.4f} | {D_SCRATCH[s]:.4f} | +{D_SCALE[s] - D_SCRATCH[s]:.3f} |" for s in D_SCALE]
     L += ["", "Caveat: the Hub cards show training-logged numbers; reloaded models re-evaluate ~0.014 AUROC lower (unresolved).", ""]
     L += ["## C: spectrum retrieval (experimental MAP@R)", "", "| dataset | ours C7 400m (3 seeds) | ours replicate-only | frozen + ABTT | GLEAMS | binned cosine |", "|---|---|---|---|---|---|"]
     for ds, v in C_BENCH.items():
