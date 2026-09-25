@@ -1,10 +1,12 @@
 #!/bin/bash -l
 # Cross-over of MS2Rescore and our rescorer on the 8 psm-rerank-hek-hct116 runs (one node).
-#   A. MS2Rescore full + the lab's feature table (LAB=1), plain / + our embedding (cosws) / + null
-#      -> $M/lab8/{full,cosws/full,null/full}/<run>.tsv, counted -> baselines_wip/results_ms2rescore_lab8.json
-#   B. MS2Rescore full writing ALL candidates (arm fullall) -> $M/all8, then OUR per-run classifier
-#      with MS2Rescore's features added (sets ms+ms2r, lab+ms2r; variants none / +embws / +nullws),
+#   B. (default) MS2Rescore full writing ALL candidates (arm fullall) -> $M/all8, then OUR per-run
+#      classifier on MS2Rescore's features (set ms+ms2r; variants none / +embws / +nullws),
 #      seeds $SEEDS -> results/rerank/psm/a2-400m_ms2r_seed<s>.json
+#   C. (default) MS2Rescore full WITHOUT DeepLC, plain / + our embedding (cosws) / + null in its place
+#      -> $M/nodeeplc8/{nodeeplc,cosws/nodeeplc,null/nodeeplc}, counted -> baselines_wip/results_ms2rescore_nodeeplc8.json
+#   A. (PARTS includes lab) MS2Rescore full + the lab's feature table, plain / + embedding / + null
+# PARTS (default "all nodeeplc"; add "lab" for A), SETS for the classifier (default ms+ms2r).
 # Smoke: -v SMOKE=1 (2 runs x LIMIT spectra, one seed, outputs under $M/smoke*). Always smoke first.
 #PBS -N ms2r-cross
 #PBS -A UIC-HPC
@@ -27,6 +29,8 @@ else
   RES=$REPO/results/rerank/psm; TAGOUT=
 fi
 IDS=$(for r in $RUNS; do echo -n "${r##*/},"; done); IDS=${IDS%,}
+PARTS=${PARTS:-"all nodeeplc"}; SETS=${SETS:-ms+ms2r}
+NDL8=${LAB8/lab8/nodeeplc8}
 mkdir -p $RES
 set +u; source /usr/share/lmod/lmod/init/bash; module load frameworks/2025.3.1; set -u
 export ONEAPI_DEVICE_SELECTOR=level_zero:gpu ZE_FLAT_DEVICE_HIERARCHY=FLAT ZE_AFFINITY_MASK=0
@@ -39,35 +43,54 @@ $PY -m pytest -q -p no:cacheprovider tests/test_ms2r_features.py tests/test_rera
 rc=$?; grep -E "^(FAILED|ERROR)|[0-9]+ (passed|failed)" $RES/.${TAGOUT}ms2r_tests.log | tail -5
 [[ $rc == 0 ]] || { echo "tests failed (rc=$rc)"; exit 1; }
 
-echo "=== $(date -Is) MS2Rescore: A (lab features x {plain, embedding, null}) and B (all ranks), in parallel"
-( env OUT=$LAB8 LAB=1 EMB_SETS="none cosws null" EMB_ROWS=$ROWS ARMS=full LIMIT=$LIMIT RUNS="$RUNS" NPROC=8 \
-    bash baselines_wip/ms2rescore/run_ms2rescore.pbs > $LAB8.log 2>&1 ) &
-pa=$!
-( env OUT=$ALL8 LAB=0 EMB_SETS=none ARMS=fullall LIMIT=$LIMIT RUNS="$RUNS" NPROC=8 \
-    bash baselines_wip/ms2rescore/run_ms2rescore.pbs > $ALL8.log 2>&1 ) &
-pb=$!
-wait $pa; wait $pb
-grep -hE "FAILED|DONE" $LAB8.log $ALL8.log | sort | uniq -c | awk '{print "   "$0}' | tail -40
-bad=$(grep -hcE "FAILED" $LAB8.log $ALL8.log | paste -sd+ | bc)
+echo "=== $(date -Is) MS2Rescore parts: $PARTS (in parallel)"
+pids=(); logs=()
+if [[ " $PARTS " == *" all "* ]]; then
+  ( env OUT=$ALL8 LAB=0 EMB_SETS=none ARMS=fullall LIMIT=$LIMIT RUNS="$RUNS" NPROC=8 \
+      bash baselines_wip/ms2rescore/run_ms2rescore.pbs > $ALL8.log 2>&1 ) & pids+=($!); logs+=($ALL8.log)
+fi
+if [[ " $PARTS " == *" nodeeplc "* ]]; then
+  ( env OUT=$NDL8 LAB=0 EMB_SETS="none cosws null" EMB_ROWS=$ROWS ARMS=nodeeplc LIMIT=$LIMIT RUNS="$RUNS" NPROC=8 \
+      bash baselines_wip/ms2rescore/run_ms2rescore.pbs > $NDL8.log 2>&1 ) & pids+=($!); logs+=($NDL8.log)
+fi
+if [[ " $PARTS " == *" lab "* ]]; then
+  ( env OUT=$LAB8 LAB=1 EMB_SETS="none cosws null" EMB_ROWS=$ROWS ARMS=full LIMIT=$LIMIT RUNS="$RUNS" NPROC=8 \
+      bash baselines_wip/ms2rescore/run_ms2rescore.pbs > $LAB8.log 2>&1 ) & pids+=($!); logs+=($LAB8.log)
+fi
+for p in "${pids[@]}"; do wait $p; done
+grep -hE "FAILED|DONE" "${logs[@]}" | sed 's/^[^ ]* //' | sort | uniq -c | awk '{print "   "$0}' | tail -60
+bad=$(grep -hcE "FAILED" "${logs[@]}" | paste -sd+ | bc)
 [[ ${bad:-0} == 0 ]] || { echo "MS2Rescore failures: $bad"; exit 1; }
 
-echo "=== $(date -Is) count A (our TDC, pooled over runs)"
-SB=$SC/baselines/ms2rescore/bin/python
-for s in full cosws/full null/full; do
-  d=$LAB8/$s; n=$(echo $s | tr '/' '_')
-  $SB baselines_wip/score_baselines.py --ms2rescore $d --out $RES/.${TAGOUT}ms2r_lab8_$n.json > /dev/null 2>&1 || { echo "count failed $s"; exit 1; }
-done
-$PY - $RES $TAGOUT <<'PY'
+count() {   # count ROOT ARM LABELPREFIX DEST: plain / cosws / null sets, our TDC pooled over runs
+  local root=$1 arm=$2 pre=$3 dest=$4 SB=$SC/baselines/ms2rescore/bin/python
+  for s in "" cosws/ null/; do
+    n=${s%/}; n=${n:-plain}
+    $SB baselines_wip/score_baselines.py --ms2rescore $root/$s$arm --out $RES/.${TAGOUT}${pre}_$n.json > /dev/null 2>&1 \
+      || { echo "count failed $root/$s$arm"; return 1; }
+  done
+  $PY - $RES "$TAGOUT" $pre $arm "$dest" <<'PY'
 import json, sys
-res, tag = sys.argv[1], sys.argv[2]
+res, tag, pre, arm, dest = sys.argv[1:6]
 out = {}
-for n, label in (("full", "ms2rescore:full+lab"), ("cosws_full", "ms2rescore:full+lab+embedding(400M teacher, cosws)"),
-                 ("null_full", "ms2rescore:full+lab+null control")):
-    out[label] = json.load(open(f"{res}/.{tag}ms2r_lab8_{n}.json"))["ms2rescore:full"]
-    print(f"   {label:55s} {out[label]['all']['pooled']:>9,}")
-dest = f"{res}/{tag}ms2r_lab8.json" if tag else "/home/khuss/code/msdelta/baselines_wip/results_ms2rescore_lab8.json"
+for n, label in (("plain", f"ms2rescore:{arm}"), ("cosws", f"ms2rescore:{arm}+embedding(400M teacher, cosws)"),
+                 ("null", f"ms2rescore:{arm}+null control")):
+    out[label] = json.load(open(f"{res}/.{tag}{pre}_{n}.json"))[f"ms2rescore:{arm}"]
+    print(f"   {label:55s} {out[label]['all']['pooled']:>9,}  (HEK {out[label]['HEK293']['pooled']:,}, HCT116 {out[label]['HCT116']['pooled']:,})")
 json.dump(out, open(dest, "w"), indent=1); print("   ->", dest)
 PY
+}
+if [[ " $PARTS " == *" nodeeplc "* ]]; then
+  echo "=== $(date -Is) count C: MS2Rescore without DeepLC, plain / + embedding / + null"
+  d=/home/khuss/code/msdelta/baselines_wip/results_ms2rescore_nodeeplc8.json; [[ -n $TAGOUT ]] && d=$RES/${TAGOUT}ms2r_nodeeplc8.json
+  count $NDL8 nodeeplc ndl8 $d || exit 1
+fi
+if [[ " $PARTS " == *" lab "* ]]; then
+  echo "=== $(date -Is) count A: MS2Rescore + lab features, plain / + embedding / + null"
+  d=/home/khuss/code/msdelta/baselines_wip/results_ms2rescore_lab8.json; [[ -n $TAGOUT ]] && d=$RES/${TAGOUT}ms2r_lab8.json
+  count $LAB8 full lab8 $d || exit 1
+fi
+[[ " $PARTS " == *" all "* ]] || { echo "=== $(date -Is) done"; exit 0; }
 
 echo "=== $(date -Is) B: our per-run classifier + MS2Rescore features"
 RROWS=$ROWS
@@ -84,7 +107,7 @@ PY
 fi
 for s in $SEEDS; do
   $PY -m msdelta.rerank_psm_fdr --rows $RROWS --runs $IDS --labfeat $LABDIR --ms2r $ALL8 --regime perrun \
-      --models linear --sets ms,lab,ms+ms2r,lab+ms2r --variants none,embws,nullws --seed $s \
+      --models linear --sets $SETS --variants none,embws,nullws --seed $s \
       --out $RES/${TAGOUT}a2-400m_ms2r_seed$s.json > $RES/.${TAGOUT}a2-400m_ms2r_seed$s.log 2>&1 \
     || { echo "classifier seed $s failed (see $RES/.${TAGOUT}a2-400m_ms2r_seed$s.log)"; tail -5 $RES/.${TAGOUT}a2-400m_ms2r_seed$s.log; exit 1; }
   grep -E "\[all\s*\] perrun" $RES/.${TAGOUT}a2-400m_ms2r_seed$s.log | sed 's/^/   /'
