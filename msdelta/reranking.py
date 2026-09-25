@@ -37,6 +37,7 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 from torch import Tensor, nn
+from torch.utils.data import Sampler
 
 from msdelta.fourier import FourierFeatures
 
@@ -788,6 +789,79 @@ def hard_negatives(peptide: str, rng, k: int, min_delta: float = 0.05,
         cands = [cands[i] for i in rng.choice(len(cands), k, replace=False)]
     return cands
 
+
+# ------------------------------------------------------------------ A8: mass-aware training
+# Deployed pipelines filter candidates by precursor mass first, so the student is used to
+# separate peptides of (nearly) the SAME mass. Random batch negatives are almost never that.
+
+def peptide_neutral_mass(peptide: str) -> float:
+    """Monoisotopic neutral mass of a peptide in our notation (`C[57.0215]`, `[42.0106]P`)."""
+    from msdelta.chemistry import RESIDUE_MASSES
+    mods = sum(float(x) for x in re.findall(r"\[([-+]?\d+\.?\d*)\]", peptide))
+    residues = re.sub(r"\[[^\]]*\]", "", peptide)
+    return sum(RESIDUE_MASSES[r] for r in residues) + mods + 18.010565
+
+
+def _il(peptide: str) -> str:
+    """I/L-collapsed, modification-stripped sequence: peptides equal here give the same
+    fragment masses up to their modifications, so they are never negatives of each other."""
+    return re.sub(r"\[[^\]]*\]", "", peptide).replace("I", "L")
+
+
+class MassNegativePool:
+    """Training peptides sorted by neutral mass, for same-mass hard negatives."""
+
+    def __init__(self, peptides):
+        uniq = sorted(set(peptides))
+        m = np.array([peptide_neutral_mass(p) for p in uniq])
+        order = np.argsort(m, kind="stable")
+        self.masses = m[order]
+        self.peptides = [uniq[i] for i in order]
+
+    def negatives(self, peptide: str, rng, k: int, ppm: float = 20.0) -> list[str]:
+        """Up to k OTHER peptides within +-ppm of this one's mass (I/L-equivalents excluded)."""
+        mass = peptide_neutral_mass(peptide)
+        tol = mass * ppm * 1e-6
+        lo = np.searchsorted(self.masses, mass - tol, "left")
+        hi = np.searchsorted(self.masses, mass + tol, "right")
+        own = _il(peptide)
+        cands = [self.peptides[i] for i in range(lo, hi) if _il(self.peptides[i]) != own]
+        if len(cands) <= k:
+            return cands
+        return [cands[i] for i in rng.choice(len(cands), k, replace=False)]
+
+
+class MassBatchSampler(Sampler):
+    """Batches of rows that are NEIGHBOURS IN MASS: each epoch, masses + uniform jitter
+    (+-jitter Da) are sorted and cut into consecutive batches, whose order is shuffled. So
+    in-batch negatives are near-same-mass competitors, like the candidates left after a
+    precursor window. Reshuffles itself every epoch (the epoch counter advances inside
+    __iter__; HF Trainer never calls set_epoch on a custom batch_sampler -- FT14)."""
+
+    def __init__(self, masses, batch_size: int, jitter: float = 0.5, seed: int = 0,
+                 drop_last: bool = False):
+        self.masses = np.asarray(masses, dtype=np.float64)
+        self.batch_size, self.jitter, self.seed, self.drop_last = batch_size, jitter, seed, drop_last
+        self.epoch = 0
+
+    def set_epoch(self, epoch: int):
+        self.epoch = epoch
+
+    def __len__(self):
+        n = len(self.masses) // self.batch_size
+        return n if self.drop_last or len(self.masses) % self.batch_size == 0 else n + 1
+
+    def __iter__(self):
+        rng = np.random.default_rng((self.seed, self.epoch))
+        self.epoch += 1
+        key = self.masses + rng.uniform(-self.jitter, self.jitter, len(self.masses))
+        order = np.argsort(key, kind="stable")
+        batches = [order[i:i + self.batch_size] for i in range(0, len(order), self.batch_size)]
+        if self.drop_last and len(batches[-1]) < self.batch_size:
+            batches = batches[:-1]
+        for j in rng.permutation(len(batches)):
+            yield batches[j].tolist()
+
 @dataclass
 class AlignmentCollator:
     """Pad spectra and their peptides into one batch."""
@@ -798,6 +872,11 @@ class AlignmentCollator:
     hard_negatives: int = 0
     neg_min_delta: float = 0.05
     neg_seed: int = 0
+    # A8: "swap" = distinguishable rearrangements (A4); "mass" = other TRAINING peptides
+    # within +-neg_ppm of the peptide's mass (needs neg_pool, a MassNegativePool).
+    neg_source: str = "swap"
+    neg_ppm: float = 20.0
+    neg_pool: object = None
 
     # Only meaningful on the cached-target path, where it makes every batch the same
     # shape; with a live teacher the spectra dominate and vary anyway.
@@ -818,7 +897,10 @@ class AlignmentCollator:
         charges = [int(f.get("charge", 0)) for f in features]
         flat, valid = [], []
         for pep in peps:
-            neg = hard_negatives(pep, self._rng, k, self.neg_min_delta)
+            if self.neg_source == "mass":
+                neg = self.neg_pool.negatives(pep, self._rng, k, self.neg_ppm)
+            else:
+                neg = hard_negatives(pep, self._rng, k, self.neg_min_delta)
             valid.append([True] * len(neg) + [False] * (k - len(neg)))
             flat += neg + [pep] * (k - len(neg))            # padding rows are masked out
         tok = self.padded(flat, [c for c in charges for _ in range(k)])
