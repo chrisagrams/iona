@@ -1427,3 +1427,10 @@ transductive gain). Job 8865987 (8 of 10 encoders; 400m@220k/430k rerun on capac
 
 Best block stays at ~3/4 depth. Still far below binned cosine 0.730 and trained C7 0.868.
 D=128 is the top of the swept range for 200m/400m -> optimum unlocated (add D=256).
+- Precursor-mass windows (yHydra's native setting; job 8866320), same 22,869 queries:
+    window    median cands   yHydra (L2)   A1 (3 seeds)
+    open      ~8k            0.196         0.901
+    +-1.1 Da  14-15          0.754         0.972-0.973
+    20 ppm    2              0.942         0.993
+  The window does much of the work; our embedding still makes 8-9x fewer errors. True
+  candidate inside the window for every query (mass calc verified). In-distribution for us.
