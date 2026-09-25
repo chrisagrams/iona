@@ -1703,3 +1703,17 @@ Result (job 8870383, 22:32 UTC): all near chance on C14 (MAP@R; pre-registered /
 C14 spectra themselves: at most 0.047). Yeast 20k for the same encoders: 0.709 / 0.654 / 0.602. So frozen embeddings do not
 transfer to HCT116 at all; fine-tuned C7 400M reaches 0.23-0.32, GLEAMS 0.658, binned 1 Da 0.742. Not a data-loading issue:
 same 20,002 queries and prepared data as the fine-tuned eval. No further C compute (user, 2026-09-25).
+
+## Cross-over results (job 8870274, 8 runs, 2026-09-25 23:07 UTC)
+
+C. MS2Rescore WITHOUT DeepLC (basic + MS2PIP + ms2 features), one run each:
+    plain 124,152 (HEK 117,816 / HCT116 5,872); + iona embedding 124,670 (118,267 / 6,130); + null 124,338 (117,824 / 6,203)
+    net embedding - null = +332 (+0.27%): HEK +443 (null +8, clean), HCT116 -73 (noise, as before).
+    DeepLC is worth +4,059 (128,211 with vs 124,152 without); the embedding in its place recovers +518 (net +332),
+    i.e. it does NOT replace retention-time prediction.
+B. iona-rerank (per-run linear) on MS2Rescore's own features (all-ranks export; MSFragger + MS2PIP + DeepLC + ms2),
+   seeds 0/1/2:
+    plain 124,792 / 124,863 / 124,652 (mean 124,769); + iona embedding 125,058 / 124,970 / 125,001 (125,010);
+    + null 124,892 / 124,843 / 124,860 (124,865). Net embedding - null per seed +166 / +127 / +141 (+145, +0.12%):
+    small but positive in every seed. Note iona-rerank on MS2Rescore's features (124.8k) is below MS2Rescore's own
+    classifier on them (128.2k); with the rich features iona-rerank reaches 128.9k.
