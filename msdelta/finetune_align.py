@@ -68,6 +68,12 @@ class AlignModelArguments:
     mse_weight: float = 0.0
     hard_negatives: int = 0
     neg_min_delta: float = 0.05
+    # A8 (mass-aware): batches of mass NEIGHBOURS (in-batch negatives ~ same-mass
+    # competitors) and/or hard negatives drawn from training peptides within +-neg_ppm.
+    mass_batches: bool = False
+    mass_batch_jitter: float = 0.5
+    neg_source: str = "swap"
+    neg_ppm: float = 20.0
 
 
 @dataclass
@@ -113,6 +119,17 @@ class AlignTrainingArguments(TrainingArguments):
 
 class SequenceAlignmentTrainer(Trainer):
     """Optimise the student alone, and score ranking rather than the loss."""
+
+    mass_sampler = None          # A8: a reranking.MassBatchSampler, or None (random batches)
+
+    def get_train_dataloader(self):
+        if self.mass_sampler is None:
+            return super().get_train_dataloader()
+        from torch.utils.data import DataLoader
+        return DataLoader(self.train_dataset, batch_sampler=self.mass_sampler,
+                          collate_fn=self.data_collator,
+                          num_workers=self.args.dataloader_num_workers,
+                          pin_memory=self.args.dataloader_pin_memory)
 
     def create_optimizer(self):
         """Defer to the Trainer unless a teacher is actually present to exclude.
@@ -245,7 +262,9 @@ def main(argv: list[str] | None = None) -> int:
     collator = AlignmentCollator(max_peptide_length=model_args.max_peptide_length,
                                  hard_negatives=model_args.hard_negatives,
                                  neg_min_delta=model_args.neg_min_delta,
-                                 neg_seed=training_args.seed)
+                                 neg_seed=training_args.seed,
+                                 neg_source=model_args.neg_source,
+                                 neg_ppm=model_args.neg_ppm)
 
     student = sum(p.numel() for p in model.sequence_encoder.parameters())
     frozen = (sum(p.numel() for p in model.spectrum_model.parameters())
@@ -318,10 +337,24 @@ def main(argv: list[str] | None = None) -> int:
             print("[align] " + " ".join(f"{k}={len(v):,}" for k, v in datasets.items()),
                   flush=True)
 
+        if model_args.neg_source == "mass" or model_args.mass_batches:
+            from msdelta.reranking import MassBatchSampler, MassNegativePool, peptide_neutral_mass
+            train_peps = datasets["train"]["peptide"]
+            if model_args.neg_source == "mass":
+                collator.neg_pool = MassNegativePool(train_peps)
+                print(f"[align] mass negatives: {len(collator.neg_pool.peptides):,} training "
+                      f"peptides, +-{model_args.neg_ppm:g} ppm", flush=True)
         trainer = SequenceAlignmentTrainer(
             model=model, args=training_args, train_dataset=datasets["train"],
             eval_dataset=datasets.get("validation"), data_collator=collator,
         )
+        if model_args.mass_batches:
+            masses = [peptide_neutral_mass(p) for p in train_peps]
+            trainer.mass_sampler = MassBatchSampler(
+                masses, training_args.per_device_train_batch_size,
+                jitter=model_args.mass_batch_jitter, seed=training_args.seed)
+            print(f"[align] mass-bucketed batches of {training_args.per_device_train_batch_size} "
+                  f"(jitter +-{model_args.mass_batch_jitter:g} Da)", flush=True)
         trainer.add_callback(MemoryProbe(every=50))
         trainer.train()
 
