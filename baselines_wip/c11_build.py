@@ -37,6 +37,7 @@ PROCESSOR = "/flare/UIC-HPC/khuss/msdelta/pretrained/msdelta-50m-production-01-c
 MAX_PEAKS = 512
 MAX_PER_GROUP = 20
 TRIM = os.environ.get("C11_TRIM", "0") == "1"
+TARGET = int(os.environ.get("C11_TARGET", "0"))   # >0: keep whole groups (seed 0) up to N spectra
 
 
 def confident_psms(run: str) -> dict:
@@ -104,6 +105,18 @@ def main(out_dir, *runs):
             seen[k] += 1; keep[i] = True
     capped = len(recs) - int(keep.sum())
     recs = [r for r, k in zip(recs, keep) if k]
+    if TARGET and len(recs) > TARGET:
+        from collections import defaultdict
+        by = defaultdict(list)
+        for i, r in enumerate(recs):
+            by[(r["peptide"], r["charge"])].append(i)
+        keys = list(by); pick = []
+        for j in np.random.default_rng(0).permutation(len(keys)):
+            pick.extend(by[keys[j]])
+            if len(pick) >= TARGET:
+                break
+        recs = [recs[i] for i in sorted(pick)]
+        print(f"[c11] sampled whole groups to {len(recs):,} spectra (C11_TARGET={TARGET})", flush=True)
     print(f"[c11] capped groups at {MAX_PER_GROUP}: {capped:,} spectra dropped", flush=True)
     groups = len({(r["peptide"], r["charge"]) for r in recs})
     print(f"[c11] {len(recs):,} spectra in {groups:,} peptide+charge groups (>= 2 each)",
@@ -121,7 +134,7 @@ def main(out_dir, *runs):
     Dataset.from_dict(prep).save_to_disk(str(out / "prepared"))
     info = {"source": f"{REPO_ID}@{REVISION}", "runs": list(runs), "per_run": stats,
             "spectra": len(recs), "groups": groups, "max_peaks": MAX_PEAKS,
-            "max_per_group": MAX_PER_GROUP, "trimmed_to_top512": TRIM,
+            "max_per_group": MAX_PER_GROUP, "trimmed_to_top512": TRIM, "target": TARGET,
             "labels": "MSFragger rank-1 targets at q<=1% (per-run TDC on -log10 e-value)"}
     (out / "prepared" / "PREPARED.json").write_text(json.dumps(info, indent=1))
 
