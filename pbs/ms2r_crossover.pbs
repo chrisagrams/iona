@@ -6,7 +6,8 @@
 #   C. (default) MS2Rescore full WITHOUT DeepLC, plain / + our embedding (cosws) / + null in its place
 #      -> $M/nodeeplc8/{nodeeplc,cosws/nodeeplc,null/nodeeplc}, counted -> baselines_wip/results_ms2rescore_nodeeplc8.json
 #   A. (PARTS includes lab) MS2Rescore full + the lab's feature table, plain / + embedding / + null
-# PARTS (default "all nodeeplc"; add "lab" for A), SETS for the classifier (default ms+ms2r).
+#   D. (PARTS includes noms2pip) MS2Rescore full WITHOUT MS2PIP, plain / + embedding / + null in its place
+# PARTS (default "all nodeeplc"; add "lab" for A, "noms2pip" for D), SETS for the classifier (default ms+ms2r).
 # Smoke: -v SMOKE=1 (2 runs x LIMIT spectra, one seed, outputs under $M/smoke*). Always smoke first.
 #PBS -N ms2r-cross
 #PBS -A UIC-HPC
@@ -30,7 +31,7 @@ else
 fi
 IDS=$(for r in $RUNS; do echo -n "${r##*/},"; done); IDS=${IDS%,}
 PARTS=${PARTS:-"all nodeeplc"}; SETS=${SETS:-ms+ms2r}
-NDL8=${LAB8/lab8/nodeeplc8}
+NDL8=${LAB8/lab8/nodeeplc8}; NMP8=${LAB8/lab8/noms2pip8}
 mkdir -p $RES
 set +u; source /usr/share/lmod/lmod/init/bash; module load frameworks/2025.3.1; set -u
 export ONEAPI_DEVICE_SELECTOR=level_zero:gpu ZE_FLAT_DEVICE_HIERARCHY=FLAT ZE_AFFINITY_MASK=0
@@ -52,6 +53,10 @@ fi
 if [[ " $PARTS " == *" nodeeplc "* ]]; then
   ( env OUT=$NDL8 LAB=0 EMB_SETS="none cosws null" EMB_ROWS=$ROWS ARMS=nodeeplc LIMIT=$LIMIT RUNS="$RUNS" NPROC=8 \
       bash baselines_wip/ms2rescore/run_ms2rescore.pbs > $NDL8.log 2>&1 ) & pids+=($!); logs+=($NDL8.log)
+fi
+if [[ " $PARTS " == *" noms2pip "* ]]; then
+  ( env OUT=$NMP8 LAB=0 EMB_SETS="none cosws null" EMB_ROWS=$ROWS ARMS=noms2pip LIMIT=$LIMIT RUNS="$RUNS" NPROC=8 \
+      bash baselines_wip/ms2rescore/run_ms2rescore.pbs > $NMP8.log 2>&1 ) & pids+=($!); logs+=($NMP8.log)
 fi
 if [[ " $PARTS " == *" lab "* ]]; then
   ( env OUT=$LAB8 LAB=1 EMB_SETS="none cosws null" EMB_ROWS=$ROWS ARMS=full LIMIT=$LIMIT RUNS="$RUNS" NPROC=8 \
@@ -84,6 +89,11 @@ if [[ " $PARTS " == *" nodeeplc "* ]]; then
   echo "=== $(date -Is) count C: MS2Rescore without DeepLC, plain / + embedding / + null"
   d=/home/khuss/code/msdelta/baselines_wip/results_ms2rescore_nodeeplc8.json; [[ -n $TAGOUT ]] && d=$RES/${TAGOUT}ms2r_nodeeplc8.json
   count $NDL8 nodeeplc ndl8 $d || exit 1
+fi
+if [[ " $PARTS " == *" noms2pip "* ]]; then
+  echo "=== $(date -Is) count D: MS2Rescore without MS2PIP, plain / + embedding / + null"
+  d=/home/khuss/code/msdelta/baselines_wip/results_ms2rescore_noms2pip8.json; [[ -n $TAGOUT ]] && d=$RES/${TAGOUT}ms2r_noms2pip8.json
+  count $NMP8 noms2pip nmp8 $d || exit 1
 fi
 if [[ " $PARTS " == *" lab "* ]]; then
   echo "=== $(date -Is) count A: MS2Rescore + lab features, plain / + embedding / + null"

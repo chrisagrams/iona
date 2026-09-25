@@ -8,6 +8,7 @@
 # arm "fullall": the full config but writing ALL candidates (max_psm_rank_output 10), so their
 #   MS2Rescore features can be fed to our classifier (rerank_psm_fdr --ms2r); not for counting
 # arm "nodeeplc": the full config without the DeepLC feature generator (swap DeepLC for our embedding)
+# arm "noms2pip": the full config without the MS2PIP feature generator (swap MS2PIP for our embedding)
 #PBS -N ms2rescore-base
 #PBS -A UIC-HPC
 #PBS -l filesystems=home:flare
@@ -50,7 +51,7 @@ for r in $RUNS; do
       for arm in $ARMS; do
         if [[ $arm == full ]]; then
           [[ $ds == HEK293 ]] && cfg=$W/config_full_CID.json || cfg=$W/config_full_${HCT_MODEL:-HCD2021}.json
-        elif [[ $arm == fullall || $arm == nodeeplc ]]; then
+        elif [[ $arm == fullall || $arm == nodeeplc || $arm == noms2pip ]]; then
           [[ $ds == HEK293 ]] && cfg=$W/config_${arm}_CID.json || cfg=$W/config_${arm}_${HCT_MODEL:-HCD2021}.json
         elif [[ $arm == fullcid ]]; then cfg=$W/config_full_CID.json
         else cfg=$W/config_$arm.json; fi
