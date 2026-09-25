@@ -1,0 +1,92 @@
+#!/bin/bash -l
+# Cross-over of MS2Rescore and our rescorer on the 8 psm-rerank-hek-hct116 runs (one node).
+#   A. MS2Rescore full + the lab's feature table (LAB=1), plain / + our embedding (cosws) / + null
+#      -> $M/lab8/{full,cosws/full,null/full}/<run>.tsv, counted -> baselines_wip/results_ms2rescore_lab8.json
+#   B. MS2Rescore full writing ALL candidates (arm fullall) -> $M/all8, then OUR per-run classifier
+#      with MS2Rescore's features added (sets ms+ms2r, lab+ms2r; variants none / +embws / +nullws),
+#      seeds $SEEDS -> results/rerank/psm/a2-400m_ms2r_seed<s>.json
+# Smoke: -v SMOKE=1 (2 runs x LIMIT spectra, one seed, outputs under $M/smoke*). Always smoke first.
+#PBS -N ms2r-cross
+#PBS -A UIC-HPC
+#PBS -l filesystems=home:flare
+#PBS -j oe
+#PBS -o /home/khuss/code/msdelta/pbs/logs/
+set -uo pipefail
+REPO=/home/khuss/code/msdelta; cd $REPO
+SC=/lus/flare/projects/UIC-HPC/khuss/msdelta
+M=$SC/baselines/ms2rescore_out
+ROWS=$SC/rerank-psm/a2-400m/rows
+LABDIR=$SC/huggingface/hub/datasets--Gaolaboratory--psm-rerank-hek-hct116/snapshots/a6df7948d4500a1f303b0dcf4b6a6a040784d0c6/features
+SMOKE=${SMOKE:-0}
+RUNS8="HEK293/0718-5 HEK293/05032011-7 HEK293/09122011-5 HEK293/HEK-0628-5 HEK293/HEK-U100ug-0408-5 HEK293/HEK-U100ug-V2-5 HCT116/Xiaomu_HCT116WholeCell_HILIC15_120min_10ul HCT116/Xiaomu_HCT116WholeCell_HILIC14_120min_10ul"
+if [[ $SMOKE == 1 ]]; then
+  RUNS=${RUNS:-"HEK293/HEK-0628-5 HCT116/Xiaomu_HCT116WholeCell_HILIC14_120min_10ul"}; LIMIT=${LIMIT:-1000}
+  SEEDS=${SEEDS:-0}; LAB8=$M/smoke_lab8; ALL8=$M/smoke_all8; RES=$M/smoke_results; TAGOUT=smoke_
+else
+  RUNS=${RUNS:-$RUNS8}; LIMIT=0; SEEDS=${SEEDS:-"0 1 2"}; LAB8=$M/lab8; ALL8=$M/all8
+  RES=$REPO/results/rerank/psm; TAGOUT=
+fi
+IDS=$(for r in $RUNS; do echo -n "${r##*/},"; done); IDS=${IDS%,}
+mkdir -p $RES
+set +u; source /usr/share/lmod/lmod/init/bash; module load frameworks/2025.3.1; set -u
+export ONEAPI_DEVICE_SELECTOR=level_zero:gpu ZE_FLAT_DEVICE_HIERARCHY=FLAT ZE_AFFINITY_MASK=0
+export OMP_NUM_THREADS=32 PYTHONPATH=$REPO HF_HOME=$SC/huggingface HF_HUB_OFFLINE=1
+PY=$REPO/.venv/bin/python
+
+echo "=== $(date -Is) tests (SMOKE=$SMOKE)"
+$PY -m pytest -q -p no:cacheprovider tests/test_ms2r_features.py tests/test_rerank_r4.py tests/test_psm_rerank.py -rfE \
+    > $RES/.${TAGOUT}ms2r_tests.log 2>&1
+rc=$?; grep -E "^(FAILED|ERROR)|[0-9]+ (passed|failed)" $RES/.${TAGOUT}ms2r_tests.log | tail -5
+[[ $rc == 0 ]] || { echo "tests failed (rc=$rc)"; exit 1; }
+
+echo "=== $(date -Is) MS2Rescore: A (lab features x {plain, embedding, null}) and B (all ranks), in parallel"
+( env OUT=$LAB8 LAB=1 EMB_SETS="none cosws null" EMB_ROWS=$ROWS ARMS=full LIMIT=$LIMIT RUNS="$RUNS" NPROC=8 \
+    bash baselines_wip/ms2rescore/run_ms2rescore.pbs > $LAB8.log 2>&1 ) &
+pa=$!
+( env OUT=$ALL8 LAB=0 EMB_SETS=none ARMS=fullall LIMIT=$LIMIT RUNS="$RUNS" NPROC=8 \
+    bash baselines_wip/ms2rescore/run_ms2rescore.pbs > $ALL8.log 2>&1 ) &
+pb=$!
+wait $pa; wait $pb
+grep -hE "FAILED|DONE" $LAB8.log $ALL8.log | sort | uniq -c | awk '{print "   "$0}' | tail -40
+bad=$(grep -hcE "FAILED" $LAB8.log $ALL8.log | paste -sd+ | bc)
+[[ ${bad:-0} == 0 ]] || { echo "MS2Rescore failures: $bad"; exit 1; }
+
+echo "=== $(date -Is) count A (our TDC, pooled over runs)"
+SB=$SC/baselines/ms2rescore/bin/python
+for s in full cosws/full null/full; do
+  d=$LAB8/$s; n=$(echo $s | tr '/' '_')
+  $SB baselines_wip/score_baselines.py --ms2rescore $d --out $RES/.${TAGOUT}ms2r_lab8_$n.json > /dev/null 2>&1 || { echo "count failed $s"; exit 1; }
+done
+$PY - $RES $TAGOUT <<'PY'
+import json, sys
+res, tag = sys.argv[1], sys.argv[2]
+out = {}
+for n, label in (("full", "ms2rescore:full+lab"), ("cosws_full", "ms2rescore:full+lab+embedding(400M teacher, cosws)"),
+                 ("null_full", "ms2rescore:full+lab+null control")):
+    out[label] = json.load(open(f"{res}/.{tag}ms2r_lab8_{n}.json"))["ms2rescore:full"]
+    print(f"   {label:55s} {out[label]['all']['pooled']:>9,}")
+dest = f"{res}/{tag}ms2r_lab8.json" if tag else "/home/khuss/code/msdelta/baselines_wip/results_ms2rescore_lab8.json"
+json.dump(out, open(dest, "w"), indent=1); print("   ->", dest)
+PY
+
+echo "=== $(date -Is) B: our per-run classifier + MS2Rescore features"
+RROWS=$ROWS
+if [[ $SMOKE == 1 ]]; then   # only the spectra MS2Rescore saw
+  RROWS=$M/smoke_rows; mkdir -p $RROWS
+  $PY - $ALL8 $ROWS $RROWS $IDS <<'PY'
+import sys, pandas as pd, pyarrow.parquet as pq
+all8, rows, out, ids = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4].split(",")
+for r in ids:
+    keep = set(pd.read_csv(f"{all8}/in/{r}/candidates.tsv", sep="\t", usecols=["candidate_id"])["candidate_id"])
+    t = pq.read_table(f"{rows}/{r}.parquet").to_pandas()
+    t[t["candidate"].isin(keep)].to_parquet(f"{out}/{r}.parquet"); print("   smoke rows", r, t["candidate"].isin(keep).sum())
+PY
+fi
+for s in $SEEDS; do
+  $PY -m msdelta.rerank_psm_fdr --rows $RROWS --runs $IDS --labfeat $LABDIR --ms2r $ALL8 --regime perrun \
+      --models linear --sets ms,lab,ms+ms2r,lab+ms2r --variants none,embws,nullws --seed $s \
+      --out $RES/${TAGOUT}a2-400m_ms2r_seed$s.json > $RES/.${TAGOUT}a2-400m_ms2r_seed$s.log 2>&1 \
+    || { echo "classifier seed $s failed (see $RES/.${TAGOUT}a2-400m_ms2r_seed$s.log)"; tail -5 $RES/.${TAGOUT}a2-400m_ms2r_seed$s.log; exit 1; }
+  grep -E "\[all\s*\] perrun" $RES/.${TAGOUT}a2-400m_ms2r_seed$s.log | sed 's/^/   /'
+done
+echo "=== $(date -Is) done"

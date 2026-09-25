@@ -1,0 +1,7 @@
+{"ms2rescore": {
+  "feature_generators": {"basic": {}, "ms2pip": {"model": "HCD2021", "model_dir": "/lus/flare/projects/UIC-HPC/khuss/msdelta/baselines/ms2pip_models"}, "deeplc": {}, "ms2": {}},
+  "rescoring": {"train_fdr": 0.01, "model": "svm"},
+  "psm_file_type": "tsv", "id_decoy_pattern": null,
+  "max_psm_rank_input": 10, "max_psm_rank_output": 10,
+  "write_report": false, "disable_update_check": true,
+  "fragmentation_model": "cidhcd", "tolerance_value": 0.3, "tolerance_mode": "Da"}}

@@ -157,6 +157,39 @@ def load_lab_features(lab_dir: str, run_ids) -> "tuple":
     return lab[["candidate"] + keep], tuple(keep)
 
 
+def load_ms2r_features(root: str, run_ids) -> "tuple":
+    """MS2Rescore's per-candidate features for these runs, keyed on `candidate`.
+
+    Expects an all-ranks MS2Rescore run (run_ms2rescore.pbs arm `fullall`):
+    ROOT/in/<run>/candidates.tsv (candidate_id, spectrum_id, peptidoform) and
+    ROOT/fullall/<run>.tsv (every candidate with its rescoring:* features). Joined on
+    (spectrum_id, peptidoform), which is unique per candidate. Returns (frame, columns)
+    with columns prefixed `ms2r_`; MS2Rescore's own score/q-value are NOT used."""
+    import pandas as pd
+    frames = []
+    for run in sorted(set(run_ids)):
+        cand = pd.read_csv(Path(root) / "in" / run / "candidates.tsv", sep="\t",
+                           usecols=["candidate_id", "spectrum_id", "peptidoform"])
+        head = pd.read_csv(Path(root) / "fullall" / f"{run}.tsv", sep="\t", nrows=0).columns
+        feat = [c for c in head if c.startswith("rescoring:")]
+        out = pd.read_csv(Path(root) / "fullall" / f"{run}.tsv", sep="\t",
+                          usecols=["spectrum_id", "peptidoform"] + feat)
+        if out.duplicated(["spectrum_id", "peptidoform"]).any():
+            raise SystemExit(f"ms2r {run}: duplicate (spectrum_id, peptidoform) rows")
+        m = cand.merge(out, on=["spectrum_id", "peptidoform"], how="left", validate="one_to_one")
+        miss = m[feat[0]].isna().mean()
+        if miss > 0.01:
+            raise SystemExit(f"ms2r {run}: {miss:.1%} of candidates have no MS2Rescore features")
+        frames.append(m.drop(columns=["spectrum_id", "peptidoform"]))
+    f = pd.concat(frames, ignore_index=True).rename(columns={"candidate_id": "candidate"})
+    f = f.rename(columns={c: "ms2r_" + c[len("rescoring:"):] for c in f.columns if c.startswith("rescoring:")})
+    cols = [c for c in f.columns if c.startswith("ms2r_")]
+    for c in cols:
+        f[c] = pd.to_numeric(f[c], errors="coerce")
+    cols = [c for c in cols if f[c].notna().any() and f[c].nunique(dropna=True) > 1]
+    return f[["candidate"] + cols], tuple(cols)
+
+
 def fit_linear(Xtr, y, w0=None, l2: float = 1e-4, steps: int = 60):
     """Class-balanced L2 logistic regression by full-batch L-BFGS (torch, CPU); returns
     (weights incl. bias). Warm-starts from w0, so Percolator's iterations stay cheap."""
@@ -287,6 +320,8 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--runs", default="", help="only these run ids (comma list); default "
                     "every table under --rows")
     ap.add_argument("--labfeat", default="", help="dir holding the dataset's features/ tables")
+    ap.add_argument("--ms2r", default="", help="all-ranks MS2Rescore output root (in/, fullall/): "
+                    "adds sets ms+ms2r and (with --labfeat) lab+ms2r")
     ap.add_argument("--regime", default="global", help="global, perrun, or global,perrun")
     ap.add_argument("--iters", type=int, default=10, help="perrun: label-refinement rounds")
     ap.add_argument("--vectors", default="", help="stage-1 vectors dir (R5 product features)")
@@ -329,7 +364,15 @@ def main(argv: list[str] | None = None) -> int:
         if len(df) != before:
             raise SystemExit(f"lab features cover {len(df):,} of {before:,} candidates")
         print(f"[fdr] lab features: {len(lab)} usable columns", flush=True)
-    for c in BASE_FEATURES + hand + lab + ("cosine",):
+    ms2r: tuple = ()
+    if cli.ms2r:
+        mf, ms2r = load_ms2r_features(cli.ms2r, df["run_id"].unique())
+        before = len(df)
+        df = df.merge(mf, on="candidate", how="inner")
+        if len(df) != before:
+            raise SystemExit(f"ms2r features cover {len(df):,} of {before:,} candidates")
+        print(f"[fdr] MS2Rescore features: {len(ms2r)} usable columns", flush=True)
+    for c in BASE_FEATURES + hand + lab + ms2r + ("cosine",):
         df[c] = pd.to_numeric(df[c], errors="coerce")
         df[c] = df[c].fillna(df[c].median())
     spec = df["spectrum_id"].astype("category").cat.codes.to_numpy()
@@ -401,6 +444,10 @@ def main(argv: list[str] | None = None) -> int:
         sets |= {"hand": hand, "ms+hand": BASE_FEATURES + hand}
     if lab:
         sets |= {"lab": lab}
+    if ms2r:
+        sets |= {"ms+ms2r": BASE_FEATURES + ms2r}
+        if lab:
+            sets |= {"lab+ms2r": lab + ms2r}
     if cli.sets:
         sets = {k: v for k, v in sets.items() if k in cli.sets.split(",")}
     # variant -> (extra scalar columns, product vectors: None | "real" | "null")

@@ -1,0 +1,6 @@
+{"ms2rescore": {
+  "feature_generators": {"basic": {}},
+  "rescoring": {"train_fdr": 0.01, "model": "svm"},
+  "psm_file_type": "tsv", "id_decoy_pattern": null,
+  "max_psm_rank_input": 10, "max_psm_rank_output": 1,
+  "write_report": false, "disable_update_check": true}}

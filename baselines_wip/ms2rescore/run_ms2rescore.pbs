@@ -1,0 +1,63 @@
+#!/bin/bash -l
+# MS2Rescore baseline on psm-rerank-hek-hct116 runs (one node; runs in parallel).
+#   qsub -q debug -l select=1 -l walltime=01:00:00 -v OUT=...,LIMIT=0,ARMS="full searchonly" run_ms2rescore.pbs
+# + our embedding (A/B: same config, extra rescoring:emb_* columns only; see convert.py):
+#   -v OUT=$B/ms2rescore_out/emb8,ARMS=full,EMB_ROWS=<rerank-psm/TAG/rows>,EMB_SETS="cos cosws"
+#   -> $OUT/<set>/full/<run>.tsv
+# + the lab's feature table as extra rescoring:lab_* columns: -v LAB=1 (combines with EMB_SETS)
+# arm "fullall": the full config but writing ALL candidates (max_psm_rank_output 10), so their
+#   MS2Rescore features can be fed to our classifier (rerank_psm_fdr --ms2r); not for counting
+#PBS -N ms2rescore-base
+#PBS -A UIC-HPC
+#PBS -l filesystems=home:flare
+#PBS -j oe
+#PBS -o /home/khuss/code/msdelta/baselines_wip/logs/
+set -uo pipefail
+B=/lus/flare/projects/UIC-HPC/khuss/msdelta/baselines
+W=/home/khuss/code/msdelta/baselines_wip/ms2rescore
+PY=$B/ms2rescore/bin/python
+OUT=${OUT:-$B/ms2rescore_out/full}
+LIMIT=${LIMIT:-0}
+ARMS=${ARMS:-"full searchonly"}
+EMB_ROWS=${EMB_ROWS:-}
+EMB_SETS=${EMB_SETS:-none}
+LAB=${LAB:-0}
+LABDIR=/lus/flare/projects/UIC-HPC/khuss/msdelta/huggingface/hub/datasets--Gaolaboratory--psm-rerank-hek-hct116/snapshots/a6df7948d4500a1f303b0dcf4b6a6a040784d0c6/features
+NPROC=${NPROC:-12}
+RUNS=${RUNS:-"HEK293/0718-5 HEK293/05032011-7 HEK293/09122011-5 HEK293/HEK-0628-5 HEK293/HEK-U100ug-0408-5 HEK293/HEK-U100ug-V2-5 HCT116/Xiaomu_HCT116WholeCell_HILIC15_120min_10ul HCT116/Xiaomu_HCT116WholeCell_HILIC14_120min_10ul"}
+S=/lus/flare/projects/UIC-HPC/khuss/msdelta/huggingface/hub/datasets--Gaolaboratory--psm-rerank-hek-hct116/snapshots/87f5c2756f5de8da8a664ef7e1a4dac8de067a88
+export HOME_MS2PIP=$B/ms2pip_models
+export OMP_NUM_THREADS=4 MKL_NUM_THREADS=4 OPENBLAS_NUM_THREADS=4
+export MPLCONFIGDIR=$B/.mpl XDG_CACHE_HOME=$B/.cache
+mkdir -p "$OUT"
+echo "=== $(date -Is) start OUT=$OUT LIMIT=$LIMIT ARMS=$ARMS host=$(hostname) nproc=$(nproc)"
+for r in $RUNS; do
+  (
+    ds=${r%%/*}; name=${r##*/}
+    for set in $EMB_SETS; do
+      if [[ $set == none ]]; then base=$OUT; extra=(); else
+        base=$OUT/$set; extra=(--emb "$EMB_ROWS/$name.parquet" --emb-set "$set"); fi
+      [[ $LAB == 1 ]] && extra+=(--labfeat "$LABDIR/$ds/$name.parquet")
+      in=$base/in/$name; mkdir -p $base
+      if [[ ! -f $in/.done ]]; then
+        $PY $W/convert.py --parquet $S/$r.parquet --out $in --limit $LIMIT "${extra[@]}" > $base/convert_$name.log 2>&1 && touch $in/.done \
+          || { echo "CONVERT FAILED $set $name"; continue; }
+      fi
+      echo "$(date -Is) converted $set $name"
+      for arm in $ARMS; do
+        if [[ $arm == full ]]; then
+          [[ $ds == HEK293 ]] && cfg=$W/config_full_CID.json || cfg=$W/config_full_${HCT_MODEL:-HCD2021}.json
+        elif [[ $arm == fullall ]]; then
+          [[ $ds == HEK293 ]] && cfg=$W/config_fullall_CID.json || cfg=$W/config_fullall_${HCT_MODEL:-HCD2021}.json
+        elif [[ $arm == fullcid ]]; then cfg=$W/config_full_CID.json
+        else cfg=$W/config_$arm.json; fi
+        o=$base/$arm/$name; mkdir -p $base/$arm
+        [[ -f $o.tsv ]] && { echo "skip $set $arm $name"; continue; }
+        /usr/bin/time -v $B/ms2rescore/bin/ms2rescore -c $cfg -p $in/psms.tsv -t tsv -s $in -o $o -n $NPROC \
+          > $o.log 2>&1 && echo "$(date -Is) DONE $set $arm $name" || echo "$(date -Is) FAILED $set $arm $name (see $o.log)"
+      done
+    done
+  ) &
+done
+wait
+echo "=== $(date -Is) end"
