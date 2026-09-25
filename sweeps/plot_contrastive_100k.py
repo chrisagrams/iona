@@ -261,13 +261,86 @@ def fig_zeroshot_layers(res=None):
     return out
 
 
+def fig_zeroshot_abtt(res=None):
+    """Frozen encoders with all-but-the-top (Mu & Viswanath 2018): mean + top-D principal
+    directions (fitted on TRAIN spectra) removed before cosine. eval_zeroshot_layers --abtt.
+    Also writes the numbers to zeroshot-layers-abtt/summary.csv."""
+    import csv
+    import matplotlib.lines as mlines
+    base = REPO / "results" / "finetune" / "contrastive" / "zeroshot-layers-abtt"
+    files = sorted(glob.glob(str(base / "zs_*.json")))
+    if not files:
+        return None
+    key = "experimental/MAP@R"
+    style = {"010k": ":", "220k": "-", "430k": "--", "540k": "--"}
+    rows = []
+    for f in files:
+        d = json.load(open(f))
+        m = re.match(r"zs_0*(\d+m)_ck(\d+k)", d["name"])
+        scale, ck = m.group(1), m.group(2)
+        raw = {k: v[key] for k, v in d["layers"].items()}
+        blocks = sorted(k for k in raw if k.startswith("block"))
+        best_block = max(blocks, key=raw.get)
+        tr = d["abtt"]["train"]
+        ds = sorted((k for k in tr if k != "center"), key=int)
+        curve = [raw[best_block], tr["center"][best_block][key]] + [tr[D][best_block][key] for D in ds]
+        ab_final = max(tr[D]["final"][key] for D in ds)
+        ab_best, ab_d, ab_layer = max((tr[D][b][key], D, b) for D in ds for b in blocks + ["final"])
+        rows.append(dict(scale=scale, ckpt=ck, best_block=best_block, raw_final=raw["final"],
+                         raw_best=raw[best_block], abtt_final=ab_final, abtt_best=ab_best,
+                         abtt_best_D=int(ab_d), abtt_best_layer=ab_layer, curve=curve, Ds=ds))
+    with open(base / "summary.csv", "w", newline="") as fh:
+        w = csv.writer(fh)
+        w.writerow(["scale", "ckpt", "raw_final", "raw_best_block", "best_block",
+                    "abtt_final", "abtt_best", "abtt_best_D", "abtt_best_layer"])
+        for r in rows:
+            w.writerow([r["scale"], r["ckpt"], f"{r['raw_final']:.4f}", f"{r['raw_best']:.4f}",
+                        r["best_block"], f"{r['abtt_final']:.4f}", f"{r['abtt_best']:.4f}",
+                        r["abtt_best_D"], r["abtt_best_layer"]])
+    rows.sort(key=lambda r: (ORDER.index(r["scale"]), r["ckpt"]))
+    fig, (ax, bx) = plt.subplots(1, 2, figsize=(13, 4.6), gridspec_kw={"width_ratios": [1.6, 1]})
+    x = np.arange(len(rows)); w = 0.2
+    for i, (k, lab, alpha) in enumerate((("raw_final", "raw, final layer", 0.35),
+                                         ("raw_best", "raw, best block", 0.6),
+                                         ("abtt_final", "ABTT, final layer", 0.8),
+                                         ("abtt_best", "ABTT, best block (best D)", 1.0))):
+        ax.bar(x + (i - 1.5) * w, [r[k] for r in rows], w, alpha=alpha,
+               color=[SCALE_COLOUR[r["scale"]] for r in rows],
+               edgecolor=INK if k.startswith("abtt") else "none", linewidth=0.6, label=lab)
+    for yref, lab in ((0.730, "binned cosine 0.730"), (0.868, "trained C7 400m 0.868")):
+        ax.axhline(yref, color=MUTED, ls="--", lw=1)
+        ax.text(len(rows) - 0.5, yref + 0.01, lab, ha="right", fontsize=7.5, color=MUTED)
+    ax.set_xticks(x); ax.set_xticklabels([f"{r['scale']}\n@{r['ckpt']}" for r in rows], fontsize=8)
+    ax.set_ylabel("MAP@R (experimental)"); ax.set_ylim(0, 1.0)
+    ax.legend(frameon=False, fontsize=7.8, loc="upper left", bbox_to_anchor=(0, 0.66))
+    ax.set_title("frozen encoders: raw vs all-but-the-top", loc="left", pad=10)
+    ax.grid(axis="y"); ax.set_axisbelow(True)
+    for r in rows:
+        xs = np.arange(len(r["curve"]))
+        bx.plot(xs, r["curve"], marker="o", ms=3, lw=1.5, ls=style.get(r["ckpt"], "-"),
+                color=SCALE_COLOUR[r["scale"]])
+    labels = ["raw", "centre"] + [f"D={D}" for D in rows[0]["Ds"]]
+    bx.set_xticks(range(len(labels))); bx.set_xticklabels(labels, fontsize=8)
+    handles = [mlines.Line2D([], [], color=SCALE_COLOUR[s], lw=2, label=s) for s in ORDER
+               if any(r["scale"] == s for r in rows)]
+    handles += [mlines.Line2D([], [], color=MUTED, ls=style[c], label=f"ckpt {c}")
+                for c in ("010k", "220k", "540k")]
+    finish(bx, "top principal directions removed (fit on train)", "MAP@R, best block",
+           "best block vs D")
+    bx.legend(handles=handles, frameon=False, fontsize=7.5, ncol=2, loc="lower right")
+    fig.tight_layout(); out = FIGS / "c100k_zeroshot_abtt.png"
+    fig.savefig(out); plt.close(fig)
+    return out
+
+
 def main() -> int:
     FIGS.mkdir(parents=True, exist_ok=True)
     res = load()
     if not res:
         raise SystemExit(f"no results under {RESULTS}")
     print(f"  {len(res)} scored models")
-    for f in (fig_scale, fig_checkpoint, fig_c7, fig_transfer, fig_zeroshot_layers):
+    for f in (fig_scale, fig_checkpoint, fig_c7, fig_transfer, fig_zeroshot_layers,
+              fig_zeroshot_abtt):
         out = f(res)
         if out is not None:
             print(f"  wrote {out.relative_to(REPO)}")

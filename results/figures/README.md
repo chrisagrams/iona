@@ -30,6 +30,7 @@ encoders' final layer as reference lines. Script: `sweeps/plot_contrastive_100k.
 | `c100k_checkpoint.png` | **C4**: pretraining checkpoint, 50m and 100m |
 | `c100k_c7.png` | **C7**: continuing the best models on ms-contrastive-100k; x = steps into the epoch |
 | `c100k_zeroshot_layers.png` | **C10**: frozen encoders, retrieval at every block (left) and best block vs final layer (right) |
+| `c100k_zeroshot_abtt.png` | Frozen encoders with all-but-the-top (mean + top-D principal directions, fitted on TRAIN, removed before cosine): left, raw vs ABTT per encoder (final layer / best block) against binned cosine and trained C7; right, best-block MAP@R vs D. Numbers: results/finetune/contrastive/zeroshot-layers-abtt/summary.csv. 400m@220k/430k pending |
 | `c100k_transfer.png` | small replicate-corpus eval vs this test, all 69 Stage-1 models (Spearman 0.78) |
 
 `C1_recipe/` (script `sweeps/plot_c1.py`), on the small replicate-corpus eval:
