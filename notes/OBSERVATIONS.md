@@ -1575,3 +1575,16 @@ spectra in 20,978 groups (>=2, capped at 20), nothing trimmed (max 452 peaks). J
   worse -- consistent with the spectrum encoder's poor transfer (C13).
 - A claim: clearly ahead in distribution (open 0.925 vs 0.196; 20 ppm 0.994 vs 0.942 with
   A2); on unseen data only without a mass filter. A2 version: 8866810 running.
+
+## R per-run ablation, 3 seeds: A2 +0.53% on the strongest base, +2.5% on engine features (2026-09-25)
+
+Per-run linear rescorer, 8 runs, PSMs at 1% FDR; real - null (null = same features from a
+random spectrum). Jobs A1 8866860/8866890/8867044, A2 8866608/8867047/8867050.
+
+    base        emb   seed0    seed1    seed2    mean
+    lab (~129k) A2    +564     +924     +544     +677 (+0.53%)
+    lab         A1    +398     +738     +473     +536 (+0.42%)
+    MSFragger   A2    +2,705   +2,373   +2,386   +2,488 (+2.5%)
+    MSFragger   A1    +1,495   +1,215   +1,186   +1,299 (+1.3%)
+
+Null arms: -96 to +290. Positive on every seed; A2 > A1 on every seed and base.
