@@ -450,6 +450,13 @@ def main(argv: list[str] | None = None) -> int:
         help="also cap padded ions (spectra x longest) per training batch; "
         "needed with --finetune-encoder, where per-ion activations dominate memory",
     )
+    parser.add_argument(
+        "--gradient-accumulation-steps",
+        type=int,
+        default=1,
+        help="micro-batches per optimizer step; lower the budgets and raise this to cut "
+        "memory without shrinking the data per step",
+    )
     parser.add_argument("--eval-batch-size", type=int, default=64)
     parser.add_argument("--learning-rate", type=float, default=1e-3, help="head learning rate")
     parser.add_argument(
@@ -551,6 +558,7 @@ def train_and_evaluate(args: argparse.Namespace, wandb_run: wandb.Run | None) ->
         num_train_epochs=args.epochs,
         max_steps=args.max_steps,
         per_device_eval_batch_size=args.eval_batch_size,
+        gradient_accumulation_steps=args.gradient_accumulation_steps,
         learning_rate=args.learning_rate,
         weight_decay=args.weight_decay,
         warmup_steps=args.warmup_ratio,  # a float < 1 is a fraction of total steps
