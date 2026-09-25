@@ -139,12 +139,12 @@ def fig_benchmarks(rows):
         fig.savefig(FIG / "C_benchmarks.png"); plt.close(fig)
 
 
-def fig_pretraining(rows):
+def fig_pretraining(rows, ab):
     b, meth = "ms-contrastive-100k", "replicate corpus only (24 ep, C2/C4)"
     cks = [10, 120, 220, 330, 430, 540]
     cols = {"50m": "#93c5fd", "100m": "#3b82f6", "200m": "#1d4ed8", "400m": "#1e3a8a"}
     with plt.rc_context(STYLE):
-        fig, ax = plt.subplots(figsize=(7.2, 4.6))
+        fig, (ax, ax2) = plt.subplots(1, 2, figsize=(12.5, 4.6), gridspec_kw={"width_ratios": [1.7, 1]})
         ax.yaxis.grid(True, color=GRIDC, lw=0.8); ax.set_axisbelow(True)
         handles = []
         mk = {"50m": "o", "100m": "o", "200m": "D", "400m": "s"}
@@ -160,11 +160,29 @@ def fig_pretraining(rows):
         ax.set_xticks(cks); ax.set_xticklabels([f"{c}k" for c in cks])
         ax.set_xlabel("pretraining steps of the starting checkpoint", labelpad=6)
         ax.set_ylabel("MAP@R, ms-contrastive-100k test", labelpad=6)
-        ax.set_title("Pretraining and scale improve spectrum retrieval", loc="left", fontsize=13,
-                     fontweight="bold", pad=12)
-        ax.legend(handles=handles, title="model size", frameon=False, fontsize=9, title_fontsize=9.5,
-                  loc="upper left", bbox_to_anchor=(1.01, 1.0))
-        fig.text(0.01, -0.04, "Replicate-corpus recipe (24 epochs), mean ± sd over 3 seeds. A random-init encoder trained the same way stays at chance.",
+        ax.set_title("Longer pretraining helps, saturating by ~220k steps", loc="left", fontsize=10.5)
+        ax.legend(handles=handles, title="model size", frameon=False, fontsize=8.5, title_fontsize=9,
+                  loc="lower right")
+        # right: the same contrastive training from a random vs the pretrained encoder (C3)
+        ax2.yaxis.grid(True, color=GRIDC, lw=0.8); ax2.set_axisbelow(True)
+        scales = ["50m", "100m", "200m", "400m"]; x = np.arange(4)
+        for k, (kind, col) in enumerate((("random init", BINNED), ("pretrained", OURS))):
+            vals = [[r["map_at_100"] for r in ab if r["init"] == kind and r["scale"] == sc] for sc in scales]
+            m = [np.mean(v) for v in vals]; e = [np.std(v, ddof=1) for v in vals]
+            xx = x + (k - 0.5) * 0.38
+            ax2.bar(xx, m, 0.36, yerr=e, capsize=3, color=col, label=kind, zorder=2,
+                    error_kw=dict(elinewidth=1, capthick=1, ecolor=INK))
+            for xi, mi, ei in zip(xx, m, e):
+                ax2.text(xi, mi + ei + 0.012, f"{mi:.2f}", ha="center", fontsize=8)
+        ax2.set_xticks(x); ax2.set_xticklabels([sc.upper() for sc in scales]); ax2.set_xlabel("model size", labelpad=6)
+        ax2.set_ylabel("MAP@100, small replicate eval", labelpad=6); ax2.set_ylim(0, 0.52)
+        ax2.set_title("No pretraining: stays at chance", loc="left", fontsize=10.5)
+        ax2.legend(frameon=False, fontsize=8.5, loc="upper right")
+        fig.suptitle("Pretraining drives spectrum retrieval", x=0.07, ha="left", fontsize=13,
+                     fontweight="bold", y=1.03)
+        fig.text(0.07, -0.05, "Left: replicate-corpus recipe (24 epochs), ms-contrastive-100k test, mean ± sd over 3 seeds. "
+                 "Right: identical short contrastive training (earlier recipe) from a random vs the pretrained\nencoder, "
+                 "scored on the small replicate eval; 6 seeds. The two panels use different recipes and test sets.",
                  fontsize=8, color=MUTED)
         fig.savefig(FIG / "C_pretraining_scaling.png"); plt.close(fig)
 
@@ -337,7 +355,7 @@ def main():
         for r in ab:
             w.writerow({k: (f"{v:.5f}" if isinstance(v, float) else v) for k, v in r.items()})
     print("ablation rows", len(ab))
-    fig_benchmarks(rows); fig_pretraining(rows); fig_zeroshot(zs); fig_transfer(rows, zs); fig_ablation(ab)
+    fig_benchmarks(rows); fig_pretraining(rows, ab); fig_zeroshot(zs); fig_transfer(rows, zs); fig_ablation(ab)
     fig_transfer(rows, zs, panels=[("ms-contrastive-100k", "ms-contrastive-100k test\n(in-distribution)", 1),
                                    ("yeast-20k", "yeast 20k subset\n(unseen)", 1)],
                  baselines=False, out="C_transfer_ours.png", title="Our models in-distribution vs unseen")
