@@ -1510,3 +1510,25 @@ from the random-spectrum cosine.
 - A2 > A4 > A1 for reranking (retrieval: A2 0.923 > A1 0.898 ~ A4 0.895). A4's hard
   negatives help reranking though not retrieval. Jobs 8866603 (A2), 8866354 (A4).
 - Lab-feature version with A2 (global + per-run, + vectors): 8866608 running.
+
+## A2 lab-feature reranking with null controls; vector-product arm is CONFOUNDED (2026-09-25)
+
+8 runs, PSMs at 1% FDR, seed 0 (job 8866608; log copied to results/rerank/psm/a2-400m_r4_seed0.log).
+real - null = gain of our embedding features minus the same features from a RANDOM spectrum:
+
+    base                    features  real               null               real-null
+    per-run linear, lab     embws     129,618 (+577)     129,054 (+13)      +564 (+0.44%)
+    global MLP, lab         embws     105,672 (+887)     105,077 (+292)     +595
+    global MLP, lab         embvec    106,371 (+1,586)   106,178 (+1,393)   +193
+    per-run linear, ms      embws     101,885 (+2,731)   99,180 (+26)       +2,705 (+2.7%)
+    per-run linear, ms      embvec    104,885 (+5,731)   101,539 (+2,385)   +3,346
+
+- Within-spectrum cosine features: null adds ~0; A2 beats A1 on the strongest base
+  (+0.44% vs +0.37%) and gives +2.7% on engine features alone.
+- Vector product (R5): the NULL arm gains up to +2.4k -- the random-spectrum product still
+  carries the PEPTIDE's own embedding, so the rescorer can learn sequence-only (decoy-like)
+  patterns. Do not report embvec gains without a stricter control (e.g. product with a
+  spectrum from the same precursor-mass window, or peptide-only features as their own arm).
+- A2 vs yHydra in distribution: open 0.925 vs 0.196; +-1.1 Da 0.979 vs 0.754; 20 ppm 0.994
+  vs 0.942 (A1: 0.901 / 0.973 / 0.993). A6 (A2 teacher + A4 loss) validation 0.9425-0.945
+  = A2; test/reranking evals not yet run.

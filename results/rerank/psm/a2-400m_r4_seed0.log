@@ -1,0 +1,170 @@
+Lmod Warning: ONEAPI_DEVICE_SELECTOR has been set to
+"opencl:gpu;level_zero:gpu"
+to enable Triton-XPU, vLLM, Ray, and dpctl functionality.
+
+If you encounter issues, you can revert to:
+  export ONEAPI_DEVICE_SELECTOR="level_zero:gpu"
+
+If you do need to revert, please email support@alcf.anl.gov
+so we can track and address compatibility issues.
+
+While processing the following module(s):
+    Module fullname      Module Filename
+    ---------------      ---------------
+    frameworks/2025.3.1  /opt/aurora/26.26.0/modulefiles/frameworks/2025.3.1.lua
+
+Lmod Warning: ONEAPI_DEVICE_SELECTOR has been set to
+"opencl:gpu;level_zero:gpu"
+to enable Triton-XPU, vLLM, Ray, and dpctl functionality.
+
+If you encounter issues, you can revert to:
+  export ONEAPI_DEVICE_SELECTOR="level_zero:gpu"
+
+If you do need to revert, please email support@alcf.anl.gov
+so we can track and address compatibility issues.
+
+While processing the following module(s):
+    Module fullname      Module Filename
+    ---------------      ---------------
+    frameworks/2025.3.1  /opt/aurora/26.26.0/modulefiles/frameworks/2025.3.1.lua
+
+keys   : HF_TOKEN loaded (37 chars)
+keys   : WANDB_API_KEY loaded (40 chars)
+=== 2026-09-25T08:02:53+00:00 tests
+=== 2026-09-25T08:04:04+00:00 lab features for: 0718-5 05032011-7 09122011-5 HEK-0628-5 HEK-U100ug-0408-5 HEK-U100ug-V2-5 Xiaomu_HCT116WholeCell_HILIC15_120min_10ul Xiaomu_HCT116WholeCell_HILIC14_120min_10ul
+  lab features under /lus/flare/projects/UIC-HPC/khuss/msdelta/huggingface/hub/datasets--Gaolaboratory--psm-rerank-hek-hct116/snapshots/a6df7948d4500a1f303b0dcf4b6a6a040784d0c6/features
+=== 2026-09-25T08:04:18+00:00 FDR: regime global,perrun, runs 0718-5,05032011-7,09122011-5,HEK-0628-5,HEK-U100ug-0408-5,HEK-U100ug-V2-5,Xiaomu_HCT116WholeCell_HILIC15_120min_10ul,Xiaomu_HCT116WholeCell_HILIC14_120min_10ul
+[fdr] lab features: 254 usable columns
+/home/khuss/code/msdelta/msdelta/rerank_psm_fdr.py:337: PerformanceWarning: DataFrame is highly fragmented.  This is usually the result of calling `frame.insert` many times, which has poor performance.  Consider joining all columns at once using pd.concat(axis=1) instead. To get a de-fragmented frame, use `newframe = frame.copy()`
+  df[k] = v
+/home/khuss/code/msdelta/msdelta/rerank_psm_fdr.py:337: PerformanceWarning: DataFrame is highly fragmented.  This is usually the result of calling `frame.insert` many times, which has poor performance.  Consider joining all columns at once using pd.concat(axis=1) instead. To get a de-fragmented frame, use `newframe = frame.copy()`
+  df[k] = v
+/home/khuss/code/msdelta/msdelta/rerank_psm_fdr.py:337: PerformanceWarning: DataFrame is highly fragmented.  This is usually the result of calling `frame.insert` many times, which has poor performance.  Consider joining all columns at once using pd.concat(axis=1) instead. To get a de-fragmented frame, use `newframe = frame.copy()`
+  df[k] = v
+/home/khuss/code/msdelta/msdelta/rerank_psm_fdr.py:337: PerformanceWarning: DataFrame is highly fragmented.  This is usually the result of calling `frame.insert` many times, which has poor performance.  Consider joining all columns at once using pd.concat(axis=1) instead. To get a de-fragmented frame, use `newframe = frame.copy()`
+  df[k] = v
+/home/khuss/code/msdelta/msdelta/rerank_psm_fdr.py:344: PerformanceWarning: DataFrame is highly fragmented.  This is usually the result of calling `frame.insert` many times, which has poor performance.  Consider joining all columns at once using pd.concat(axis=1) instead. To get a de-fragmented frame, use `newframe = frame.copy()`
+  df["null_cosine"] = pd.to_numeric(df["cosine_null"], errors="coerce")
+/home/khuss/code/msdelta/msdelta/rerank_psm_fdr.py:346: PerformanceWarning: DataFrame is highly fragmented.  This is usually the result of calling `frame.insert` many times, which has poor performance.  Consider joining all columns at once using pd.concat(axis=1) instead. To get a de-fragmented frame, use `newframe = frame.copy()`
+  df["null_" + k] = v
+/home/khuss/code/msdelta/msdelta/rerank_psm_fdr.py:346: PerformanceWarning: DataFrame is highly fragmented.  This is usually the result of calling `frame.insert` many times, which has poor performance.  Consider joining all columns at once using pd.concat(axis=1) instead. To get a de-fragmented frame, use `newframe = frame.copy()`
+  df["null_" + k] = v
+/home/khuss/code/msdelta/msdelta/rerank_psm_fdr.py:346: PerformanceWarning: DataFrame is highly fragmented.  This is usually the result of calling `frame.insert` many times, which has poor performance.  Consider joining all columns at once using pd.concat(axis=1) instead. To get a de-fragmented frame, use `newframe = frame.copy()`
+  df["null_" + k] = v
+/home/khuss/code/msdelta/msdelta/rerank_psm_fdr.py:346: PerformanceWarning: DataFrame is highly fragmented.  This is usually the result of calling `frame.insert` many times, which has poor performance.  Consider joining all columns at once using pd.concat(axis=1) instead. To get a de-fragmented frame, use `newframe = frame.copy()`
+  df["null_" + k] = v
+  [leak] AUROC target-vs-decoy on cosine: 0.5259
+  [leak] AUROC target-vs-decoy on cosine_null: 0.5016
+  [all   ] msfragger   PSMs@1%   89,693 (26.95% of 332,822)  peptides@1%  21,858
+  [HCT116] msfragger   PSMs@1%    1,518 ( 1.75% of 86,826)  peptides@1%     827
+  [HEK293] msfragger   PSMs@1%   88,543 (35.99% of 245,996)  peptides@1%  21,517
+  [all   ] embedding   PSMs@1%        0 ( 0.00% of 332,822)  peptides@1%       0
+  [HCT116] embedding   PSMs@1%        0 ( 0.00% of 86,826)  peptides@1%       0
+  [HEK293] embedding   PSMs@1%        0 ( 0.00% of 245,996)  peptides@1%       0
+  [all   ] embedding:delta PSMs@1%        0 ( 0.00% of 332,822)  peptides@1%       0
+  [HCT116] embedding:delta PSMs@1%        0 ( 0.00% of 86,826)  peptides@1%       0
+  [HEK293] embedding:delta PSMs@1%        0 ( 0.00% of 245,996)  peptides@1%       0
+[fdr] CV over 8 run groups in 3 folds
+[fdr] vectors: 332,822 spectra x 2560, PCA k=64
+  [all   ] linear:ms   PSMs@1%   91,780 (27.58% of 332,822)  peptides@1%  22,635
+  [HCT116] linear:ms   PSMs@1%    1,681 ( 1.94% of 86,826)  peptides@1%     931
+  [HEK293] linear:ms   PSMs@1%   90,544 (36.81% of 245,996)  peptides@1%  21,884
+  [all   ] linear:ms+emb PSMs@1%   92,289 (27.73% of 332,822)  peptides@1%  22,651
+  [HCT116] linear:ms+emb PSMs@1%    1,664 ( 1.92% of 86,826)  peptides@1%     910
+  [HEK293] linear:ms+emb PSMs@1%   91,029 (37.00% of 245,996)  peptides@1%  22,024
+  [all   ] linear:ms+embws PSMs@1%   92,576 (27.82% of 332,822)  peptides@1%  22,851
+  [HCT116] linear:ms+embws PSMs@1%    1,755 ( 2.02% of 86,826)  peptides@1%     955
+  [HEK293] linear:ms+embws PSMs@1%   91,019 (37.00% of 245,996)  peptides@1%  22,090
+  [all   ] linear:ms+nullws PSMs@1%   91,733 (27.56% of 332,822)  peptides@1%  22,657
+  [HCT116] linear:ms+nullws PSMs@1%    1,744 ( 2.01% of 86,826)  peptides@1%     952
+  [HEK293] linear:ms+nullws PSMs@1%   90,154 (36.65% of 245,996)  peptides@1%  21,923
+  [all   ] linear:ms+embvec PSMs@1%   93,381 (28.06% of 332,822)  peptides@1%  22,981
+  [HCT116] linear:ms+embvec PSMs@1%    1,804 ( 2.08% of 86,826)  peptides@1%     963
+  [HEK293] linear:ms+embvec PSMs@1%   92,029 (37.41% of 245,996)  peptides@1%  22,115
+  [all   ] linear:ms+nullvec PSMs@1%   93,466 (28.08% of 332,822)  peptides@1%  23,044
+  [HCT116] linear:ms+nullvec PSMs@1%    1,834 ( 2.11% of 86,826)  peptides@1%   1,003
+  [HEK293] linear:ms+nullvec PSMs@1%   91,674 (37.27% of 245,996)  peptides@1%  22,317
+  [all   ] linear:lab  PSMs@1%   99,512 (29.90% of 332,822)  peptides@1%  24,333
+  [HCT116] linear:lab  PSMs@1%    2,686 ( 3.09% of 86,826)  peptides@1%   1,355
+  [HEK293] linear:lab  PSMs@1%   96,713 (39.31% of 245,996)  peptides@1%  23,085
+  [all   ] linear:lab+emb PSMs@1%   99,787 (29.98% of 332,822)  peptides@1%  24,389
+  [HCT116] linear:lab+emb PSMs@1%    2,657 ( 3.06% of 86,826)  peptides@1%   1,355
+  [HEK293] linear:lab+emb PSMs@1%   97,101 (39.47% of 245,996)  peptides@1%  23,132
+  [all   ] linear:lab+embws PSMs@1%   99,530 (29.90% of 332,822)  peptides@1%  24,330
+  [HCT116] linear:lab+embws PSMs@1%    2,649 ( 3.05% of 86,826)  peptides@1%   1,326
+  [HEK293] linear:lab+embws PSMs@1%   96,930 (39.40% of 245,996)  peptides@1%  23,118
+  [all   ] linear:lab+nullws PSMs@1%   99,471 (29.89% of 332,822)  peptides@1%  24,295
+  [HCT116] linear:lab+nullws PSMs@1%    2,645 ( 3.05% of 86,826)  peptides@1%   1,317
+  [HEK293] linear:lab+nullws PSMs@1%   96,754 (39.33% of 245,996)  peptides@1%  23,108
+  [all   ] linear:lab+embvec PSMs@1%  100,209 (30.11% of 332,822)  peptides@1%  24,482
+  [HCT116] linear:lab+embvec PSMs@1%    2,730 ( 3.14% of 86,826)  peptides@1%   1,454
+  [HEK293] linear:lab+embvec PSMs@1%   97,378 (39.59% of 245,996)  peptides@1%  23,172
+  [all   ] linear:lab+nullvec PSMs@1%   99,806 (29.99% of 332,822)  peptides@1%  24,332
+  [HCT116] linear:lab+nullvec PSMs@1%    2,736 ( 3.15% of 86,826)  peptides@1%   1,411
+  [HEK293] linear:lab+nullvec PSMs@1%   97,121 (39.48% of 245,996)  peptides@1%  23,163
+  [all   ] mlp:ms      PSMs@1%   93,206 (28.00% of 332,822)  peptides@1%  23,719
+  [HCT116] mlp:ms      PSMs@1%    2,424 ( 2.79% of 86,826)  peptides@1%   1,216
+  [HEK293] mlp:ms      PSMs@1%   91,475 (37.19% of 245,996)  peptides@1%  22,606
+  [all   ] mlp:ms+emb  PSMs@1%   94,126 (28.28% of 332,822)  peptides@1%  23,929
+  [HCT116] mlp:ms+emb  PSMs@1%    2,349 ( 2.71% of 86,826)  peptides@1%   1,167
+  [HEK293] mlp:ms+emb  PSMs@1%   92,203 (37.48% of 245,996)  peptides@1%  22,815
+  [all   ] mlp:ms+embws PSMs@1%   94,508 (28.40% of 332,822)  peptides@1%  24,030
+  [HCT116] mlp:ms+embws PSMs@1%    2,348 ( 2.70% of 86,826)  peptides@1%   1,231
+  [HEK293] mlp:ms+embws PSMs@1%   92,712 (37.69% of 245,996)  peptides@1%  22,914
+  [all   ] mlp:ms+nullws PSMs@1%   93,386 (28.06% of 332,822)  peptides@1%  23,709
+  [HCT116] mlp:ms+nullws PSMs@1%    2,360 ( 2.72% of 86,826)  peptides@1%   1,239
+  [HEK293] mlp:ms+nullws PSMs@1%   91,584 (37.23% of 245,996)  peptides@1%  22,653
+  [all   ] mlp:ms+embvec PSMs@1%   96,670 (29.05% of 332,822)  peptides@1%  24,306
+  [HCT116] mlp:ms+embvec PSMs@1%    2,558 ( 2.95% of 86,826)  peptides@1%   1,252
+  [HEK293] mlp:ms+embvec PSMs@1%   94,173 (38.28% of 245,996)  peptides@1%  23,121
+  [all   ] mlp:ms+nullvec PSMs@1%   94,472 (28.39% of 332,822)  peptides@1%  23,471
+  [HCT116] mlp:ms+nullvec PSMs@1%    2,170 ( 2.50% of 86,826)  peptides@1%   1,071
+  [HEK293] mlp:ms+nullvec PSMs@1%   92,386 (37.56% of 245,996)  peptides@1%  22,438
+  [all   ] mlp:lab     PSMs@1%  104,785 (31.48% of 332,822)  peptides@1%  26,787
+  [HCT116] mlp:lab     PSMs@1%    3,711 ( 4.27% of 86,826)  peptides@1%   1,949
+  [HEK293] mlp:lab     PSMs@1%  100,889 (41.01% of 245,996)  peptides@1%  25,132
+  [all   ] mlp:lab+emb PSMs@1%  105,607 (31.73% of 332,822)  peptides@1%  26,983
+  [HCT116] mlp:lab+emb PSMs@1%    3,956 ( 4.56% of 86,826)  peptides@1%   2,051
+  [HEK293] mlp:lab+emb PSMs@1%  101,752 (41.36% of 245,996)  peptides@1%  25,235
+  [all   ] mlp:lab+embws PSMs@1%  105,672 (31.75% of 332,822)  peptides@1%  27,039
+  [HCT116] mlp:lab+embws PSMs@1%    3,904 ( 4.50% of 86,826)  peptides@1%   2,005
+  [HEK293] mlp:lab+embws PSMs@1%  101,756 (41.36% of 245,996)  peptides@1%  25,244
+  [all   ] mlp:lab+nullws PSMs@1%  105,077 (31.57% of 332,822)  peptides@1%  26,727
+  [HCT116] mlp:lab+nullws PSMs@1%    4,015 ( 4.62% of 86,826)  peptides@1%   2,005
+  [HEK293] mlp:lab+nullws PSMs@1%  101,171 (41.13% of 245,996)  peptides@1%  24,973
+  [all   ] mlp:lab+embvec PSMs@1%  106,371 (31.96% of 332,822)  peptides@1%  26,841
+  [HCT116] mlp:lab+embvec PSMs@1%    4,169 ( 4.80% of 86,826)  peptides@1%   2,105
+  [HEK293] mlp:lab+embvec PSMs@1%  102,081 (41.50% of 245,996)  peptides@1%  25,037
+  [all   ] mlp:lab+nullvec PSMs@1%  106,178 (31.90% of 332,822)  peptides@1%  27,030
+  [HCT116] mlp:lab+nullvec PSMs@1%    4,007 ( 4.61% of 86,826)  peptides@1%   2,053
+  [HEK293] mlp:lab+nullvec PSMs@1%  102,059 (41.49% of 245,996)  peptides@1%  25,289
+  [all   ] perrun/linear:ms PSMs@1%   99,154 (29.79% of 332,822)  peptides@1%  24,030
+  [HCT116] perrun/linear:ms PSMs@1%    2,879 ( 3.32% of 86,826)  peptides@1%   1,425
+  [HEK293] perrun/linear:ms PSMs@1%   96,257 (39.13% of 245,996)  peptides@1%  23,055
+  [all   ] perrun/linear:ms+emb PSMs@1%  100,723 (30.26% of 332,822)  peptides@1%  24,535
+  [HCT116] perrun/linear:ms+emb PSMs@1%    2,902 ( 3.34% of 86,826)  peptides@1%   1,458
+  [HEK293] perrun/linear:ms+emb PSMs@1%   97,772 (39.75% of 245,996)  peptides@1%  23,502
+  [all   ] perrun/linear:ms+embws PSMs@1%  101,885 (30.61% of 332,822)  peptides@1%  24,822
+  [HCT116] perrun/linear:ms+embws PSMs@1%    3,108 ( 3.58% of 86,826)  peptides@1%   1,504
+  [HEK293] perrun/linear:ms+embws PSMs@1%   98,748 (40.14% of 245,996)  peptides@1%  23,792
+  [all   ] perrun/linear:ms+nullws PSMs@1%   99,180 (29.80% of 332,822)  peptides@1%  24,039
+  [HCT116] perrun/linear:ms+nullws PSMs@1%    2,879 ( 3.32% of 86,826)  peptides@1%   1,435
+  [HEK293] perrun/linear:ms+nullws PSMs@1%   96,274 (39.14% of 245,996)  peptides@1%  23,054
+  [all   ] perrun/linear:ms+embvec PSMs@1%  104,885 (31.51% of 332,822)  peptides@1%  25,205
+  [HCT116] perrun/linear:ms+embvec PSMs@1%    3,484 ( 4.01% of 86,826)  peptides@1%   1,700
+  [HEK293] perrun/linear:ms+embvec PSMs@1%  101,220 (41.15% of 245,996)  peptides@1%  23,906
+  [all   ] perrun/linear:ms+nullvec PSMs@1%  101,539 (30.51% of 332,822)  peptides@1%  24,577
+  [HCT116] perrun/linear:ms+nullvec PSMs@1%    3,078 ( 3.55% of 86,826)  peptides@1%   1,553
+  [HEK293] perrun/linear:ms+nullvec PSMs@1%   98,146 (39.90% of 245,996)  peptides@1%  23,384
+  [all   ] perrun/linear:lab PSMs@1%  129,041 (38.77% of 332,822)  peptides@1%  29,770
+  [HCT116] perrun/linear:lab PSMs@1%    6,856 ( 7.90% of 86,826)  peptides@1%   3,110
+  [HEK293] perrun/linear:lab PSMs@1%  121,966 (49.58% of 245,996)  peptides@1%  27,481
+  [all   ] perrun/linear:lab+emb PSMs@1%  129,475 (38.90% of 332,822)  peptides@1%  29,940
+  [HCT116] perrun/linear:lab+emb PSMs@1%    6,835 ( 7.87% of 86,826)  peptides@1%   3,135
+  [HEK293] perrun/linear:lab+emb PSMs@1%  122,427 (49.77% of 245,996)  peptides@1%  27,627
+  [all   ] perrun/linear:lab+embws PSMs@1%  129,618 (38.95% of 332,822)  peptides@1%  29,830
+  [HCT116] perrun/linear:lab+embws PSMs@1%    6,924 ( 7.97% of 86,826)  peptides@1%   3,090
+  [HEK293] perrun/linear:lab+embws PSMs@1%  122,581 (49.83% of 245,996)  peptides@1%  27,539
+  [all   ] perrun/linear:lab+nullws PSMs@1%  129,054 (38.78% of 332,822)  peptides@1%  29,740
+  [HCT116] perrun/linear:lab+nullws PSMs@1%    6,838 ( 7.88% of 86,826)  peptides@1%   3,036
+  [HEK293] perrun/linear:lab+nullws PSMs@1%  121,993 (49.59% of 245,996)  peptides@1%  27,465
