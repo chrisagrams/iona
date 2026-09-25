@@ -1377,3 +1377,17 @@ style), extra rescoring:emb_* columns only (job 8865654; scored with our TDC, po
   HEK flat. Only 2 HCT116 runs here; MS2Rescore's own CV noise not measured yet.
 - Consistent with our per-run rescorer (+0.37% on lab features): the A1 embedding adds a
   small, positive signal on top of strong rescoring. Full dataset (R3) will test HCT116.
+
+## All-but-the-top (Mu & Viswanath 2018) roughly doubles zero-shot retrieval (2026-09-25)
+
+Frozen 50m@220k, mean+max pooled, ms-contrastive-100k test (experimental MAP@R); mean and
+top-D principal directions fitted on 25,859 TRAIN experimental spectra, removed, then
+cosine (job 8865736, diag/abtt_smoke_out):
+
+    layer     raw     D1      D4      D8      D16     D32
+    block08   0.208   0.244   0.330   0.359   0.380   0.395
+    final     0.112   0.142   0.205   0.241   0.277   0.296
+
+Raw reproduces the earlier zero-shot run exactly. Still rising at D=32 -> full run over all
+10 frozen encoders with D in {8, 32, 64, 128} queued. The pretrained space is strongly
+anisotropic: a few common directions dominate cosine.
