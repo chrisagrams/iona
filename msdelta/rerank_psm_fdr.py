@@ -291,6 +291,10 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--iters", type=int, default=10, help="perrun: label-refinement rounds")
     ap.add_argument("--vectors", default="", help="stage-1 vectors dir (R5 product features)")
     ap.add_argument("--pca-k", type=int, default=64)
+    ap.add_argument("--seed", type=int, default=0, help="fold assignment and subsampling")
+    ap.add_argument("--shuffle-labels", action="store_true",
+                    help="CONTROL: permute the training labels every fit; any real "
+                         "acceptance left over is leakage or an FDR bug")
     cli = ap.parse_args(argv)
 
     import pyarrow.parquet as pq
@@ -377,7 +381,7 @@ def main(argv: list[str] | None = None) -> int:
     units = df["run_id"].map(series_of).to_numpy() if cli.group == "series" \
         else df["run_id"].to_numpy()
     uniq = np.array(sorted(set(units)))
-    rng = np.random.default_rng(0); rng.shuffle(uniq)
+    rng = np.random.default_rng(cli.seed); rng.shuffle(uniq)
     fold_of = {u: i % cli.folds for i, u in enumerate(uniq)}
     fold = np.array([fold_of[u] for u in units])
     report["cv"] = {"group": cli.group, "folds": cli.folds, "units": len(uniq)}
@@ -434,6 +438,8 @@ def main(argv: list[str] | None = None) -> int:
                                              f"FDR in the training runs -- nothing to learn")
                         idx = np.r_[pos, neg]
                         y = np.r_[np.ones(len(pos)), np.zeros(len(neg))]
+                        if cli.shuffle_labels:
+                            y = np.random.default_rng(cli.seed + f).permutation(y)
                         Xall = design(cols, vec, np.flatnonzero(tr), np.r_[idx, te])
                         scaler = StandardScaler().fit(Xall[:len(idx)])
                         Xtr, Xte = scaler.transform(Xall[:len(idx)]), scaler.transform(Xall[len(idx):])
@@ -458,8 +464,8 @@ def main(argv: list[str] | None = None) -> int:
                 for run in sorted(set(runs)):
                     rows = np.flatnonzero(runs == run)
                     codes = np.unique(spec[rows])
-                    sfold = dict(zip(codes, np.random.default_rng(0).permutation(len(codes))
-                                     % cli.folds))
+                    sfold = dict(zip(codes, np.random.default_rng(cli.seed).permutation(
+                        len(codes)) % cli.folds))
                     rfold = np.array([sfold[c] for c in spec[rows]])
                     for f in range(cli.folds):
                         tr, te = rows[rfold != f], rows[rfold == f]
@@ -479,6 +485,8 @@ def main(argv: list[str] | None = None) -> int:
                                                                       replace=False)
                             sel = np.r_[pos, neg]
                             yy = np.r_[np.ones(len(pos)), np.zeros(len(neg))]
+                            if cli.shuffle_labels:
+                                yy = np.random.default_rng(cli.seed + f).permutation(yy)
                             w = fit_linear(Xtr[sel], yy, w0=w)
                             cur = Xtr @ w[:-1] + w[-1]
                         if w is None:      # no confident targets at all: fall back to the engine
@@ -487,6 +495,7 @@ def main(argv: list[str] | None = None) -> int:
                         score[te] = calibrate(cur, decoy[tr], spec[tr], Xte @ w[:-1] + w[-1])
                 evaluate(name, score)
         report["perrun"] = {"folds": cli.folds, "iters": cli.iters, "model": "linear"}
+    report["seed"] = cli.seed; report["shuffle_labels"] = cli.shuffle_labels
 
     Path(cli.out).parent.mkdir(parents=True, exist_ok=True)
     Path(cli.out).write_text(json.dumps(report, indent=1))
