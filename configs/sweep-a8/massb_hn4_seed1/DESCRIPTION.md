@@ -1,0 +1,1 @@
+A8 ARM massb_hn4, seed 1: mass-aware student ({'--mass_batches': 'true', '--hard_negatives': '4', '--neg_source': 'mass', '--neg_ppm': '20'}), LiT + 0.1 MSE, batch 256, teacher = A-oodsel's (cache /lus/flare/projects/UIC-HPC/khuss/msdelta/align-targets-400m-oodsel). PLAN.md A8.

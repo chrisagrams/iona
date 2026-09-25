@@ -103,6 +103,7 @@ declare -A GRID_CHECK=(
     [configs/sweep-a3]="sweeps/make_a3.py --check"
     [configs/sweep-a4]="sweeps/make_a4.py --check"
     [configs/sweep-a6]="sweeps/make_a4.py --teacher 400m --check"
+    [configs/sweep-a8]="sweeps/make_a8.py --check"
     [configs/sweep-c16-stage1]="sweeps/make_c16.py --stage 1 --check"
     [configs/sweep-c16-stage2]="sweeps/make_c16.py --stage 2 --check"
     [configs/sweep-conneg]="sweeps/make_conneg.py --check"
