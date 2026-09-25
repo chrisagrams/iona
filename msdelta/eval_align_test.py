@@ -34,6 +34,9 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--data", required=True, help="prepared test split (eval_grouped)")
     ap.add_argument("--out", required=True)
     ap.add_argument("--batch-size", type=int, default=16)
+    ap.add_argument("--save-embeddings", default="",
+                    help="also write spectrum/candidate embeddings + keys (.npz) for "
+                         "external comparisons (baselines_wip/yhydra_crossmodal.py)")
     cli = ap.parse_args(argv)
 
     from datasets import load_from_disk
@@ -103,6 +106,11 @@ def main(argv: list[str] | None = None) -> int:
                                      batch["charge"].to(device)).float().cpu())
     spectrum_emb, sequence_emb = torch.cat(spectra), torch.cat(sequences)
 
+    if cli.save_embeddings:
+        np.savez(cli.save_embeddings, spectrum=spectrum_emb.numpy(),
+                 sequence=sequence_emb.numpy(), spectrum_group=spectrum_group,
+                 cand_peptide=np.array([p for p, _ in candidates]),
+                 cand_charge=np.array([c for _, c in candidates]))
     metrics = cross_modal_metrics(sequence_emb, spectrum_emb, spectrum_group,
                                   np.arange(len(candidates)))
     teacher_ref = retrieval_metrics_topk(spectrum_emb, group_ids(rows), device=device)

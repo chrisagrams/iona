@@ -335,6 +335,15 @@ def main(argv: list[str] | None = None) -> int:
     spec = df["spectrum_id"].astype("category").cat.codes.to_numpy()
     for k, v in within_spectrum(spec, df["cosine"].to_numpy(float)).items():
         df[k] = v
+    # NULL embedding (the control for every +embws arm): the same five features built from
+    # cosine_null -- each candidate against a RANDOM other spectrum. Identical column count
+    # and preprocessing, no spectrum information. A real gain must beat this arm too.
+    has_null = "cosine_null" in df.columns and pd.to_numeric(
+        df["cosine_null"], errors="coerce").notna().all()
+    if has_null:
+        df["null_cosine"] = pd.to_numeric(df["cosine_null"], errors="coerce")
+        for k, v in within_spectrum(spec, df["null_cosine"].to_numpy(float)).items():
+            df["null_" + k] = v
     decoy = df["is_decoy"].to_numpy(bool)
     peptide = df["peptide"].to_numpy()
     n_spectra = int(spec.max() + 1)
@@ -396,6 +405,8 @@ def main(argv: list[str] | None = None) -> int:
         sets = {k: v for k, v in sets.items() if k in cli.sets.split(",")}
     # variant -> (extra scalar columns, product vectors: None | "real" | "null")
     variants = {"": ((), None), "+emb": (("cosine",), None), "+embws": (WS_FEATURES, None)}
+    if has_null:
+        variants["+nullws"] = (tuple("null_" + c for c in WS_FEATURES), None)
     pca = None
     if cli.vectors:
         spec_v, pep_v, owner, null_owner = load_vectors(cli.vectors, df["candidate"])
