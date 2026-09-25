@@ -1661,3 +1661,33 @@ real - null (+251, HEK) is the defensible number.
 400m@430k 0.634 (raw best block 0.18-0.51). D=128 best everywhere (edge of range).
 
 **HCT116 x18 A2 re-embed** done (2 h 41 min on 3 nodes; runs are ~144k spectra each).
+
+## Audit of the MS2Rescore baseline and of the lab-feature classifier (2026-09-25 evening)
+
+Prompted by "MS2Rescore full + null control" (128,658) sitting above "MS2Rescore full" (128,211).
+
+- MS2Rescore 4.0.2 setup is correct: feature generators basic + MS2PIP + DeepLC + ms2; SVM rescoring;
+  MS2PIP model CID (HEK) / HCD2021 (HCT116); one fragment tolerance (0.3 Da) annotates every spectrum
+  and MS2PIP reuses it (core.py). DeepLC calibrates per run. "Non-mapped modifications" warning is
+  benign: Oxidation / Acetyl / Carbamidomethyl are Unimod labels and resolve to the right masses
+  (checked with psm_utils in the MS2Rescore env). Converter output: ProForma + charge, decoy flag,
+  score = -log10 e-value, MSFragger features as rescoring: columns. Gains are in the published range
+  (HEK-0628-5 +36% over the search engine; 8 runs 89,693 -> 128,211, +43%).
+- The +447 of "+ null" is MS2Rescore retrained with 5 uninformative columns: HEK +6, HCT116 +452.
+  The two HCT116 runs start from ~1k PSMs (1,026 at 1% before rescoring), liblinear warns it did not
+  converge, and their totals swing by hundreds with any change (HCD2021 7,139; CID model 6,317;
+  + embedding 7,482; + null 7,591). Plain repeat is stable (128,211 vs 128,209). Not information.
+- Lab features: the prediction-based columns (predicted_* 25, rt_* 3, ccs_* 3) and the lab's own
+  embedding_* columns (8) are EMPTY in the published table, so our loader drops them; "all features"
+  = fragment-ion coverage/intensity, xcorr proxies, per-spectrum context (rank/margin/z of each score
+  among the candidates), peptide/tryptic features and native scores of FOUR engines (MSFragger
+  hyperscore, Comet / SEQUEST / ProLuCID xcorr, ProLuCID binomial/z). The multi-engine scores + context
+  features plausibly explain parity with MS2Rescore full without predicted spectra or RT.
+- Leakage scan (HEK-0628-5, all 342,412 candidates): the best single lab feature separates target vs
+  decoy at AUROC 0.550 (MSFragger hyperscore 0.543). No leak.
+- Resolution check: y-ion errors of the 300 best target PSMs, median 0.055 Da in BOTH HEK-0628-5 and
+  HCT116 HILIC14 (20% within 0.02 Da); peak m/z decimals look alike. So HILIC14's MS2 does not look
+  Orbitrap-accurate; 0.3 Da is appropriate there. "HCT116 = high-res MS2" (lab, 2026-09-25) needs
+  confirming per run with the lab / raw metadata before we call HCT116 results "high-res".
+- Correction: the 18-run HCT116 MS2Rescore job with A2 (8867717) already includes the null arm
+  (EMB_SETS="cosws null").
