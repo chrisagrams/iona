@@ -1532,3 +1532,12 @@ real - null = gain of our embedding features minus the same features from a RAND
 - A2 vs yHydra in distribution: open 0.925 vs 0.196; +-1.1 Da 0.979 vs 0.754; 20 ppm 0.994
   vs 0.942 (A1: 0.901 / 0.973 / 0.993). A6 (A2 teacher + A4 loss) validation 0.9425-0.945
   = A2; test/reranking evals not yet run.
+
+## A4 chain complete: hard negatives did not fix near-miss blindness; MLP single-seed noise ~ hundreds (2026-09-25)
+
+- Synthetic near-miss (A4 best, informational): true peptide above adjacent swap 68.8%
+  (A1 70.5%); vs reversed 98.3%, mass-matched 98.8%. A4's hard negatives did not help here.
+- MLP ms+hand (single seed): A1 embws +930 / nullws +455; A4 embws +1,132 / nullws +836.
+  Null arms of this size mean single-seed MLP differences of a few hundred PSMs are noise;
+  the per-run linear arms (null ~0) are the clean evidence. R ablation (3 seeds) running.
+- MLP ms (single seed), A1 re-embed: embws 93,817 / nullws 93,185 (base 93,206).
