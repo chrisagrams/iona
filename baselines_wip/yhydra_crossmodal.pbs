@@ -12,10 +12,10 @@ cd /home/khuss/code/msdelta
 S=/lus/flare/projects/UIC-HPC/khuss/msdelta
 DATA=$S/eval-data/ms-contrastive-100k-test-mp512
 EXPORT=$S/baselines/gleams/data
-CACHE=$S/align-targets-a1-050m-c7s600
-ARGS=configs/a1-align-100k-050m-c7s600/training.args
+CACHE=${CACHE:-$S/align-targets-a1-050m-c7s600}
+ARGS=${ARGS:-configs/a1-align-100k-050m-c7s600/training.args}
 OUT=$S/baselines/yhydra/xmodal; mkdir -p $OUT
-RUNS="$S/runs/v2_align-ft-a1-align-100k-050m-c7s600-8861093 $S/runs/v2_align-ft-a1-align-100k-050m-c7s600-8861292 $S/runs/v2_align-ft-a1-align-100k-050m-c7s600-8861309"
+RUNS=${RUNS:-"$S/runs/v2_align-ft-a1-align-100k-050m-c7s600-8861093 $S/runs/v2_align-ft-a1-align-100k-050m-c7s600-8861292 $S/runs/v2_align-ft-a1-align-100k-050m-c7s600-8861309"}
 set +u; source /usr/share/lmod/lmod/init/bash; module load frameworks/2025.3.1; set -u
 export ONEAPI_DEVICE_SELECTOR=level_zero:gpu ZE_FLAT_DEVICE_HIERARCHY=FLAT PYTHONPATH=$PWD OMP_NUM_THREADS=8
 export HF_HOME=$S/huggingface HF_HUB_OFFLINE=1 HF_DATASETS_OFFLINE=1
