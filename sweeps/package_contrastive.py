@@ -266,6 +266,55 @@ def fig_transfer(rows, zs):
         fig.savefig(FIG / "C_transfer.png"); plt.close(fig)
 
 
+RUNS = Path("/lus/flare/projects/UIC-HPC/khuss/msdelta/runs")
+# C3: identical contrastive training from the pretrained vs a RANDOM encoder (random_init, verified
+# per run in its wandb config). Older recipe (t 0.07, lr 1e-4, KL 10) and the small replicate
+# eval (MAP@100 / Hit@1), each scale at its original checkpoint; 6 seeds. Later jobs are retries.
+ABL_JOBS = {"8853557": "pretrained", "8854412": "pretrained", "8853558": "random init", "8854760": "random init"}
+
+
+def ablation_rows():
+    cells = {}
+    for job, kind in ABL_JOBS.items():
+        for d in sorted(RUNS.glob(f"sweep-*-{job}")):
+            f = d / "all_results.json"
+            if not f.exists():
+                continue
+            r = json.loads(f.read_text())
+            if "retrieval/MAP@100" not in r:
+                continue
+            arm = re.match(r"sweep-(.+)-\d+$", d.name).group(1)
+            sc, seed = re.match(r"s0*(\d+m)_seed(\d+)$", arm).groups()
+            cells[(kind, sc, int(seed))] = dict(init=kind, scale=sc, seed=int(seed), job=job,
+                                                map_at_100=r["retrieval/MAP@100"], hit_at_1=r["retrieval/Hit@1"])
+    return sorted(cells.values(), key=lambda r: (r["init"], int(r["scale"][:-1]), r["seed"]))
+
+
+def fig_ablation(ab):
+    scales = ["50m", "100m", "200m", "400m"]
+    with plt.rc_context(STYLE):
+        fig, axes = plt.subplots(1, 2, figsize=(10.5, 4.2))
+        for ax, key, lab in ((axes[0], "map_at_100", "MAP@100"), (axes[1], "hit_at_1", "Hit@1")):
+            ax.yaxis.grid(True, color=GRIDC, lw=0.8); ax.set_axisbelow(True)
+            x = np.arange(len(scales))
+            for k, (kind, col) in enumerate((("random init", BINNED), ("pretrained", OURS))):
+                vals = [[r[key] for r in ab if r["init"] == kind and r["scale"] == sc] for sc in scales]
+                m = [np.mean(v) for v in vals]; e = [np.std(v, ddof=1) for v in vals]
+                xx = x + (k - 0.5) * 0.38
+                ax.bar(xx, m, 0.36, yerr=e, capsize=3, color=col, label=f"{kind} + contrastive training",
+                       error_kw=dict(elinewidth=1, capthick=1, ecolor=INK), zorder=2)
+                for xi, mi, ei in zip(xx, m, e):
+                    ax.text(xi, mi + ei + 0.012, f"{mi:.2f}", ha="center", fontsize=8)
+            ax.set_xticks(x); ax.set_xticklabels([sc.upper() for sc in scales]); ax.set_ylabel(lab)
+            ax.set_xlabel("model size")
+        axes[0].set_ylim(0, 0.52); axes[1].set_ylim(0, 0.92)
+        h, l = axes[0].get_legend_handles_labels()
+        fig.legend(h, l, frameon=False, fontsize=9, ncol=2, loc="upper center", bbox_to_anchor=(0.5, 0.0))
+        fig.suptitle("Pretraining is what makes contrastive training work", x=0.07, ha="left", fontsize=13,
+                     fontweight="bold", y=1.03)
+        fig.savefig(FIG / "C_pretraining_ablation.png"); plt.close(fig)
+
+
 def main():
     FIG.mkdir(parents=True, exist_ok=True)
     rows = load_rows()
@@ -279,7 +328,13 @@ def main():
         w = csv.DictWriter(fh, list(zs[0])); w.writeheader()
         for r in zs:
             w.writerow({k: (f"{v:.5f}" if isinstance(v, float) else v) for k, v in r.items()})
-    fig_benchmarks(rows); fig_pretraining(rows); fig_zeroshot(zs); fig_transfer(rows, zs)
+    ab = ablation_rows()
+    with open(REPO / "results" / "contrastive_pretraining_ablation.csv", "w", newline="") as fh:
+        w = csv.DictWriter(fh, list(ab[0])); w.writeheader()
+        for r in ab:
+            w.writerow({k: (f"{v:.5f}" if isinstance(v, float) else v) for k, v in r.items()})
+    print("ablation rows", len(ab))
+    fig_benchmarks(rows); fig_pretraining(rows); fig_zeroshot(zs); fig_transfer(rows, zs); fig_ablation(ab)
     print(f"rows {len(rows)}, zero-shot rows {len(zs)}")
     agg = defaultdict(list)
     for r in rows:
