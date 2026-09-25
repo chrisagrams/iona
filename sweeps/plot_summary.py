@@ -119,22 +119,40 @@ def denoise_cells():
 
 
 def fig_d():
+    from matplotlib.lines import Line2D
     cells = denoise_cells()
-    xs = list(D_SCALE)
+    xs = list(D_SCALE); xi = np.arange(len(xs))
     sd = lambda v: float(np.std(v, ddof=1)) if len(v) > 1 else 0.0
-    fig, ax = plt.subplots(figsize=(6.2, 4.0))
-    cmap = plt.get_cmap("Blues")
-    for i, c in enumerate(D_CKPTS):
-        v = [cells[(x, c)] for x in xs]
-        ax.errorbar(xs, [np.mean(u) for u in v], yerr=[sd(u) for u in v], fmt="o-", ms=4, capsize=3,
-                    color=cmap(0.35 + 0.65 * i / (len(D_CKPTS) - 1)), label=f"pretrained {c // 1000}k steps")
-    v = [cells[(x, 0)] for x in xs]
-    ax.errorbar(xs, [np.mean(u) for u in v], yerr=[sd(u) for u in v], fmt="s--", ms=4, capsize=3,
-                color=BASE, label="from scratch")
-    ax.set_xlabel("model size"); ax.set_ylabel("denoise test AUROC")
-    ax.set_title("Scaling improvements for denoising", loc="left")
-    ax.legend(frameon=False, fontsize=7, loc="upper left", bbox_to_anchor=(1.0, 1.0))
-    save(fig, "D_denoise.png")
+    ink, muted = "#1f2937", "#6b7280"
+    style = {"font.family": "DejaVu Sans", "font.size": 10, "axes.edgecolor": "#9ca3af",
+             "axes.linewidth": 0.8, "axes.labelcolor": ink, "text.color": ink,
+             "xtick.color": muted, "ytick.color": muted, "axes.spines.top": False,
+             "axes.spines.right": False, "savefig.bbox": "tight", "figure.dpi": 200}
+    with plt.rc_context(style):
+        fig, ax = plt.subplots(figsize=(7.2, 4.6))
+        ax.yaxis.grid(True, color="#e5e7eb", lw=0.8); ax.set_axisbelow(True)
+        cmap = plt.get_cmap("viridis_r")
+        cols = {c: cmap(0.25 + 0.7 * i / (len(D_CKPTS) - 1)) for i, c in enumerate(D_CKPTS)}
+        series = [(0, "#9ca3af", "from scratch", "s", "--")] + \
+                 [(c, cols[c], f"{c // 1000}k steps", "o", "-") for c in D_CKPTS]
+        means = {c: np.array([np.mean(cells[(x, c)]) for x in xs]) for c, *_ in series}
+        handles = []
+        for c, col, lab, mk, ls in series:
+            ax.errorbar(xi, means[c], yerr=[sd(cells[(x, c)]) for x in xs], color=col, lw=2.0, ls=ls,
+                        marker=mk, ms=6.5, mfc=col, mec="white", mew=1.2, capsize=3.5, capthick=1.2,
+                        elinewidth=1.2, zorder=3)
+            handles.append(Line2D([], [], color=col, lw=2.0, ls=ls, marker=mk, ms=6.5, mec="white", mew=1.2, label=lab))
+        ax.set_xticks(xi); ax.set_xticklabels([x.upper() for x in xs])
+        ax.set_xlim(-0.3, len(xs) - 0.7)
+        ax.set_xlabel("model size (parameters)", labelpad=6); ax.set_ylabel("test AUROC", labelpad=6)
+        ax.set_title("Scaling improvements for denoising", loc="left", fontsize=13, fontweight="bold", pad=12)
+        leg = ax.legend(handles=handles[::-1], title="pretraining", frameon=False, fontsize=9,
+                        title_fontsize=9.5, loc="upper left", bbox_to_anchor=(1.01, 1.0),
+                        handlelength=2.6, labelspacing=0.7)
+        leg._legend_box.align = "left"
+        fig.text(0.01, -0.02, "Mean ± sd over 3–5 seeds per point; 50M from scratch is a single run.",
+                 fontsize=8, color=muted)
+        save(fig, "D_denoise.png")
     rows = ["scale,pretraining_steps,n_seeds,mean_auroc,sd_auroc,min_auroc,max_auroc,per_seed_auroc"]
     for x in xs:
         for c in [0] + D_CKPTS:
