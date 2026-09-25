@@ -1,0 +1,16 @@
+method,seed,psms,source
+MSFragger (e-value),,89693,"per-run results, methods/all/msfragger"
+"MS2Rescore, search features only",,100974,results_ms2rescore.json:ms2rescore:searchonly
+MS2Rescore full (MS2PIP + DeepLC),,128211,results_ms2rescore.json:ms2rescore:full
+"ours per-run, MSFragger features",0,99154,a2-400m_r4_seed0.log
+"ours per-run, MSFragger features + embedding",0,101885,a2-400m_r4_seed0.log
+"ours per-run, lab features",0,129041,a2-400m_r4_seed0.log
+"ours per-run, lab features + embedding",0,129618,a2-400m_r4_seed0.log
+"ours per-run, MSFragger features",1,99182,a2-400m_r4_global+perrun_seed1.json
+"ours per-run, MSFragger features + embedding",1,101840,a2-400m_r4_global+perrun_seed1.json
+"ours per-run, lab features",1,128751,a2-400m_r4_global+perrun_seed1.json
+"ours per-run, lab features + embedding",1,129965,a2-400m_r4_global+perrun_seed1.json
+"ours per-run, MSFragger features",2,99405,a2-400m_r4_global+perrun_seed2.json
+"ours per-run, MSFragger features + embedding",2,101853,a2-400m_r4_global+perrun_seed2.json
+"ours per-run, lab features",2,128934,a2-400m_r4_global+perrun_seed2.json
+"ours per-run, lab features + embedding",2,129684,a2-400m_r4_global+perrun_seed2.json
