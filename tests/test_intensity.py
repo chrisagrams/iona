@@ -10,6 +10,7 @@ from pyteomics import mass
 from transformers import TrainingArguments
 
 from msdelta.configuration_msdelta import MSDeltaConfig, MSDeltaIntensityPredictionConfig
+from msdelta.denoising import PeakBudgetBatchSampler
 from msdelta.intensity import (
     IntensityTrainer,
     MSDeltaIntensityProcessor,
@@ -204,6 +205,21 @@ class IntensityPredictionModelTests(unittest.TestCase):
             for parameter in model.msdelta.parameters():
                 parameter.add_(1.0)
         self.assertTrue(torch.equal(before, model(**self.batch).intensities))
+
+
+class PeakBudgetBatchSamplerTests(unittest.TestCase):
+    def test_peak_budget_caps_batches_of_short_spectra(self):
+        lengths = [4] * 100 + [30] * 10
+        pairs_only = PeakBudgetBatchSampler(lengths, peak_pair_budget=4000, seed=0)
+        capped = PeakBudgetBatchSampler(lengths, peak_pair_budget=4000, seed=0, peak_budget=64)
+
+        def padded_peaks(batch):
+            return len(batch) * max(lengths[i] for i in batch)
+
+        self.assertGreater(max(map(padded_peaks, pairs_only)), 64)
+        self.assertLessEqual(max(map(padded_peaks, capped)), 64)
+        for sampler in (pairs_only, capped):
+            self.assertEqual(sorted(i for batch in sampler for i in batch), list(range(110)))
 
 
 class PrositDataTests(unittest.TestCase):
