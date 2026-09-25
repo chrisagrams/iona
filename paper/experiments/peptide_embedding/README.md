@@ -24,7 +24,7 @@ Candidates can be restricted to those whose mass matches the spectrum's precurso
 | dataset | queries | ours (model) |
 |---|---|---|
 | ms-contrastive-100k test (in-distribution for ours) | 22,869 | student of the fine-tuned 400M teacher; 3 seeds |
-| HEK (unseen, low-resolution MS2) | 26,628 | student of the fine-tuned 50M teacher; 3 seeds (the 400M-teacher student has not been run on HEK) |
+| HEK (unseen, low-resolution MS2) | 26,628 | student of the fine-tuned 400M teacher; 3 seeds |
 | nine-species yeast (unseen, high-resolution) | 75,476 | student of a 400M teacher selected on the eight other species (seed 1, step 600); 1 seed |
 
 - Queries are the spectra whose peptide yHydra can represent, identical for both methods.
@@ -40,7 +40,7 @@ Candidates can be restricted to those whose mass matches the spectrum's precurso
 | dataset | window | yHydra | ours |
 |---|---|---|---|
 | in-distribution | open / ±1.1 Da / 20 ppm | 0.20 / 0.75 / 0.94 | 0.92 / 0.98 / 0.99 |
-| HEK | open / ±1.1 Da / 20 ppm | 0.02 / 0.34 / 0.61 | 0.06 / 0.60 / 0.68 |
+| HEK | open / ±1.1 Da / 20 ppm | 0.02 / 0.34 / 0.61 | 0.15 / 0.69 / 0.70 |
 | nine-species yeast | open / ±1.1 Da / 20 ppm | 0.06 / 0.65 / 0.89 | 0.41 / 0.66 / 0.77 |
 
 Reading: our embedding identifies peptides far better without a mass filter, and stays ahead on

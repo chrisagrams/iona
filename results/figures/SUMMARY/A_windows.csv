@@ -14,15 +14,15 @@ yhydra,"ours, 400M teacher",standard,"C7 400M seed 0, end of epoch",8866359,20 p
 c11_cap20,yHydra (L2),,,,open search,0.01570,26628,,yHydra
 c11_cap20,yHydra (L2),,,,±1.1 Da,0.34498,26628,0.04097,yHydra
 c11_cap20,yHydra (L2),,,,20 ppm,0.60575,26628,0.24309,yHydra
-c11_cap20,"ours, 50M teacher",standard,"C7 50M, step 600",8861093,open search,0.06238,26628,,ours
-c11_cap20,"ours, 50M teacher",standard,"C7 50M, step 600",8861093,±1.1 Da,0.60470,26628,0.04097,ours
-c11_cap20,"ours, 50M teacher",standard,"C7 50M, step 600",8861093,20 ppm,0.67981,26628,0.24309,ours
-c11_cap20,"ours, 50M teacher",standard,"C7 50M, step 600",8861292,open search,0.06106,26628,,ours
-c11_cap20,"ours, 50M teacher",standard,"C7 50M, step 600",8861292,±1.1 Da,0.60061,26628,0.04097,ours
-c11_cap20,"ours, 50M teacher",standard,"C7 50M, step 600",8861292,20 ppm,0.67801,26628,0.24309,ours
-c11_cap20,"ours, 50M teacher",standard,"C7 50M, step 600",8861309,open search,0.06121,26628,,ours
-c11_cap20,"ours, 50M teacher",standard,"C7 50M, step 600",8861309,±1.1 Da,0.60117,26628,0.04097,ours
-c11_cap20,"ours, 50M teacher",standard,"C7 50M, step 600",8861309,20 ppm,0.67820,26628,0.24309,ours
+c11_cap20,"ours, 400M teacher",standard,"C7 400M seed 0, end of epoch",8866356,open search,0.15116,26628,,ours
+c11_cap20,"ours, 400M teacher",standard,"C7 400M seed 0, end of epoch",8866356,±1.1 Da,0.69341,26628,0.04097,ours
+c11_cap20,"ours, 400M teacher",standard,"C7 400M seed 0, end of epoch",8866356,20 ppm,0.70088,26628,0.24309,ours
+c11_cap20,"ours, 400M teacher",standard,"C7 400M seed 0, end of epoch",8866357,open search,0.14977,26628,,ours
+c11_cap20,"ours, 400M teacher",standard,"C7 400M seed 0, end of epoch",8866357,±1.1 Da,0.69115,26628,0.04097,ours
+c11_cap20,"ours, 400M teacher",standard,"C7 400M seed 0, end of epoch",8866357,20 ppm,0.69971,26628,0.24309,ours
+c11_cap20,"ours, 400M teacher",standard,"C7 400M seed 0, end of epoch",8866359,open search,0.15067,26628,,ours
+c11_cap20,"ours, 400M teacher",standard,"C7 400M seed 0, end of epoch",8866359,±1.1 Da,0.69066,26628,0.04097,ours
+c11_cap20,"ours, 400M teacher",standard,"C7 400M seed 0, end of epoch",8866359,20 ppm,0.69956,26628,0.24309,ours
 nine_yeast,yHydra (L2),,,,open search,0.06030,75476,,yHydra
 nine_yeast,yHydra (L2),,,,±1.1 Da,0.65010,75476,0.00000,yHydra
 nine_yeast,yHydra (L2),,,,20 ppm,0.89010,75476,0.00000,yHydra
