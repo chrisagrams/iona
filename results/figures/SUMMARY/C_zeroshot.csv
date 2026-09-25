@@ -1,0 +1,15 @@
+benchmark,encoder,raw_final,raw_best_layer,abtt_best,abtt_D,abtt_layer,abtt_fit
+ms-contrastive-100k,50m@10k,0.07230,0.08620,0.18150,64,final,ms-contrastive-100k train
+ms-contrastive-100k,50m@220k,0.11230,0.20800,0.40060,64,block08,ms-contrastive-100k train
+ms-contrastive-100k,50m@540k,0.10190,0.17710,0.36080,64,block08,ms-contrastive-100k train
+ms-contrastive-100k,100m@220k,0.09320,0.13950,0.32840,64,block10,ms-contrastive-100k train
+ms-contrastive-100k,100m@540k,0.08710,0.12520,0.30640,64,block10,ms-contrastive-100k train
+ms-contrastive-100k,200m@220k,0.07740,0.15070,0.36640,128,block13,ms-contrastive-100k train
+ms-contrastive-100k,200m@540k,0.08020,0.19060,0.43210,128,block12,ms-contrastive-100k train
+ms-contrastive-100k,400m@10k,0.16790,0.21610,0.41390,128,block16,ms-contrastive-100k train
+yeast-20k,50m@220k,0.31600,0.38473,0.60197,128,block07,8 other species (train split)
+yeast-20k,100m@220k,0.15252,0.17813,0.42061,128,block10,8 other species (train split)
+yeast-20k,200m@220k,0.22368,0.32830,0.60879,128,block12,8 other species (train split)
+yeast-20k,200m@540k,0.22097,0.33893,0.65396,128,block12,8 other species (train split)
+yeast-20k,400m@220k,0.35471,0.51013,0.70887,128,block14,8 other species (train split)
+yeast-20k,400m@430k,0.28576,0.38066,0.63370,128,block09,8 other species (train split)

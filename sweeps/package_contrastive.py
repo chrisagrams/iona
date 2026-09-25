@@ -318,6 +318,69 @@ def fig_ablation(ab):
         fig.savefig(FIG / "C_pretraining_ablation.png"); plt.close(fig)
 
 
+C7 = "C7 (replicate corpus -> ms-contrastive-100k)"
+PLOT_KEYS = ["benchmark", "model", "scale", "pretrain_ckpt", "finetune_stage", "seed", "map_at_r", "hit_at_1", "note"]
+
+
+def sel(rows, bench, method, scale="", ck="", stage=""):
+    return [r for r in rows if r["benchmark"] == bench and r["method"] == method
+            and (not scale or r["scale"] == scale) and (not ck or r["pretrain_ckpt"] == ck)
+            and (not stage or r["stage"] == stage)]
+
+
+def as_plot_row(r, model, note=""):
+    return dict(benchmark=r["benchmark"], model=model, scale=r["scale"], pretrain_ckpt=r["pretrain_ckpt"],
+                finetune_stage=r["stage"], seed=r["seed"], map_at_r=r["map_at_r"], hit_at_1=r["hit_at_1"], note=note)
+
+
+def write_plot_csv(name, out_rows, keys=PLOT_KEYS):
+    with open(FIG / name, "w", newline="") as fh:
+        w = csv.DictWriter(fh, keys); w.writeheader()
+        for r in out_rows:
+            w.writerow({k: (f"{r[k]:.5f}" if isinstance(r.get(k), float) else r.get(k, "")) for k in keys})
+
+
+def export_plot_data(rows, zs, ab):
+    """One CSV per figure holding exactly the per-seed rows that figure plots (same selection as the plots)."""
+    # C_transfer_ours: our models on the in-distribution test and on yeast 20k
+    out = []
+    for b in ("ms-contrastive-100k", "yeast-20k"):
+        for model, rs in (("C7 400M, end of epoch", sel(rows, b, C7, "400m", stage="final")),
+                          ("C7 400M, step 600", sel(rows, b, C7, "400m", stage="s600")),
+                          ("C7 50M, end of epoch", sel(rows, b, C7, "50m", stage="final")),
+                          ("replicate corpus only 400M", sel(rows, b, "replicate corpus only (12 ep)", "400m")
+                           or sel(rows, b, "replicate corpus only (24 ep)", "400m")),
+                          ("replicate corpus only 50M", sel(rows, b, "replicate corpus only (12 ep)", "50m")
+                           or sel(rows, b, "replicate corpus only (24 ep)", "50m"))):
+            out += [as_plot_row(r, model, r["method"]) for r in rs]
+        z = max((r for r in zs if r["benchmark"] == b), key=lambda t: t["abtt_best"])
+        sc, ck = z["encoder"].split("@")
+        out.append(dict(benchmark=b, model="frozen + ABTT (best encoder)", scale=sc, pretrain_ckpt=ck, finetune_stage="",
+                        seed="", map_at_r=z["abtt_best"], hit_at_1="",
+                        note=f"frozen encoder, layer {z['abtt_layer']}, ABTT D={z['abtt_D']} (fit: {z['abtt_fit']}); "
+                             f"encoder/layer/D chosen on this benchmark"))
+    write_plot_csv("C_transfer_ours.csv", out)
+    # C_pretraining_scaling: replicate-corpus recipe (24 ep) across sizes and pretraining checkpoints
+    write_plot_csv("C_pretraining_scaling.csv",
+                   [as_plot_row(r, f"replicate corpus only {r['scale'].upper()}", r["method"])
+                    for r in sel(rows, "ms-contrastive-100k", "replicate corpus only (24 ep, C2/C4)")])
+    # C_pretraining_ablation
+    write_plot_csv("C_pretraining_ablation.csv", ab, list(ab[0]))
+    # C_zeroshot
+    write_plot_csv("C_zeroshot.csv", zs, list(zs[0]))
+    # C_benchmarks: the four plotted series; binned cosine at both bin widths (the plot shows the better one)
+    out = []
+    for b in ("ms-contrastive-100k", "hek-lowres", "yeast-full", "yeast-20k"):
+        out += [as_plot_row(r, "ours: C7 400M") for r in sel(rows, b, C7, "400m", stage="final")]
+        out += [as_plot_row(r, "ours: replicate corpus only 400M") for r in sel(rows, b, "replicate corpus only (12 ep)", "400m")]
+        out += [as_plot_row(r, "GLEAMS") for r in sel(rows, b, "GLEAMS (pretrained)")]
+        bins = sel(rows, b, "binned cosine (1 Da bins)") + sel(rows, b, "binned cosine (0.1 Da bins)")
+        best = max(r["map_at_r"] for r in bins)
+        out += [as_plot_row(r, "binned cosine", r["method"] + (" [plotted: best width]" if r["map_at_r"] == best else ""))
+                for r in bins]
+    write_plot_csv("C_benchmarks.csv", out)
+
+
 def main():
     FIG.mkdir(parents=True, exist_ok=True)
     rows = load_rows()
@@ -341,6 +404,7 @@ def main():
     fig_transfer(rows, zs, panels=[("ms-contrastive-100k", "ms-contrastive-100k test\n(in-distribution)", 1),
                                    ("yeast-20k", "yeast 20k subset\n(unseen)", 1)],
                  baselines=False, out="C_transfer_ours.png", title="Our models in-distribution vs unseen")
+    export_plot_data(rows, zs, ab)
     print(f"rows {len(rows)}, zero-shot rows {len(zs)}")
     agg = defaultdict(list)
     for r in rows:
