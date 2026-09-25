@@ -3,7 +3,7 @@ library_name: pytorch
 tags: [mass-spectrometry, proteomics, peptide-embedding, cross-modal, msdelta]
 ---
 
-# iona-peptide-embedder
+# iona-peptide-embedder-400m
 
 Maps a (modified) peptide + precursor charge to a 2560-d unit vector in the **spectrum
 embedding space of [`Gaolaboratory/iona-contrastive-400m`](https://huggingface.co/Gaolaboratory/iona-contrastive-400m)**,
@@ -42,7 +42,7 @@ spectra (not in training) retrieval degrades strongly for this family of models.
 ```python
 import torch
 from huggingface_hub import snapshot_download
-import sys; path = snapshot_download("Gaolaboratory/iona-peptide-embedder"); sys.path.insert(0, path)
+import sys; path = snapshot_download("Gaolaboratory/iona-peptide-embedder-400m"); sys.path.insert(0, path)
 from peptide_embedder import PeptideEmbedder
 
 peptides = PeptideEmbedder.from_pretrained(path).eval()

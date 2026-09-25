@@ -1,4 +1,4 @@
-"""iona-peptide-embedder: map a (modified) peptide + precursor charge to the spectrum-embedding
+"""iona-peptide-embedder-400m: map a (modified) peptide + precursor charge to the spectrum-embedding
 space of iona-contrastive-400m. Self-contained (torch only); a faithful copy of
 msdelta.reranking.PeptideEncoder (readout "pool") and its tokenizer.
 
