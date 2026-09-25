@@ -1,0 +1,43 @@
+#!/bin/bash -l
+# C11: GLEAMS vs ours vs binned cosine on HEK/HCT116 confident PSMs (c11_build.py).
+#   qsub -q debug -l select=1 -l walltime=01:00:00 baselines_wip/c11.pbs
+#PBS -N c11
+#PBS -A UIC-HPC
+#PBS -l filesystems=home:flare
+#PBS -j oe
+#PBS -o /home/khuss/code/msdelta/pbs/logs/
+set -uo pipefail
+cd /home/khuss/code/msdelta
+S=/lus/flare/projects/UIC-HPC/khuss/msdelta
+C=$S/baselines/c11; G=$S/baselines/gleams
+RUNS="0718-5 05032011-7 09122011-5 HEK-0628-5 HEK-U100ug-0408-5 HEK-U100ug-V2-5 Xiaomu_HCT116WholeCell_HILIC15_120min_10ul Xiaomu_HCT116WholeCell_HILIC14_120min_10ul"
+set +u; source /usr/share/lmod/lmod/init/bash; module load frameworks/2025.3.1; set -u
+export ONEAPI_DEVICE_SELECTOR=level_zero:gpu ZE_FLAT_DEVICE_HIERARCHY=FLAT PYTHONPATH=$PWD OMP_NUM_THREADS=8
+export HF_HOME=$S/huggingface HF_HUB_OFFLINE=1 HF_DATASETS_OFFLINE=1
+PY=.venv/bin/python
+if [ ! -d $C/prepared ]; then
+  echo "=== $(date -Is) build"; ZE_AFFINITY_MASK=0 $PY baselines_wip/c11_build.py $C $RUNS || exit 1
+fi
+cat $C/prepared/PREPARED.json | head -30
+echo "=== $(date -Is) GLEAMS embed (CPU, background)"
+( cd $G && env -u PYTHONPATH CUDA_VISIBLE_DEVICES="" TF_CPP_MIN_LOG_LEVEL=2 $G/env/bin/python \
+    /home/khuss/code/msdelta/baselines_wip/gleams/embed_gleams.py $C/export 96 > $C/gleams_embed.log 2>&1 ) &
+gpid=$!
+echo "=== $(date -Is) ours + binned on 8 tiles"
+OUT=results/finetune/contrastive/c11; mkdir -p $OUT
+pids=()
+for i in $(seq 0 7); do
+  ZE_AFFINITY_MASK=$i $PY -m msdelta.eval_grouped_retrieval score --data $C/prepared \
+    --models sweeps/arms/c11_models.txt --out-dir $OUT --shard $i --num-shards 8 > $OUT/.shard$i.log 2>&1 &
+  pids+=($!)
+done
+for p in "${pids[@]}"; do wait $p || echo "a scoring shard failed"; done
+grep -h "MAP@R\|Error" $OUT/.shard*.log | cut -c1-160
+wait $gpid; tail -2 $C/gleams_embed.log
+echo "=== $(date -Is) GLEAMS score"
+$PY baselines_wip/gleams/score_retrieval.py $C/export $C/export/gleams_embed.npy $C/gleams_metrics.json 2>&1 | tail -3
+python3 -c "
+import json;d=json.load(open('$C/gleams_metrics.json'))
+for k in ('mp512/experimental','mp512_strictvalid/experimental'):
+    v=d.get(k); print('GLEAMS',k, v and {a:round(b,4) for a,b in v.items() if isinstance(b,float)})"
+echo "=== $(date -Is) done"

@@ -1,0 +1,40 @@
+#!/bin/bash -l
+# yHydra vs our alignment student (A1, 3 seeds): cross-modal spectrum -> peptide retrieval on
+# the ms-contrastive-100k test split, identical queries and candidates (yhydra_crossmodal.py).
+#   qsub -q debug -l select=1 -l walltime=00:45:00 baselines_wip/yhydra_crossmodal.pbs
+#PBS -N yhydra-xmodal
+#PBS -A UIC-HPC
+#PBS -l filesystems=home:flare
+#PBS -j oe
+#PBS -o /home/khuss/code/msdelta/pbs/logs/
+set -uo pipefail
+cd /home/khuss/code/msdelta
+S=/lus/flare/projects/UIC-HPC/khuss/msdelta
+DATA=$S/eval-data/ms-contrastive-100k-test-mp512
+EXPORT=$S/baselines/gleams/data
+CACHE=$S/align-targets-a1-050m-c7s600
+ARGS=configs/a1-align-100k-050m-c7s600/training.args
+OUT=$S/baselines/yhydra/xmodal; mkdir -p $OUT
+RUNS="$S/runs/v2_align-ft-a1-align-100k-050m-c7s600-8861093 $S/runs/v2_align-ft-a1-align-100k-050m-c7s600-8861292 $S/runs/v2_align-ft-a1-align-100k-050m-c7s600-8861309"
+set +u; source /usr/share/lmod/lmod/init/bash; module load frameworks/2025.3.1; set -u
+export ONEAPI_DEVICE_SELECTOR=level_zero:gpu ZE_FLAT_DEVICE_HIERARCHY=FLAT PYTHONPATH=$PWD OMP_NUM_THREADS=8
+export HF_HOME=$S/huggingface HF_HUB_OFFLINE=1 HF_DATASETS_OFFLINE=1
+echo "=== $(date -Is) our embeddings"
+i=0; pids=()
+for run in $RUNS; do
+  n=$(basename $run)
+  ZE_AFFINITY_MASK=$i .venv/bin/python -m msdelta.eval_align_test --run $run --cache $CACHE \
+    --args_file $ARGS --data $DATA --out $OUT/test_$n.json --save-embeddings $OUT/$n.npz \
+    > $OUT/.ours_$n.log 2>&1 &
+  pids+=($!); i=$((i + 1))
+done
+for p in "${pids[@]}"; do wait $p || echo "OURS FAILED (see $OUT/.ours_*.log)"; done
+echo "=== $(date -Is) yHydra + comparison"
+for run in $RUNS; do
+  n=$(basename $run)
+  [ -f $OUT/$n.npz ] || { echo "missing $n.npz"; continue; }
+  env -u PYTHONPATH CUDA_VISIBLE_DEVICES="" TF_CPP_MIN_LOG_LEVEL=2 \
+    $S/baselines/yhydra/env/bin/python baselines_wip/yhydra_crossmodal.py $EXPORT $OUT/$n.npz $OUT/xmodal_$n.json \
+    2>&1 | grep -v "Warning\|warn" | tail -12
+done
+echo "=== $(date -Is) done"

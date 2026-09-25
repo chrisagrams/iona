@@ -1391,3 +1391,21 @@ cosine (job 8865736, diag/abtt_smoke_out):
 Raw reproduces the earlier zero-shot run exactly. Still rising at D=32 -> full run over all
 10 frozen encoders with D in {8, 32, 64, 128} queued. The pretrained space is strongly
 anisotropic: a few common directions dominate cosine.
+
+## A vs yHydra, cross-modal spectrum -> peptide: A1 Hit@1 0.90 vs yHydra 0.20 (2026-09-25)
+
+ms-contrastive-100k test, the 22,869 experimental spectra whose peptide yHydra can represent
+(88.5%; no mods beyond fixed CAM, length 7-42); candidates = the representable test
+peptides (yHydra 7,848 sequences; ours 8,623 peptide+charge). Job 8865921,
+$SCRATCH/baselines/yhydra/xmodal/.
+
+    model                 Hit@1   Hit@5   MRR
+    A1 (3 seeds)          0.901   0.933   0.916   (full set, 9,771 cands: 0.898)
+    yHydra, L2 (native)   0.196   0.377   0.284
+    yHydra, cosine        0.176   0.360   0.266
+
+Caveats: in-distribution for A1 (trained on this dataset's train split), zero-shot for
+yHydra; yHydra is used natively with a precursor-mass pre-filter (K=50), not open retrieval.
+Pending: precursor-mass-window variant (both models) and an OOD cross-modal test on the
+HEK/HCT116 confident PSMs (C11 export). yHydra >> chance (1/7,848), so its input encoding
+(pyteomics alphabet order) is right.
