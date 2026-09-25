@@ -221,10 +221,16 @@ class IntensityTrainer(Trainer):
     """Batch spectra by padded ion-pair count; attention bias memory is O(N^2)."""
 
     def __init__(
-        self, *args, ion_pair_budget: int, encoder_learning_rate: float | None = None, **kwargs
+        self,
+        *args,
+        ion_pair_budget: int,
+        ion_budget: int | None = None,
+        encoder_learning_rate: float | None = None,
+        **kwargs,
     ):
         super().__init__(*args, **kwargs)
         self.ion_pair_budget = ion_pair_budget
+        self.ion_budget = ion_budget
         self.encoder_learning_rate = encoder_learning_rate
 
     def create_optimizer(self, model=None):
@@ -257,6 +263,7 @@ class IntensityTrainer(Trainer):
                 peak_pair_budget=self.ion_pair_budget,
                 seed=self.args.data_seed or self.args.seed,
                 num_processes=num_processes,
+                peak_budget=self.ion_budget,
             ),
             collate_fn=self.data_collator,
             num_workers=self.args.dataloader_num_workers,
@@ -423,6 +430,12 @@ def main(argv: list[str] | None = None) -> int:
         default=2**21,
         help="max padded ions^2 summed over a training batch (bounds bias memory)",
     )
+    parser.add_argument(
+        "--ion-budget",
+        type=int,
+        help="also cap padded ions (spectra x longest) per training batch; "
+        "needed with --finetune-encoder, where per-ion activations dominate memory",
+    )
     parser.add_argument("--eval-batch-size", type=int, default=64)
     parser.add_argument("--learning-rate", type=float, default=1e-3, help="head learning rate")
     parser.add_argument(
@@ -543,6 +556,7 @@ def train_and_evaluate(args: argparse.Namespace, wandb_run: wandb.Run | None) ->
         processing_class=processor,
         compute_metrics=intensity_metrics,
         ion_pair_budget=args.ion_pair_budget,
+        ion_budget=args.ion_budget,
         encoder_learning_rate=args.encoder_learning_rate if args.finetune_encoder else None,
     )
     trainer.train()
