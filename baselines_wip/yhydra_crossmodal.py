@@ -60,10 +60,12 @@ def peptide_mass(peptide: str) -> float:
     return sum(MONO[a] for a in residues) + mods + WATER
 
 
-def window_hits(q, c, truth, qmass, cmass, tol, ppm, metric="cos", chunk=1024):
+def window_hits(q, c, truth, qmass, cmass, tol, ppm, metric="cos", chunk=1024, lam=0.0):
     """Hit@1 with candidates restricted to |cand mass - precursor mass| <= tol (Da, or ppm
     of the precursor). A query whose true candidate falls outside its own window counts
-    as a miss (reported separately as `true_outside`)."""
+    as a miss (reported separately as `true_outside`). lam > 0 (cosine only): inside the
+    window rank by cosine - lam * |mass error in ppm| -- a mass tie-breaker, the way a
+    filter-then-score pipeline also leans on precursor accuracy."""
     q = np.asarray(q, np.float32); c = np.asarray(c, np.float32)
     if metric == "cos":
         q = q / np.linalg.norm(q, axis=1, keepdims=True)
@@ -77,6 +79,8 @@ def window_hits(q, c, truth, qmass, cmass, tol, ppm, metric="cos", chunk=1024):
         lim = m * tol * 1e-6 if ppm else tol
         ok = np.abs(cmass[None] - m) <= lim
         sizes.append(ok.sum(1))
+        if lam:
+            sim = sim - lam * (np.abs(cmass[None] - m) / m * 1e6)
         sim = np.where(ok, sim, -np.inf)
         t = truth[s:s + chunk]
         inside = ok[np.arange(len(t)), t]
@@ -172,6 +176,15 @@ def main(data_dir, ours_path, out_path):
             yh_q, yh_seq, truth, qm[shared_q], yh_cmass, tol, ppm, "l2")
         res[f"ours/shared/peptide+charge/window_{name}"] = window_hits(
             o_spec[shared_q], o_seq[c_idx], o_truth, qm[shared_q], o_cmass[c_idx], tol, ppm)
+    # sensitivity: a mass tie-breaker inside the window, the SAME for both models (cosine),
+    # fixed grid (not tuned on this set)
+    for lam in (0.001, 0.003, 0.01):
+        for name, tol, ppm in (("20ppm", 20.0, True), ("1.1Da", 1.1, False)):
+            res[f"yhydra/shared/cos/window_{name}/lam{lam}"] = window_hits(
+                yh_q, yh_seq, truth, qm[shared_q], yh_cmass, tol, ppm, "cos", lam=lam)
+            res[f"ours/shared/peptide+charge/window_{name}/lam{lam}"] = window_hits(
+                o_spec[shared_q], o_seq[c_idx], o_truth, qm[shared_q], o_cmass[c_idx], tol, ppm,
+                lam=lam)
     # ours on everything (our standard number)
     res["ours/full/peptide+charge"] = topk_hits(o_spec, o_seq, grp, "cos")
     json.dump(res, open(out_path, "w"), indent=1)
