@@ -1691,3 +1691,10 @@ Prompted by "MS2Rescore full + null control" (128,658) sitting above "MS2Rescore
   confirming per run with the lab / raw metadata before we call HCT116 results "high-res".
 - Correction: the 18-run HCT116 MS2Rescore job with A2 (8867717) already includes the null arm
   (EMB_SETS="cosws null").
+
+## C14 zero-shot (frozen + ABTT) -- settings fixed BEFORE seeing C14 (2026-09-25 21:40 UTC)
+
+Frozen encoders on the C14 HCT116 20k set, ABTT fitted on nine-species-train-fit25k (unlabelled, no
+human data; same as the yeast run). Pre-registered setting = the layer / D each encoder preferred
+on yeast 20k (train fit): 400m@220k block14 D128 (yeast 0.709), 200m@540k block12 D128 (0.654),
+50m@220k block07 D128 (0.602). The best-over-layers/D number on C14 is reported only as an upper bound.
