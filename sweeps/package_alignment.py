@@ -137,6 +137,7 @@ def fig_windows(rows, fixed=None, out="A_windows.png"):
         fig.legend(handles=[Line2D([], [], color=c, marker=mk, ls=ls, lw=2, ms=7, mec="white", mew=1.2)
                             for _, c, mk, ls in leg], labels=[l for l, *_ in leg], frameon=False,
                    fontsize=9, ncol=3, loc="upper center", bbox_to_anchor=(0.5, -0.02))
+        fig.text(0.07, -0.15, "Ceiling (HEK, 20 ppm): for 24% of HEK spectra the true peptide is more than 20 ppm from the recorded precursor, mostly because a heavier isotope peak\nwas recorded as the precursor (about 1 Da above the monoisotopic mass); these fall outside a 20 ppm window, so no method can exceed 0.76.", fontsize=8, color=MUTED)
         fig.savefig(FIG / out); plt.close(fig)
     return plotted
 

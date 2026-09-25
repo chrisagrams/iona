@@ -34,8 +34,11 @@ Candidates can be restricted to those whose mass matches the spectrum's precurso
 - "ours" is our best evaluated model on each dataset, chosen on these results; the per-row model is in
   the CSV (`method`, `teacher`, `job`).
 - **Ceiling (HEK, 20 ppm)**: for 24% of HEK spectra the true peptide is more than 20 ppm from the recorded
-  precursor mass, so it is excluded from the candidate list before scoring; no method can exceed 0.76.
-  The other datasets have no such cases.
+  precursor mass, so it is excluded from the candidate list before scoring and no method can exceed 0.76.
+  The main cause is precursor isotope mis-assignment: the instrument recorded a heavier isotope peak as the
+  precursor, about 1.003 Da above the monoisotopic mass (among confident HEK identifications of run
+  HEK-0628-5, 14.2% are +1 isotope, 1.9% +2 and 0.8% -1). Search engines allow for this with an
+  isotope-error setting; a strict 20 ppm window does not. The other datasets have no such cases.
 
 | dataset | window | yHydra | ours |
 |---|---|---|---|
