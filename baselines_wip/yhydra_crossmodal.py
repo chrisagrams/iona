@@ -45,6 +45,48 @@ def to_yhydra(peptide: str):
     return s
 
 
+MONO = {"G": 57.02146, "A": 71.03711, "S": 87.03203, "P": 97.05276, "V": 99.06841,
+        "T": 101.04768, "C": 103.00919, "L": 113.08406, "I": 113.08406, "N": 114.04293,
+        "D": 115.02694, "Q": 128.05858, "K": 128.09496, "E": 129.04259, "M": 131.04049,
+        "H": 137.05891, "F": 147.06841, "R": 156.10111, "Y": 163.06333, "W": 186.07931}
+WATER, PROTON = 18.010565, 1.007276
+
+
+def peptide_mass(peptide: str) -> float:
+    """Neutral monoisotopic mass of a peptide in our notation (`C[57.0215]`, `[42.0106]P`)."""
+    import re
+    mods = sum(float(x) for x in re.findall(r"\[([-+]?\d+\.?\d*)\]", peptide))
+    residues = re.sub(r"\[[^\]]*\]", "", peptide)
+    return sum(MONO[a] for a in residues) + mods + WATER
+
+
+def window_hits(q, c, truth, qmass, cmass, tol, ppm, metric="cos", chunk=1024):
+    """Hit@1 with candidates restricted to |cand mass - precursor mass| <= tol (Da, or ppm
+    of the precursor). A query whose true candidate falls outside its own window counts
+    as a miss (reported separately as `true_outside`)."""
+    q = np.asarray(q, np.float32); c = np.asarray(c, np.float32)
+    if metric == "cos":
+        q = q / np.linalg.norm(q, axis=1, keepdims=True)
+        c = c / np.linalg.norm(c, axis=1, keepdims=True)
+    hit = outside = 0; sizes = []
+    for s in range(0, len(q), chunk):
+        qq = q[s:s + chunk]
+        sim = qq @ c.T if metric == "cos" else -(
+            (qq ** 2).sum(1)[:, None] + (c ** 2).sum(1)[None] - 2 * qq @ c.T)
+        m = qmass[s:s + chunk, None]
+        lim = m * tol * 1e-6 if ppm else tol
+        ok = np.abs(cmass[None] - m) <= lim
+        sizes.append(ok.sum(1))
+        sim = np.where(ok, sim, -np.inf)
+        t = truth[s:s + chunk]
+        inside = ok[np.arange(len(t)), t]
+        outside += (~inside).sum()
+        hit += ((sim.argmax(1) == t) & inside).sum()
+    sizes = np.concatenate(sizes)
+    return {"hit@1": hit / len(q), "true_outside": outside / len(q),
+            "median_candidates": float(np.median(sizes)), "queries": len(q)}
+
+
 def topk_hits(queries, cands, truth, metric="cos", chunk=1024):
     """Hit@1/Hit@5/MRR of each query's true candidate among all candidates."""
     q = np.asarray(queries, np.float32); c = np.asarray(cands, np.float32)
@@ -121,6 +163,15 @@ def main(data_dir, ours_path, out_path):
     res["ours/shared/peptide+charge"] = topk_hits(o_spec[shared_q], o_seq[c_idx], o_truth, "cos")
     res["ours/shared/sequence"] = seq_level_hits(
         o_spec[shared_q], o_seq[c_idx], cseq[c_idx].astype(str), qseq[shared_q].astype(str))
+    # precursor-mass windows (yHydra's native setting; real search): both models
+    qm = ((rows["precursor"].to_numpy(float) - PROTON) * rows["charge"].to_numpy(float))
+    yh_cmass = np.array([peptide_mass(s.replace("C", "C[57.0215]")) for s in uniq])
+    o_cmass = np.array([peptide_mass(p) for p in cpep])
+    for name, tol, ppm in (("20ppm", 20.0, True), ("1.1Da", 1.1, False)):
+        res[f"yhydra/shared/l2/window_{name}"] = window_hits(
+            yh_q, yh_seq, truth, qm[shared_q], yh_cmass, tol, ppm, "l2")
+        res[f"ours/shared/peptide+charge/window_{name}"] = window_hits(
+            o_spec[shared_q], o_seq[c_idx], o_truth, qm[shared_q], o_cmass[c_idx], tol, ppm)
     # ours on everything (our standard number)
     res["ours/full/peptide+charge"] = topk_hits(o_spec, o_seq, grp, "cos")
     json.dump(res, open(out_path, "w"), indent=1)

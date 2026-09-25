@@ -1,8 +1,8 @@
 #!/bin/bash -l
-# yHydra vs our alignment student (A1, 3 seeds): cross-modal spectrum -> peptide retrieval on
-# the ms-contrastive-100k test split, identical queries and candidates (yhydra_crossmodal.py).
-#   qsub -q debug -l select=1 -l walltime=00:45:00 baselines_wip/yhydra_crossmodal.pbs
-#PBS -N yhydra-xmodal
+# A on unseen data: cross-modal spectrum -> peptide on the C11 set (HEK/HCT116 confident
+# PSMs; neither our models nor yHydra trained on it). Ours: A1, 3 seeds. yHydra: pretrained.
+# Needs the C11 build ($C/prepared, $C/export). Same scorer as the in-distribution run.
+#PBS -N c11-xmodal
 #PBS -A UIC-HPC
 #PBS -l filesystems=home:flare
 #PBS -j oe
@@ -10,32 +10,35 @@
 set -uo pipefail
 cd /home/khuss/code/msdelta
 S=/lus/flare/projects/UIC-HPC/khuss/msdelta
-DATA=$S/eval-data/ms-contrastive-100k-test-mp512
-EXPORT=$S/baselines/gleams/data
+C=$S/baselines/c11; OUT=$C/xmodal; mkdir -p $OUT
 CACHE=$S/align-targets-a1-050m-c7s600
 ARGS=configs/a1-align-100k-050m-c7s600/training.args
-OUT=$S/baselines/yhydra/xmodal; mkdir -p $OUT
 RUNS="$S/runs/v2_align-ft-a1-align-100k-050m-c7s600-8861093 $S/runs/v2_align-ft-a1-align-100k-050m-c7s600-8861292 $S/runs/v2_align-ft-a1-align-100k-050m-c7s600-8861309"
+[ -f $C/export/meta.parquet ] || { echo "C11 build missing"; exit 1; }
 set +u; source /usr/share/lmod/lmod/init/bash; module load frameworks/2025.3.1; set -u
 export ONEAPI_DEVICE_SELECTOR=level_zero:gpu ZE_FLAT_DEVICE_HIERARCHY=FLAT PYTHONPATH=$PWD OMP_NUM_THREADS=8
 export HF_HOME=$S/huggingface HF_HUB_OFFLINE=1 HF_DATASETS_OFFLINE=1
-echo "=== $(date -Is) our embeddings"
+echo "=== $(date -Is) yHydra spectrum tower (CPU, background)"
+( [ -f $C/export/yhydra_embed.npy ] || env -u PYTHONPATH CUDA_VISIBLE_DEVICES="" TF_CPP_MIN_LOG_LEVEL=2 \
+    $S/baselines/yhydra/env/bin/python baselines_wip/gleams/embed_yhydra.py $C/export > $OUT/yhydra_embed.log 2>&1 ) &
+ypid=$!
+echo "=== $(date -Is) ours (A1 x3)"
 i=0; pids=()
 for run in $RUNS; do
   n=$(basename $run)
-  [ -f $OUT/$n.npz ] && { i=$((i + 1)); continue; }      # reuse saved embeddings
+  [ -f $OUT/$n.npz ] && { i=$((i + 1)); continue; }
   ZE_AFFINITY_MASK=$i .venv/bin/python -m msdelta.eval_align_test --run $run --cache $CACHE \
-    --args_file $ARGS --data $DATA --out $OUT/test_$n.json --save-embeddings $OUT/$n.npz \
+    --args_file $ARGS --data $C/prepared --out $OUT/test_$n.json --save-embeddings $OUT/$n.npz \
     > $OUT/.ours_$n.log 2>&1 &
   pids+=($!); i=$((i + 1))
 done
 for p in "${pids[@]}"; do wait $p || echo "OURS FAILED (see $OUT/.ours_*.log)"; done
-echo "=== $(date -Is) yHydra + comparison"
+wait $ypid; tail -2 $OUT/yhydra_embed.log
+echo "=== $(date -Is) comparison"
 for run in $RUNS; do
   n=$(basename $run)
-  [ -f $OUT/$n.npz ] || { echo "missing $n.npz"; continue; }
   env -u PYTHONPATH CUDA_VISIBLE_DEVICES="" TF_CPP_MIN_LOG_LEVEL=2 \
-    $S/baselines/yhydra/env/bin/python baselines_wip/yhydra_crossmodal.py $EXPORT $OUT/$n.npz $OUT/xmodal_$n.json \
-    2>&1 | grep -v "Warning\|warn" | tail -12
+    $S/baselines/yhydra/env/bin/python baselines_wip/yhydra_crossmodal.py $C/export $OUT/$n.npz $OUT/xmodal_$n.json \
+    2>&1 | grep -v "Warning\|warn\|WARNING" | tail -14
 done
 echo "=== $(date -Is) done"
