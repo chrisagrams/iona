@@ -495,10 +495,15 @@ def main(argv: list[str] | None = None) -> int:
         wandb_run = init_wandb_run(
             project=args.wandb_project,
             run_name=args.run_name or args.output_dir.name,
-            config={
-                "cli": {k: str(v) if isinstance(v, Path) else v for k, v in vars(args).items()}
-            },
+            config={},
             entity=args.wandb_entity,
+        )
+    if wandb_run is not None:
+        # A resumed job reattaches to the same run; its stored config comes back
+        # JSON-round-tripped (e.g. int keys as strings), so allow value changes.
+        wandb_run.config.update(
+            {"cli": {k: str(v) if isinstance(v, Path) else v for k, v in vars(args).items()}},
+            allow_val_change=True,
         )
     try:
         return train_and_evaluate(args, wandb_run)
@@ -536,7 +541,8 @@ def train_and_evaluate(args: argparse.Namespace, wandb_run: wandb.Run | None) ->
                 "model": config.to_dict(),
                 "trainable_parameters": trainable,
                 "splits": {"train": len(train), "val": len(validation), "holdout": len(holdout)},
-            }
+            },
+            allow_val_change=True,
         )
 
     training_args = TrainingArguments(

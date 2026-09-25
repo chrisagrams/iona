@@ -5,7 +5,7 @@
 # qsub -A PROJECT -q QUEUE \
 #   -l select=1 -l place=scatter -l walltime=06:00:00 \
 #   -l filesystems=home:flare -j oe -o /path/to/pbs/logs \
-#   -v DATA_DIR=/flare/PROJECT/prosit-dataset/arrays,ENCODER_CHECKPOINT=/flare/PROJECT/msdelta-200m-production-01-final,OUTPUT_ROOT=/flare/PROJECT/msdelta-intensity,RUN_NAME=200m-finetune,INTENSITY_ARGS \
+#   -v DATA_DIR=/flare/PROJECT/prosit-dataset/arrays,ENCODER_CHECKPOINT=/flare/PROJECT/msdelta-200m-production-01-final,OUTPUT_ROOT=/flare/PROJECT/msdelta-intensity,RUN_PREFIX=200m-finetune,INTENSITY_ARGS \
 #   pbs/aurora-intensity.pbs
 # DATA_DIR holds the train/val/holdout .npy arrays from scripts/convert_prosit_hdf5.py.
 # Extra msdelta.intensity flags go in INTENSITY_ARGS. Its spaces cannot be written
@@ -13,8 +13,10 @@
 # makes qsub copy the exported value, e.g.
 #   export INTENSITY_ARGS="--finetune-encoder --gradient-checkpointing --ion-budget 32768"
 # The -o log directory must exist before submission.
-# Outputs, checkpoints, logs and W&B files go to $OUTPUT_ROOT/$RUN_NAME.
-# Set RESUME_FROM_CHECKPOINT=latest with the same RUN_NAME to continue a run; the
+# Outputs, checkpoints, logs and W&B files go to $OUTPUT_ROOT/$RUN_NAME, where
+# RUN_NAME defaults to $RUN_PREFIX-<job id> so each submission is its own run.
+# To continue a run, pass its full RUN_NAME (e.g. 200m-finetune-8868584) with
+# RESUME_FROM_CHECKPOINT=latest; the
 # job saves and exits cleanly CHECKPOINT_MARGIN_SECONDS (default 15 min) before
 # its walltime, and only a run that reaches its last step evaluates the holdout.
 # The launch follows the ALCF Aurora PyTorch DDP guidance:
@@ -53,7 +55,8 @@ DATA_DIR=${DATA_DIR:?set DATA_DIR to the converted Prosit arrays directory}
 ENCODER_CHECKPOINT=${ENCODER_CHECKPOINT:-}
 OUTPUT_ROOT=${OUTPUT_ROOT:?set OUTPUT_ROOT to a Flare base directory for outputs}
 JOB_ID=${PBS_JOBID%%.*}
-RUN_NAME=${RUN_NAME:-intensity-$JOB_ID}
+RUN_PREFIX=${RUN_PREFIX:-intensity}
+RUN_NAME=${RUN_NAME:-$RUN_PREFIX-$JOB_ID}
 RUN_DIR=$OUTPUT_ROOT/$RUN_NAME
 LOG_DIR=$RUN_DIR/logs
 INTENSITY_ARGS=${INTENSITY_ARGS:-}
