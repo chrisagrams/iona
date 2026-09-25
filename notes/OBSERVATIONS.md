@@ -1610,3 +1610,19 @@ higher than C13). ABTT fitted on 25k spectra of the 8 OTHER species. Job 8867207
 - Nothing beats binned cosine on these clean high-res spectra; GLEAMS stays ahead of us.
 - Next: an OOD VALIDATION set from the 8 other species (nine-species train split) to select
   checkpoints/teachers for transfer; a student on the best-transferring C7 teacher -> R.
+
+## MS2Rescore full + A2 embedding with NULL: +0.54% real, +0.35% null -> +0.20% net; the HCT116 "+4.1%" was noise (2026-09-25)
+
+Same 8 runs, same MS2Rescore config; extra rescoring:emb_* columns (job 8867053):
+
+    arm                      all             HEK             HCT116
+    MS2Rescore full          128,211         120,747         7,139
+    + A2 cosws               128,909 (+698)  121,004 (+257)  7,482 (+343)
+    + A2 null                128,658 (+447)  120,753 (+6)    7,591 (+452)
+    real - null              +251 (+0.20%)   +251            -109
+
+- HEK: a clean small gain on top of MS2Rescore (+257 vs null +6).
+- HCT116: null gains as much as the real embedding -> MS2Rescore's run-to-run spread on these
+  two small runs is hundreds of PSMs. CORRECTION: the earlier A1 "+4.1% on HCT116" is within
+  that noise and should not be cited. Measured noise: plain repeat 8867056 (queued) and the
+  18-run HCT116 jobs.
