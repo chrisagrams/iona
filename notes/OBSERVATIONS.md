@@ -1494,3 +1494,19 @@ seed 0 (chosen on validation; its own MAP@R 0.868). Students 8866356/7/9:
     A2  0.9229 / 0.9227 / 0.9226   Hit@5 0.949   MRR 0.935
     A1  0.8989 / 0.8982 / 0.8975   (teacher C7 50m step 600, MAP@R 0.831)
 Student quality tracks teacher quality (A2 answered). Downstream (reranking, yHydra) next.
+
+## Reranking with A2 (400m teacher) and A4, with the NULL control (2026-09-25)
+
+Same 8 runs, MSFragger features, global CV-by-run, PSMs at 1% FDR (stage 2 of the re-embed
+jobs; single seed). embws = cosine + within-spectrum features; nullws = the same five built
+from the random-spectrum cosine.
+
+    rescorer  base     A1 embws  A4 embws  A2 embws          A2 nullws
+    MLP       93,206   93,843    94,224    94,508 (+1,302)   93,386 (+180)
+    linear    91,780   --        92,306    92,576 (+796)     91,733 (-47)
+
+- Real minus null: A2 +1,122 (MLP) / +843 (linear); A4 +667 / +593. The gain is the
+  embedding's information, not an extra input. Leakage AUROC: A2 cosine 0.526, null 0.502.
+- A2 > A4 > A1 for reranking (retrieval: A2 0.923 > A1 0.898 ~ A4 0.895). A4's hard
+  negatives help reranking though not retrieval. Jobs 8866603 (A2), 8866354 (A4).
+- Lab-feature version with A2 (global + per-run, + vectors): 8866608 running.
