@@ -1559,3 +1559,19 @@ spectra in 20,978 groups (>=2, capped at 20), nothing trimmed (max 452 peaks). J
   (vs +-0.002 in distribution): the embedding is fitted to its training domain.
 - C claim is IN-DISTRIBUTION only (ms-contrastive-100k 0.868). Diagnostics proposed:
   frozen+ABTT on this set, earlier C7 checkpoints, ms-contrastive-100k provenance/filtering.
+
+## A vs yHydra on nine-species yeast (UNSEEN, high-res): we win open retrieval, yHydra wins with a mass filter (2026-09-25)
+
+75,476 spectra yHydra can represent (of 86,184); candidates 14,424 sequences (yHydra) /
+18,174 peptide+charge (ours). A1, job 8866807:
+
+    candidates   median   yHydra   A1
+    open         14-18k   0.060    0.253
+    +-1.1 Da     20-25    0.650    0.537
+    20 ppm       3-4      0.890    0.691
+
+- With the mass filter (the practical setting) yHydra is clearly better on this unseen set;
+  our embedding localises peptide space better (open 4x) but separates same-mass candidates
+  worse -- consistent with the spectrum encoder's poor transfer (C13).
+- A claim: clearly ahead in distribution (open 0.925 vs 0.196; 20 ppm 0.994 vs 0.942 with
+  A2); on unseen data only without a mass filter. A2 version: 8866810 running.
