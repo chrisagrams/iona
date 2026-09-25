@@ -106,6 +106,9 @@ def pick(rows, bench, method, scale="", ck="", stage="", seed=None):
 # End-of-epoch seed chosen on the ms-contrastive-100k VALIDATION split (grouped100k-validation MAP@R:
 # 400M seeds 0.8639 / 0.8629 / 0.8634 -> seed 0; 50M 0.8314 / 0.8357 / 0.8342 -> seed 1).
 BEST_SEED = {"400m": 0, "50m": 1}
+# "replicate corpus only" = the stage-1 model each fine-tuned model started from
+# (configs/sweep-con100k-best: 400M from the 12-epoch run, 50M from the 24-epoch run).
+STAGE1 = {"400m": "replicate corpus only (12 ep)", "50m": "replicate corpus only (24 ep)"}
 
 
 def msd(v):
@@ -223,7 +226,7 @@ def fig_transfer(rows, zs, panels=None, baselines=True, out="C_transfer.png",
     """Per benchmark: every model of ours scored there (optionally vs GLEAMS and binned cosine)."""
     c7 = "C7 (replicate corpus -> ms-contrastive-100k)"
     def rep(b, sc):
-        return pick(rows, b, "replicate corpus only (12 ep)", sc) or pick(rows, b, "replicate corpus only (24 ep)", sc)
+        return pick(rows, b, STAGE1[sc], sc)
     def frozen(b):
         r = [r for r in zs if r["benchmark"] == b]
         if not r:
@@ -351,10 +354,8 @@ def export_plot_data(rows, zs, ab):
     for b in ("ms-contrastive-100k", "yeast-20k"):
         for model, rs in (("fine-tuned 400M", sel(rows, b, C7, "400m", stage="final", seed=BEST_SEED["400m"])),
                           ("fine-tuned 50M", sel(rows, b, C7, "50m", stage="final", seed=BEST_SEED["50m"])),
-                          ("replicate corpus only 400M", sel(rows, b, "replicate corpus only (12 ep)", "400m")
-                           or sel(rows, b, "replicate corpus only (24 ep)", "400m")),
-                          ("replicate corpus only 50M", sel(rows, b, "replicate corpus only (12 ep)", "50m")
-                           or sel(rows, b, "replicate corpus only (24 ep)", "50m"))):
+                          ("replicate corpus only 400M", sel(rows, b, STAGE1["400m"], "400m")),
+                          ("replicate corpus only 50M", sel(rows, b, STAGE1["50m"], "50m"))):
             out += [as_plot_row(r, model, r["method"]) for r in rs]
         z = max((r for r in zs if r["benchmark"] == b), key=lambda t: t["abtt_best"])
         sc, ck = z["encoder"].split("@")

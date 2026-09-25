@@ -1,0 +1,35 @@
+benchmark,model,scale,pretrain_ckpt,finetune_stage,seed,map_at_r,hit_at_1,note
+ms-contrastive-100k,ours: C7 400M,400m,220k,final,0,0.86816,0.91339,
+ms-contrastive-100k,ours: C7 400M,400m,220k,final,1,0.86886,0.91415,
+ms-contrastive-100k,ours: C7 400M,400m,220k,final,2,0.86785,0.91371,
+ms-contrastive-100k,ours: replicate corpus only 400M,400m,220k,final,0,0.71126,0.80837,
+ms-contrastive-100k,ours: replicate corpus only 400M,400m,220k,final,1,0.71381,0.80921,
+ms-contrastive-100k,ours: replicate corpus only 400M,400m,220k,final,2,0.71395,0.81028,
+ms-contrastive-100k,GLEAMS,,,,,0.64648,0.74615,
+ms-contrastive-100k,binned cosine,,,,,0.67114,0.77062,binned cosine (1 Da bins)
+ms-contrastive-100k,binned cosine,,,,,0.72947,0.81923,binned cosine (0.1 Da bins) [plotted: best width]
+hek-lowres,ours: C7 400M,400m,220k,final,0,0.17304,0.28820,
+hek-lowres,ours: C7 400M,400m,220k,final,1,0.16930,0.28693,
+hek-lowres,ours: C7 400M,400m,220k,final,2,0.16667,0.27847,
+hek-lowres,ours: replicate corpus only 400M,400m,220k,final,0,0.01702,0.04432,
+hek-lowres,ours: replicate corpus only 400M,400m,220k,final,1,0.01776,0.04534,
+hek-lowres,ours: replicate corpus only 400M,400m,220k,final,2,0.01558,0.04165,
+hek-lowres,GLEAMS,,,,,0.53045,0.68401,
+hek-lowres,binned cosine,,,,,0.55413,0.74570,binned cosine (1 Da bins) [plotted: best width]
+hek-lowres,binned cosine,,,,,0.24685,0.46333,binned cosine (0.1 Da bins)
+yeast-full,ours: C7 400M,400m,220k,final,0,0.51373,0.70682,
+yeast-full,ours: C7 400M,400m,220k,final,1,0.56458,0.74004,
+yeast-full,ours: C7 400M,400m,220k,final,2,0.47447,0.67878,
+yeast-full,ours: replicate corpus only 400M,400m,220k,final,0,0.44441,0.66543,
+yeast-full,ours: replicate corpus only 400M,400m,220k,final,1,0.47389,0.68485,
+yeast-full,ours: replicate corpus only 400M,400m,220k,final,2,0.50323,0.70327,
+yeast-full,GLEAMS,,,,,0.67573,0.81985,
+yeast-full,binned cosine,,,,,0.78997,0.89195,binned cosine (1 Da bins) [plotted: best width]
+yeast-full,binned cosine,,,,,0.78927,0.89077,binned cosine (0.1 Da bins)
+yeast-20k,ours: C7 400M,400m,220k,final,0,0.59562,0.77916,
+yeast-20k,ours: C7 400M,400m,220k,final,1,0.65554,0.81573,
+yeast-20k,ours: C7 400M,400m,220k,final,2,0.55011,0.75673,
+yeast-20k,ours: replicate corpus only 400M,400m,220k,final,0,0.52046,0.74085,
+yeast-20k,GLEAMS,,,,,0.76989,0.88566,
+yeast-20k,binned cosine,,,,,0.91570,0.96663,binned cosine (1 Da bins)
+yeast-20k,binned cosine,,,,,0.91593,0.96538,binned cosine (0.1 Da bins) [plotted: best width]

@@ -1,0 +1,10 @@
+run,seed,job,hit_at_1,hit_at_5,mrr,spectra,candidates,teacher_map_at_r,teacher_hit_at_1,student,teacher
+v2_align-ft-a1-align-100k-050m-c7s600,,8861093,0.89895,0.93164,0.91456,25848.00000,9771.00000,0.83114,0.88738,"ours, 50M teacher","C7 50M, step 600"
+v2_align-ft-a1-align-100k-050m-c7s600,,8861292,0.89817,0.93172,0.91405,25848.00000,9771.00000,0.83114,0.88738,"ours, 50M teacher","C7 50M, step 600"
+v2_align-ft-a1-align-100k-050m-c7s600,,8861309,0.89752,0.93203,0.91367,25848.00000,9771.00000,0.83114,0.88738,"ours, 50M teacher","C7 50M, step 600"
+v2_align-ft-a1-align-100k-400m-oodsel,,8867776,0.91794,0.94603,0.93130,25848.00000,9771.00000,0.85893,0.90854,"ours, 400M teacher (OOD-selected)","C7 400M seed 1, step 600 (chosen on 8-species validation)"
+v2_align-ft-a1-align-100k-400m-oodsel,,8867779,0.91756,0.94615,0.93109,25848.00000,9771.00000,0.85893,0.90854,"ours, 400M teacher (OOD-selected)","C7 400M seed 1, step 600 (chosen on 8-species validation)"
+v2_align-ft-a1-align-100k-400m-oodsel,,8867817,0.91729,0.94622,0.93096,25848.00000,9771.00000,0.85893,0.90854,"ours, 400M teacher (OOD-selected)","C7 400M seed 1, step 600 (chosen on 8-species validation)"
+v2_align-ft-a1-align-100k-400m-c7final,,8866356,0.92286,0.94893,0.93538,25848.00000,9771.00000,0.86816,0.91339,"ours, 400M teacher","C7 400M seed 0, end of epoch"
+v2_align-ft-a1-align-100k-400m-c7final,,8866357,0.92266,0.94843,0.93512,25848.00000,9771.00000,0.86816,0.91339,"ours, 400M teacher","C7 400M seed 0, end of epoch"
+v2_align-ft-a1-align-100k-400m-c7final,,8866359,0.92259,0.94897,0.93510,25848.00000,9771.00000,0.86816,0.91339,"ours, 400M teacher","C7 400M seed 0, end of epoch"
