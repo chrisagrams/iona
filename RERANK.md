@@ -14,7 +14,9 @@ best PSM per spectrum with a target-decoy q-value.
 | Input data | one parquet per run in the `Gaolaboratory/psm-rerank-hek-hct116` schema (`spectra/<dataset>/<run>.parquet`: MS2 peaks + the candidate list with MSFragger's scores, `is_decoy`) **and** the lab's feature table for the run (`features/<dataset>/<run>.parquet`, keyed on `candidate_id`; produced by the lab's `psm_features.py`) |
 | Software | this repo (`msdelta`), Python 3.12, torch, transformers, pandas, pyarrow, scikit-learn, safetensors, huggingface_hub; a GPU for step 1 (CPU works, slowly) |
 
-`HF_TOKEN` must be set for the private repos.
+`HF_TOKEN` must be set for the private repos. On Aurora (Intel XPU), after `module load frameworks`, set
+`export ONEAPI_DEVICE_SELECTOR=level_zero:gpu ZE_FLAT_DEVICE_HIERARCHY=FLAT` -- the module's default
+selector makes torch segfault on import.
 
 ## Steps
 
