@@ -1,0 +1,82 @@
+#!/bin/bash -l
+# R4/R5 (PLAN.md): does the embedding add PSMs on top of STRONG rescoring?
+#
+#   qsub -q debug -l select=1 -l walltime=01:00:00 \
+#        -v TAG=a1-050m-c7s600,RUNS="0718-5 ...",REGIME=global pbs/rerank_psm_r4.pbs
+# Lists inside -v use '+' (qsub splits on commas): REGIME=global+perrun, MODELS=linear+mlp.
+#
+# 1. tests (rerank_psm + r4); abort on failure;
+# 2. downloads the dataset's published features/ tables for RUNS (revision pinned in
+#    msdelta.rerank_psm_fdr.LAB_REVISION) -- the only network step;
+# 3. msdelta.rerank_psm_fdr on stage 1's rows for exactly RUNS, feature sets ms + lab,
+#    embedding variants none / emb / embws (+ embvec / nullvec when VECTORS is set).
+# REGIME=global (A/B), perrun (C/D), or global,perrun.
+
+#PBS -N msdelta-rerank-r4
+#PBS -A UIC-HPC
+#PBS -l place=scatter
+#PBS -l filesystems=home:flare
+#PBS -j oe
+#PBS -o pbs/logs/
+
+set -uo pipefail
+REPO_DIR=${REPO_DIR:-${PBS_O_WORKDIR:-$PWD}}
+cd "$REPO_DIR"
+TAG=${TAG:?set TAG}; RUNS=${RUNS:?set RUNS}
+REGIME=${REGIME:-global}; REGIME=${REGIME//+/,}
+MODELS=${MODELS:-linear+mlp}; MODELS=${MODELS//+/,}
+MAX_NEG=${MAX_NEG:-1000000}
+VECTORS=${VECTORS:-}
+OUT_NAME=${OUT_NAME:-${TAG}_r4_${REGIME//,/+}}
+VENV_DIR=${VENV_DIR:-$REPO_DIR/.venv}
+SCRATCH_ROOT=${SCRATCH_ROOT:-/lus/flare/projects/${PROJECT:-UIC-HPC}/$USER/msdelta}
+BASE=$SCRATCH_ROOT/rerank-psm/$TAG
+set +u
+source /usr/share/lmod/lmod/init/bash
+module load "${FRAMEWORKS_MODULE:-frameworks/2025.3.1}"
+set -u
+source "$REPO_DIR/pbs/load_keys.sh"
+export ONEAPI_DEVICE_SELECTOR=level_zero:gpu ZE_FLAT_DEVICE_HIERARCHY=FLAT ZE_AFFINITY_MASK=0
+export OMP_NUM_THREADS=${OMP_NUM_THREADS:-32}
+export PYTHONPATH=$REPO_DIR${PYTHONPATH:+:$PYTHONPATH}
+export HF_HOME=${HF_HOME:-$SCRATCH_ROOT/huggingface}
+export HF_HUB_OFFLINE=0 HF_DATASETS_OFFLINE=0
+ALCF_PROXY=${ALCF_PROXY:-http://proxy.alcf.anl.gov:3128}
+export HTTP_PROXY=$ALCF_PROXY HTTPS_PROXY=$ALCF_PROXY http_proxy=$ALCF_PROXY https_proxy=$ALCF_PROXY
+export no_proxy="admin,localhost,*.cm.aurora.alcf.anl.gov,aurora-*,*.aurora.alcf.anl.gov,*.alcf.anl.gov,127.0.0.1"
+export NO_PROXY=$no_proxy
+[[ -n ${HF_TOKEN:-} ]] || { echo "HF_TOKEN not loaded" >&2; exit 2; }
+PY="$VENV_DIR/bin/python"
+
+echo "=== $(date -Is) tests"
+"$PY" -m pytest -q -p no:cacheprovider tests/test_rerank_psm.py tests/test_rerank_r4.py -rfE \
+    > "$BASE/.r4_tests.log" 2>&1
+rc=$?; grep -E "^(FAILED|ERROR)|[0-9]+ (passed|failed)" "$BASE/.r4_tests.log" | tail -20
+[[ $rc == 0 ]] || { echo "tests failed (rc=$rc, $BASE/.r4_tests.log)" >&2; exit 1; }
+
+echo "=== $(date -Is) lab features for: $RUNS"
+LAB=$("$PY" - $RUNS <<'EOF'
+import sys
+from pathlib import Path
+from huggingface_hub import HfApi, hf_hub_download
+from msdelta.rerank_psm_fdr import LAB_REVISION
+R = "Gaolaboratory/psm-rerank-hek-hct116"
+files = [f for f in HfApi().list_repo_files(R, repo_type="dataset", revision=LAB_REVISION)
+         if f.startswith("features/")]
+root = None
+for run in sys.argv[1:]:
+    hit = [f for f in files if f.endswith(f"/{run}.parquet")]
+    assert len(hit) == 1, (run, hit)
+    p = Path(hf_hub_download(R, hit[0], repo_type="dataset", revision=LAB_REVISION))
+    root = p.parent.parent
+print(root)
+EOF
+) || { echo "lab feature download failed" >&2; exit 1; }
+echo "  lab features under $LAB"
+
+RUN_LIST=$(echo $RUNS | tr ' ' ',')
+echo "=== $(date -Is) FDR: regime $REGIME, runs $RUN_LIST"
+"$PY" -m msdelta.rerank_psm_fdr --rows "$BASE/rows" --runs "$RUN_LIST" --labfeat "$LAB" \
+    --sets ms,lab --models "$MODELS" --regime "$REGIME" --max-neg "$MAX_NEG" \
+    ${VECTORS:+--vectors "$VECTORS"} --out "results/rerank/psm/$OUT_NAME.json"
+rc=$?; echo "=== $(date -Is) done rc=$rc"; exit $rc
