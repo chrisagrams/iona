@@ -30,8 +30,10 @@ echo "$(date -Is) starting job ${PBS_JOBID:-?} on $(hostname)"
 
 JOB_START_EPOCH=$(date +%s)
 CHECKPOINT_MARGIN_SECONDS=${CHECKPOINT_MARGIN_SECONDS:-900}
+# awk must read all of qstat's output: exiting at the match would SIGPIPE qstat
+# (exit 141), which pipefail turns into a job failure.
 PBS_WALLTIME=$(qstat -f "${PBS_JOBID:?PBS_JOBID is required}" | awk -F ' = ' \
-    '/^[[:space:]]*Resource_List.walltime = / {print $2; exit}')
+    '!found && /^[[:space:]]*Resource_List.walltime = / {print $2; found = 1}')
 IFS=: read -r -a WALLTIME_PARTS <<<"$PBS_WALLTIME"
 if ((${#WALLTIME_PARTS[@]} != 3)); then
     echo "could not parse PBS Resource_List.walltime: $PBS_WALLTIME" >&2
