@@ -1358,3 +1358,7 @@ same 8 runs (job 8865619, results/rerank/psm/a1-050m-c7s600_r4_perrun.json):
 - lab + per-run matches/exceeds MS2Rescore full without predicted-spectrum or RT features.
 - The A1 embedding helps a weak base (+1.3-1.5%) and fades on a strong one (+0.2%).
 - NOT YET VERIFIED: shuffled-label control (must collapse) and fold-seed noise.
+- CONTROLS (job 8865754): shuffled training labels -> 0 PSMs (no leakage / FDR bug).
+  Fold seeds 0/1/2: lab 129,041 / 128,991 / 129,040 (+-30); lab+embws 129,345 / 129,688 /
+  129,490 -> embedding +304 / +697 / +450, mean +484 (+0.37%), positive on every seed and
+  ~15x the seed spread.
