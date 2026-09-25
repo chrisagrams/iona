@@ -1,0 +1,1 @@
+Weights: runs/v2_align-ft-a1-align-100k-400m-c7final-8866356/final/model.safetensors (sha256 37bf5120...95ab5). Uploaded 2026-09-25 to Gaolaboratory/iona-peptide-embedder (private). Standalone module verified identical to msdelta.reranking.PeptideEncoder (max |diff| 0.0).

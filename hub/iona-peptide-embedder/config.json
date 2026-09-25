@@ -1,0 +1,14 @@
+{
+ "model_type": "iona-peptide-embedder",
+ "embedding_size": 2560,
+ "hidden_size": 256,
+ "num_layers": 4,
+ "num_heads": 8,
+ "max_length": 64,
+ "n_charges": 8,
+ "mod_n_freqs": 16,
+ "pooling": "mean+max",
+ "readout": "pool",
+ "spectrum_model": "Gaolaboratory/iona-contrastive-400m",
+ "spectrum_pooling": "mean+max of the spectrum encoder's last hidden state"
+}
