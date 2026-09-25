@@ -23,7 +23,10 @@
 module use /soft/modulefiles
 module load frameworks
 
-set -euo pipefail
+set -Eeuo pipefail
+# set -e exits silently when a command substitution fails; name the line instead.
+trap 'echo "aurora-intensity.pbs: line $LINENO failed (exit $?): $BASH_COMMAND" >&2' ERR
+echo "$(date -Is) starting job ${PBS_JOBID:-?} on $(hostname)"
 
 JOB_START_EPOCH=$(date +%s)
 CHECKPOINT_MARGIN_SECONDS=${CHECKPOINT_MARGIN_SECONDS:-900}
@@ -107,7 +110,9 @@ if [[ $XPUS_PER_HOST == 12 ]]; then
 else
     CPU_BIND=${CPU_BIND:-none}
 fi
-export ONEAPI_DEVICE_SELECTOR=${ONEAPI_DEVICE_SELECTOR:-level_zero:gpu}
+# frameworks/2025.3.1 sets "opencl:gpu;level_zero:gpu"; PyTorch XPU needs only
+# Level Zero, and OpenCL devices must not be counted or selected here.
+export ONEAPI_DEVICE_SELECTOR=level_zero:gpu
 unset SYCL_DEVICE_FILTER
 
 VISIBLE_XPUS=$("$VENV_DIR/bin/python" -c 'import torch; print(torch.xpu.device_count())')
