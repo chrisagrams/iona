@@ -11,12 +11,18 @@ in groups of >= 2 spectra (a query needs another relevant spectrum), each group 
 MAX_PER_GROUP spectra drawn at random (seed 0): HEK peptides identified hundreds of times
 would otherwise dominate MAP@R and exceed the top-k metric's k=100.
 
+C11_TRIM=1 (environment): spectra above 512 peaks are TRIMMED to their 512 most intense
+peaks (m/z order kept) instead of dropped -- the rule stage 1 of reranking uses. Every
+method then sees the identical trimmed spectrum (GLEAMS and yHydra use only their top
+150 / 100 peaks anyway). Needed for HCT116, whose high-res spectra are mostly > 512 peaks.
+
 Writes, from the SAME rows in the SAME order:
   OUT/prepared/   the eval_grouped_retrieval `score` format (processed by MSDeltaProcessor)
   OUT/export/     meta.parquet + experimental.mgf (+ empty consensus.mgf): the format the
                   GLEAMS / yHydra embedders and score_retrieval.py already read
 """
 import json
+import os
 import sys
 from collections import Counter
 from pathlib import Path
@@ -30,6 +36,7 @@ ROWS = f"{S}/rerank-psm/a1-050m-c7s600/rows"
 PROCESSOR = "/flare/UIC-HPC/khuss/msdelta/pretrained/msdelta-50m-production-01-checkpoint-220000"
 MAX_PEAKS = 512
 MAX_PER_GROUP = 20
+TRIM = os.environ.get("C11_TRIM", "0") == "1"
 
 
 def confident_psms(run: str) -> dict:
@@ -74,6 +81,9 @@ def main(out_dir, *runs):
             mz = np.asarray(r["mz"], np.float64); it = np.asarray(r["intensity"], np.float64)
             ok = (it > 0) & np.isfinite(mz)
             mz, it = mz[ok], it[ok]
+            if TRIM and len(mz) > MAX_PEAKS:
+                top = np.sort(np.argsort(it)[-MAX_PEAKS:])
+                mz, it = mz[top], it[top]
             if not (0 < len(mz) <= MAX_PEAKS):
                 continue
             n_kept += 1
@@ -111,7 +121,7 @@ def main(out_dir, *runs):
     Dataset.from_dict(prep).save_to_disk(str(out / "prepared"))
     info = {"source": f"{REPO_ID}@{REVISION}", "runs": list(runs), "per_run": stats,
             "spectra": len(recs), "groups": groups, "max_peaks": MAX_PEAKS,
-            "max_per_group": MAX_PER_GROUP,
+            "max_per_group": MAX_PER_GROUP, "trim_to_top512": TRIM,
             "labels": "MSFragger rank-1 targets at q<=1% (per-run TDC on -log10 e-value)"}
     (out / "prepared" / "PREPARED.json").write_text(json.dumps(info, indent=1))
 

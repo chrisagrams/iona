@@ -1469,3 +1469,6 @@ HEK confident PSMs (psm-rerank-hek-hct116, 8 runs; <=512 peaks; groups capped at
   the same low-res domain shift as C11 (our spectrum encoder: MAP@R 0.17 here).
 - 20 ppm drops the true peptide for 24% of spectra (precursor accuracy of these runs), so
   it caps at 0.757; +-1.1 Da is the sensible window here.
+- Lab, 2026-09-25: HEK runs are high-res MS1 / LOW-res MS2 (ion-trap fragments); HCT116 is
+  high-res in both. C11's collapse is therefore the low-res MS2 domain. HCT116 = the unseen
+  high-res test (C11-HCT116, queued; >512-peak spectra trimmed to top-512 for all methods).
