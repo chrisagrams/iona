@@ -97,10 +97,15 @@ def load_rows():
     return rows
 
 
-def pick(rows, bench, method, scale="", ck="", stage=""):
+def pick(rows, bench, method, scale="", ck="", stage="", seed=None):
     return [r["map_at_r"] for r in rows if r["benchmark"] == bench and r["method"] == method
             and (not scale or r["scale"] == scale) and (not ck or r["pretrain_ckpt"] == ck)
-            and (not stage or r["stage"] == stage)]
+            and (not stage or r["stage"] == stage) and (seed is None or r["seed"] == seed)]
+
+
+# End-of-epoch seed chosen on the ms-contrastive-100k VALIDATION split (grouped100k-validation MAP@R:
+# 400M seeds 0.8639 / 0.8629 / 0.8634 -> seed 0; 50M 0.8314 / 0.8357 / 0.8342 -> seed 1).
+BEST_SEED = {"400m": 0, "50m": 1}
 
 
 def msd(v):
@@ -225,9 +230,8 @@ def fig_transfer(rows, zs, panels=None, baselines=True, out="C_transfer.png",
             return [], ""
         best = max(r, key=lambda t: t["abtt_best"])
         return [best["abtt_best"]], best["encoder"].upper().replace("K", "k")
-    series = [("C7 400M, end of epoch", "#1e3a8a", lambda b: (pick(rows, b, c7, "400m", stage="final"), "")),
-              ("C7 400M, step 600", "#3b82f6", lambda b: (pick(rows, b, c7, "400m", stage="s600"), "")),
-              ("C7 50M, end of epoch", "#93c5fd", lambda b: (pick(rows, b, c7, "50m", stage="final"), "")),
+    series = [("fine-tuned 400M", "#1e3a8a", lambda b: (pick(rows, b, c7, "400m", stage="final", seed=BEST_SEED["400m"]), "")),
+              ("fine-tuned 50M", "#93c5fd", lambda b: (pick(rows, b, c7, "50m", stage="final", seed=BEST_SEED["50m"]), "")),
               ("replicate corpus only 400M", "#0d9488", lambda b: (rep(b, "400m"), "")),
               ("replicate corpus only 50M", "#5eead4", lambda b: (rep(b, "50m"), "")),
               ("frozen + ABTT (best encoder)", "#7c3aed", frozen),
@@ -322,10 +326,10 @@ C7 = "C7 (replicate corpus -> ms-contrastive-100k)"
 PLOT_KEYS = ["benchmark", "model", "scale", "pretrain_ckpt", "finetune_stage", "seed", "map_at_r", "hit_at_1", "note"]
 
 
-def sel(rows, bench, method, scale="", ck="", stage=""):
+def sel(rows, bench, method, scale="", ck="", stage="", seed=None):
     return [r for r in rows if r["benchmark"] == bench and r["method"] == method
             and (not scale or r["scale"] == scale) and (not ck or r["pretrain_ckpt"] == ck)
-            and (not stage or r["stage"] == stage)]
+            and (not stage or r["stage"] == stage) and (seed is None or r["seed"] == seed)]
 
 
 def as_plot_row(r, model, note=""):
@@ -345,9 +349,8 @@ def export_plot_data(rows, zs, ab):
     # C_transfer_ours: our models on the in-distribution test and on yeast 20k
     out = []
     for b in ("ms-contrastive-100k", "yeast-20k"):
-        for model, rs in (("C7 400M, end of epoch", sel(rows, b, C7, "400m", stage="final")),
-                          ("C7 400M, step 600", sel(rows, b, C7, "400m", stage="s600")),
-                          ("C7 50M, end of epoch", sel(rows, b, C7, "50m", stage="final")),
+        for model, rs in (("fine-tuned 400M", sel(rows, b, C7, "400m", stage="final", seed=BEST_SEED["400m"])),
+                          ("fine-tuned 50M", sel(rows, b, C7, "50m", stage="final", seed=BEST_SEED["50m"])),
                           ("replicate corpus only 400M", sel(rows, b, "replicate corpus only (12 ep)", "400m")
                            or sel(rows, b, "replicate corpus only (24 ep)", "400m")),
                           ("replicate corpus only 50M", sel(rows, b, "replicate corpus only (12 ep)", "50m")
