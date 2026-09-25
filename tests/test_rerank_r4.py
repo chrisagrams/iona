@@ -147,7 +147,7 @@ def test_end_to_end_regimes_with_lab_and_vectors(tmp_path, regime):
     m = rep["methods"]["all"]
     prefix = "perrun/linear" if regime == "perrun" else "linear"
     for s in ("ms", "lab"):
-        for v in ("", "+emb", "+embws", "+embvec", "+nullvec"):
+        for v in ("", "+emb", "+embws", "+nullws", "+embvec", "+nullvec"):
             assert f"{prefix}:{s}{v}" in m
     # the strong lab feature beats the weak engine scores; the real vectors help; the
     # null vectors (random spectrum) do not
@@ -155,6 +155,8 @@ def test_end_to_end_regimes_with_lab_and_vectors(tmp_path, regime):
     assert m[f"{prefix}:lab"]["psms_1pct"] > ms_
     assert m[f"{prefix}:ms+embvec"]["psms_1pct"] > ms_
     assert m[f"{prefix}:ms+nullvec"]["psms_1pct"] < m[f"{prefix}:ms+embvec"]["psms_1pct"]
+    # the null within-spectrum arm (random-spectrum cosine) must not match the real one
+    assert m[f"{prefix}:ms+nullws"]["psms_1pct"] < m[f"{prefix}:ms+embws"]["psms_1pct"]
 
 
 def test_runs_filter_refuses_missing(tmp_path):

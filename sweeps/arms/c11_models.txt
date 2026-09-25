@@ -1,0 +1,9 @@
+# C11: HEK/HCT116 confident-PSM retrieval (neither we nor GLEAMS trained on it)
+c7b_cont400m_final_seed0 /lus/flare/projects/UIC-HPC/khuss/msdelta/runs/sweep-cont400m_ep01_seed0-8860522/final
+c7b_cont400m_final_seed1 /lus/flare/projects/UIC-HPC/khuss/msdelta/runs/sweep-cont400m_ep01_seed1-8860522/final
+c7b_cont400m_final_seed2 /lus/flare/projects/UIC-HPC/khuss/msdelta/runs/sweep-cont400m_ep01_seed2-8860522/final
+s400m_t0002_pk256_ep12_seed0 /lus/flare/projects/UIC-HPC/khuss/msdelta/runs/sweep-s400m_t0002_pk256_ep12_seed0-8857593/final
+s400m_t0002_pk256_ep12_seed1 /lus/flare/projects/UIC-HPC/khuss/msdelta/runs/sweep-s400m_t0002_pk256_ep12_seed1-8857593/final
+s400m_t0002_pk256_ep12_seed2 /lus/flare/projects/UIC-HPC/khuss/msdelta/runs/sweep-s400m_t0002_pk256_ep12_seed2-8857593/final
+binned_w0.1 binned:0.1
+binned_w1.0005 binned:1.0005
