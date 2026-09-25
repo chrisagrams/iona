@@ -1362,3 +1362,18 @@ same 8 runs (job 8865619, results/rerank/psm/a1-050m-c7s600_r4_perrun.json):
   Fold seeds 0/1/2: lab 129,041 / 128,991 / 129,040 (+-30); lab+embws 129,345 / 129,688 /
   129,490 -> embedding +304 / +697 / +450, mean +484 (+0.37%), positive on every seed and
   ~15x the seed spread.
+
+## MS2Rescore full + our embedding columns: +0.24% overall, +4.1% on HCT116, flat on HEK (2026-09-25)
+
+Same 8 runs, same MS2Rescore config (MS2PIP + DeepLC + search features, per-run Percolator-
+style), extra rescoring:emb_* columns only (job 8865654; scored with our TDC, pooled):
+
+    arm                        all        HEK293     HCT116
+    MS2Rescore full            128,211    120,747    7,139
+    + emb_cos                  128,431    120,716    7,324
+    + emb_cos + within-spec    128,521    120,643    7,433   (+310 / -104 / +294 = +4.1%)
+
+- Gain concentrated on HCT116 (the harder data: low ID rate, MS2PIP HCD model fits worse);
+  HEK flat. Only 2 HCT116 runs here; MS2Rescore's own CV noise not measured yet.
+- Consistent with our per-run rescorer (+0.37% on lab features): the A1 embedding adds a
+  small, positive signal on top of strong rescoring. Full dataset (R3) will test HCT116.
