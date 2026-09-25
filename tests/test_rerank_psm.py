@@ -74,3 +74,19 @@ def test_da_floor_matching():
     assert _match(obs, theo, 20.0).tolist() == [False, False]          # old default
     assert _match(obs, theo, 250.0).tolist() == [True, False]
     assert _match(obs, theo, 250.0, da_floor=0.05).tolist() == [True, True]
+
+
+def test_within_spectrum_features():
+    """Same numbers as the MS2Rescore converter's pool_features on a hand example."""
+    from msdelta.rerank_psm_fdr import within_spectrum
+    spec = np.array([0, 0, 0, 0, 1])
+    cos = np.array([0.5, 0.8, 0.3, 0.8, 0.4])
+    f = within_spectrum(spec, cos)
+    assert f["cos_delta"] == pytest.approx([-0.3, 0.0, -0.5, 0.0, 0.0])
+    assert f["cos_rank"].tolist() == [3, 1, 4, 2, 1]
+    assert f["cos_z"][:4] == pytest.approx([-0.4714045, 0.9428090, -1.4142136, 0.9428090])
+    assert f["cos_z"][4] == 0.0
+    assert f["cos_gap12"] == pytest.approx([0.0, 0.0, 0.0, 0.0, 0.0])
+    f = within_spectrum(np.array([7, 7]), np.array([0.9, 0.6]))
+    assert f["cos_delta"] == pytest.approx([0.3, -0.3])
+    assert f["cos_gap12"] == pytest.approx([0.3, 0.3])
