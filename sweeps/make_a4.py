@@ -2,6 +2,10 @@
 
     python sweeps/make_a4.py
     python sweeps/make_a4.py --check
+    python sweeps/make_a4.py --teacher 400m     # A6 = A2 + A4: 400m teacher, best A4 loss
+
+A6 (PLAN.md): the A4 loss that won validation (LiT + 4 hard negatives, no MSE) on the A2
+teacher (C7 400m final, cache align-targets-a2-400m-c7final), 3 seeds -> configs/sweep-a6.
 
 A1 regresses the student onto the frozen teacher's embedding (MSE), so nothing ever pushes
 a WRONG peptide away: an adjacent-residue swap lands next to the truth (70.5% on the
@@ -57,11 +61,23 @@ def description(neg, mse, seed):
             f"(teacher C7-50m step 600, cache {CACHE}), batch 256. PLAN.md A4.\n")
 
 
+TEACHERS = {  # --teacher: (base args, cache, out dir, run prefix, (neg, mse) combos)
+    "050m": (BASE, CACHE, OUT, RUN_PREFIX, None),
+    "400m": (REPO / "configs" / "a1-align-100k-400m-c7final" / "training.args",
+             "/lus/flare/projects/UIC-HPC/khuss/msdelta/align-targets-a2-400m-c7final",
+             REPO / "configs" / "sweep-a6", "v2_a6-", [("hn4", "mse0")]),
+}
+
+
 def main() -> int:
+    global BASE, CACHE, OUT, RUN_PREFIX
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--check", action="store_true")
+    ap.add_argument("--teacher", default="050m", choices=sorted(TEACHERS))
     cli = ap.parse_args()
-    combos = [(n, m, s) for n in NEG for m in MSE for s in SEEDS]
+    BASE, CACHE, OUT, RUN_PREFIX, only = TEACHERS[cli.teacher]
+    combos = [(n, m, s) for n in NEG for m in MSE for s in SEEDS
+              if only is None or (n, m) in only]
     if cli.check:
         stale = [n for n, t in (render(*c) for c in combos)
                  if not (OUT / n / "training.args").exists()

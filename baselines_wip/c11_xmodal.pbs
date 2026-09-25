@@ -11,9 +11,9 @@ set -uo pipefail
 cd /home/khuss/code/msdelta
 S=/lus/flare/projects/UIC-HPC/khuss/msdelta
 C=${C11_DIR:-$S/baselines/c11_cap20}; OUT=$C/xmodal; mkdir -p $OUT
-CACHE=$S/align-targets-a1-050m-c7s600
-ARGS=configs/a1-align-100k-050m-c7s600/training.args
-RUNS="$S/runs/v2_align-ft-a1-align-100k-050m-c7s600-8861093 $S/runs/v2_align-ft-a1-align-100k-050m-c7s600-8861292 $S/runs/v2_align-ft-a1-align-100k-050m-c7s600-8861309"
+CACHE=${CACHE:-$S/align-targets-a1-050m-c7s600}
+ARGS=${ARGS:-configs/a1-align-100k-050m-c7s600/training.args}
+RUNS=${RUNS:-"$S/runs/v2_align-ft-a1-align-100k-050m-c7s600-8861093 $S/runs/v2_align-ft-a1-align-100k-050m-c7s600-8861292 $S/runs/v2_align-ft-a1-align-100k-050m-c7s600-8861309"}
 [ -f $C/export/meta.parquet ] || { echo "C11 build missing"; exit 1; }
 set +u; source /usr/share/lmod/lmod/init/bash; module load frameworks/2025.3.1; set -u
 export ONEAPI_DEVICE_SELECTOR=level_zero:gpu ZE_FLAT_DEVICE_HIERARCHY=FLAT PYTHONPATH=$PWD OMP_NUM_THREADS=8
