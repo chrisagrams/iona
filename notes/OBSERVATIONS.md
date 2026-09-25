@@ -1409,3 +1409,21 @@ yHydra; yHydra is used natively with a precursor-mass pre-filter (K=50), not ope
 Pending: precursor-mass-window variant (both models) and an OOD cross-modal test on the
 HEK/HCT116 confident PSMs (C11 export). yHydra >> chance (1/7,848), so its input encoding
 (pyteomics alphabet order) is right.
+
+## ABTT across frozen encoders: ~2x everywhere; best D 64-128 (edge of range for 200m/400m) (2026-09-25)
+
+Exp MAP@R, ms-contrastive-100k test, train-fit (test-fit within 0.005 everywhere: no
+transductive gain). Job 8865987 (8 of 10 encoders; 400m@220k/430k rerun on capacity):
+
+    encoder       raw final  raw best   ABTT final  ABTT best (D)
+    50m@10k       0.072      0.086      0.181       0.181 (64)
+    50m@220k      0.112      0.208      0.296       0.401 (64)
+    50m@540k      0.102      0.177      0.260       0.361 (64)
+    100m@220k     0.093      0.140      0.259       0.328 (64)
+    100m@540k     0.087      0.125      0.241       0.306 (64)
+    200m@220k     0.077      0.151      0.230       0.366 (128)
+    200m@540k     0.080      0.191      0.242       0.432 (128)
+    400m@10k      0.168      0.216      0.385       0.414 (128)
+
+Best block stays at ~3/4 depth. Still far below binned cosine 0.730 and trained C7 0.868.
+D=128 is the top of the swept range for 200m/400m -> optimum unlocated (add D=256).

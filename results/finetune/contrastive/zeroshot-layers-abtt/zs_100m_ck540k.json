@@ -1,0 +1,1532 @@
+{
+ "name": "zs_100m_ck540k",
+ "path": "/flare/UIC-HPC/khuss/msdelta/pretrained/msdelta-100m-production-01-checkpoint-540423",
+ "pooling": "mean+max",
+ "layers": {
+  "block00": {
+   "experimental/Hit@1": 0.00047738393603055255,
+   "experimental/Precision@1": 0.00047738393603055255,
+   "experimental/R-Precision": 0.00035803795202291446,
+   "experimental/MAP@R": 0.0002983649600190954,
+   "experimental/R@5": 0.0009547678720611051,
+   "experimental/MAP@100": 0.00083638615211183,
+   "experimental/queries": 25137.0
+  },
+  "block01": {
+   "experimental/Hit@1": 0.015435413931654533,
+   "experimental/Precision@1": 0.015435413931654533,
+   "experimental/R-Precision": 0.010243863627322275,
+   "experimental/MAP@R": 0.009219477264590046,
+   "experimental/R@5": 0.015276285952977682,
+   "experimental/MAP@100": 0.012078647155980247,
+   "experimental/queries": 25137.0
+  },
+  "block02": {
+   "experimental/Hit@1": 0.030711699884632217,
+   "experimental/Precision@1": 0.030711699884632217,
+   "experimental/R-Precision": 0.01993077932927557,
+   "experimental/MAP@R": 0.018279826550503243,
+   "experimental/R@5": 0.026554481441699487,
+   "experimental/MAP@100": 0.022453248313499832,
+   "experimental/queries": 25137.0
+  },
+  "block03": {
+   "experimental/Hit@1": 0.04809643155507817,
+   "experimental/Precision@1": 0.04809643155507817,
+   "experimental/R-Precision": 0.03144766678601265,
+   "experimental/MAP@R": 0.029120420097863708,
+   "experimental/R@5": 0.04155229343199268,
+   "experimental/MAP@100": 0.035312152095724414,
+   "experimental/queries": 25137.0
+  },
+  "block04": {
+   "experimental/Hit@1": 0.06333293551338665,
+   "experimental/Precision@1": 0.06333293551338665,
+   "experimental/R-Precision": 0.042328042328042326,
+   "experimental/MAP@R": 0.039384174722520586,
+   "experimental/R@5": 0.05489915264351355,
+   "experimental/MAP@100": 0.046976103363237424,
+   "experimental/queries": 25137.0
+  },
+  "block05": {
+   "experimental/Hit@1": 0.07992202729044834,
+   "experimental/Precision@1": 0.07992202729044834,
+   "experimental/R-Precision": 0.053307872856745035,
+   "experimental/MAP@R": 0.04984683932052353,
+   "experimental/R@5": 0.06850459482038429,
+   "experimental/MAP@100": 0.05917768929489056,
+   "experimental/queries": 25137.0
+  },
+  "block06": {
+   "experimental/Hit@1": 0.095755261168795,
+   "experimental/Precision@1": 0.095755261168795,
+   "experimental/R-Precision": 0.06430759438278236,
+   "experimental/MAP@R": 0.06020010343318614,
+   "experimental/R@5": 0.08270676691729323,
+   "experimental/MAP@100": 0.07099219749891687,
+   "experimental/queries": 25137.0
+  },
+  "block07": {
+   "experimental/Hit@1": 0.12097704578907587,
+   "experimental/Precision@1": 0.12097704578907587,
+   "experimental/R-Precision": 0.08081712217050563,
+   "experimental/MAP@R": 0.07623224728487886,
+   "experimental/R@5": 0.10040975454509289,
+   "experimental/MAP@100": 0.08815245069324788,
+   "experimental/queries": 25137.0
+  },
+  "block08": {
+   "experimental/Hit@1": 0.14162390102239727,
+   "experimental/Precision@1": 0.14162390102239727,
+   "experimental/R-Precision": 0.09352746946731909,
+   "experimental/MAP@R": 0.08892270358435772,
+   "experimental/R@5": 0.11548713052472451,
+   "experimental/MAP@100": 0.10237709000186788,
+   "experimental/queries": 25137.0
+  },
+  "block09": {
+   "experimental/Hit@1": 0.1724151648963679,
+   "experimental/Precision@1": 0.1724151648963679,
+   "experimental/R-Precision": 0.11524843855670923,
+   "experimental/MAP@R": 0.10998726976170585,
+   "experimental/R@5": 0.1373274455981223,
+   "experimental/MAP@100": 0.12393011225243478,
+   "experimental/queries": 25137.0
+  },
+  "block10": {
+   "experimental/Hit@1": 0.19509090185781916,
+   "experimental/Precision@1": 0.19509090185781916,
+   "experimental/R-Precision": 0.13030592353900625,
+   "experimental/MAP@R": 0.12521382822134702,
+   "experimental/R@5": 0.15385686438318016,
+   "experimental/MAP@100": 0.13968346102518356,
+   "experimental/queries": 25137.0
+  },
+  "block11": {
+   "experimental/Hit@1": 0.19226638023630505,
+   "experimental/Precision@1": 0.19226638023630505,
+   "experimental/R-Precision": 0.12748140191749213,
+   "experimental/MAP@R": 0.12252854358117515,
+   "experimental/R@5": 0.15017702987627798,
+   "experimental/MAP@100": 0.13695484875693698,
+   "experimental/queries": 25137.0
+  },
+  "block12": {
+   "experimental/Hit@1": 0.17563750646457413,
+   "experimental/Precision@1": 0.17563750646457413,
+   "experimental/R-Precision": 0.11709830130882762,
+   "experimental/MAP@R": 0.11195647849783188,
+   "experimental/R@5": 0.14039065918765167,
+   "experimental/MAP@100": 0.12600130241355498,
+   "experimental/queries": 25137.0
+  },
+  "block13": {
+   "experimental/Hit@1": 0.14305605283048892,
+   "experimental/Precision@1": 0.14305605283048892,
+   "experimental/R-Precision": 0.09491983928074153,
+   "experimental/MAP@R": 0.09035485539244938,
+   "experimental/R@5": 0.1148108366153479,
+   "experimental/MAP@100": 0.10231096858259706,
+   "experimental/queries": 25137.0
+  },
+  "final": {
+   "experimental/Hit@1": 0.13895850737956,
+   "experimental/Precision@1": 0.13895850737956,
+   "experimental/R-Precision": 0.09143891474718542,
+   "experimental/MAP@R": 0.08713251382424314,
+   "experimental/R@5": 0.10993754226836934,
+   "experimental/MAP@100": 0.09866964556690275,
+   "experimental/queries": 25137.0
+  }
+ },
+ "abtt": {
+  "components": [
+   8,
+   32,
+   64,
+   128
+  ],
+  "fit_spectra": {
+   "train": 25859,
+   "test": 25848
+  },
+  "train": {
+   "center": {
+    "block00": {
+     "experimental/Hit@1": 0.0006365119147074034,
+     "experimental/Precision@1": 0.0006365119147074034,
+     "experimental/R-Precision": 0.0004177109440267335,
+     "experimental/MAP@R": 0.0003679834506902176,
+     "experimental/R@5": 0.0008950948800572861,
+     "experimental/MAP@100": 0.0007597005143912799,
+     "experimental/queries": 25137.0
+    },
+    "block01": {
+     "experimental/Hit@1": 0.025858296534988265,
+     "experimental/Precision@1": 0.025858296534988265,
+     "experimental/R-Precision": 0.017543859649122806,
+     "experimental/MAP@R": 0.015873015873015872,
+     "experimental/R@5": 0.02599753351633051,
+     "experimental/MAP@100": 0.020823372734917536,
+     "experimental/queries": 25137.0
+    },
+    "block02": {
+     "experimental/Hit@1": 0.042089350360027054,
+     "experimental/Precision@1": 0.042089350360027054,
+     "experimental/R-Precision": 0.02862314516449855,
+     "experimental/MAP@R": 0.026146715996340057,
+     "experimental/R@5": 0.03834984286112106,
+     "experimental/MAP@100": 0.032282629914873136,
+     "experimental/queries": 25137.0
+    },
+    "block03": {
+     "experimental/Hit@1": 0.05832040418506584,
+     "experimental/Precision@1": 0.05832040418506584,
+     "experimental/R-Precision": 0.03924493774117834,
+     "experimental/MAP@R": 0.0363010701356566,
+     "experimental/R@5": 0.052014958029995624,
+     "experimental/MAP@100": 0.04391182383769366,
+     "experimental/queries": 25137.0
+    },
+    "block04": {
+     "experimental/Hit@1": 0.07144846242590604,
+     "experimental/Precision@1": 0.07144846242590604,
+     "experimental/R-Precision": 0.04702231769900943,
+     "experimental/MAP@R": 0.04408839559215499,
+     "experimental/R@5": 0.06184111071329117,
+     "experimental/MAP@100": 0.05310042416532014,
+     "experimental/queries": 25137.0
+    },
+    "block05": {
+     "experimental/Hit@1": 0.08314436885865457,
+     "experimental/Precision@1": 0.08314436885865457,
+     "experimental/R-Precision": 0.055893702510243864,
+     "experimental/MAP@R": 0.05231332299001472,
+     "experimental/R@5": 0.0719258463619366,
+     "experimental/MAP@100": 0.06208622561352072,
+     "experimental/queries": 25137.0
+    },
+    "block06": {
+     "experimental/Hit@1": 0.09631220909416398,
+     "experimental/Precision@1": 0.09631220909416398,
+     "experimental/R-Precision": 0.0657198551935394,
+     "experimental/MAP@R": 0.061383617774595216,
+     "experimental/R@5": 0.0835819708000159,
+     "experimental/MAP@100": 0.07260262801595305,
+     "experimental/queries": 25137.0
+    },
+    "block07": {
+     "experimental/Hit@1": 0.12010184190635319,
+     "experimental/Precision@1": 0.12010184190635319,
+     "experimental/R-Precision": 0.08061821219715956,
+     "experimental/MAP@R": 0.07611290130087123,
+     "experimental/R@5": 0.10283645621991487,
+     "experimental/MAP@100": 0.08930143684192655,
+     "experimental/queries": 25137.0
+    },
+    "block08": {
+     "experimental/Hit@1": 0.1446075506225882,
+     "experimental/Precision@1": 0.1446075506225882,
+     "experimental/R-Precision": 0.09625253610216017,
+     "experimental/MAP@R": 0.09154831523252575,
+     "experimental/R@5": 0.11831165214623861,
+     "experimental/MAP@100": 0.10545389306153062,
+     "experimental/queries": 25137.0
+    },
+    "block09": {
+     "experimental/Hit@1": 0.17531925050722044,
+     "experimental/Precision@1": 0.17531925050722044,
+     "experimental/R-Precision": 0.11715797430083144,
+     "experimental/MAP@R": 0.11215538847117794,
+     "experimental/R@5": 0.14255877789712376,
+     "experimental/MAP@100": 0.1277081324565988,
+     "experimental/queries": 25137.0
+    },
+    "block10": {
+     "experimental/Hit@1": 0.19934757528742492,
+     "experimental/Precision@1": 0.19934757528742492,
+     "experimental/R-Precision": 0.13529856386999245,
+     "experimental/MAP@R": 0.1295003381469547,
+     "experimental/R@5": 0.161395552372996,
+     "experimental/MAP@100": 0.14557572403618793,
+     "experimental/queries": 25137.0
+    },
+    "block11": {
+     "experimental/Hit@1": 0.1968015276285953,
+     "experimental/Precision@1": 0.1968015276285953,
+     "experimental/R-Precision": 0.13163862036042487,
+     "experimental/MAP@R": 0.12648685205076182,
+     "experimental/R@5": 0.15781517285276683,
+     "experimental/MAP@100": 0.1423441562940166,
+     "experimental/queries": 25137.0
+    },
+    "block12": {
+     "experimental/Hit@1": 0.18136611369694078,
+     "experimental/Precision@1": 0.18136611369694078,
+     "experimental/R-Precision": 0.12097704578907587,
+     "experimental/MAP@R": 0.11593467796475315,
+     "experimental/R@5": 0.14476667860126508,
+     "experimental/MAP@100": 0.13073518920514798,
+     "experimental/queries": 25137.0
+    },
+    "block13": {
+     "experimental/Hit@1": 0.14850618610017105,
+     "experimental/Precision@1": 0.14850618610017105,
+     "experimental/R-Precision": 0.09766479691291721,
+     "experimental/MAP@R": 0.09337828698730954,
+     "experimental/R@5": 0.11884870907427299,
+     "experimental/MAP@100": 0.10629717653120276,
+     "experimental/queries": 25137.0
+    },
+    "final": {
+     "experimental/Hit@1": 0.1433345267931734,
+     "experimental/Precision@1": 0.1433345267931734,
+     "experimental/R-Precision": 0.09519831324342602,
+     "experimental/MAP@R": 0.09075267533914151,
+     "experimental/R@5": 0.11493018259935553,
+     "experimental/MAP@100": 0.10280624518944777,
+     "experimental/queries": 25137.0
+    }
+   },
+   "8": {
+    "block00": {
+     "experimental/Hit@1": 0.0013128058240840196,
+     "experimental/Precision@1": 0.0013128058240840196,
+     "experimental/R-Precision": 0.001113895850737956,
+     "experimental/MAP@R": 0.0009050403787245892,
+     "experimental/R@5": 0.002068663722799061,
+     "experimental/MAP@100": 0.0016872078914196929,
+     "experimental/queries": 25137.0
+    },
+    "block01": {
+     "experimental/Hit@1": 0.07646099375422684,
+     "experimental/Precision@1": 0.07646099375422684,
+     "experimental/R-Precision": 0.053069180888729764,
+     "experimental/MAP@R": 0.0491307634164777,
+     "experimental/R@5": 0.07176671838325974,
+     "experimental/MAP@100": 0.06107399401718038,
+     "experimental/queries": 25137.0
+    },
+    "block02": {
+     "experimental/Hit@1": 0.10709312964952063,
+     "experimental/Precision@1": 0.10709312964952063,
+     "experimental/R-Precision": 0.07554600787683495,
+     "experimental/MAP@R": 0.07048374905517762,
+     "experimental/R@5": 0.09907705772367427,
+     "experimental/MAP@100": 0.08547365211589707,
+     "experimental/queries": 25137.0
+    },
+    "block03": {
+     "experimental/Hit@1": 0.12038031586903768,
+     "experimental/Precision@1": 0.12038031586903768,
+     "experimental/R-Precision": 0.08366153478935434,
+     "experimental/MAP@R": 0.07877829494370847,
+     "experimental/R@5": 0.11129013008712257,
+     "experimental/MAP@100": 0.09599251691550616,
+     "experimental/queries": 25137.0
+    },
+    "block04": {
+     "experimental/Hit@1": 0.13748657357679914,
+     "experimental/Precision@1": 0.13748657357679914,
+     "experimental/R-Precision": 0.09661057405418308,
+     "experimental/MAP@R": 0.09086207582448184,
+     "experimental/R@5": 0.1267454350161117,
+     "experimental/MAP@100": 0.10980831391630116,
+     "experimental/queries": 25137.0
+    },
+    "block05": {
+     "experimental/Hit@1": 0.1617933723196881,
+     "experimental/Precision@1": 0.1617933723196881,
+     "experimental/R-Precision": 0.11379639575128297,
+     "experimental/MAP@R": 0.10704340215618412,
+     "experimental/R@5": 0.14878466006285554,
+     "experimental/MAP@100": 0.1292224457142826,
+     "experimental/queries": 25137.0
+    },
+    "block06": {
+     "experimental/Hit@1": 0.1887257827107451,
+     "experimental/Precision@1": 0.1887257827107451,
+     "experimental/R-Precision": 0.13257349723515138,
+     "experimental/MAP@R": 0.12528344671201813,
+     "experimental/R@5": 0.17048573815491108,
+     "experimental/MAP@100": 0.1495670910908223,
+     "experimental/queries": 25137.0
+    },
+    "block07": {
+     "experimental/Hit@1": 0.2274734455185583,
+     "experimental/Precision@1": 0.2274734455185583,
+     "experimental/R-Precision": 0.16189282730636115,
+     "experimental/MAP@R": 0.153687790905836,
+     "experimental/R@5": 0.2040020686637228,
+     "experimental/MAP@100": 0.18057050840398522,
+     "experimental/queries": 25137.0
+    },
+    "block08": {
+     "experimental/Hit@1": 0.26896606595854716,
+     "experimental/Precision@1": 0.26896606595854716,
+     "experimental/R-Precision": 0.1918486692922783,
+     "experimental/MAP@R": 0.18334526793173408,
+     "experimental/R@5": 0.23869196801527628,
+     "experimental/MAP@100": 0.21350105547575846,
+     "experimental/queries": 25137.0
+    },
+    "block09": {
+     "experimental/Hit@1": 0.32374587261805304,
+     "experimental/Precision@1": 0.32374587261805304,
+     "experimental/R-Precision": 0.23459442256434737,
+     "experimental/MAP@R": 0.2252257628197478,
+     "experimental/R@5": 0.28706687353303895,
+     "experimental/MAP@100": 0.2592824294059958,
+     "experimental/queries": 25137.0
+    },
+    "block10": {
+     "experimental/Hit@1": 0.3618968055058281,
+     "experimental/Precision@1": 0.3618968055058281,
+     "experimental/R-Precision": 0.2632175677288459,
+     "experimental/MAP@R": 0.25386879898158093,
+     "experimental/R@5": 0.31746031746031744,
+     "experimental/MAP@100": 0.289696072699342,
+     "experimental/queries": 25137.0
+    },
+    "block11": {
+     "experimental/Hit@1": 0.35250825476389386,
+     "experimental/Precision@1": 0.35250825476389386,
+     "experimental/R-Precision": 0.25512193181366116,
+     "experimental/MAP@R": 0.24638978398376896,
+     "experimental/R@5": 0.30829056768906393,
+     "experimental/MAP@100": 0.2813747387946864,
+     "experimental/queries": 25137.0
+    },
+    "block12": {
+     "experimental/Hit@1": 0.32895731391971994,
+     "experimental/Precision@1": 0.32895731391971994,
+     "experimental/R-Precision": 0.23668297728448104,
+     "experimental/MAP@R": 0.22803039344392728,
+     "experimental/R@5": 0.2873254564983888,
+     "experimental/MAP@100": 0.2607178020890831,
+     "experimental/queries": 25137.0
+    },
+    "block13": {
+     "experimental/Hit@1": 0.3019055575446553,
+     "experimental/Precision@1": 0.3019055575446553,
+     "experimental/R-Precision": 0.21512113617376774,
+     "experimental/MAP@R": 0.2067868082905677,
+     "experimental/R@5": 0.26357560568086885,
+     "experimental/MAP@100": 0.23781261572325843,
+     "experimental/queries": 25137.0
+    },
+    "final": {
+     "experimental/Hit@1": 0.2922385328400366,
+     "experimental/Precision@1": 0.2922385328400366,
+     "experimental/R-Precision": 0.2074631021999443,
+     "experimental/MAP@R": 0.19924812030075187,
+     "experimental/R@5": 0.2531527230775351,
+     "experimental/MAP@100": 0.22865685666570632,
+     "experimental/queries": 25137.0
+    }
+   },
+   "32": {
+    "block00": {
+     "experimental/Hit@1": 0.0009149858773918924,
+     "experimental/Precision@1": 0.0009149858773918924,
+     "experimental/R-Precision": 0.0005967299200381908,
+     "experimental/MAP@R": 0.0005271114293670685,
+     "experimental/R@5": 0.0009746588693957114,
+     "experimental/MAP@100": 0.0009575442079001614,
+     "experimental/queries": 25137.0
+    },
+    "block01": {
+     "experimental/Hit@1": 0.09778414289692486,
+     "experimental/Precision@1": 0.09778414289692486,
+     "experimental/R-Precision": 0.06850459482038429,
+     "experimental/MAP@R": 0.06362135497473843,
+     "experimental/R@5": 0.0919759716752198,
+     "experimental/MAP@100": 0.0781371678174308,
+     "experimental/queries": 25137.0
+    },
+    "block02": {
+     "experimental/Hit@1": 0.13999283924095954,
+     "experimental/Precision@1": 0.13999283924095954,
+     "experimental/R-Precision": 0.10011138958507379,
+     "experimental/MAP@R": 0.09348768747264988,
+     "experimental/R@5": 0.12915224569359907,
+     "experimental/MAP@100": 0.11184934464408479,
+     "experimental/queries": 25137.0
+    },
+    "block03": {
+     "experimental/Hit@1": 0.1580140828261129,
+     "experimental/Precision@1": 0.1580140828261129,
+     "experimental/R-Precision": 0.11238413494052592,
+     "experimental/MAP@R": 0.10556152285475594,
+     "experimental/R@5": 0.1458407924573338,
+     "experimental/MAP@100": 0.12648810191537097,
+     "experimental/queries": 25137.0
+    },
+    "block04": {
+     "experimental/Hit@1": 0.17094323109360704,
+     "experimental/Precision@1": 0.17094323109360704,
+     "experimental/R-Precision": 0.12274734455185583,
+     "experimental/MAP@R": 0.11524843855670923,
+     "experimental/R@5": 0.15757648088475157,
+     "experimental/MAP@100": 0.1373083243085703,
+     "experimental/queries": 25137.0
+    },
+    "block05": {
+     "experimental/Hit@1": 0.1996658312447786,
+     "experimental/Precision@1": 0.1996658312447786,
+     "experimental/R-Precision": 0.14285714285714285,
+     "experimental/MAP@R": 0.1345526514699447,
+     "experimental/R@5": 0.18510562119584675,
+     "experimental/MAP@100": 0.16098017179819432,
+     "experimental/queries": 25137.0
+    },
+    "block06": {
+     "experimental/Hit@1": 0.2327644508095636,
+     "experimental/Precision@1": 0.2327644508095636,
+     "experimental/R-Precision": 0.16710426860802802,
+     "experimental/MAP@R": 0.15855113975414728,
+     "experimental/R@5": 0.21255519751760354,
+     "experimental/MAP@100": 0.18734933516478136,
+     "experimental/queries": 25137.0
+    },
+    "block07": {
+     "experimental/Hit@1": 0.27728050284441264,
+     "experimental/Precision@1": 0.27728050284441264,
+     "experimental/R-Precision": 0.20036201615148982,
+     "experimental/MAP@R": 0.1911325933882325,
+     "experimental/R@5": 0.25142220630942436,
+     "experimental/MAP@100": 0.22328410695132858,
+     "experimental/queries": 25137.0
+    },
+    "block08": {
+     "experimental/Hit@1": 0.31865377730039385,
+     "experimental/Precision@1": 0.31865377730039385,
+     "experimental/R-Precision": 0.23013883916139555,
+     "experimental/MAP@R": 0.22101881688347855,
+     "experimental/R@5": 0.2841031149301826,
+     "experimental/MAP@100": 0.2555636117494101,
+     "experimental/queries": 25137.0
+    },
+    "block09": {
+     "experimental/Hit@1": 0.3801567410589967,
+     "experimental/Precision@1": 0.3801567410589967,
+     "experimental/R-Precision": 0.27917014759120024,
+     "experimental/MAP@R": 0.26954290488125077,
+     "experimental/R@5": 0.3362573099415205,
+     "experimental/MAP@100": 0.30685151279193146,
+     "experimental/queries": 25137.0
+    },
+    "block10": {
+     "experimental/Hit@1": 0.4183076739467717,
+     "experimental/Precision@1": 0.4183076739467717,
+     "experimental/R-Precision": 0.31021999443052073,
+     "experimental/MAP@R": 0.30055296972590206,
+     "experimental/R@5": 0.36782432271154075,
+     "experimental/MAP@100": 0.3385155682310159,
+     "experimental/queries": 25137.0
+    },
+    "block11": {
+     "experimental/Hit@1": 0.4038270278871783,
+     "experimental/Precision@1": 0.4038270278871783,
+     "experimental/R-Precision": 0.2990014719338028,
+     "experimental/MAP@R": 0.28950352070652824,
+     "experimental/R@5": 0.3565859092174882,
+     "experimental/MAP@100": 0.32667187183375723,
+     "experimental/queries": 25137.0
+    },
+    "block12": {
+     "experimental/Hit@1": 0.3795600111389585,
+     "experimental/Precision@1": 0.3795600111389585,
+     "experimental/R-Precision": 0.2781755977244699,
+     "experimental/MAP@R": 0.2688467199745395,
+     "experimental/R@5": 0.33705294983490475,
+     "experimental/MAP@100": 0.3061427163324668,
+     "experimental/queries": 25137.0
+    },
+    "block13": {
+     "experimental/Hit@1": 0.3638859052392887,
+     "experimental/Precision@1": 0.3638859052392887,
+     "experimental/R-Precision": 0.2666587102677328,
+     "experimental/MAP@R": 0.256593865616422,
+     "experimental/R@5": 0.3244022755300951,
+     "experimental/MAP@100": 0.29377234313578776,
+     "experimental/queries": 25137.0
+    },
+    "final": {
+     "experimental/Hit@1": 0.34399490790468235,
+     "experimental/Precision@1": 0.34399490790468235,
+     "experimental/R-Precision": 0.25008950948800573,
+     "experimental/MAP@R": 0.2409297052154195,
+     "experimental/R@5": 0.30140828261129016,
+     "experimental/MAP@100": 0.2735141915467302,
+     "experimental/queries": 25137.0
+    }
+   },
+   "64": {
+    "block00": {
+     "experimental/Hit@1": 0.00043760194136133987,
+     "experimental/Precision@1": 0.00043760194136133987,
+     "experimental/R-Precision": 0.0003182559573537017,
+     "experimental/MAP@R": 0.0002685284640171858,
+     "experimental/R@5": 0.0006762939093766161,
+     "experimental/MAP@100": 0.0006525386260451843,
+     "experimental/queries": 25137.0
+    },
+    "block01": {
+     "experimental/Hit@1": 0.10768985956955882,
+     "experimental/Precision@1": 0.10768985956955882,
+     "experimental/R-Precision": 0.07614273779687314,
+     "experimental/MAP@R": 0.07069260452719099,
+     "experimental/R@5": 0.10118550344114254,
+     "experimental/MAP@100": 0.08628894808791572,
+     "experimental/queries": 25137.0
+    },
+    "block02": {
+     "experimental/Hit@1": 0.15256394955643077,
+     "experimental/Precision@1": 0.15256394955643077,
+     "experimental/R-Precision": 0.10759040458288578,
+     "experimental/MAP@R": 0.10126506743048097,
+     "experimental/R@5": 0.13995305724629034,
+     "experimental/MAP@100": 0.12095603058132061,
+     "experimental/queries": 25137.0
+    },
+    "block03": {
+     "experimental/Hit@1": 0.17102279508294546,
+     "experimental/Precision@1": 0.17102279508294546,
+     "experimental/R-Precision": 0.12165333969845248,
+     "experimental/MAP@R": 0.11477105462067869,
+     "experimental/R@5": 0.15729800692206708,
+     "experimental/MAP@100": 0.13675602680222537,
+     "experimental/queries": 25137.0
+    },
+    "block04": {
+     "experimental/Hit@1": 0.18653777300393842,
+     "experimental/Precision@1": 0.18653777300393842,
+     "experimental/R-Precision": 0.1323348052671361,
+     "experimental/MAP@R": 0.12508453673867206,
+     "experimental/R@5": 0.1708238851095994,
+     "experimental/MAP@100": 0.14889449578516759,
+     "experimental/queries": 25137.0
+    },
+    "block05": {
+     "experimental/Hit@1": 0.21629470501650952,
+     "experimental/Precision@1": 0.21629470501650952,
+     "experimental/R-Precision": 0.1551497792099296,
+     "experimental/MAP@R": 0.146437522377372,
+     "experimental/R@5": 0.1961849067112225,
+     "experimental/MAP@100": 0.17227918703260042,
+     "experimental/queries": 25137.0
+    },
+    "block06": {
+     "experimental/Hit@1": 0.24450013923698133,
+     "experimental/Precision@1": 0.24450013923698133,
+     "experimental/R-Precision": 0.17438437363249393,
+     "experimental/MAP@R": 0.16594064526395352,
+     "experimental/R@5": 0.2205911604407845,
+     "experimental/MAP@100": 0.1944033901252387,
+     "experimental/queries": 25137.0
+    },
+    "block07": {
+     "experimental/Hit@1": 0.2863905796236623,
+     "experimental/Precision@1": 0.2863905796236623,
+     "experimental/R-Precision": 0.20710506424792138,
+     "experimental/MAP@R": 0.19784580498866214,
+     "experimental/R@5": 0.25836416437920195,
+     "experimental/MAP@100": 0.2293721373669168,
+     "experimental/queries": 25137.0
+    },
+    "block08": {
+     "experimental/Hit@1": 0.3340891912320484,
+     "experimental/Precision@1": 0.3340891912320484,
+     "experimental/R-Precision": 0.24284918645820902,
+     "experimental/MAP@R": 0.23296336078290966,
+     "experimental/R@5": 0.29558022039225046,
+     "experimental/MAP@100": 0.26580018014949947,
+     "experimental/queries": 25137.0
+    },
+    "block09": {
+     "experimental/Hit@1": 0.391255917571707,
+     "experimental/Precision@1": 0.391255917571707,
+     "experimental/R-Precision": 0.2862911246369893,
+     "experimental/MAP@R": 0.27705175637506463,
+     "experimental/R@5": 0.34413414488602456,
+     "experimental/MAP@100": 0.31279987281028093,
+     "experimental/queries": 25137.0
+    },
+    "block10": {
+     "experimental/Hit@1": 0.42658232883796793,
+     "experimental/Precision@1": 0.42658232883796793,
+     "experimental/R-Precision": 0.3161674026335681,
+     "experimental/MAP@R": 0.30636114094760714,
+     "experimental/R@5": 0.3759796316187294,
+     "experimental/MAP@100": 0.34391598614786284,
+     "experimental/queries": 25137.0
+    },
+    "block11": {
+     "experimental/Hit@1": 0.41468751243187335,
+     "experimental/Precision@1": 0.41468751243187335,
+     "experimental/R-Precision": 0.30815133070772166,
+     "experimental/MAP@R": 0.29811632255241277,
+     "experimental/R@5": 0.36428372518598084,
+     "experimental/MAP@100": 0.3340156853528601,
+     "experimental/queries": 25137.0
+    },
+    "block12": {
+     "experimental/Hit@1": 0.3910967895930302,
+     "experimental/Precision@1": 0.3910967895930302,
+     "experimental/R-Precision": 0.2874249114850619,
+     "experimental/MAP@R": 0.27807614273779685,
+     "experimental/R@5": 0.3439750169073477,
+     "experimental/MAP@100": 0.31334380369015297,
+     "experimental/queries": 25137.0
+    },
+    "block13": {
+     "experimental/Hit@1": 0.38182758483510365,
+     "experimental/Precision@1": 0.38182758483510365,
+     "experimental/R-Precision": 0.27893145562318494,
+     "experimental/MAP@R": 0.2697219238572622,
+     "experimental/R@5": 0.33623741894418585,
+     "experimental/MAP@100": 0.30589754133675584,
+     "experimental/queries": 25137.0
+    },
+    "final": {
+     "experimental/Hit@1": 0.345427059712774,
+     "experimental/Precision@1": 0.345427059712774,
+     "experimental/R-Precision": 0.24963201654930978,
+     "experimental/MAP@R": 0.24101921470342522,
+     "experimental/R@5": 0.2978676850857302,
+     "experimental/MAP@100": 0.2709131765542017,
+     "experimental/queries": 25137.0
+    }
+   },
+   "128": {
+    "block00": {
+     "experimental/Hit@1": 0.00047738393603055255,
+     "experimental/Precision@1": 0.00047738393603055255,
+     "experimental/R-Precision": 0.00025858296534988264,
+     "experimental/MAP@R": 0.00025858296534988264,
+     "experimental/R@5": 0.00043760194136133987,
+     "experimental/MAP@100": 0.0004793351849057715,
+     "experimental/queries": 25137.0
+    },
+    "block01": {
+     "experimental/Hit@1": 0.11202609698850301,
+     "experimental/Precision@1": 0.11202609698850301,
+     "experimental/R-Precision": 0.07775390858097625,
+     "experimental/MAP@R": 0.07270159525798624,
+     "experimental/R@5": 0.10182201535584995,
+     "experimental/MAP@100": 0.0874973079652411,
+     "experimental/queries": 25137.0
+    },
+    "block02": {
+     "experimental/Hit@1": 0.1590086326928432,
+     "experimental/Precision@1": 0.1590086326928432,
+     "experimental/R-Precision": 0.11282173688188726,
+     "experimental/MAP@R": 0.10618808927079604,
+     "experimental/R@5": 0.14389147471854238,
+     "experimental/MAP@100": 0.1250698103105917,
+     "experimental/queries": 25137.0
+    },
+    "block03": {
+     "experimental/Hit@1": 0.17818355412340375,
+     "experimental/Precision@1": 0.17818355412340375,
+     "experimental/R-Precision": 0.12744161992282294,
+     "experimental/MAP@R": 0.12025102438636273,
+     "experimental/R@5": 0.16093805943430003,
+     "experimental/MAP@100": 0.14083021332162252,
+     "experimental/queries": 25137.0
+    },
+    "block04": {
+     "experimental/Hit@1": 0.198989537335402,
+     "experimental/Precision@1": 0.198989537335402,
+     "experimental/R-Precision": 0.14220073994510085,
+     "experimental/MAP@R": 0.13434379599793134,
+     "experimental/R@5": 0.17965548792616462,
+     "experimental/MAP@100": 0.15726692541765655,
+     "experimental/queries": 25137.0
+    },
+    "block05": {
+     "experimental/Hit@1": 0.22576281974778215,
+     "experimental/Precision@1": 0.22576281974778215,
+     "experimental/R-Precision": 0.16032143851692723,
+     "experimental/MAP@R": 0.15219596610574054,
+     "experimental/R@5": 0.20010343318613996,
+     "experimental/MAP@100": 0.17632664745242943,
+     "experimental/queries": 25137.0
+    },
+    "block06": {
+     "experimental/Hit@1": 0.2503480924533556,
+     "experimental/Precision@1": 0.2503480924533556,
+     "experimental/R-Precision": 0.17780562517404622,
+     "experimental/MAP@R": 0.16953097028284997,
+     "experimental/R@5": 0.22045192345944226,
+     "experimental/MAP@100": 0.19494555152704585,
+     "experimental/queries": 25137.0
+    },
+    "block07": {
+     "experimental/Hit@1": 0.285952977682301,
+     "experimental/Precision@1": 0.285952977682301,
+     "experimental/R-Precision": 0.20469825357043403,
+     "experimental/MAP@R": 0.19629430719656282,
+     "experimental/R@5": 0.2493535425866253,
+     "experimental/MAP@100": 0.22330452848857013,
+     "experimental/queries": 25137.0
+    },
+    "block08": {
+     "experimental/Hit@1": 0.3258145363408521,
+     "experimental/Precision@1": 0.3258145363408521,
+     "experimental/R-Precision": 0.23475355054302421,
+     "experimental/MAP@R": 0.22566336476110913,
+     "experimental/R@5": 0.28082110036997254,
+     "experimental/MAP@100": 0.25412860570946216,
+     "experimental/queries": 25137.0
+    },
+    "block09": {
+     "experimental/Hit@1": 0.38409515853124876,
+     "experimental/Precision@1": 0.38409515853124876,
+     "experimental/R-Precision": 0.2788121096391773,
+     "experimental/MAP@R": 0.27016947129729085,
+     "experimental/R@5": 0.3285396029756932,
+     "experimental/MAP@100": 0.30093027222539237,
+     "experimental/queries": 25137.0
+    },
+    "block10": {
+     "experimental/Hit@1": 0.4195409157815173,
+     "experimental/Precision@1": 0.4195409157815173,
+     "experimental/R-Precision": 0.30858893264908305,
+     "experimental/MAP@R": 0.29963798384851015,
+     "experimental/R@5": 0.3621752794685126,
+     "experimental/MAP@100": 0.3326300474474101,
+     "experimental/queries": 25137.0
+    },
+    "block11": {
+     "experimental/Hit@1": 0.40995345506623704,
+     "experimental/Precision@1": 0.40995345506623704,
+     "experimental/R-Precision": 0.302323268488682,
+     "experimental/MAP@R": 0.293203246210765,
+     "experimental/R@5": 0.3520507618251979,
+     "experimental/MAP@100": 0.3243394739309055,
+     "experimental/queries": 25137.0
+    },
+    "block12": {
+     "experimental/Hit@1": 0.3869992441421013,
+     "experimental/Precision@1": 0.3869992441421013,
+     "experimental/R-Precision": 0.28300911007677926,
+     "experimental/MAP@R": 0.274177507260214,
+     "experimental/R@5": 0.33029001074113856,
+     "experimental/MAP@100": 0.304138827040319,
+     "experimental/queries": 25137.0
+    },
+    "block13": {
+     "experimental/Hit@1": 0.3777300393841747,
+     "experimental/Precision@1": 0.3777300393841747,
+     "experimental/R-Precision": 0.27547042208696343,
+     "experimental/MAP@R": 0.266270835819708,
+     "experimental/R@5": 0.32585431833552136,
+     "experimental/MAP@100": 0.2972608554826582,
+     "experimental/queries": 25137.0
+    },
+    "final": {
+     "experimental/Hit@1": 0.3279229820583204,
+     "experimental/Precision@1": 0.3279229820583204,
+     "experimental/R-Precision": 0.23272466881489437,
+     "experimental/MAP@R": 0.225265544814417,
+     "experimental/R@5": 0.274177507260214,
+     "experimental/MAP@100": 0.25106650297580196,
+     "experimental/queries": 25137.0
+    }
+   }
+  },
+  "test": {
+   "center": {
+    "block00": {
+     "experimental/Hit@1": 0.0005967299200381908,
+     "experimental/Precision@1": 0.0005967299200381908,
+     "experimental/R-Precision": 0.0004177109440267335,
+     "experimental/MAP@R": 0.00035803795202291446,
+     "experimental/R@5": 0.0008752038827226797,
+     "experimental/MAP@100": 0.0007509478994119033,
+     "experimental/queries": 25137.0
+    },
+    "block01": {
+     "experimental/Hit@1": 0.025898078529657476,
+     "experimental/Precision@1": 0.025898078529657476,
+     "experimental/R-Precision": 0.01764331463579584,
+     "experimental/MAP@R": 0.01593268886501969,
+     "experimental/R@5": 0.02599753351633051,
+     "experimental/MAP@100": 0.02084926227806775,
+     "experimental/queries": 25137.0
+    },
+    "block02": {
+     "experimental/Hit@1": 0.042288260333373115,
+     "experimental/Precision@1": 0.042288260333373115,
+     "experimental/R-Precision": 0.02860325416716394,
+     "experimental/MAP@R": 0.026166606993674662,
+     "experimental/R@5": 0.038170823885109596,
+     "experimental/MAP@100": 0.032351238164079595,
+     "experimental/queries": 25137.0
+    },
+    "block03": {
+     "experimental/Hit@1": 0.058240840195727415,
+     "experimental/Precision@1": 0.058240840195727415,
+     "experimental/R-Precision": 0.03924493774117834,
+     "experimental/MAP@R": 0.03626128814098739,
+     "experimental/R@5": 0.05203484902733023,
+     "experimental/MAP@100": 0.04391479552890006,
+     "experimental/queries": 25137.0
+    },
+    "block04": {
+     "experimental/Hit@1": 0.07120977045789076,
+     "experimental/Precision@1": 0.07120977045789076,
+     "experimental/R-Precision": 0.04718144567768628,
+     "experimental/MAP@R": 0.044128177586824205,
+     "experimental/R@5": 0.06174165572661813,
+     "experimental/MAP@100": 0.05312158263099077,
+     "experimental/queries": 25137.0
+    },
+    "block05": {
+     "experimental/Hit@1": 0.08350240681067748,
+     "experimental/Precision@1": 0.08350240681067748,
+     "experimental/R-Precision": 0.05615228547559375,
+     "experimental/MAP@R": 0.05255201495803,
+     "experimental/R@5": 0.07214464733261726,
+     "experimental/MAP@100": 0.06226336827505582,
+     "experimental/queries": 25137.0
+    },
+    "block06": {
+     "experimental/Hit@1": 0.09643155507817162,
+     "experimental/Precision@1": 0.09643155507817162,
+     "experimental/R-Precision": 0.06577952818554322,
+     "experimental/MAP@R": 0.06139356327326252,
+     "experimental/R@5": 0.08366153478935434,
+     "experimental/MAP@100": 0.07262558297230397,
+     "experimental/queries": 25137.0
+    },
+    "block07": {
+     "experimental/Hit@1": 0.12042009786370689,
+     "experimental/Precision@1": 0.12042009786370689,
+     "experimental/R-Precision": 0.08073755818116721,
+     "experimental/MAP@R": 0.07622230178621156,
+     "experimental/R@5": 0.10275689223057644,
+     "experimental/MAP@100": 0.08938228165415243,
+     "experimental/queries": 25137.0
+    },
+    "block08": {
+     "experimental/Hit@1": 0.14508493455861876,
+     "experimental/Precision@1": 0.14508493455861876,
+     "experimental/R-Precision": 0.09653101006484466,
+     "experimental/MAP@R": 0.09182678919521024,
+     "experimental/R@5": 0.11847078012491546,
+     "experimental/MAP@100": 0.10566070164502434,
+     "experimental/queries": 25137.0
+    },
+    "block09": {
+     "experimental/Hit@1": 0.17551816048056648,
+     "experimental/Precision@1": 0.17551816048056648,
+     "experimental/R-Precision": 0.11737677527151211,
+     "experimental/MAP@R": 0.1123145164498548,
+     "experimental/R@5": 0.14249910490511994,
+     "experimental/MAP@100": 0.1278471539440429,
+     "experimental/queries": 25137.0
+    },
+    "block10": {
+     "experimental/Hit@1": 0.19942713927676334,
+     "experimental/Precision@1": 0.19942713927676334,
+     "experimental/R-Precision": 0.13523889087798863,
+     "experimental/MAP@R": 0.12947050165095278,
+     "experimental/R@5": 0.16183315431435732,
+     "experimental/MAP@100": 0.14570517091727955,
+     "experimental/queries": 25137.0
+    },
+    "block11": {
+     "experimental/Hit@1": 0.19723912956995665,
+     "experimental/Precision@1": 0.19723912956995665,
+     "experimental/R-Precision": 0.13175796634443251,
+     "experimental/MAP@R": 0.12664598002943867,
+     "experimental/R@5": 0.15819310180212437,
+     "experimental/MAP@100": 0.14257231334202633,
+     "experimental/queries": 25137.0
+    },
+    "block12": {
+     "experimental/Hit@1": 0.18140589569160998,
+     "experimental/Precision@1": 0.18140589569160998,
+     "experimental/R-Precision": 0.1210963917730835,
+     "experimental/MAP@R": 0.11596451446075506,
+     "experimental/R@5": 0.14496558857461114,
+     "experimental/MAP@100": 0.1308552180923539,
+     "experimental/queries": 25137.0
+    },
+    "block13": {
+     "experimental/Hit@1": 0.14910291602020925,
+     "experimental/Precision@1": 0.14910291602020925,
+     "experimental/R-Precision": 0.09786370688626328,
+     "experimental/MAP@R": 0.09363686995265942,
+     "experimental/R@5": 0.11882881807693838,
+     "experimental/MAP@100": 0.106543425354254,
+     "experimental/queries": 25137.0
+    },
+    "final": {
+     "experimental/Hit@1": 0.14341409078251183,
+     "experimental/Precision@1": 0.14341409078251183,
+     "experimental/R-Precision": 0.09535744122210288,
+     "experimental/MAP@R": 0.09086207582448184,
+     "experimental/R@5": 0.11500974658869395,
+     "experimental/MAP@100": 0.10288320868340711,
+     "experimental/queries": 25137.0
+    }
+   },
+   "8": {
+    "block00": {
+     "experimental/Hit@1": 0.0013525878187532322,
+     "experimental/Precision@1": 0.0013525878187532322,
+     "experimental/R-Precision": 0.0010741138560687433,
+     "experimental/MAP@R": 0.0008950948800572861,
+     "experimental/R@5": 0.002227791701475912,
+     "experimental/MAP@100": 0.001708773893801045,
+     "experimental/queries": 25137.0
+    },
+    "block01": {
+     "experimental/Hit@1": 0.07681903170624975,
+     "experimental/Precision@1": 0.07681903170624975,
+     "experimental/R-Precision": 0.053228308867406614,
+     "experimental/MAP@R": 0.04931972789115646,
+     "experimental/R@5": 0.07180650037792895,
+     "experimental/MAP@100": 0.06118294621451011,
+     "experimental/queries": 25137.0
+    },
+    "block02": {
+     "experimental/Hit@1": 0.10749094959621275,
+     "experimental/Precision@1": 0.10749094959621275,
+     "experimental/R-Precision": 0.07548633488483113,
+     "experimental/MAP@R": 0.07049369455384492,
+     "experimental/R@5": 0.09939531368102797,
+     "experimental/MAP@100": 0.08558055287201914,
+     "experimental/queries": 25137.0
+    },
+    "block03": {
+     "experimental/Hit@1": 0.11926642001829972,
+     "experimental/Precision@1": 0.11926642001829972,
+     "experimental/R-Precision": 0.0835819708000159,
+     "experimental/MAP@R": 0.07843020249035286,
+     "experimental/R@5": 0.11132991208179178,
+     "experimental/MAP@100": 0.09547274624025186,
+     "experimental/queries": 25137.0
+    },
+    "block04": {
+     "experimental/Hit@1": 0.13800373950749892,
+     "experimental/Precision@1": 0.13800373950749892,
+     "experimental/R-Precision": 0.09643155507817162,
+     "experimental/MAP@R": 0.09086207582448184,
+     "experimental/R@5": 0.12648685205076182,
+     "experimental/MAP@100": 0.1097362181563392,
+     "experimental/queries": 25137.0
+    },
+    "block05": {
+     "experimental/Hit@1": 0.1611568604049807,
+     "experimental/Precision@1": 0.1611568604049807,
+     "experimental/R-Precision": 0.11335879380992163,
+     "experimental/MAP@R": 0.10654612722281895,
+     "experimental/R@5": 0.1483271671241596,
+     "experimental/MAP@100": 0.12865727442035613,
+     "experimental/queries": 25137.0
+    },
+    "block06": {
+     "experimental/Hit@1": 0.1883677447587222,
+     "experimental/Precision@1": 0.1883677447587222,
+     "experimental/R-Precision": 0.13301109917651271,
+     "experimental/MAP@R": 0.12539284719735846,
+     "experimental/R@5": 0.1705653021442495,
+     "experimental/MAP@100": 0.1495429921957361,
+     "experimental/queries": 25137.0
+    },
+    "block07": {
+     "experimental/Hit@1": 0.22667780562517403,
+     "experimental/Precision@1": 0.22667780562517403,
+     "experimental/R-Precision": 0.16163424434101126,
+     "experimental/MAP@R": 0.1533396984524804,
+     "experimental/R@5": 0.2043203246210765,
+     "experimental/MAP@100": 0.18044388843862197,
+     "experimental/queries": 25137.0
+    },
+    "block08": {
+     "experimental/Hit@1": 0.26896606595854716,
+     "experimental/Precision@1": 0.26896606595854716,
+     "experimental/R-Precision": 0.1924652902096511,
+     "experimental/MAP@R": 0.18380276087043004,
+     "experimental/R@5": 0.2387715320046147,
+     "experimental/MAP@100": 0.2136846392802598,
+     "experimental/queries": 25137.0
+    },
+    "block09": {
+     "experimental/Hit@1": 0.32374587261805304,
+     "experimental/Precision@1": 0.32374587261805304,
+     "experimental/R-Precision": 0.23517126148705095,
+     "experimental/MAP@R": 0.2256235827664399,
+     "experimental/R@5": 0.2868679635596929,
+     "experimental/MAP@100": 0.2593154697802915,
+     "experimental/queries": 25137.0
+    },
+    "block10": {
+     "experimental/Hit@1": 0.36181724151648964,
+     "experimental/Precision@1": 0.36181724151648964,
+     "experimental/R-Precision": 0.26327724072084974,
+     "experimental/MAP@R": 0.25395830846958667,
+     "experimental/R@5": 0.3172614074869714,
+     "experimental/MAP@100": 0.28948556611915144,
+     "experimental/queries": 25137.0
+    },
+    "block11": {
+     "experimental/Hit@1": 0.3526673827425707,
+     "experimental/Precision@1": 0.3526673827425707,
+     "experimental/R-Precision": 0.254724111866969,
+     "experimental/MAP@R": 0.2462107650077575,
+     "experimental/R@5": 0.3075546007876835,
+     "experimental/MAP@100": 0.28124923514841793,
+     "experimental/queries": 25137.0
+    },
+    "block12": {
+     "experimental/Hit@1": 0.328599275967697,
+     "experimental/Precision@1": 0.328599275967697,
+     "experimental/R-Precision": 0.23616581135378129,
+     "experimental/MAP@R": 0.22755300950789673,
+     "experimental/R@5": 0.2871862195170466,
+     "experimental/MAP@100": 0.2604439342325929,
+     "experimental/queries": 25137.0
+    },
+    "block13": {
+     "experimental/Hit@1": 0.3023033774913474,
+     "experimental/Precision@1": 0.3023033774913474,
+     "experimental/R-Precision": 0.21490233520308707,
+     "experimental/MAP@R": 0.20668735330389465,
+     "experimental/R@5": 0.26272029279548076,
+     "experimental/MAP@100": 0.23752995328762444,
+     "experimental/queries": 25137.0
+    },
+    "final": {
+     "experimental/Hit@1": 0.2918804948880137,
+     "experimental/Precision@1": 0.2918804948880137,
+     "experimental/R-Precision": 0.20762223017862116,
+     "experimental/MAP@R": 0.19936746628475951,
+     "experimental/R@5": 0.2527151211361738,
+     "experimental/MAP@100": 0.22854985757152368,
+     "experimental/queries": 25137.0
+    }
+   },
+   "32": {
+    "block00": {
+     "experimental/Hit@1": 0.0008752038827226797,
+     "experimental/Precision@1": 0.0008752038827226797,
+     "experimental/R-Precision": 0.000497274933365159,
+     "experimental/MAP@R": 0.0004674384373632494,
+     "experimental/R@5": 0.0009746588693957114,
+     "experimental/MAP@100": 0.0009201096882326732,
+     "experimental/queries": 25137.0
+    },
+    "block01": {
+     "experimental/Hit@1": 0.09810239885427856,
+     "experimental/Precision@1": 0.09810239885427856,
+     "experimental/R-Precision": 0.06846481282571508,
+     "experimental/MAP@R": 0.06363130047340573,
+     "experimental/R@5": 0.09241357361658113,
+     "experimental/MAP@100": 0.07834829690182565,
+     "experimental/queries": 25137.0
+    },
+    "block02": {
+     "experimental/Hit@1": 0.14074869713967458,
+     "experimental/Precision@1": 0.14074869713967458,
+     "experimental/R-Precision": 0.09943509567569718,
+     "experimental/MAP@R": 0.0932291045073,
+     "experimental/R@5": 0.12879420774157616,
+     "experimental/MAP@100": 0.11178275581551379,
+     "experimental/queries": 25137.0
+    },
+    "block03": {
+     "experimental/Hit@1": 0.15817321080478974,
+     "experimental/Precision@1": 0.15817321080478974,
+     "experimental/R-Precision": 0.11258304491387199,
+     "experimental/MAP@R": 0.10582010582010581,
+     "experimental/R@5": 0.14603970243067987,
+     "experimental/MAP@100": 0.1267865809961023,
+     "experimental/queries": 25137.0
+    },
+    "block04": {
+     "experimental/Hit@1": 0.17213669093368342,
+     "experimental/Precision@1": 0.17213669093368342,
+     "experimental/R-Precision": 0.12211083263714842,
+     "experimental/MAP@R": 0.11505947408203047,
+     "experimental/R@5": 0.15765604487409,
+     "experimental/MAP@100": 0.13740922219382315,
+     "experimental/queries": 25137.0
+    },
+    "block05": {
+     "experimental/Hit@1": 0.19894975534073278,
+     "experimental/Precision@1": 0.19894975534073278,
+     "experimental/R-Precision": 0.14247921390778534,
+     "experimental/MAP@R": 0.13409515853124876,
+     "experimental/R@5": 0.18580180610255798,
+     "experimental/MAP@100": 0.16085967003846266,
+     "experimental/queries": 25137.0
+    },
+    "block06": {
+     "experimental/Hit@1": 0.23204837490551777,
+     "experimental/Precision@1": 0.23204837490551777,
+     "experimental/R-Precision": 0.16682579464534353,
+     "experimental/MAP@R": 0.15822293829812628,
+     "experimental/R@5": 0.21150097465886938,
+     "experimental/MAP@100": 0.18673789156418918,
+     "experimental/queries": 25137.0
+    },
+    "block07": {
+     "experimental/Hit@1": 0.277161156860405,
+     "experimental/Precision@1": 0.277161156860405,
+     "experimental/R-Precision": 0.20020288817281298,
+     "experimental/MAP@R": 0.19100330190555753,
+     "experimental/R@5": 0.2506066754187055,
+     "experimental/MAP@100": 0.22301200553777797,
+     "experimental/queries": 25137.0
+    },
+    "block08": {
+     "experimental/Hit@1": 0.3197278911564626,
+     "experimental/Precision@1": 0.3197278911564626,
+     "experimental/R-Precision": 0.23157099096948722,
+     "experimental/MAP@R": 0.22198353025420695,
+     "experimental/R@5": 0.2863905796236623,
+     "experimental/MAP@100": 0.25690042177267014,
+     "experimental/queries": 25137.0
+    },
+    "block09": {
+     "experimental/Hit@1": 0.3798782670963122,
+     "experimental/Precision@1": 0.3798782670963122,
+     "experimental/R-Precision": 0.2796674225245654,
+     "experimental/MAP@R": 0.26976170585193143,
+     "experimental/R@5": 0.33723196881091616,
+     "experimental/MAP@100": 0.30691020483143,
+     "experimental/queries": 25137.0
+    },
+    "block10": {
+     "experimental/Hit@1": 0.41751203405338744,
+     "experimental/Precision@1": 0.41751203405338744,
+     "experimental/R-Precision": 0.3097823924891594,
+     "experimental/MAP@R": 0.30004574929386957,
+     "experimental/R@5": 0.3678044317142061,
+     "experimental/MAP@100": 0.3382132454675721,
+     "experimental/queries": 25137.0
+    },
+    "block11": {
+     "experimental/Hit@1": 0.40374746389783983,
+     "experimental/Precision@1": 0.40374746389783983,
+     "experimental/R-Precision": 0.29840474201376455,
+     "experimental/MAP@R": 0.289036082269165,
+     "experimental/R@5": 0.3562676532601345,
+     "experimental/MAP@100": 0.32637878070750415,
+     "experimental/queries": 25137.0
+    },
+    "block12": {
+     "experimental/Hit@1": 0.3812706369097347,
+     "experimental/Precision@1": 0.3812706369097347,
+     "experimental/R-Precision": 0.27924971158053863,
+     "experimental/MAP@R": 0.26990094283327365,
+     "experimental/R@5": 0.3378883717229582,
+     "experimental/MAP@100": 0.3069933381281515,
+     "experimental/queries": 25137.0
+    },
+    "block13": {
+     "experimental/Hit@1": 0.36245375343119707,
+     "experimental/Precision@1": 0.36245375343119707,
+     "experimental/R-Precision": 0.26640012730238294,
+     "experimental/MAP@R": 0.25608664518438956,
+     "experimental/R@5": 0.324859768468791,
+     "experimental/MAP@100": 0.29350315544254985,
+     "experimental/queries": 25137.0
+    },
+    "final": {
+     "experimental/Hit@1": 0.3438755619206747,
+     "experimental/Precision@1": 0.3438755619206747,
+     "experimental/R-Precision": 0.2506265664160401,
+     "experimental/MAP@R": 0.2412777976687751,
+     "experimental/R@5": 0.3010303536619326,
+     "experimental/MAP@100": 0.2735919271765724,
+     "experimental/queries": 25137.0
+    }
+   },
+   "64": {
+    "block00": {
+     "experimental/Hit@1": 0.000556947925368978,
+     "experimental/Precision@1": 0.000556947925368978,
+     "experimental/R-Precision": 0.00043760194136133987,
+     "experimental/MAP@R": 0.00035803795202291446,
+     "experimental/R@5": 0.0007359669013804353,
+     "experimental/MAP@100": 0.0006840147145319826,
+     "experimental/queries": 25137.0
+    },
+    "block01": {
+     "experimental/Hit@1": 0.10832637148426622,
+     "experimental/Precision@1": 0.10832637148426622,
+     "experimental/R-Precision": 0.07628197477821538,
+     "experimental/MAP@R": 0.07095118749254088,
+     "experimental/R@5": 0.10114572144647332,
+     "experimental/MAP@100": 0.0862991309333835,
+     "experimental/queries": 25137.0
+    },
+    "block02": {
+     "experimental/Hit@1": 0.15288220551378445,
+     "experimental/Precision@1": 0.15288220551378445,
+     "experimental/R-Precision": 0.10788876954290488,
+     "experimental/MAP@R": 0.10158332338783467,
+     "experimental/R@5": 0.13961491029160203,
+     "experimental/MAP@100": 0.12082860691477111,
+     "experimental/queries": 25137.0
+    },
+    "block03": {
+     "experimental/Hit@1": 0.17074432112026097,
+     "experimental/Precision@1": 0.17074432112026097,
+     "experimental/R-Precision": 0.1223296336078291,
+     "experimental/MAP@R": 0.11504952858336318,
+     "experimental/R@5": 0.15672116799936348,
+     "experimental/MAP@100": 0.1364493213178112,
+     "experimental/queries": 25137.0
+    },
+    "block04": {
+     "experimental/Hit@1": 0.18542387715320047,
+     "experimental/Precision@1": 0.18542387715320047,
+     "experimental/R-Precision": 0.13299120817917812,
+     "experimental/MAP@R": 0.12521382822134702,
+     "experimental/R@5": 0.17044595616024188,
+     "experimental/MAP@100": 0.1487377734468239,
+     "experimental/queries": 25137.0
+    },
+    "block05": {
+     "experimental/Hit@1": 0.2164936149898556,
+     "experimental/Precision@1": 0.2164936149898556,
+     "experimental/R-Precision": 0.15429446632454152,
+     "experimental/MAP@R": 0.14598002943867605,
+     "experimental/R@5": 0.19568763177785733,
+     "experimental/MAP@100": 0.1716460240751774,
+     "experimental/queries": 25137.0
+    },
+    "block06": {
+     "experimental/Hit@1": 0.2455742530930501,
+     "experimental/Precision@1": 0.2455742530930501,
+     "experimental/R-Precision": 0.17442415562716315,
+     "experimental/MAP@R": 0.16631857421331106,
+     "experimental/R@5": 0.218999880654016,
+     "experimental/MAP@100": 0.19426088977714623,
+     "experimental/queries": 25137.0
+    },
+    "block07": {
+     "experimental/Hit@1": 0.28706687353303895,
+     "experimental/Precision@1": 0.28706687353303895,
+     "experimental/R-Precision": 0.20688626327724072,
+     "experimental/MAP@R": 0.1978259139913275,
+     "experimental/R@5": 0.2566137566137566,
+     "experimental/MAP@100": 0.22882797945967037,
+     "experimental/queries": 25137.0
+    },
+    "block08": {
+     "experimental/Hit@1": 0.33249791144527985,
+     "experimental/Precision@1": 0.33249791144527985,
+     "experimental/R-Precision": 0.24084019572741378,
+     "experimental/MAP@R": 0.23117317102279508,
+     "experimental/R@5": 0.2931535187174285,
+     "experimental/MAP@100": 0.2639592455220392,
+     "experimental/queries": 25137.0
+    },
+    "block09": {
+     "experimental/Hit@1": 0.3899828937422922,
+     "experimental/Precision@1": 0.3899828937422922,
+     "experimental/R-Precision": 0.2862314516449855,
+     "experimental/MAP@R": 0.2766539364283725,
+     "experimental/R@5": 0.3419660261765525,
+     "experimental/MAP@100": 0.3116255816077116,
+     "experimental/queries": 25137.0
+    },
+    "block10": {
+     "experimental/Hit@1": 0.4255877789712376,
+     "experimental/Precision@1": 0.4255877789712376,
+     "experimental/R-Precision": 0.31374070095874607,
+     "experimental/MAP@R": 0.3045013326968214,
+     "experimental/R@5": 0.37440824282929547,
+     "experimental/MAP@100": 0.3421350923695959,
+     "experimental/queries": 25137.0
+    },
+    "block11": {
+     "experimental/Hit@1": 0.4135736165811354,
+     "experimental/Precision@1": 0.4135736165811354,
+     "experimental/R-Precision": 0.3065998329156224,
+     "experimental/MAP@R": 0.2969328082110037,
+     "experimental/R@5": 0.3620360424871703,
+     "experimental/MAP@100": 0.33237601595599864,
+     "experimental/queries": 25137.0
+    },
+    "block12": {
+     "experimental/Hit@1": 0.3919719934757529,
+     "experimental/Precision@1": 0.3919719934757529,
+     "experimental/R-Precision": 0.28645025261566615,
+     "experimental/MAP@R": 0.27748935831642596,
+     "experimental/R@5": 0.34234395512591004,
+     "experimental/MAP@100": 0.3125828382825398,
+     "experimental/queries": 25137.0
+    },
+    "block13": {
+     "experimental/Hit@1": 0.38158889286708836,
+     "experimental/Precision@1": 0.38158889286708836,
+     "experimental/R-Precision": 0.2786728726578351,
+     "experimental/MAP@R": 0.2694335043959104,
+     "experimental/R@5": 0.33689382185622785,
+     "experimental/MAP@100": 0.30537677938957014,
+     "experimental/queries": 25137.0
+    },
+    "final": {
+     "experimental/Hit@1": 0.3431594860166289,
+     "experimental/Precision@1": 0.3431594860166289,
+     "experimental/R-Precision": 0.24742411584516846,
+     "experimental/MAP@R": 0.2393185344313164,
+     "experimental/R@5": 0.29550065640291207,
+     "experimental/MAP@100": 0.26880780481166333,
+     "experimental/queries": 25137.0
+    }
+   },
+   "128": {
+    "block00": {
+     "experimental/Hit@1": 0.00043760194136133987,
+     "experimental/Precision@1": 0.00043760194136133987,
+     "experimental/R-Precision": 0.00025858296534988264,
+     "experimental/MAP@R": 0.00023869196801527628,
+     "experimental/R@5": 0.0006564029120420098,
+     "experimental/MAP@100": 0.0004959883093573092,
+     "experimental/queries": 25137.0
+    },
+    "block01": {
+     "experimental/Hit@1": 0.11015634323905,
+     "experimental/Precision@1": 0.11015634323905,
+     "experimental/R-Precision": 0.07689859569558817,
+     "experimental/MAP@R": 0.07168715439392132,
+     "experimental/R@5": 0.10112583044913873,
+     "experimental/MAP@100": 0.08634069120798105,
+     "experimental/queries": 25137.0
+    },
+    "block02": {
+     "experimental/Hit@1": 0.15817321080478974,
+     "experimental/Precision@1": 0.15817321080478974,
+     "experimental/R-Precision": 0.11246369892986434,
+     "experimental/MAP@R": 0.10566097784142897,
+     "experimental/R@5": 0.1442495126705653,
+     "experimental/MAP@100": 0.12419638076213443,
+     "experimental/queries": 25137.0
+    },
+    "block03": {
+     "experimental/Hit@1": 0.17826311811274217,
+     "experimental/Precision@1": 0.17826311811274217,
+     "experimental/R-Precision": 0.12712336396546922,
+     "experimental/MAP@R": 0.12010184190635319,
+     "experimental/R@5": 0.15966503560488524,
+     "experimental/MAP@100": 0.1401533324190079,
+     "experimental/queries": 25137.0
+    },
+    "block04": {
+     "experimental/Hit@1": 0.1980347694633409,
+     "experimental/Precision@1": 0.1980347694633409,
+     "experimental/R-Precision": 0.14074869713967458,
+     "experimental/MAP@R": 0.13301109917651271,
+     "experimental/R@5": 0.17752715121136173,
+     "experimental/MAP@100": 0.15541194787233928,
+     "experimental/queries": 25137.0
+    },
+    "block05": {
+     "experimental/Hit@1": 0.2243306679396905,
+     "experimental/Precision@1": 0.2243306679396905,
+     "experimental/R-Precision": 0.15910808767951626,
+     "experimental/MAP@R": 0.15100250626566417,
+     "experimental/R@5": 0.1980546604606755,
+     "experimental/MAP@100": 0.1742700780970283,
+     "experimental/queries": 25137.0
+    },
+    "block06": {
+     "experimental/Hit@1": 0.24867724867724866,
+     "experimental/Precision@1": 0.24867724867724866,
+     "experimental/R-Precision": 0.17565739746190873,
+     "experimental/MAP@R": 0.16765127103472968,
+     "experimental/R@5": 0.21641405100051717,
+     "experimental/MAP@100": 0.19193203568662479,
+     "experimental/queries": 25137.0
+    },
+    "block07": {
+     "experimental/Hit@1": 0.28233281616740263,
+     "experimental/Precision@1": 0.28233281616740263,
+     "experimental/R-Precision": 0.2017941679595815,
+     "experimental/MAP@R": 0.19347973107371605,
+     "experimental/R@5": 0.24487806818633887,
+     "experimental/MAP@100": 0.21952473759229113,
+     "experimental/queries": 25137.0
+    },
+    "block08": {
+     "experimental/Hit@1": 0.3225126307833075,
+     "experimental/Precision@1": 0.3225126307833075,
+     "experimental/R-Precision": 0.2314914269801488,
+     "experimental/MAP@R": 0.22252058718224133,
+     "experimental/R@5": 0.27604726100966703,
+     "experimental/MAP@100": 0.24982065930070402,
+     "experimental/queries": 25137.0
+    },
+    "block09": {
+     "experimental/Hit@1": 0.37796873135219,
+     "experimental/Precision@1": 0.37796873135219,
+     "experimental/R-Precision": 0.27306361140947605,
+     "experimental/MAP@R": 0.2647591200222779,
+     "experimental/R@5": 0.32129927994589647,
+     "experimental/MAP@100": 0.2943075195001703,
+     "experimental/queries": 25137.0
+    },
+    "block10": {
+     "experimental/Hit@1": 0.4141305645065044,
+     "experimental/Precision@1": 0.4141305645065044,
+     "experimental/R-Precision": 0.3039742212674543,
+     "experimental/MAP@R": 0.29519234594422566,
+     "experimental/R@5": 0.3550344114253889,
+     "experimental/MAP@100": 0.326379385304469,
+     "experimental/queries": 25137.0
+    },
+    "block11": {
+     "experimental/Hit@1": 0.4048613597485778,
+     "experimental/Precision@1": 0.4048613597485778,
+     "experimental/R-Precision": 0.2979074670803994,
+     "experimental/MAP@R": 0.28890679078649,
+     "experimental/R@5": 0.34707801249154635,
+     "experimental/MAP@100": 0.3186663354349415,
+     "experimental/queries": 25137.0
+    },
+    "block12": {
+     "experimental/Hit@1": 0.3841747225205872,
+     "experimental/Precision@1": 0.3841747225205872,
+     "experimental/R-Precision": 0.2782551617138083,
+     "experimental/MAP@R": 0.26997056132394476,
+     "experimental/R@5": 0.32396467358873376,
+     "experimental/MAP@100": 0.2988695095408412,
+     "experimental/queries": 25137.0
+    },
+    "block13": {
+     "experimental/Hit@1": 0.37534311970402195,
+     "experimental/Precision@1": 0.37534311970402195,
+     "experimental/R-Precision": 0.27236742650276485,
+     "experimental/MAP@R": 0.26358555117953614,
+     "experimental/R@5": 0.3211799339618889,
+     "experimental/MAP@100": 0.29357501506976147,
+     "experimental/queries": 25137.0
+    },
+    "final": {
+     "experimental/Hit@1": 0.32187611886860007,
+     "experimental/Precision@1": 0.32187611886860007,
+     "experimental/R-Precision": 0.22832875840394637,
+     "experimental/MAP@R": 0.22075028841946134,
+     "experimental/R@5": 0.2680311890838207,
+     "experimental/MAP@100": 0.24542129248903508,
+     "experimental/queries": 25137.0
+    }
+   }
+  }
+ },
+ "seconds": {
+  "embed": 1555,
+  "total": 1594
+ }
+}
