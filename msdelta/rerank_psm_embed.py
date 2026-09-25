@@ -54,10 +54,18 @@ def to_notation(sequence: str, modifications) -> str:
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--run", required=True, help="path inside the dataset repo")
-    ap.add_argument("--encoder", required=True, help="spectrum encoder (the teacher)")
-    ap.add_argument("--student", required=True, help="alignment run final/ dir")
-    ap.add_argument("--cache", required=True, help="teacher cache (MANIFEST: pooling, width)")
+    ap.add_argument("--run", required=True, help="a local parquet in the psm-rerank-hek-hct116 "
+                    "schema, or a path inside that Hub dataset")
+    ap.add_argument("--encoder", required=True,
+                    help="spectrum encoder: a local dir or a Hub repo id "
+                         "(e.g. Gaolaboratory/iona-contrastive-400m)")
+    ap.add_argument("--student", required=True,
+                    help="peptide embedder: an alignment run's final/ dir or a Hub repo id "
+                         "(e.g. Gaolaboratory/iona-peptide-embedder-400m)")
+    ap.add_argument("--cache", default="",
+                    help="teacher cache (MANIFEST: pooling, width); optional -- without it "
+                         "--pooling is used and the width is read from the student's weights")
+    ap.add_argument("--pooling", default="mean+max")
     ap.add_argument("--out", required=True)
     ap.add_argument("--max-peaks", type=int, default=512)
     ap.add_argument("--max-spectra", type=int, default=0)
@@ -79,7 +87,10 @@ def main(argv: list[str] | None = None) -> int:
 
     device = torch.device("xpu" if torch.xpu.is_available() else "cpu")
     t0 = time.time()
-    path = hf_hub_download(REPO_ID, cli.run, repo_type="dataset", revision=REVISION)
+    # a local parquet in the dataset's schema (a user's own run), or a path inside the Hub
+    # dataset (pinned revision)
+    path = cli.run if Path(cli.run).exists() else hf_hub_download(
+        REPO_ID, cli.run, repo_type="dataset", revision=REVISION)
     table = pq.read_table(path, columns=["spectrum_id", "run_id", "dataset", "charge",
                                          "precursor_mz", "n_peaks", "mz", "intensity",
                                          "candidates"])
@@ -88,14 +99,25 @@ def main(argv: list[str] | None = None) -> int:
         rows = rows[: cli.max_spectra]
     print(f"[embed] {cli.run}: {len(rows):,} spectra ({time.time() - t0:.0f}s)", flush=True)
 
-    manifest = dict(l.split(": ", 1) for l in
-                    (Path(cli.cache) / "MANIFEST.txt").read_text().splitlines() if ": " in l)
-    pooling = manifest["pooling"]
-    processor = MSDeltaProcessor.from_pretrained(cli.encoder, max_peaks=cli.max_peaks)
-    encoder = MSDeltaForPreTraining.from_pretrained(cli.encoder).to(device).eval()
+    def local(path_or_repo: str) -> str:
+        if Path(path_or_repo).exists():
+            return path_or_repo
+        from huggingface_hub import snapshot_download
+        return snapshot_download(path_or_repo)
+
+    encoder_dir, student_dir = local(cli.encoder), local(cli.student)
+    state = load_file(str(Path(student_dir) / "model.safetensors"))
+    if cli.cache:
+        manifest = dict(l.split(": ", 1) for l in
+                        (Path(cli.cache) / "MANIFEST.txt").read_text().splitlines() if ": " in l)
+        pooling, width = manifest["pooling"], int(manifest["embedding_size"])
+    else:
+        pooling = cli.pooling
+        width = int(state["sequence_encoder.projection.3.weight"].shape[0])
+    processor = MSDeltaProcessor.from_pretrained(encoder_dir, max_peaks=cli.max_peaks)
+    encoder = MSDeltaForPreTraining.from_pretrained(encoder_dir).to(device).eval()
     enc = getattr(encoder, "msdelta", encoder)
-    state = load_file(str(Path(cli.student) / "model.safetensors"))
-    student = PeptideEncoder(embedding_size=int(manifest["embedding_size"]), hidden_size=256,
+    student = PeptideEncoder(embedding_size=width, hidden_size=256,
                              num_layers=4, num_heads=8, pooling=pooling,
                              readout=student_readout(state))
     student.load_state_dict({k.removeprefix("sequence_encoder."): v for k, v in state.items()
