@@ -1541,3 +1541,21 @@ real - null = gain of our embedding features minus the same features from a RAND
   Null arms of this size mean single-seed MLP differences of a few hundred PSMs are noise;
   the per-run linear arms (null ~0) are the clean evidence. R ablation (3 seeds) running.
 - MLP ms (single seed), A1 re-embed: embws 93,817 / nullws 93,185 (base 93,206).
+
+## C13 nine-species (yeast, UNSEEN, HIGH-RES): ours loses to GLEAMS and to binned cosine (2026-09-25)
+
+InstaDeepAI/ms_ninespecies_benchmark test split (DeepNovo nine-species, yeast), 86,184
+spectra in 20,978 groups (>=2, capped at 20), nothing trimmed (max 452 peaks). Job 8866804
+(capacity rerun after the 1 h debug limit killed 8866521). Exp MAP@R / Hit@1:
+
+    binned cosine 0.1 Da        0.789 / 0.891
+    binned cosine 1 Da          0.790 / 0.892
+    GLEAMS (pretrained)         0.676 / 0.820
+    C7 400m, 3 seeds            0.514 / 0.565 / 0.475   (Hit@1 0.707 / 0.740 / 0.679)
+    replicate-only 400m         0.444 / 0.474 / 0.503   (Hit@1 0.665 / 0.685 / 0.703)
+
+- On clean unseen high-res data our encoders trail GLEAMS by 0.12-0.20 and binned cosine
+  by 0.23-0.32 MAP@R: the C11 collapse was not only low-res MS2. Seeds disagree by 0.09
+  (vs +-0.002 in distribution): the embedding is fitted to its training domain.
+- C claim is IN-DISTRIBUTION only (ms-contrastive-100k 0.868). Diagnostics proposed:
+  frozen+ABTT on this set, earlier C7 checkpoints, ms-contrastive-100k provenance/filtering.

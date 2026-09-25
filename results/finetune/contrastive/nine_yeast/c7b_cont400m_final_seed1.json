@@ -1,0 +1,22 @@
+{
+ "name": "c7b_cont400m_final_seed1",
+ "path": "/lus/flare/projects/UIC-HPC/khuss/msdelta/runs/sweep-cont400m_ep01_seed1-8860522/final",
+ "pooling": "mean+max",
+ "data": "/lus/flare/projects/UIC-HPC/khuss/msdelta/baselines/nine_yeast/prepared",
+ "metrics": {
+  "all/Hit@1": 0.7400445558340295,
+  "all/Precision@1": 0.7400445558340295,
+  "all/R-Precision": 0.5865524821014532,
+  "all/MAP@R": 0.5645831005493379,
+  "all/R@5": 0.5273248332020168,
+  "all/MAP@100": 0.6094704556020314,
+  "all/queries": 86184.0,
+  "experimental/Hit@1": 0.7400445558340295,
+  "experimental/Precision@1": 0.7400445558340295,
+  "experimental/R-Precision": 0.5865524821014532,
+  "experimental/MAP@R": 0.5645831005493379,
+  "experimental/R@5": 0.5273248332020168,
+  "experimental/MAP@100": 0.6094704556020314,
+  "experimental/queries": 86184.0
+ }
+}
