@@ -1,0 +1,194 @@
+#!/bin/bash -l
+# Train the Prosit fragment-intensity head (msdelta.intensity) with data
+# parallelism over every XPU tile of the allocated Aurora nodes. Submit from the
+# repository root, for example (one node = 6 GPUs = 12 tiles = 12 DDP ranks):
+# qsub -A PROJECT -q QUEUE \
+#   -l select=1 -l place=scatter -l walltime=06:00:00 \
+#   -l filesystems=home:flare -j oe -o /path/to/pbs/logs \
+#   -v DATA_DIR=/flare/PROJECT/prosit-dataset/arrays,ENCODER_CHECKPOINT=/flare/PROJECT/msdelta-200m-production-01-final,OUTPUT_ROOT=/flare/PROJECT/msdelta-intensity,RUN_NAME=200m-finetune \
+#   pbs/aurora-intensity.pbs
+# DATA_DIR holds the train/val/holdout .npy arrays from scripts/convert_prosit_hdf5.py.
+# Extra msdelta.intensity flags go in INTENSITY_ARGS; export it before qsub
+# because its spaces cannot pass through -v, e.g.
+#   export INTENSITY_ARGS="--finetune-encoder --gradient-checkpointing --ion-budget 32768"
+# Outputs, checkpoints, logs and W&B files go to $OUTPUT_ROOT/$RUN_NAME.
+# Set RESUME_FROM_CHECKPOINT=latest with the same RUN_NAME to continue a run; the
+# job saves and exits cleanly CHECKPOINT_MARGIN_SECONDS (default 15 min) before
+# its walltime, and only a run that reaches its last step evaluates the holdout.
+# The launch follows the ALCF Aurora PyTorch DDP guidance:
+# https://docs.alcf.anl.gov/aurora/data-science/frameworks/pytorch/
+
+module use /soft/modulefiles
+module load frameworks
+
+set -euo pipefail
+
+JOB_START_EPOCH=$(date +%s)
+CHECKPOINT_MARGIN_SECONDS=${CHECKPOINT_MARGIN_SECONDS:-900}
+PBS_WALLTIME=$(qstat -f "${PBS_JOBID:?PBS_JOBID is required}" | awk -F ' = ' \
+    '/^[[:space:]]*Resource_List.walltime = / {print $2; exit}')
+IFS=: read -r -a WALLTIME_PARTS <<<"$PBS_WALLTIME"
+if ((${#WALLTIME_PARTS[@]} != 3)); then
+    echo "could not parse PBS Resource_List.walltime: $PBS_WALLTIME" >&2
+    exit 2
+fi
+JOB_WALLTIME_SECONDS=$((10#${WALLTIME_PARTS[0]} * 3600 + 10#${WALLTIME_PARTS[1]} * 60 + 10#${WALLTIME_PARTS[2]}))
+if ((CHECKPOINT_MARGIN_SECONDS >= JOB_WALLTIME_SECONDS)); then
+    echo "CHECKPOINT_MARGIN_SECONDS must be less than the requested walltime" >&2
+    exit 2
+fi
+export MSDELTA_JOB_DEADLINE_EPOCH=$((JOB_START_EPOCH + JOB_WALLTIME_SECONDS))
+export MSDELTA_CHECKPOINT_MARGIN_SECONDS=$CHECKPOINT_MARGIN_SECONDS
+
+REPO_DIR=${REPO_DIR:-${PBS_O_WORKDIR:-$PWD}}
+VENV_DIR=${VENV_DIR:-$REPO_DIR/.venv}
+DATA_DIR=${DATA_DIR:?set DATA_DIR to the converted Prosit arrays directory}
+ENCODER_CHECKPOINT=${ENCODER_CHECKPOINT:-}
+OUTPUT_ROOT=${OUTPUT_ROOT:?set OUTPUT_ROOT to a Flare base directory for outputs}
+JOB_ID=${PBS_JOBID%%.*}
+RUN_NAME=${RUN_NAME:-intensity-$JOB_ID}
+RUN_DIR=$OUTPUT_ROOT/$RUN_NAME
+LOG_DIR=$RUN_DIR/logs
+INTENSITY_ARGS=${INTENSITY_ARGS:-}
+XPUS_PER_HOST=${XPUS_PER_HOST:-12}
+
+for split in train val holdout; do
+    if [[ ! -f $DATA_DIR/$split/intensities.npy ]]; then
+        echo "Prosit arrays not found: $DATA_DIR/$split" >&2
+        exit 2
+    fi
+done
+if [[ -n $ENCODER_CHECKPOINT && ! -f $ENCODER_CHECKPOINT/config.json ]]; then
+    echo "encoder checkpoint not found: $ENCODER_CHECKPOINT" >&2
+    exit 2
+fi
+if [[ ! -x $VENV_DIR/bin/python ]]; then
+    echo "Python interpreter not found: $VENV_DIR/bin/python" >&2
+    exit 2
+fi
+if ((XPUS_PER_HOST < 1 || XPUS_PER_HOST > 12)); then
+    echo "XPUS_PER_HOST must be between 1 and 12 on Aurora" >&2
+    exit 2
+fi
+mkdir -p "$RUN_DIR" "$LOG_DIR"
+
+if [[ ${RESUME_FROM_CHECKPOINT:-} == latest ]]; then
+    RESUME_FROM_CHECKPOINT=$("$VENV_DIR/bin/python" - "$RUN_DIR" <<'PY'
+import re
+import sys
+from pathlib import Path
+
+candidates = []
+for path in Path(sys.argv[1]).glob("checkpoint-*"):
+    match = re.fullmatch(r"checkpoint-(\d+)", path.name)
+    if match and path.is_dir() and (path / "trainer_state.json").is_file():
+        candidates.append((int(match.group(1)), path))
+if not candidates:
+    raise SystemExit(f"no complete checkpoint-N directories found in {sys.argv[1]}")
+print(max(candidates)[1])
+PY
+    )
+    echo "resuming latest checkpoint: $RESUME_FROM_CHECKPOINT"
+fi
+
+cd "$REPO_DIR"
+NODE_LIST=$RUN_DIR/pbs-nodes-$JOB_ID
+awk '!seen[$0]++ {print $0}' "$PBS_NODEFILE" >"$NODE_LIST"
+NUM_HOSTS=$(wc -l <"$NODE_LIST")
+TOTAL_XPUS=$((NUM_HOSTS * XPUS_PER_HOST))
+
+# One DDP rank per tile, FLAT numbering, as in aurora-pretrain.pbs.
+export ZE_FLAT_DEVICE_HIERARCHY=FLAT
+export ZE_AFFINITY_MASK=${ZE_AFFINITY_MASK:-$(seq -s, 0 $((XPUS_PER_HOST - 1)))}
+if [[ $XPUS_PER_HOST == 12 ]]; then
+    CPU_BIND=${CPU_BIND:-verbose,list:4-7:8-11:12-15:16-19:20-23:24-27:56-59:60-63:64-67:68-71:72-75:76-79}
+else
+    CPU_BIND=${CPU_BIND:-none}
+fi
+export ONEAPI_DEVICE_SELECTOR=${ONEAPI_DEVICE_SELECTOR:-level_zero:gpu}
+unset SYCL_DEVICE_FILTER
+
+VISIBLE_XPUS=$("$VENV_DIR/bin/python" -c 'import torch; print(torch.xpu.device_count())')
+if [[ $VISIBLE_XPUS != "$XPUS_PER_HOST" ]]; then
+    echo "expected $XPUS_PER_HOST visible XPU tiles, found $VISIBLE_XPUS" >&2
+    exit 2
+fi
+echo "$(date -Is) job=$PBS_JOBID hosts=$NUM_HOSTS xpus_per_host=$XPUS_PER_HOST total_xpus=$TOTAL_XPUS run=$RUN_NAME"
+echo "data=$DATA_DIR encoder=${ENCODER_CHECKPOINT:-<none>} output=$RUN_DIR"
+echo "walltime=${JOB_WALLTIME_SECONDS}s checkpoint_margin=${CHECKPOINT_MARGIN_SECONDS}s args: $INTENSITY_ARGS"
+"$VENV_DIR/bin/python" -c 'import torch; print(f"torch={torch.__version__} xccl={torch.distributed.is_xccl_available()}")'
+
+export OMP_NUM_THREADS=${OMP_NUM_THREADS:-4}
+export MKL_NUM_THREADS=${MKL_NUM_THREADS:-4}
+export OPENBLAS_NUM_THREADS=${OPENBLAS_NUM_THREADS:-4}
+export CCL_PROCESS_LAUNCHER=pmix
+export CCL_ATL_TRANSPORT=mpi
+export CCL_KVS_MODE=mpi
+export FI_MR_CACHE_MONITOR=${FI_MR_CACHE_MONITOR:-userfaultfd}
+unset CCL_ZE_IPC
+unset CCL_ZE_IPC_EXCHANGE
+export PYTHONPATH=$REPO_DIR${PYTHONPATH:+:$PYTHONPATH}
+# Checkpoints load from local paths; never reach for the Hugging Face Hub.
+export HF_HUB_OFFLINE=${HF_HUB_OFFLINE:-1}
+export MASTER_ADDR=${MASTER_ADDR:-$(head -n 1 "$NODE_LIST")}
+export MASTER_PORT=${MASTER_PORT:-29500}
+export MSDELTA_XPUS_PER_HOST=$XPUS_PER_HOST
+export MSDELTA_WORLD_SIZE=$TOTAL_XPUS
+
+# Compute nodes reach W&B through the ALCF proxy.
+ALCF_PROXY=${ALCF_PROXY:-http://proxy.alcf.anl.gov:3128}
+export HTTP_PROXY=${HTTP_PROXY:-$ALCF_PROXY}
+export HTTPS_PROXY=${HTTPS_PROXY:-$ALCF_PROXY}
+export http_proxy=${http_proxy:-$ALCF_PROXY}
+export https_proxy=${https_proxy:-$ALCF_PROXY}
+export no_proxy=${no_proxy:-admin,localhost,*.cm.aurora.alcf.anl.gov,aurora-*,*.aurora.alcf.anl.gov,*.alcf.anl.gov}
+export no_proxy="$no_proxy,127.0.0.1"
+export NO_PROXY="${NO_PROXY:-$no_proxy},127.0.0.1"
+export WANDB_DIR=${WANDB_DIR:-$LOG_DIR}
+export WANDB_RESUME=${WANDB_RESUME:-allow}
+export WANDB_RUN_ID=${WANDB_RUN_ID:-$RUN_NAME}
+WANDB_PROJECT=${WANDB_PROJECT:-msdelta-intensity}
+
+TRAIN_ARGS=(
+    --data-dir "$DATA_DIR"
+    --output-dir "$RUN_DIR"
+    --run-name "$RUN_NAME"
+    --ddp-backend xccl
+    --wandb-project "$WANDB_PROJECT"
+)
+if [[ -n $ENCODER_CHECKPOINT ]]; then
+    TRAIN_ARGS+=(--checkpoint "$ENCODER_CHECKPOINT")
+fi
+if [[ -n ${RESUME_FROM_CHECKPOINT:-} ]]; then
+    TRAIN_ARGS+=(--resume-from-checkpoint "$RESUME_FROM_CHECKPOINT")
+fi
+read -r -a EXTRA_ARGS <<<"$INTENSITY_ARGS"
+
+exec mpiexec \
+    --verbose \
+    --envall \
+    --pmi=pmix \
+    --no-vni \
+    -n "$TOTAL_XPUS" \
+    --ppn "$XPUS_PER_HOST" \
+    --cpu-bind "$CPU_BIND" \
+    --hostfile="$PBS_NODEFILE" \
+    /usr/bin/env \
+    bash -c '
+        set -euo pipefail
+        export RANK="${PMIX_RANK:-${PALS_RANKID:-${PMI_RANK:-}}}"
+        if [[ -z $RANK ]]; then
+            echo "Aurora launcher did not provide PMIX_RANK, PALS_RANKID, or PMI_RANK" >&2
+            exit 2
+        fi
+        export WORLD_SIZE="$MSDELTA_WORLD_SIZE"
+        export LOCAL_RANK="${PALS_LOCAL_RANKID:-${MPI_LOCALRANKID:-$((RANK % MSDELTA_XPUS_PER_HOST))}}"
+        export LOCAL_WORLD_SIZE="$MSDELTA_XPUS_PER_HOST"
+        exec "$@"
+    ' bash \
+    "$VENV_DIR/bin/python" \
+    -m msdelta.intensity \
+    "${TRAIN_ARGS[@]}" \
+    ${EXTRA_ARGS[@]+"${EXTRA_ARGS[@]}"} \
+    >"$LOG_DIR/train-$JOB_ID.out" \
+    2>"$LOG_DIR/train-$JOB_ID.err"

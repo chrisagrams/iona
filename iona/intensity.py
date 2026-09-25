@@ -38,6 +38,7 @@ from transformers import (
 )
 
 import wandb
+from msdelta.callbacks import WalltimeCheckpointCallback
 from msdelta.chemistry import PROSIT_RESIDUE_MASSES, PROTON_MASS, WATER_MASS
 from msdelta.configuration_msdelta import MSDeltaConfig, MSDeltaIntensityPredictionConfig
 from msdelta.denoising import PeakBudgetBatchSampler
@@ -233,6 +234,15 @@ class IntensityTrainer(Trainer):
         self.ion_budget = ion_budget
         self.encoder_learning_rate = encoder_learning_rate
 
+    def _save_rng_state(self, output_dir: str) -> None:
+        # As in MSDeltaTrainer: many ranks racing os.makedirs on a distributed
+        # filesystem can raise a spurious FileExistsError, so rank 0 creates it.
+        if self.args.world_size > 1:
+            if self.args.process_index == 0:
+                os.makedirs(output_dir, exist_ok=True)
+            self.accelerator.wait_for_everyone()
+        super()._save_rng_state(output_dir)
+
     def create_optimizer(self, model=None):
         # Build the stock optimizer, then give encoder parameters their own
         # learning rate: a fresh head wants ~1e-3, pretrained weights far less.
@@ -409,6 +419,10 @@ def load_encoder(checkpoint: Path | None, encoder_init: str) -> MSDeltaModel:
 
 
 def main(argv: list[str] | None = None) -> int:
+    local_rank = int(os.environ.get("LOCAL_RANK", "-1"))
+    if local_rank >= 0 and torch.xpu.is_available():
+        torch.xpu.set_device(local_rank)
+
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--data-dir", type=Path, required=True)
     parser.add_argument("--checkpoint", type=Path)
@@ -461,6 +475,10 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--bf16", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--run-name")
+    parser.add_argument(
+        "--ddp-backend", help="torch.distributed backend, e.g. xccl on Aurora (default: auto)"
+    )
+    parser.add_argument("--resume-from-checkpoint", type=Path)
     parser.add_argument("--wandb-project", help="log to this W&B project (off when unset)")
     parser.add_argument("--wandb-entity")
     args = parser.parse_args(argv)
@@ -546,6 +564,7 @@ def train_and_evaluate(args: argparse.Namespace, wandb_run: wandb.Run | None) ->
         report_to=["wandb"] if args.wandb_project else [],
         gradient_checkpointing=args.gradient_checkpointing and args.finetune_encoder,
         ddp_find_unused_parameters=False,
+        ddp_backend=args.ddp_backend,
     )
     trainer = IntensityTrainer(
         model=model,
@@ -559,7 +578,19 @@ def train_and_evaluate(args: argparse.Namespace, wandb_run: wandb.Run | None) ->
         ion_budget=args.ion_budget,
         encoder_learning_rate=args.encoder_learning_rate if args.finetune_encoder else None,
     )
-    trainer.train()
+    if deadline := os.environ.get("MSDELTA_JOB_DEADLINE_EPOCH"):
+        margin = float(os.environ.get("MSDELTA_CHECKPOINT_MARGIN_SECONDS", "900"))
+        trainer.add_callback(WalltimeCheckpointCallback(float(deadline), margin))
+    trainer.train(
+        resume_from_checkpoint=str(args.resume_from_checkpoint)
+        if args.resume_from_checkpoint
+        else None
+    )
+    if trainer.state.global_step < trainer.state.max_steps:
+        # Stopped at the walltime margin after saving a checkpoint; the holdout
+        # pass would not fit, so resume and evaluate in the next job.
+        print(f"stopped early at step {trainer.state.global_step}; resume to finish")
+        return 0
     trainer.save_model()
 
     # Each process scores its own slice of the holdout; rank 0 reports.
