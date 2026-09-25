@@ -54,6 +54,16 @@ On 8 runs of `psm-rerank-hek-hct116`, PSMs at 1% FDR:
 | **per-run, lab + embedding** | **+0.53%** on top (3 seeds, over a random-spectrum control) |
 | global model, lab + embedding | ~105.7k |
 
+On 16 held-out HCT116 runs (1,867,364 spectra; the global model was trained on the 8 runs
+above and never saw them), PSMs at 1% FDR:
+
+| method | PSMs |
+|---|---|
+| MSFragger e-value | 329,807 |
+| global model (`--mode global --model Gaolaboratory/iona-rerank-400m`) | 411,607 |
+| per-run, lab features (`--no-embedding`) | 515,674 |
+| **per-run, lab + embedding** | **523,720** (+8,046, +1.6%) |
+
 Per-run is much stronger than the global model; use global only when a run cannot be
 trained on (e.g. very few spectra).
 
