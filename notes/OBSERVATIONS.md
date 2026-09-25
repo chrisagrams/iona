@@ -1434,3 +1434,23 @@ D=128 is the top of the swept range for 200m/400m -> optimum unlocated (add D=25
     20 ppm    2              0.942         0.993
   The window does much of the work; our embedding still makes 8-9x fewer errors. True
   candidate inside the window for every query (mass calc verified). In-distribution for us.
+
+## C11: on UNSEEN low-resolution ion-trap CID spectra our encoders do not transfer (2026-09-25)
+
+HEK confident PSMs (psm-rerank-hek-hct116, 8 runs; <=512 peaks; groups capped at 20;
+27,637 spectra; HCT116 almost entirely excluded by the peak cap). Job 8866238. Exp MAP@R:
+
+    binned cosine, 1 Da bins          0.554
+    GLEAMS (pretrained)               0.530   (Hit@1 0.684)
+    binned cosine, 0.1 Da bins        0.247
+    ours, C7 400m (3 seeds)           0.167-0.173
+    ours, replicate-corpus only 400m  0.016-0.018
+
+- Data is fine (binned 1 Da and GLEAMS work); our encoders collapse. 1 Da bins beating
+  0.1 Da 2x says peak positions are only ~0.5 Da precise here.
+- Most likely a resolution/fragmentation DOMAIN shift: our models depend on precise m/z
+  (denoise: m/z rounded to bf16 -> AUROC 0.70). To check: instrument provenance of
+  MSConsensus-100M / ms-contrastive-100k; an m/z-jitter test on the 100k test split.
+- Consequences: the C claim vs GLEAMS is domain-limited (wins on ms-contrastive-100k
+  0.714 vs 0.646, loses badly here); expect the same for A vs yHydra on this data; R's
+  small embedding gain on these runs is consistent.

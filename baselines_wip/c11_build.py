@@ -7,7 +7,9 @@ them). Labels: MSFragger's rank-1 candidate of each spectrum, kept when it is a 
 q <= 1% (TDC on -log10 e-value, per run) -- the same confident-PSM definition as the
 reranking baseline. Groups = peptide + charge (our notation, as every retrieval metric).
 Kept: spectra with 1..512 peaks (our encoders' limit, so every method sees the SAME set)
-in groups of >= 2 spectra (a query needs another relevant spectrum).
+in groups of >= 2 spectra (a query needs another relevant spectrum), each group capped at
+MAX_PER_GROUP spectra drawn at random (seed 0): HEK peptides identified hundreds of times
+would otherwise dominate MAP@R and exceed the top-k metric's k=100.
 
 Writes, from the SAME rows in the SAME order:
   OUT/prepared/   the eval_grouped_retrieval `score` format (processed by MSDeltaProcessor)
@@ -27,6 +29,7 @@ S = "/lus/flare/projects/UIC-HPC/khuss/msdelta"
 ROWS = f"{S}/rerank-psm/a1-050m-c7s600/rows"
 PROCESSOR = "/flare/UIC-HPC/khuss/msdelta/pretrained/msdelta-50m-production-01-checkpoint-220000"
 MAX_PEAKS = 512
+MAX_PER_GROUP = 20
 
 
 def confident_psms(run: str) -> dict:
@@ -82,6 +85,16 @@ def main(out_dir, *runs):
               flush=True)
     size = Counter((r["peptide"], r["charge"]) for r in recs)
     recs = [r for r in recs if size[(r["peptide"], r["charge"])] >= 2]
+    rng = np.random.default_rng(0)
+    order = rng.permutation(len(recs))           # random member choice, original order kept
+    seen: Counter = Counter(); keep = np.zeros(len(recs), bool)
+    for i in order:
+        k = (recs[i]["peptide"], recs[i]["charge"])
+        if seen[k] < MAX_PER_GROUP:
+            seen[k] += 1; keep[i] = True
+    capped = len(recs) - int(keep.sum())
+    recs = [r for r, k in zip(recs, keep) if k]
+    print(f"[c11] capped groups at {MAX_PER_GROUP}: {capped:,} spectra dropped", flush=True)
     groups = len({(r["peptide"], r["charge"]) for r in recs})
     print(f"[c11] {len(recs):,} spectra in {groups:,} peptide+charge groups (>= 2 each)",
           flush=True)
@@ -98,6 +111,7 @@ def main(out_dir, *runs):
     Dataset.from_dict(prep).save_to_disk(str(out / "prepared"))
     info = {"source": f"{REPO_ID}@{REVISION}", "runs": list(runs), "per_run": stats,
             "spectra": len(recs), "groups": groups, "max_peaks": MAX_PEAKS,
+            "max_per_group": MAX_PER_GROUP,
             "labels": "MSFragger rank-1 targets at q<=1% (per-run TDC on -log10 e-value)"}
     (out / "prepared" / "PREPARED.json").write_text(json.dumps(info, indent=1))
 
