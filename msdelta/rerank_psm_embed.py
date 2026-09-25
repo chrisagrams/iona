@@ -30,6 +30,9 @@ import numpy as np
 import torch
 
 REPO_ID = "Gaolaboratory/psm-rerank-hek-hct116"
+# Pinned: the 2026-09-25 00:34 update moved <dataset>/<run>.parquet to spectra/ and added
+# features/. Every table so far was built from this revision; keep them all on it.
+REVISION = "87f5c2756f5de8da8a664ef7e1a4dac8de067a88"
 KEEP = ("msfragger_hyperscore", "search_rank", "search_delta_score",
         "search_neglog10_evalue", "num_matched_ions", "tot_num_ions", "massdiff",
         "num_tol_term", "num_missed_cleavages")
@@ -73,7 +76,7 @@ def main(argv: list[str] | None = None) -> int:
 
     device = torch.device("xpu" if torch.xpu.is_available() else "cpu")
     t0 = time.time()
-    path = hf_hub_download(REPO_ID, cli.run, repo_type="dataset")
+    path = hf_hub_download(REPO_ID, cli.run, repo_type="dataset", revision=REVISION)
     table = pq.read_table(path, columns=["spectrum_id", "run_id", "dataset", "charge",
                                          "precursor_mz", "n_peaks", "mz", "intensity",
                                          "candidates"])

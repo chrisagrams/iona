@@ -20,6 +20,9 @@ from pathlib import Path
 import numpy as np
 
 REPO_ID = "Gaolaboratory/psm-rerank-hek-hct116"
+# Pinned: the 2026-09-25 00:34 update moved <dataset>/<run>.parquet to spectra/ and added
+# features/. Every table so far was built from this revision; keep them all on it.
+REVISION = "87f5c2756f5de8da8a664ef7e1a4dac8de067a88"
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -39,7 +42,7 @@ def main(argv: list[str] | None = None) -> int:
     from msdelta.rescoring import FEATURE_NAMES, extract_features
 
     t0 = time.time()
-    path = hf_hub_download(REPO_ID, cli.run, repo_type="dataset")
+    path = hf_hub_download(REPO_ID, cli.run, repo_type="dataset", revision=REVISION)
     rows = pq.read_table(path, columns=["charge", "precursor_mz", "mz", "intensity",
                                         "candidates"]).to_pylist()
     names = [n for n in FEATURE_NAMES if n != "embedding_cosine"]
