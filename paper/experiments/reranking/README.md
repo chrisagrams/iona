@@ -10,7 +10,7 @@ spectrum/peptide embedding similarity as a feature lets the classifier identify 
 | file | content |
 |---|---|
 | `R_embedding_gain.png`, `R_embedding_gain.csv` | % more PSMs at 1% FDR from adding the embedding features vs adding a null control |
-| `R_benchmark.png`, `R_benchmark.csv` | PSMs at 1% FDR for MSFragger, MS2Rescore and our per-run classifier, with and without the embedding |
+| `R_benchmark.png`, `R_benchmark.csv` | PSMs at 1% FDR for MSFragger, MS2Rescore (also with the embedding and with the null control added) and our per-run classifier, with and without the embedding |
 | `plot_reranking.py` | regenerates both figures from the CSVs (`python plot_reranking.py`; matplotlib + numpy) |
 
 `R_embedding_gain.csv`: one row per (dataset, embedding, feature set, arm, seed) with the PSMs of the
@@ -78,9 +78,12 @@ features.
   and 99,154-99,405 (MSFragger features only); gains are compared within each seed.
 - Oktoberfest was run on the 6 HEK runs only and is not comparable with these 8-run numbers, so it is
   not shown.
-- Adding the embedding to MS2Rescore full (one seed) gave +698 PSMs against +447 for the null control
-  (net +251, +0.2%); on the two HCT116 runs the null gained as much as the embedding, so that
-  comparison is within MS2Rescore's run-to-run noise and is not shown.
+- MS2Rescore full with the embedding features added (one run): 128,909 PSMs, against 128,658 with the
+  null control, a net +251 (+0.2%). On the 6 HEK runs the gain is clean (+257 vs +6 for the null); on
+  the 2 HCT116 runs the null gained more than the embedding (+452 vs +343), i.e. within MS2Rescore's
+  sensitivity to added features on those small runs. Both rows are shown in `R_benchmark.png`; the
+  18-run HCT116 MS2Rescore comparison is pending. (MS2Rescore full + embedding and our per-run
+  classifier both read 128,909: the first is one run, the second the mean of 129,041 / 128,751 / 128,934.)
 
 Provenance: msdelta repository, `sweeps/package_rerank.py` (from `results/rerank/psm/` and
-`baselines_wip/results_ms2rescore.json`).
+`baselines_wip/results_ms2rescore.json`, `baselines_wip/results_ms2rescore_emb8_a2.json`).

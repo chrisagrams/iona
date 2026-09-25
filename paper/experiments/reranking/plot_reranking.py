@@ -66,10 +66,12 @@ def benchmark():
     order = [order[0]] + [m for m in order if "MSFragger features only" in m] + \
             [m for m in order if m.startswith("MS2Rescore")] + \
             [m for m in order if m.startswith("our") and "MSFragger features only" not in m]
-    col = lambda m: "#2563eb" if "+ embedding" in m else ("#93c5fd" if m.startswith("our ") else
-                                                          ("#f59e0b" if "MS2Rescore" in m else "#9ca3af"))
+    col = lambda m: ("#b45309" if m.startswith("MS2Rescore") and "+ embedding" in m else
+                     "#fcd34d" if "null control" in m else
+                     "#2563eb" if "+ embedding" in m else "#93c5fd" if m.startswith("our ") else
+                     "#f59e0b" if "MS2Rescore" in m else "#9ca3af")
     with plt.rc_context(STYLE):
-        fig, ax = plt.subplots(figsize=(8.5, 4.2))
+        fig, ax = plt.subplots(figsize=(8.5, 4.9))
         ax.xaxis.grid(True, color=GRIDC, lw=0.8); ax.set_axisbelow(True)
         for i, m in enumerate(order):
             v = np.array([float(r["psms"]) for r in rows if r["method"] == m])
@@ -79,7 +81,8 @@ def benchmark():
         ax.set_yticks(range(len(order))); ax.set_yticklabels(order); ax.invert_yaxis()
         ax.set_xlim(80000, 138000); ax.set_xlabel("PSMs at 1% FDR (8 runs: 6 HEK, 2 HCT116)")
         ax.set_title("PSM rescoring: identifications at 1% FDR", loc="left", fontsize=13, fontweight="bold", pad=10)
-        fig.text(0.01, -0.03, "Our per-run classifier: mean ± sd over 3 seeds; embedding = 400M-teacher peptide embedder.",
+        fig.text(0.01, -0.03, "Our per-run classifier: mean ± sd over 3 seeds. MS2Rescore rows: one run each. "
+                 "Embedding = 400M-teacher peptide embedder;\nnull control = the same features from a random spectrum's embedding.",
                  fontsize=8, color=MUTED)
         fig.savefig(HERE / "R_benchmark.png"); plt.close(fig)
 

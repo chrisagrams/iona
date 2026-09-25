@@ -2,6 +2,8 @@ method,seed,source,psms
 MSFragger (e-value),,a2-400m_r4_global+perrun_seed1.json:methods/all/msfragger,89693
 "MS2Rescore, search features only",,results_ms2rescore.json:ms2rescore:searchonly,100974
 MS2Rescore full (MS2PIP + DeepLC),,results_ms2rescore.json:ms2rescore:full,128211
+MS2Rescore full + null control,,results_ms2rescore_emb8_a2.json:ms2rescore:full+null control,128658
+MS2Rescore full + embedding,,"results_ms2rescore_emb8_a2.json:ms2rescore:full+embedding(400M teacher, cosws)",128909
 "our per-run classifier, MSFragger features only",0,a2-400m_r4_seed0.log,99154
 "our per-run classifier, MSFragger features only + embedding",0,a2-400m_r4_seed0.log,101885
 our per-run classifier,0,a2-400m_r4_seed0.log,129041

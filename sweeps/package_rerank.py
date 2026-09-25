@@ -121,6 +121,10 @@ def benchmark_rows():
     for k, lab in (("ms2rescore:searchonly", "MS2Rescore, search features only"),
                    ("ms2rescore:full", "MS2Rescore full (MS2PIP + DeepLC)")):
         rows.append(dict(method=lab, seed="", psms=ms2r[k]["all"]["pooled"], source=f"results_ms2rescore.json:{k}"))
+    emb = json.loads((REPO / "baselines_wip" / "results_ms2rescore_emb8_a2.json").read_text())
+    for k, lab in (("ms2rescore:full+null control", "MS2Rescore full + null control"),
+                   ("ms2rescore:full+embedding(400M teacher, cosws)", "MS2Rescore full + embedding")):
+        rows.append(dict(method=lab, seed="", psms=emb[k]["all"]["pooled"], source=f"results_ms2rescore_emb8_a2.json:{k}"))
     for seed, src in enumerate(EMB["A2"][1]):
         p = perrun(src)
         for feat, lab in (("ms", "our per-run classifier, MSFragger features only"), ("ms+embws", "our per-run classifier, MSFragger features only + embedding"),
@@ -132,12 +136,15 @@ def benchmark_rows():
 
 def fig_benchmark(rows):
     order = ["MSFragger (e-value)", "our per-run classifier, MSFragger features only", "our per-run classifier, MSFragger features only + embedding",
-             "MS2Rescore, search features only", "MS2Rescore full (MS2PIP + DeepLC)", "our per-run classifier",
+             "MS2Rescore, search features only", "MS2Rescore full (MS2PIP + DeepLC)", "MS2Rescore full + null control",
+             "MS2Rescore full + embedding", "our per-run classifier",
              "our per-run classifier + embedding"]
-    col = lambda m: "#2563eb" if "+ embedding" in m else ("#93c5fd" if m.startswith("our ") else
-                                                          ("#f59e0b" if "MS2Rescore" in m else "#9ca3af"))
+    col = lambda m: ("#b45309" if m.startswith("MS2Rescore") and "+ embedding" in m else
+                     "#fcd34d" if "null control" in m else
+                     "#2563eb" if "+ embedding" in m else "#93c5fd" if m.startswith("our ") else
+                     "#f59e0b" if "MS2Rescore" in m else "#9ca3af")
     with plt.rc_context(STYLE):
-        fig, ax = plt.subplots(figsize=(8.5, 4.2))
+        fig, ax = plt.subplots(figsize=(8.5, 4.9))
         ax.xaxis.grid(True, color=GRIDC, lw=0.8); ax.set_axisbelow(True)
         for i, m in enumerate(order):
             v = np.array([r["psms"] for r in rows if r["method"] == m], dtype=float)
@@ -147,7 +154,8 @@ def fig_benchmark(rows):
         ax.set_yticks(range(len(order))); ax.set_yticklabels(order); ax.invert_yaxis()
         ax.set_xlim(80000, 138000); ax.set_xlabel("PSMs at 1% FDR (8 runs: 6 HEK, 2 HCT116)")
         ax.set_title("PSM rescoring: identifications at 1% FDR", loc="left", fontsize=13, fontweight="bold", pad=10)
-        fig.text(0.01, -0.03, "Our per-run classifier: mean ± sd over 3 seeds; embedding = 400M-teacher peptide embedder.",
+        fig.text(0.01, -0.03, "Our per-run classifier: mean ± sd over 3 seeds. MS2Rescore rows: one run each. "
+                 "Embedding = 400M-teacher peptide embedder;\nnull control = the same features from a random spectrum's embedding.",
                  fontsize=8, color=MUTED)
         fig.savefig(FIG / "R_benchmark.png"); plt.close(fig)
 
