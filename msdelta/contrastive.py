@@ -305,19 +305,6 @@ class MSDeltaForContrastive(nn.Module):
             self.reference.eval()
         return self
 
-    # Forwarded by hand since this is a plain nn.Module; only the trainable encoder.
-    def gradient_checkpointing_enable(self, **kwargs):
-        if hasattr(self.model, "gradient_checkpointing_enable"):
-            self.model.gradient_checkpointing_enable(**kwargs)
-
-    def gradient_checkpointing_disable(self):
-        if hasattr(self.model, "gradient_checkpointing_disable"):
-            self.model.gradient_checkpointing_disable()
-
-    @property
-    def is_gradient_checkpointing(self) -> bool:
-        return bool(getattr(self.model, "is_gradient_checkpointing", False))
-
     def embed(self, mz, log_intensity, attention_mask) -> tuple[Tensor, Tensor]:
         encoder = getattr(self.model, "msdelta", self.model)
         if self.layer_mix is not None:
