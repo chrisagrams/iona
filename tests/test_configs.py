@@ -415,11 +415,12 @@ class TestResumeIsWiredThrough:
     nobody checks on a recovery run.
     """
 
-    ENTRY_POINTS = ("msdelta/finetune_denoise.py", "msdelta/finetune_contrastive.py")
+    ENTRY_POINTS = ("msdelta.finetune_denoise", "msdelta.finetune_contrastive")
 
     @pytest.mark.parametrize("module", ENTRY_POINTS)
     def test_train_is_not_called_bare(self, module):
-        source = (REPO / module).read_text()
+        import importlib
+        source = Path(importlib.import_module(module).__file__).read_text()   # follows the shims
         assert "trainer.train()" not in source, (
             f"{module} calls trainer.train() with no argument, so "
             f"--resume_from_checkpoint is parsed and discarded")
@@ -443,5 +444,6 @@ class TestResumeIsWiredThrough:
     def test_evaluation_still_strips_it(self):
         """eval_checkpoint scores a saved checkpoint; resuming training into it is
         never what is wanted, so the flag has to keep being removed there."""
-        source = (REPO / "msdelta" / "eval_checkpoint.py").read_text()
+        import importlib
+        source = Path(importlib.import_module("msdelta.eval_checkpoint").__file__).read_text()
         assert '"--resume_from_checkpoint",' in source

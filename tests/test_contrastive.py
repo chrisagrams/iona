@@ -9,6 +9,7 @@ to fix that, including the two NaN paths that would have made every real batch N
 from __future__ import annotations
 
 import numpy as np
+from pathlib import Path
 import pytest
 import torch
 
@@ -758,6 +759,13 @@ class TestPairSamplerAndLoss:
         assert z.grad is not None and bool((z.grad != 0).any())
 
 
+
+def _module_source(module: str) -> str:
+    """Source of the module an import name resolves to (old flat names are shims)."""
+    import importlib
+    return Path(importlib.import_module(module).__file__).read_text()
+
+
 class TestRetrievalSummary:
     """The task, not the proxy.
 
@@ -827,7 +835,7 @@ class TestRetrievalSummary:
         The metric is computed after training and after the encoder is saved, so any
         exception there costs hours and returns nothing. The fine-tune wraps the call.
         """
-        source = (REPO / "msdelta" / "finetune_contrastive.py").read_text()
+        source = _module_source("msdelta.finetune_contrastive")
         block = source[source.index("retrieval_summary("):]
         assert "try:" in source[:source.index("retrieval_summary(")][-400:], \
             "the retrieval evaluation must be wrapped in try/except"

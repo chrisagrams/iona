@@ -165,25 +165,25 @@ class TestAlignmentCollator:
 
 class TestProbes:
     def test_off_by_default(self, monkeypatch):
-        import msdelta.reranking as r
+        import msdelta.models.peptide_embedder as r
         monkeypatch.setattr(r, "PROBES", False)
         r.probe("x", bad=torch.tensor([float("nan")]))           # must not raise
         r.probe_index("x", "i", torch.tensor([999]), 4)
 
     def test_catches_non_finite(self, monkeypatch):
-        import msdelta.reranking as r
+        import msdelta.models.peptide_embedder as r
         monkeypatch.setattr(r, "PROBES", True)
         with pytest.raises(RuntimeError, match="non-finite"):
             r.probe("stage", value=torch.tensor([1.0, float("inf")]))
 
     def test_catches_out_of_range_index(self, monkeypatch):
-        import msdelta.reranking as r
+        import msdelta.models.peptide_embedder as r
         monkeypatch.setattr(r, "PROBES", True)
         with pytest.raises(RuntimeError, match="out of range"):
             r.probe_index("stage", "residues", torch.tensor([0, 23]), 23)
 
     def test_accepts_valid_index(self, monkeypatch):
-        import msdelta.reranking as r
+        import msdelta.models.peptide_embedder as r
         monkeypatch.setattr(r, "PROBES", True)
         r.probe_index("stage", "residues", torch.tensor([0, 22]), 23)
 
