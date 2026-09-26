@@ -1,4 +1,3 @@
---pretrained_path /flare/UIC-HPC/khuss/msdelta/pretrained/msdelta-100m-production-01-checkpoint-138073
 --dataset_repo chrisagrams/ms-denoise-100k
 --max_peaks 512
 --preprocessing_num_workers 24
