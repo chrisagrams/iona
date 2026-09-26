@@ -22,7 +22,7 @@ from datasets import load_dataset, load_from_disk
 
 from msdelta.contrastive import MSDeltaForContrastive, embed_dataset
 from msdelta.finetune_contrastive import ContrastiveCollator
-from msdelta.grouped_retrieval import build_grouped_split, group_ids, replicate_corpus_peptides
+from msdelta.grouped_retrieval import build_grouped_split, corpus_peptides, group_ids
 from msdelta.modeling_msdelta import MSDeltaForPreTraining
 from msdelta.processing_msdelta import MSDeltaProcessor
 from msdelta.retrieval import retrieval_metrics
@@ -30,8 +30,8 @@ from msdelta.retrieval import retrieval_metrics
 
 def prepare(cli) -> int:
     processor = MSDeltaProcessor.from_pretrained(cli.processor, max_peaks=cli.max_peaks)
-    exclude = replicate_corpus_peptides() if cli.exclude_replicate else set()
-    print(f"[prepare] excluding {len(exclude):,} replicate-corpus peptides", flush=True)
+    exclude = corpus_peptides(cli.exclude_peptides_from) if cli.exclude_peptides_from else set()
+    print(f"[prepare] excluding {len(exclude):,} peptides from {cli.exclude_peptides_from}", flush=True)
     raw = load_dataset(cli.repo)[cli.split]
     if cli.max_analytes and len(raw) > cli.max_analytes:
         raw = raw.shuffle(seed=0).select(range(cli.max_analytes))
@@ -42,7 +42,8 @@ def prepare(cli) -> int:
     rows.save_to_disk(cli.out_data)
     Path(cli.out_data, "PREPARED.json").write_text(json.dumps({
         "repo": cli.repo, "split": cli.split, "processor": cli.processor,
-        "max_peaks": cli.max_peaks, "excluded_peptides": len(exclude),
+        "max_peaks": cli.max_peaks, "exclude_peptides_from": cli.exclude_peptides_from,
+        "excluded_peptides": len(exclude),
         "rows": len(rows)}, indent=1))
     print(f"[prepare] wrote {len(rows):,} spectra to {cli.out_data}", flush=True)
     return 0
@@ -115,13 +116,13 @@ def main(argv: list[str] | None = None) -> int:
     p = sub.add_parser("prepare")
     p.add_argument("--out-data", required=True)
     p.add_argument("--processor", required=True, help="any pretrained checkpoint dir")
-    p.add_argument("--repo", default="chrisagrams/ms-contrastive-100k")
+    p.add_argument("--repo", required=True, help="grouped dataset repo")
     p.add_argument("--split", default="test")
     p.add_argument("--max-peaks", type=int, default=512)
     p.add_argument("--num-proc", type=int, default=16)
     p.add_argument("--max-analytes", type=int, default=0, help="random sample (0 = all)")
-    p.add_argument("--no-exclude-replicate", dest="exclude_replicate",
-                   action="store_false")
+    p.add_argument("--exclude-peptides-from", default=None,
+                   help="dataset repo whose peptides to drop")
     s = sub.add_parser("score")
     s.add_argument("--data", required=True)
     s.add_argument("--models", required=True)

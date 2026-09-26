@@ -22,7 +22,7 @@ from msdelta.contrastive import (GroupBatchSampler, MSDeltaForContrastive, gradc
                                  subset_by_group)
 from msdelta.modeling_msdelta import MSDeltaForPreTraining
 from msdelta.processing_msdelta import MSDeltaProcessor
-from msdelta.reranking import AlignmentCollator, REPLICATE_REPO, peptide_key
+from msdelta.reranking import AlignmentCollator, peptide_key
 from msdelta.wandb_distributed import init_wandb_run
 
 
@@ -36,10 +36,11 @@ class ContrastiveModelArguments:
 
 @dataclass
 class ContrastiveDataArguments:
-    dataset_repo: str = REPLICATE_REPO
+    dataset_repo: str
     dataset_format: str = "replicate"
     include_consensus: bool = False
-    exclude_replicate_peptides: bool = True
+    # Corpus whose peptides are dropped from a grouped dataset.
+    exclude_peptides_from: str | None = None
     processor_name_or_path: str | None = None
     max_peaks: int = 512
     validation_fraction: float = 0.1
@@ -131,7 +132,7 @@ def load_contrastive_datasets(data_args, processor) -> dict:
     datasets = gr.load_spectrum_datasets(
         data_args.dataset_format, data_args.dataset_repo, processor,
         include_consensus=data_args.include_consensus,
-        exclude_replicate_peptides=data_args.exclude_replicate_peptides,
+        exclude_peptides_from=data_args.exclude_peptides_from,
         num_proc=data_args.preprocessing_num_workers or None,
         validation_fraction=data_args.validation_fraction, seed=data_args.split_seed)
     if data_args.dataset_format != "grouped":

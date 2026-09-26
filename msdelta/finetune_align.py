@@ -22,7 +22,6 @@ from msdelta.processing_msdelta import MSDeltaProcessor
 from msdelta.reranking import (
     AlignmentCollator,
     PeptideEncoder,
-    REPLICATE_REPO,
     SequenceAlignmentModel,
     attach_teacher_embeddings,
     cross_modal_metrics,
@@ -46,11 +45,12 @@ class AlignModelArguments:
 
 @dataclass
 class AlignDataArguments:
+    dataset_repo: str
     processor_name_or_path: str | None = None
-    dataset_repo: str = REPLICATE_REPO
     dataset_format: str = "replicate"
     include_consensus: bool = False
-    exclude_replicate_peptides: bool = True
+    # Corpus whose peptides are dropped from a grouped dataset.
+    exclude_peptides_from: str | None = None
     preprocessing_num_workers: int = 24
     max_peaks: int = 512
     validation_fraction: float = 0.1
@@ -180,7 +180,7 @@ def main(argv: list[str] | None = None) -> int:
                 datasets = load_spectrum_datasets(
                     data_args.dataset_format, data_args.dataset_repo, processor,
                     include_consensus=data_args.include_consensus,
-                    exclude_replicate_peptides=data_args.exclude_replicate_peptides,
+                    exclude_peptides_from=data_args.exclude_peptides_from,
                     num_proc=data_args.preprocessing_num_workers or None,
                     validation_fraction=data_args.validation_fraction,
                     seed=training_args.seed,

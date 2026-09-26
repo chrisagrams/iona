@@ -62,7 +62,7 @@ def main(argv: list[str] | None = None) -> int:
     datasets = load_spectrum_datasets(
         data_args.dataset_format, data_args.dataset_repo, processor,
         include_consensus=data_args.include_consensus,
-        exclude_replicate_peptides=data_args.exclude_replicate_peptides,
+        exclude_peptides_from=data_args.exclude_peptides_from,
         num_proc=data_args.preprocessing_num_workers or None,
         validation_fraction=data_args.validation_fraction,
         seed=precompute_args.seed,
@@ -138,7 +138,7 @@ def _write_cache(cache, datasets, model_args, data_args, precompute_args) -> int
         f"seed: {precompute_args.seed}\n"
         f"dataset: {data_args.dataset_repo} ({data_args.dataset_format}, "
         f"include_consensus={data_args.include_consensus}, "
-        f"exclude_replicate_peptides={data_args.exclude_replicate_peptides})\n"
+        f"exclude_peptides_from={data_args.exclude_peptides_from})\n"
         + "".join(f"{k}: {len(v)}\n" for k, v in datasets.items())
     )
     print(f"[precompute] wrote {width}-d targets to {cache}", flush=True)

@@ -25,9 +25,6 @@ from msdelta.modeling_msdelta import MSDeltaForPreTraining
 from msdelta.processing_msdelta import MSDeltaProcessor
 from msdelta.reranking import AlignmentCollator, PeptideCollator, PeptideEncoder, embed_spectrum
 
-REPO_ID = "Gaolaboratory/psm-rerank-hek-hct116"
-# Pinned: later revisions moved the run tables.
-REVISION = "87f5c2756f5de8da8a664ef7e1a4dac8de067a88"
 KEEP = ("msfragger_hyperscore", "search_rank", "search_delta_score",
         "search_neglog10_evalue", "num_matched_ions", "tot_num_ions", "massdiff",
         "num_tol_term", "num_missed_cleavages")
@@ -50,6 +47,8 @@ def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--run", required=True, help="local parquet or path in the Hub dataset")
+    ap.add_argument("--repo", help="Hub dataset repo to download --run from")
+    ap.add_argument("--revision", default=None, help="dataset revision to pin")
     ap.add_argument("--encoder", required=True,
                     help="spectrum encoder dir or Hub repo id")
     ap.add_argument("--student", required=True,
@@ -65,8 +64,10 @@ def main(argv: list[str] | None = None) -> int:
 
     device = torch.device("xpu" if torch.xpu.is_available() else "cpu")
     t0 = time.time()
+    if not Path(cli.run).exists() and not cli.repo:
+        ap.error("--run is not a local file; pass --repo to download it")
     path = cli.run if Path(cli.run).exists() else hf_hub_download(
-        REPO_ID, cli.run, repo_type="dataset", revision=REVISION)
+        cli.repo, cli.run, repo_type="dataset", revision=cli.revision)
     table = pq.read_table(path, columns=["spectrum_id", "run_id", "dataset", "charge",
                                          "precursor_mz", "n_peaks", "mz", "intensity",
                                          "candidates"])

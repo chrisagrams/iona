@@ -2,7 +2,7 @@
 # Score saved contrastive encoders on ms-contrastive-100k's held-out split. No training.
 #
 #   qsub -q debug -l select=1 -l walltime=01:00:00 \
-#        -v MODELS=models.txt,PROCESSOR=/path/to/ckpt pbs/eval_grouped_retrieval.pbs
+#        -v MODELS=models.txt,DATASET=chrisagrams/ms-contrastive-100k,PROCESSOR=/path/to/ckpt pbs/eval_grouped_retrieval.pbs
 #
 # Prepares the split once, then scores one shard of models per tile. Resubmit to resume.
 
@@ -44,7 +44,9 @@ if [[ ! -d $DATA ]]; then
     echo "=== $(date -Is) prepare $DATA"
     mkdir -p "$(dirname "$DATA")"
     ZE_AFFINITY_MASK=0 "$PY" "$REPO_DIR/scripts/eval_grouped_retrieval.py" prepare \
-        --out-data "$DATA" --processor "${PROCESSOR:?set PROCESSOR to a checkpoint to take the processor config from}" --split "$SPLIT" \
+        --out-data "$DATA" --repo "${DATASET:?set DATASET to the grouped dataset repo}" \
+        --processor "${PROCESSOR:?set PROCESSOR to a checkpoint to take the processor config from}" \
+        --split "$SPLIT" ${EXCLUDE_PEPTIDES_FROM:+--exclude-peptides-from "$EXCLUDE_PEPTIDES_FROM"} \
         || { echo "prepare failed" >&2; exit 1; }
 fi
 cat "$DATA/PREPARED.json"

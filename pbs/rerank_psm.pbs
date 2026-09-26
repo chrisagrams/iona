@@ -3,9 +3,10 @@
 # spread over nodes x tiles, then PSMs/peptides at 1% FDR.
 #
 #   qsub -q debug -l select=1 -l walltime=01:00:00 \
-#        -v TAG=...,RUNS_FILE=...,ENCODER=...,STUDENT=...,CACHE=... pbs/rerank_psm.pbs
+#        -v TAG=...,DATASET=Gaolaboratory/psm-rerank-hek-hct116,REVISION=...,RUNS_FILE=...,ENCODER=...,STUDENT=...,CACHE=... \
+#        pbs/rerank_psm.pbs
 #
-# RUNS_FILE lists runs (e.g. HEK293/0718-1.parquet), one per line. Per-run tables go to
+# RUNS_FILE lists runs in DATASET (e.g. HEK293/0718-1.parquet), one per line; REVISION is optional. Per-run tables go to
 # $SCRATCH_ROOT/rerank-psm/$TAG/{rows,handfeat}; existing ones are reused, so resubmit to
 # resume. The FDR report goes to results/rerank/psm/$TAG.json.
 
@@ -32,12 +33,14 @@ if [[ ${1:-} == worker ]]; then
           rows="$BASE/rows/$name"; hand="$BASE/handfeat/$name"; log="$BASE/logs/$name.log"
           if [[ ! -f $rows ]]; then
             ZE_AFFINITY_MASK=$t "$PY" "$REPO_DIR/scripts/rerank_psm_embed.py" --run "$run" \
+              --repo "$DATASET" ${REVISION:+--revision "$REVISION"} \
               --encoder "$ENCODER" --student "$STUDENT" --cache "$CACHE" --out "$rows.tmp" \
               >> "$log" 2>&1 && mv "$rows.tmp" "$rows" \
               || { echo "[node $RANK tile $t] EMBED FAILED $run"; continue; }
           fi
           if [[ ! -f $hand ]]; then
             OMP_NUM_THREADS=1 "$PY" "$REPO_DIR/scripts/rerank_psm_handfeat.py" --run "$run" \
+              --repo "$DATASET" ${REVISION:+--revision "$REVISION"} \
               --out "$hand.tmp" >> "$log" 2>&1 && mv "$hand.tmp" "$hand" \
               || echo "[node $RANK tile $t] HANDFEAT FAILED $run"
           fi
@@ -52,6 +55,8 @@ fi
 export REPO_DIR=${REPO_DIR:-${PBS_O_WORKDIR:-$PWD}}
 cd "$REPO_DIR"
 export TAG=${TAG:?set TAG}
+export DATASET=${DATASET:?set DATASET to the PSM dataset repo}
+export REVISION=${REVISION:-}
 export RUNS_FILE=${RUNS_FILE:?set RUNS_FILE to a file listing runs, one per line}
 export ENCODER=${ENCODER:?set ENCODER to the contrastive encoder checkpoint}
 export STUDENT=${STUDENT:?set STUDENT to the alignment run final/ directory}

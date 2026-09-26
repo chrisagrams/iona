@@ -20,22 +20,23 @@ from huggingface_hub import hf_hub_download
 from rerank_psm_embed import to_notation
 from msdelta.rescoring import FEATURE_NAMES, extract_features
 
-REPO_ID = "Gaolaboratory/psm-rerank-hek-hct116"
-# Pinned: later revisions moved the run tables.
-REVISION = "87f5c2756f5de8da8a664ef7e1a4dac8de067a88"
-
 
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--run", required=True)
+    ap.add_argument("--run", required=True, help="local parquet or path in the Hub dataset")
+    ap.add_argument("--repo", help="Hub dataset repo to download --run from")
+    ap.add_argument("--revision", default=None, help="dataset revision to pin")
     ap.add_argument("--out", required=True)
     ap.add_argument("--ppm", type=float, default=250.0)
     ap.add_argument("--da-floor", type=float, default=0.05)
     cli = ap.parse_args(argv)
 
     t0 = time.time()
-    path = hf_hub_download(REPO_ID, cli.run, repo_type="dataset", revision=REVISION)
+    if not Path(cli.run).exists() and not cli.repo:
+        ap.error("--run is not a local file; pass --repo to download it")
+    path = cli.run if Path(cli.run).exists() else hf_hub_download(
+        cli.repo, cli.run, repo_type="dataset", revision=cli.revision)
     rows = pq.read_table(path, columns=["charge", "precursor_mz", "mz", "intensity",
                                         "candidates"]).to_pylist()
     out = {"candidate": [], **{f"hf_{n}": [] for n in FEATURE_NAMES}}

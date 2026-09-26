@@ -6,13 +6,11 @@ import numpy as np
 import torch
 from datasets import load_dataset
 
-from msdelta.reranking import REPLICATE_REPO, build_alignment_datasets, peptide_key
-
-GROUPED_REPO = "chrisagrams/ms-contrastive-100k"
+from msdelta.reranking import build_alignment_datasets, peptide_key
 
 
-def replicate_corpus_peptides(repo_id: str = REPLICATE_REPO) -> set[str]:
-    """Every peptide in the replicate corpus, across all of its splits."""
+def corpus_peptides(repo_id: str) -> set[str]:
+    """Every peptide in a corpus, across all of its splits."""
     raw = load_dataset(repo_id)
     return {p for split in raw.values() for p in split["peptide"]}
 
@@ -109,7 +107,7 @@ def group_ids(rows) -> np.ndarray:
 
 def load_spectrum_datasets(dataset_format: str, repo_id: str, processor, *,
                            include_consensus: bool = False,
-                           exclude_replicate_peptides: bool = True, num_proc=None,
+                           exclude_peptides_from: str | None = None, num_proc=None,
                            validation_fraction: float = 0.1, seed: int = 0) -> dict:
     """train + validation, one spectrum per row, from the replicate or grouped corpus."""
     if dataset_format == "replicate":
@@ -119,7 +117,7 @@ def load_spectrum_datasets(dataset_format: str, repo_id: str, processor, *,
     if dataset_format != "grouped":
         raise ValueError(f"dataset_format must be replicate or grouped, "
                          f"not {dataset_format!r}")
-    exclude = replicate_corpus_peptides() if exclude_replicate_peptides else set()
+    exclude = corpus_peptides(exclude_peptides_from) if exclude_peptides_from else set()
     return build_grouped_datasets(repo_id, processor, include_consensus=include_consensus,
                                   exclude_peptides=exclude, num_proc=num_proc,
                                   splits=("train", "validation"))

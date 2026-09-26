@@ -303,9 +303,6 @@ def cross_modal_metrics(sequence_embeddings, spectrum_embeddings, spectrum_group
     return metrics
 
 
-REPLICATE_REPO = "chrisagrams/ms2-peptide-replicate-retrieval"
-
-
 def build_alignment_datasets(repo_id, processor, num_proc=None, validation_fraction=0.1,
                              seed=0):
     """Spectrum/sequence pairs, split by peptide."""

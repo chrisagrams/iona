@@ -40,4 +40,4 @@
 --report_to wandb
 --dataset_format grouped
 --include_consensus false
---exclude_replicate_peptides true
+--exclude_peptides_from chrisagrams/ms2-peptide-replicate-retrieval

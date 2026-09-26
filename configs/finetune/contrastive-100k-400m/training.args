@@ -34,7 +34,7 @@
 --report_to wandb
 --dataset_format grouped
 --include_consensus false
---exclude_replicate_peptides true
+--exclude_peptides_from chrisagrams/ms2-peptide-replicate-retrieval
 --gradcache_chunk 4
 --save_only_model true
 --split_seed 0
