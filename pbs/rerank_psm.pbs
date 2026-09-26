@@ -70,9 +70,7 @@ mkdir -p "$BASE/rows" "$BASE/handfeat" "$BASE/logs"
 set +u
 source /usr/share/lmod/lmod/init/bash
 module load "${FRAMEWORKS_MODULE:-frameworks/2025.3.1}"
-source "$REPO_DIR/pbs/load_keys.sh"
 set -u
-[[ -n ${HF_TOKEN:-} ]] || { echo "HF_TOKEN not loaded" >&2; exit 2; }
 export ONEAPI_DEVICE_SELECTOR=level_zero:gpu ZE_FLAT_DEVICE_HIERARCHY=FLAT ZE_AFFINITY_MASK=0
 export OMP_NUM_THREADS=${OMP_NUM_THREADS:-8}
 export PYTHONPATH=$REPO_DIR${PYTHONPATH:+:$PYTHONPATH}

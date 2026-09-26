@@ -92,9 +92,6 @@ export no_proxy=${no_proxy:-admin,localhost,*.cm.aurora.alcf.anl.gov,aurora-*,*.
 export no_proxy="$no_proxy,127.0.0.1"
 export NO_PROXY="${NO_PROXY:-$no_proxy},127.0.0.1"
 
-# Credentials at runtime, never through `qsub -v` (visible in `qstat -f`).
-source "$REPO_DIR/pbs/load_keys.sh"
-
 export WANDB_DIR=${WANDB_DIR:-$LOG_DIR}
 export WANDB_RESUME=${WANDB_RESUME:-allow}
 export WANDB_RUN_ID=${WANDB_RUN_ID:-$RUN_NAME-$JOB_ID}
@@ -116,7 +113,6 @@ if n != $XPUS_PER_HOST:
     sys.exit(f'  visible tiles {n} != XPUS_PER_HOST $XPUS_PER_HOST; set_device(LOCAL_RANK) would go out of range')
 "
 if [[ -n ${WANDB_PROJECT:-} ]]; then
-    [[ -n ${WANDB_API_KEY:-} ]] || { echo "WANDB_API_KEY not loaded -- see pbs/load_keys.sh" >&2; exit 2; }
     # Any HTTP response means the proxy works; api.wandb.ai returns 404 to a bare GET.
     wandb_code=$(curl --silent --show-error --max-time 30 -o /dev/null -w '%{http_code}' https://api.wandb.ai || echo 000)
     [[ $wandb_code != 000 ]] \

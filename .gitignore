@@ -16,6 +16,3 @@ pbs/logs/
 
 # Benchmark data (published to HF, not tracked in git)
 data/
-
-# Credentials: loaded at runtime by pbs/load_keys.sh, never committed
-.keys/
