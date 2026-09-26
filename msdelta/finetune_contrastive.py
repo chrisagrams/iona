@@ -114,6 +114,13 @@ class ContrastiveModelArguments:
                           "the readout or the encoder is doing the work."},
     )
     temperature: float = field(default=0.07, metadata={"help": "SupCon temperature"})
+    loss: str = field(
+        default="supcon",
+        metadata={"help": "contrastive loss: 'supcon' (softmax over the batch, every run so far) or "
+                          "'sigmoid' (C8: SigLIP-style independent per-pair sigmoid, learnable "
+                          "scale and bias; --temperature is then unused)"})
+    sigmoid_init_scale: float = field(default=10.0, metadata={"help": "sigmoid loss: initial logit scale"})
+    sigmoid_init_bias: float = field(default=-10.0, metadata={"help": "sigmoid loss: initial logit bias"})
     kl_weight: float = field(
         default=100.0,
         metadata={"help": "weight on KL to the frozen pretrained head. 0 disables the "
@@ -204,6 +211,17 @@ class ContrastiveDataArguments:
                           "on, groups_per_batch x replicates can far exceed what fits: "
                           "peak memory is one chunk, not the batch. The gradient is "
                           "exact -- tests assert it against a full-batch backward."})
+    same_mass_batches: bool = field(
+        default=False,
+        metadata={"help": "C19: build each batch from peptide groups that are neighbours in "
+                          "neutral mass (sorted with +-mass_jitter Da jitter each epoch), so "
+                          "in-batch negatives are same-mass competitors."})
+    mass_jitter: float = field(default=1.0, metadata={"help": "same_mass_batches: jitter (Da)"})
+    gradcache_trim_padding: bool = field(
+        default=False,
+        metadata={"help": "GradCache: sort each batch's spectra by length and cut every chunk "
+                          "to its own longest spectrum instead of max_peaks. Same gradient "
+                          "(tested), much less compute on padding."})
 
 
 @dataclass
@@ -275,7 +293,8 @@ class ContrastiveTrainer(Trainer):
     """Standard Trainer, with the PK sampler and the loss components surfaced."""
 
     def __init__(self, *args, groups=None, groups_per_batch=12, replicates=4,
-                 gradcache_chunk=0, encoder_lr_scale=1.0, layer_mix_lr=None,
+                 gradcache_chunk=0, gradcache_trim_padding=False, group_masses=None,
+                 mass_jitter=1.0, encoder_lr_scale=1.0, layer_mix_lr=None,
                  pair_loss=False, pairs_per_batch=8, positive_fraction=0.5,
                  **kwargs):
         super().__init__(*args, **kwargs)
@@ -283,6 +302,9 @@ class ContrastiveTrainer(Trainer):
         self.groups_per_batch = groups_per_batch
         self.replicates = replicates
         self.gradcache_chunk = gradcache_chunk
+        self.gradcache_trim_padding = gradcache_trim_padding
+        self.group_masses = group_masses
+        self.mass_jitter = mass_jitter
         self.encoder_lr_scale = encoder_lr_scale
         self.layer_mix_lr = layer_mix_lr
         self.pair_loss = pair_loss
@@ -356,7 +378,9 @@ class ContrastiveTrainer(Trainer):
                                        self.positive_fraction, seed=self.args.seed)
         else:
             sampler = GroupBatchSampler(self.groups, self.groups_per_batch,
-                                        self.replicates, seed=self.args.seed)
+                                        self.replicates, seed=self.args.seed,
+                                        group_masses=self.group_masses,
+                                        mass_jitter=self.mass_jitter)
         return DataLoader(self.train_dataset, batch_sampler=sampler,
                           collate_fn=self.data_collator,
                           num_workers=self.args.dataloader_num_workers,
@@ -370,7 +394,8 @@ class ContrastiveTrainer(Trainer):
         inputs = self._prepare_inputs(inputs)
         inner = model.module if hasattr(model, "module") else model
         outputs = gradcache_step(inner, inputs, self.gradcache_chunk,
-                                 accelerator=getattr(self, "accelerator", None))
+                                 accelerator=getattr(self, "accelerator", None),
+                                 trim_padding=self.gradcache_trim_padding)
         if self.state.global_step % max(self.args.logging_steps, 1) == 0:
             self.log({"contrastive": float(outputs["contrastive"]),
                       "kl": float(outputs["kl"])})
@@ -518,7 +543,10 @@ def main(argv: list[str] | None = None) -> int:
                                   pair_positive_weight=model_args.pair_positive_weight,
                                   projection_hidden=model_args.projection_hidden,
                                   projection_dim=model_args.projection_dim,
-                                  projection_dropout=model_args.projection_dropout)
+                                  projection_dropout=model_args.projection_dropout,
+                                  loss=model_args.loss,
+                                  sigmoid_init_scale=model_args.sigmoid_init_scale,
+                                  sigmoid_init_bias=model_args.sigmoid_init_bias)
     if model_args.encoder_lr_scale == 0:
         # A zero learning rate would still let weight decay and any stateful optimizer
         # move the encoder. Freezing is the thing being asked for, so freeze it.
@@ -567,10 +595,18 @@ def main(argv: list[str] | None = None) -> int:
             if training_args.process_index == 0:
                 print("[contrastive] subset by group: "
                       + " ".join(f"{k}={len(v):,}" for k, v in datasets.items()), flush=True)
-        groups = np.unique(
+        train_peptides = datasets["train"]["peptide"]
+        uniq_keys, groups = np.unique(
             np.array([peptide_key(p, c) for p, c in
-                      zip(datasets["train"]["peptide"], datasets["train"]["charge"])]),
-            return_inverse=True)[1]
+                      zip(train_peptides, datasets["train"]["charge"])]),
+            return_inverse=True)
+        group_masses = None
+        if data_args.same_mass_batches:
+            from msdelta.reranking import peptide_neutral_mass
+            first = {}
+            for row, g in enumerate(groups):
+                first.setdefault(int(g), row)
+            group_masses = {g: peptide_neutral_mass(train_peptides[row]) for g, row in first.items()}
         if training_args.process_index == 0:
             print(f"[contrastive] " + " ".join(f"{k}={len(v):,}" for k, v in datasets.items())
                   + f" train_groups={len(set(groups.tolist())):,}", flush=True)
@@ -585,6 +621,8 @@ def main(argv: list[str] | None = None) -> int:
             groups=groups, groups_per_batch=data_args.groups_per_batch,
             replicates=data_args.replicates,
             gradcache_chunk=data_args.gradcache_chunk,
+            gradcache_trim_padding=data_args.gradcache_trim_padding,
+            group_masses=group_masses, mass_jitter=data_args.mass_jitter,
             encoder_lr_scale=model_args.encoder_lr_scale,
             layer_mix_lr=(model_args.layer_mix_lr
                           if model_args.pooling == "layer_mix" else None),

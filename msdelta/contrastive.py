@@ -58,7 +58,15 @@ class GroupBatchSampler(Sampler[list[int]]):
     """
 
     def __init__(self, groups, groups_per_batch: int = 12, replicates: int = 4,
-                 seed: int = 0, drop_last: bool = True):
+                 seed: int = 0, drop_last: bool = True, group_masses=None,
+                 mass_jitter: float = 1.0):
+        # C19 (same-mass batches): with group_masses (neutral mass per group id), each epoch
+        # sorts the groups by mass + uniform(+-mass_jitter Da), cuts them into consecutive
+        # blocks of groups_per_batch and shuffles the blocks, so a batch's negatives are
+        # near-same-mass peptides -- the competitors a precursor window leaves (GLEAMS).
+        # Without it, groups are drawn in random order as before.
+        self.group_masses = None if group_masses is None else dict(group_masses)
+        self.mass_jitter = mass_jitter
         if replicates < 2:
             raise ValueError("replicates must be >= 2 or there are no positive pairs")
         if groups_per_batch < 2:
@@ -92,7 +100,18 @@ class GroupBatchSampler(Sampler[list[int]]):
         # same batches as seed 1 epoch 0), which would make a seed sweep partly a
         # relabelling of one trajectory rather than independent runs.
         rng = np.random.default_rng([self.seed, self.epoch])
-        order = rng.permutation(list(self.members))
+        if self.group_masses is None:
+            order = rng.permutation(list(self.members))
+        else:
+            keys = np.array(list(self.members))
+            mass = np.array([self.group_masses[int(k)] for k in keys], dtype=np.float64)
+            by_mass = keys[np.argsort(mass + rng.uniform(-self.mass_jitter, self.mass_jitter,
+                                                          len(keys)), kind="stable")]
+            n = len(by_mass) // self.groups_per_batch
+            blocks = [by_mass[i * self.groups_per_batch:(i + 1) * self.groups_per_batch]
+                      for i in range(n)]
+            order = (np.concatenate([blocks[j] for j in rng.permutation(n)])
+                     if n else by_mass)
         for start in range(0, len(order) - self.groups_per_batch + 1,
                            self.groups_per_batch):
             batch: list[int] = []
@@ -259,6 +278,27 @@ def supervised_contrastive_loss(embeddings: Tensor, groups: Tensor,
     return _SUPCON[temperature](F.normalize(embeddings.float(), dim=-1), groups)
 
 
+def sigmoid_contrastive_loss(embeddings: Tensor, groups: Tensor, log_scale: Tensor,
+                             bias: Tensor) -> Tensor:
+    """SigLIP-style pairwise sigmoid loss (Zhai et al., ICCV 2023), within one modality.
+
+    Every ordered pair i != j of the batch is an independent binary problem: label +1 when
+    both spectra come from the same peptide group, -1 otherwise, logit
+    exp(log_scale) * cos(i, j) + bias. Unlike SupCon's softmax, positives do not compete
+    for probability mass (with K replicates SupCon's target per positive is 1/(K-1)), and
+    each pair's term does not depend on the rest of the batch. log_scale and bias are
+    learnable; SigLIP initialises them at log(10) and -10 so the loss starts near the
+    heavy negative imbalance instead of fighting it. Normalised like SigLIP: summed over
+    pairs, divided by the batch size.
+    """
+    z = F.normalize(embeddings.float(), dim=-1)
+    logits = (z @ z.T) * log_scale.float().exp() + bias.float()
+    same = groups.unsqueeze(0) == groups.unsqueeze(1)
+    labels = same.float() * 2 - 1
+    off_diagonal = ~torch.eye(len(z), dtype=torch.bool, device=z.device)
+    return -F.logsigmoid(labels * logits)[off_diagonal].sum() / len(z)
+
+
 class _SupConCache(dict):
     """One SupConLoss per temperature; it holds no state beyond that scalar."""
 
@@ -408,8 +448,17 @@ class MSDeltaForContrastive(nn.Module):
                  kl_weight: float = 1.0, layer_mix_norm: bool = True,
                  pair_loss: bool = False, pair_margin: float = 1.0,
                  pair_positive_weight: float = 1.0, projection_hidden: int = 0,
-                 projection_dim: int = 0, projection_dropout: float = 0.1):
+                 projection_dim: int = 0, projection_dropout: float = 0.1,
+                 loss: str = "supcon", sigmoid_init_scale: float = 10.0,
+                 sigmoid_init_bias: float = -10.0):
         super().__init__()
+        # "supcon" (default, every run so far) or "sigmoid" (C8, SigLIP-style pairwise).
+        if loss not in ("supcon", "sigmoid"):
+            raise ValueError(f"loss must be 'supcon' or 'sigmoid', not {loss!r}")
+        self.loss = loss
+        if loss == "sigmoid":
+            self.sigmoid_log_scale = nn.Parameter(torch.tensor(float(np.log(sigmoid_init_scale))))
+            self.sigmoid_bias = nn.Parameter(torch.tensor(float(sigmoid_init_bias)))
         self.model = model
         self.reference = reference
         # pooling="layer_mix" replaces the fixed readout with a trained one over depth.
@@ -496,6 +545,13 @@ class MSDeltaForContrastive(nn.Module):
             pooled = self.projection(pooled)
         return F.normalize(pooled.float(), dim=-1), hidden
 
+    def contrastive_loss(self, embeddings: Tensor, group: Tensor) -> Tensor:
+        """The batch-level contrastive term; one place, so forward and GradCache agree."""
+        if self.loss == "sigmoid":
+            return sigmoid_contrastive_loss(embeddings, group, self.sigmoid_log_scale,
+                                            self.sigmoid_bias)
+        return supervised_contrastive_loss(embeddings, group, self.temperature)
+
     def forward(self, mz, log_intensity, attention_mask, group,
                 reference_logits=None, return_dict: bool = True,
                 return_loss: bool = True):
@@ -507,8 +563,7 @@ class MSDeltaForContrastive(nn.Module):
             contrastive = pair.pop("loss")
             extra = pair
         else:
-            contrastive = supervised_contrastive_loss(embeddings, group,
-                                                      self.temperature)
+            contrastive = self.contrastive_loss(embeddings, group)
 
         kl = embeddings.new_zeros(())
         if self.kl_weight > 0:
@@ -827,7 +882,8 @@ def _restore_rng(state: tuple, device) -> None:
         torch.cuda.set_rng_state(device_state, device)
 
 
-def gradcache_step(model, batch, chunk_size: int, accelerator=None) -> dict[str, Tensor]:
+def gradcache_step(model, batch, chunk_size: int, accelerator=None,
+                   trim_padding: bool = False) -> dict[str, Tensor]:
     """One optimizer step with a contrastive batch far larger than memory allows.
 
     The epochs ladder settled what the constraint is. Three epochs took the separation
@@ -854,8 +910,25 @@ def gradcache_step(model, batch, chunk_size: int, accelerator=None) -> dict[str,
     """
     keys = ("mz", "log_intensity", "attention_mask")
     total = len(batch["group"])
-    chunks = [{k: batch[k][i:i + chunk_size] for k in keys}
-              for i in range(0, total, chunk_size)]
+    groups = batch["group"]
+    if trim_padding:
+        # Speed, not semantics. Batches arrive padded to max_peaks, and attention plus
+        # DeltaMZBias cost O(width^2) per spectrum, so a chunk of short spectra spends
+        # most of its time on padding. Sort the rows by length (longest first, so the
+        # first chunk sets peak memory) and cut each chunk to its own longest spectrum.
+        # The loss is invariant to row order as long as the group labels move with the
+        # rows, and each chunk still has one fixed shape across passes 1 and 3, so the
+        # gradient stays exact (tests/test_contrastive.py).
+        order = torch.argsort(batch["attention_mask"].sum(1), descending=True, stable=True)
+        batch = {**{k: batch[k][order] for k in keys}}
+        groups = groups[order.to(groups.device)]
+    chunks = []
+    for i in range(0, total, chunk_size):
+        chunk = {k: batch[k][i:i + chunk_size] for k in keys}
+        if trim_padding:
+            width = max(int(chunk["attention_mask"].sum(1).max()), 1)
+            chunk = {k: v[:, :width] for k, v in chunk.items()}
+        chunks.append(chunk)
 
     # 1. embeddings only, no graph -- capturing the RNG state before each chunk.
     #
@@ -875,8 +948,7 @@ def gradcache_step(model, batch, chunk_size: int, accelerator=None) -> dict[str,
 
     # 2. the loss over the WHOLE batch, differentiated only w.r.t. the embeddings.
     leaves = [e.detach().requires_grad_(True) for e in cached]
-    contrastive = supervised_contrastive_loss(
-        torch.cat(leaves), batch["group"], model.temperature)
+    contrastive = model.contrastive_loss(torch.cat(leaves), groups)
     contrastive.backward()
     grads = [leaf.grad for leaf in leaves]
 

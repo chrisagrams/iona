@@ -1,0 +1,1 @@
+C8 x C19 ARM: loss=sigmoid, batches=mass, seed 1. 50M from pretrained checkpoint 540,423, ms-contrastive-100k only, 3 epochs, encoder every half epoch; otherwise the Iona stage-2 recipe (P85 x K3, KL 10, lr 1e-4). sweeps/make_c8c19.py.

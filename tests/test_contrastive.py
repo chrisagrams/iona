@@ -407,16 +407,40 @@ class TestGradCacheEdges:
                           for _, p in sorted(model.model.named_parameters())
                           if p.grad is not None])
 
-    def _assert_matches(self, batch, chunk_size, **kw):
+    def _assert_matches(self, batch, chunk_size, trim_padding=False, **kw):
         from msdelta.contrastive import gradcache_step
         direct = self._model(**kw)
         direct(**batch)["loss"].backward()
         cached = self._model(**kw)
-        got = gradcache_step(cached, batch, chunk_size=chunk_size)
+        got = gradcache_step(cached, batch, chunk_size=chunk_size, trim_padding=trim_padding)
         ref, mine = self._flat_grad(direct), self._flat_grad(cached)
         rel = (ref - mine).norm() / ref.norm()
         assert rel < 1e-4, f"relative gradient error {rel:.2e}"
         return got
+
+    @pytest.mark.parametrize("chunk", [1, 2, 3, 8])
+    def test_trimmed_length_sorted_chunks_match_full_batch(self, chunk):
+        """trim_padding sorts rows by length and cuts each chunk to its own width.
+
+        Right-padded spectra of very different lengths, groups interleaved so sorting
+        really reorders them: the gradient must still equal the full padded batch's.
+        """
+        lengths = [12, 3, 7, 12, 5, 9, 2, 11]
+        mask = torch.zeros(8, 12, dtype=torch.long)
+        for i, n in enumerate(lengths):
+            mask[i, :n] = 1
+        batch = self._batch(size=8, mask=mask, groups=torch.tensor([0, 1, 2, 3, 0, 1, 2, 3]))
+        self._assert_matches(batch, chunk, trim_padding=True)
+
+    def test_trimmed_loss_equals_untrimmed(self):
+        from msdelta.contrastive import gradcache_step
+        mask = torch.zeros(6, 10, dtype=torch.long)
+        for i, n in enumerate([10, 4, 6, 2, 9, 5]):
+            mask[i, :n] = 1
+        batch = self._batch(size=6, length=10, mask=mask, groups=torch.tensor([0, 1, 2, 0, 1, 2]))
+        a = gradcache_step(self._model(), batch, chunk_size=2)
+        b = gradcache_step(self._model(), batch, chunk_size=2, trim_padding=True)
+        assert float(a["loss"]) == pytest.approx(float(b["loss"]), abs=1e-5)
 
     @pytest.mark.parametrize("size,chunk", [(8, 3), (8, 5), (10, 4), (7, 2), (9, 9)])
     def test_chunk_size_need_not_divide_the_batch(self, size, chunk):
@@ -848,3 +872,118 @@ class TestRetrievalSummary:
         out = retrieval_summary(model, dataset, ContrastiveCollator(pad_spectra_to=8),
                                 torch.device("cpu"), max_rows=8)
         assert out == {}, "all-singleton split has nothing to retrieve"
+
+
+class TestSigmoidLoss:
+    """C8: SigLIP-style pairwise sigmoid loss as an alternative to SupCon."""
+
+    def test_matches_a_hand_computed_value(self):
+        from msdelta.contrastive import sigmoid_contrastive_loss
+        emb = torch.tensor([[1.0, 0.0], [1.0, 0.0], [0.0, 1.0]])
+        groups = torch.tensor([0, 0, 1])
+        log_scale, bias = torch.tensor(0.0), torch.tensor(0.0)     # logit = cosine
+        # pairs (ordered, i != j): (0,1),(1,0) same, cos 1 -> -log sig(1); four cross pairs, cos 0
+        # -> -log sig(-0) each
+        expected = (2 * -torch.nn.functional.logsigmoid(torch.tensor(1.0))
+                    + 4 * -torch.nn.functional.logsigmoid(torch.tensor(0.0))) / 3
+        got = sigmoid_contrastive_loss(emb, groups, log_scale, bias)
+        assert float(got) == pytest.approx(float(expected), abs=1e-6)
+
+    def test_scale_and_bias_are_learnable_parameters(self):
+        from msdelta.contrastive import MSDeltaForContrastive
+        from msdelta.configuration_msdelta import MSDeltaConfig
+        from msdelta.modeling_msdelta import MSDeltaForPreTraining
+        cfg = MSDeltaConfig(hidden_size=32, num_attention_heads=4, num_hidden_layers=2,
+                            intermediate_size=64, delta_bias_n_freqs=8, delta_bias_per_head_hidden=4)
+        m = MSDeltaForContrastive(MSDeltaForPreTraining(cfg), None, kl_weight=0.0, loss="sigmoid")
+        names = {n for n, p in m.named_parameters() if p.requires_grad}
+        assert {"sigmoid_log_scale", "sigmoid_bias"} <= names
+        assert float(m.sigmoid_log_scale.exp()) == pytest.approx(10.0)
+        assert float(m.sigmoid_bias) == pytest.approx(-10.0)
+
+    def test_rejects_an_unknown_loss(self):
+        from msdelta.contrastive import MSDeltaForContrastive
+        with pytest.raises(ValueError):
+            MSDeltaForContrastive(torch.nn.Linear(2, 2), None, kl_weight=0.0, loss="triplet")
+
+    @pytest.mark.parametrize("trim", [False, True])
+    @pytest.mark.parametrize("chunk", [1, 3, 8])
+    def test_gradcache_gradient_matches_full_batch(self, chunk, trim):
+        """Including the gradient on the learnable scale and bias."""
+        from msdelta.configuration_msdelta import MSDeltaConfig
+        from msdelta.contrastive import MSDeltaForContrastive, gradcache_step
+        from msdelta.modeling_msdelta import MSDeltaForPreTraining
+        cfg = MSDeltaConfig(hidden_size=32, num_attention_heads=4, num_hidden_layers=2,
+                            intermediate_size=64, delta_bias_n_freqs=8, delta_bias_per_head_hidden=4,
+                            hidden_dropout_prob=0.0, attention_probs_dropout_prob=0.0)
+
+        def model():
+            torch.manual_seed(0)
+            return MSDeltaForContrastive(MSDeltaForPreTraining(cfg), MSDeltaForPreTraining(cfg),
+                                         kl_weight=10.0, loss="sigmoid",
+                                         sigmoid_init_scale=5.0, sigmoid_init_bias=-2.0).train()
+        torch.manual_seed(1)
+        mask = torch.zeros(8, 12, dtype=torch.long)
+        for i, n in enumerate([12, 3, 7, 12, 5, 9, 2, 11]):
+            mask[i, :n] = 1
+        batch = {"mz": torch.rand(8, 12) * 1000, "log_intensity": torch.rand(8, 12),
+                 "attention_mask": mask, "group": torch.tensor([0, 1, 2, 3, 0, 1, 2, 3])}
+        direct = model(); direct(**batch)["loss"].backward()
+        cached = model(); gradcache_step(cached, batch, chunk_size=chunk, trim_padding=trim)
+
+        def flat(m):
+            return torch.cat([p.grad.flatten() for _, p in sorted(m.named_parameters())
+                              if p.grad is not None])
+        ref, got = flat(direct), flat(cached)
+        assert (ref - got).norm() / ref.norm() < 1e-4
+        assert cached.sigmoid_bias.grad is not None and cached.sigmoid_log_scale.grad is not None
+
+
+class TestSameMassBatches:
+    """C19: GroupBatchSampler with group_masses builds batches of mass-neighbouring groups."""
+
+    def _sampler(self, masses, p=4, k=2, seed=0, jitter=0.0):
+        from msdelta.contrastive import GroupBatchSampler
+        n = len(masses)
+        groups = np.repeat(np.arange(n), 3)                  # 3 rows per group
+        return GroupBatchSampler(groups, p, k, seed=seed, group_masses=dict(enumerate(masses)),
+                                 mass_jitter=jitter), groups
+
+    def test_batches_are_mass_neighbours(self):
+        masses = np.random.default_rng(0).uniform(500, 3000, 64)
+        sampler, groups = self._sampler(masses)
+        order = np.sort(masses)
+        spans = []
+        for batch in sampler:
+            g = np.unique(groups[batch])
+            assert len(g) == 4
+            spans.append(masses[g].max() - masses[g].min())
+            # the batch is exactly 4 consecutive groups in mass order
+            lo = np.searchsorted(order, masses[g].min())
+            assert np.allclose(np.sort(masses[g]), order[lo:lo + 4])
+        assert np.median(spans) < (3000 - 500) / 64 * 8          # far tighter than random batches
+
+    def test_each_group_once_per_epoch_with_k_replicates(self):
+        masses = np.linspace(600, 2000, 20)
+        sampler, groups = self._sampler(masses, p=4, k=2)
+        seen = []
+        for batch in sampler:
+            assert len(batch) == 8
+            g, counts = np.unique(groups[batch], return_counts=True)
+            assert (counts == 2).all()
+            seen.extend(g.tolist())
+        assert sorted(seen) == list(range(20))
+
+    def test_reshuffles_every_epoch(self):
+        masses = np.random.default_rng(1).uniform(500, 3000, 40)
+        sampler, _ = self._sampler(masses, jitter=1.0)
+        first = [tuple(b) for b in sampler]
+        second = [tuple(b) for b in sampler]
+        assert first != second
+
+    def test_without_masses_behaviour_is_unchanged(self):
+        from msdelta.contrastive import GroupBatchSampler
+        groups = np.repeat(np.arange(12), 3)
+        a = [tuple(b) for b in GroupBatchSampler(groups, 4, 2, seed=3)]
+        b = [tuple(b) for b in GroupBatchSampler(groups, 4, 2, seed=3, group_masses=None)]
+        assert a == b

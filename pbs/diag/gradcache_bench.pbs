@@ -1,0 +1,22 @@
+#!/bin/bash -l
+# GradCache throughput: one real contrastive step at 50M/100M/200M/400M (one tile each, in parallel).
+#PBS -N gc-bench
+#PBS -A UIC-HPC
+#PBS -l filesystems=home:flare
+#PBS -j oe
+#PBS -o /home/khuss/code/msdelta/pbs/logs/
+set -uo pipefail
+cd /home/khuss/code/msdelta
+S=/lus/flare/projects/UIC-HPC/khuss/msdelta
+set +u; source /usr/share/lmod/lmod/init/bash; module load frameworks/2025.3.1; set -u
+export ONEAPI_DEVICE_SELECTOR=level_zero:gpu ZE_FLAT_DEVICE_HIERARCHY=FLAT PYTHONPATH=$PWD OMP_NUM_THREADS=8
+export HF_HOME=$S/huggingface HF_HUB_OFFLINE=1 HF_DATASETS_OFFLINE=1
+O=results/finetune/contrastive/gradcache_bench; mkdir -p $O
+i=0
+for s in 50m 100m 200m 400m; do
+  c="4,8,16,32,64"; [ $s = 400m ] && c="4,16,32,64"
+  ZE_AFFINITY_MASK=$i .venv/bin/python pbs/diag/gradcache_bench.py --size $s --out $O/$s.json --chunks $c > $O/$s.log 2>&1 &
+  i=$((i+1))
+done
+wait
+grep -h "\[bench\]" $O/*.log | cut -c1-220
