@@ -45,7 +45,7 @@ def main():
             handles.append(Line2D([], [], color=col, lw=2.0, ls=ls, marker=mk, ms=6.5, mec="white", mew=1.2, label=lab))
         ax.set_xticks(xi); ax.set_xticklabels([s.upper() for s in SCALES]); ax.set_xlim(-0.3, len(SCALES) - 0.7)
         ax.set_xlabel("model size (parameters)", labelpad=6); ax.set_ylabel("test AUROC", labelpad=6)
-        ax.set_title("Scaling improvements for denoising", loc="left", fontsize=13, fontweight="bold", pad=12)
+        ax.set_title("Denoising performance across checkpoints", loc="left", fontsize=13, fontweight="bold", pad=12)
         leg = ax.legend(handles=handles[::-1], title="pretraining", frameon=False, fontsize=9, title_fontsize=9.5,
                         loc="upper left", bbox_to_anchor=(1.01, 1.0), handlelength=2.6, labelspacing=0.7)
         leg._legend_box.align = "left"

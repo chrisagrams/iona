@@ -145,7 +145,7 @@ def fig_d():
         ax.set_xticks(xi); ax.set_xticklabels([x.upper() for x in xs])
         ax.set_xlim(-0.3, len(xs) - 0.7)
         ax.set_xlabel("model size (parameters)", labelpad=6); ax.set_ylabel("test AUROC", labelpad=6)
-        ax.set_title("Scaling improvements for denoising", loc="left", fontsize=13, fontweight="bold", pad=12)
+        ax.set_title("Denoising performance across checkpoints", loc="left", fontsize=13, fontweight="bold", pad=12)
         leg = ax.legend(handles=handles[::-1], title="pretraining", frameon=False, fontsize=9,
                         title_fontsize=9.5, loc="upper left", bbox_to_anchor=(1.01, 1.0),
                         handlelength=2.6, labelspacing=0.7)
