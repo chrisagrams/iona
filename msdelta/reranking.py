@@ -11,7 +11,6 @@ from dataclasses import dataclass
 import numpy as np
 import torch
 import torch.nn.functional as F
-from datasets import load_dataset
 from torch import Tensor, nn
 
 from msdelta.fourier import FourierFeatures
@@ -74,11 +73,6 @@ def parse_peptide(peptide: str) -> tuple[list[int], list[float]]:
         masses.append(0.0)
         index += 1
     return ids, masses
-
-
-def peptide_key(peptide: str, charge: int, by_charge: bool = True) -> str:
-    """Identity used to decide whether two spectra are the same sequence (charge-aware by default)."""
-    return f"{peptide}_{charge}" if by_charge else peptide
 
 
 @dataclass
@@ -301,63 +295,6 @@ def cross_modal_metrics(sequence_embeddings, spectrum_embeddings, spectrum_group
             F.cosine_similarity(spectrum, sequence, dim=-1).mean()
         )
     return metrics
-
-
-def build_alignment_datasets(repo_id, processor, num_proc=None, validation_fraction=0.1,
-                             seed=0):
-    """Spectrum/sequence pairs, split by peptide."""
-    raw = load_dataset(repo_id)
-    split = "train" if "train" in raw else list(raw)[0]
-
-    # Spectra above max_peaks are dropped, not truncated, and the count is printed.
-    max_peaks = processor.max_peaks
-
-    def prepare(example):
-        if len(example["mz"]) > max_peaks:
-            return {"mz": [], "log_intensity": [], "peptide": "", "charge": 0, "precursor": 0.0}
-        try:
-            values = processor(
-                torch.as_tensor(example["mz"], dtype=torch.float32),
-                torch.as_tensor(example["intensity"], dtype=torch.float32),
-                padding=False,
-            )
-        except (ValueError, KeyError, TypeError):
-            return {"mz": [], "log_intensity": [], "peptide": "", "charge": 0, "precursor": 0.0}
-        return {
-            "mz": values["mz"][0] if values["mz"] and isinstance(values["mz"][0], list)
-                  else values["mz"],
-            "log_intensity": (values["log_intensity"][0]
-                              if values["log_intensity"]
-                              and isinstance(values["log_intensity"][0], list)
-                              else values["log_intensity"]),
-            "peptide": example.get("peptide") or "",
-            "charge": int(example.get("charge") or 0),
-            # Measured precursor m/z, used by the rescorer.
-            "precursor": float(example.get("precursor") or 0.0),
-        }
-
-    rows = raw[split].map(prepare, remove_columns=raw[split].column_names,
-                          num_proc=num_proc, desc="preprocess alignment pairs")
-    before = len(rows)
-    rows = rows.filter(lambda e: len(e["mz"]) > 0 and bool(e["peptide"]),
-                       num_proc=num_proc, desc="drop empty pairs")
-    dropped = before - len(rows)
-    if dropped:
-        oversized = sum(1 for n in raw[split]["mz"] if len(n) > max_peaks)
-        print(f"[alignment] dropped {dropped:,} of {before:,} pairs "
-              f"({100 * dropped / before:.1f}%); {oversized:,} were over max_peaks="
-              f"{max_peaks}. Peak count tracks charge and peptide length, so this is a "
-              f"biased loss, not a random one.", flush=True)
-
-    peptides = sorted(set(rows["peptide"]))
-    generator = np.random.default_rng(seed)
-    held_out = set(generator.choice(
-        peptides, size=max(1, int(len(peptides) * validation_fraction)), replace=False
-    ).tolist())
-    return {
-        "train": rows.filter(lambda e: e["peptide"] not in held_out, desc="train split"),
-        "validation": rows.filter(lambda e: e["peptide"] in held_out, desc="validation split"),
-    }
 
 
 @dataclass

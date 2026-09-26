@@ -13,16 +13,20 @@ import numpy as np
 import torch
 from torch import nn
 from torch.utils.data import DataLoader
-from transformers import (HfArgumentParser, Trainer, TrainerCallback, TrainingArguments,
-                          set_seed)
+from transformers import HfArgumentParser, Trainer, TrainerCallback, TrainingArguments, set_seed
 
-from msdelta import grouped_retrieval as gr
-from msdelta.contrastive import (GroupBatchSampler, MSDeltaForContrastive, gradcache_step,
-                                 group_separation_summary, retrieval_summary,
-                                 subset_by_group)
+from msdelta.contrastive import (
+    GroupBatchSampler,
+    MSDeltaForContrastive,
+    gradcache_step,
+    group_separation_summary,
+    retrieval_summary,
+    subset_by_group,
+)
+from msdelta.data import group_ids, load_spectrum_datasets, peptide_key
 from msdelta.modeling_msdelta import MSDeltaForPreTraining
 from msdelta.processing_msdelta import MSDeltaProcessor
-from msdelta.reranking import AlignmentCollator, peptide_key
+from msdelta.reranking import AlignmentCollator
 from msdelta.wandb_distributed import init_wandb_run
 
 
@@ -129,7 +133,7 @@ def load_contrastive_datasets(data_args, processor) -> dict:
             raise ValueError(f"replicates={data_args.replicates} but grouped analytes "
                              f"have {members} spectra (include_consensus="
                              f"{data_args.include_consensus}); set replicates <= {members}")
-    datasets = gr.load_spectrum_datasets(
+    datasets = load_spectrum_datasets(
         data_args.dataset_format, data_args.dataset_repo, processor,
         include_consensus=data_args.include_consensus,
         exclude_peptides_from=data_args.exclude_peptides_from,
@@ -139,7 +143,7 @@ def load_contrastive_datasets(data_args, processor) -> dict:
         return datasets
     # Drop train analytes left with a single spectrum by max_peaks.
     train = datasets["train"]
-    ids = gr.group_ids(train)
+    ids = group_ids(train)
     keep = np.flatnonzero(np.bincount(ids)[ids] >= 2)
     if len(keep) < len(train):
         print(f"[contrastive] dropped {len(train) - len(keep):,} train spectra left "

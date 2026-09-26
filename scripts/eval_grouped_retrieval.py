@@ -21,8 +21,8 @@ import torch
 from datasets import load_dataset, load_from_disk
 
 from msdelta.contrastive import MSDeltaForContrastive, embed_dataset
+from msdelta.data import build_grouped_split, corpus_peptides, group_ids
 from msdelta.finetune_contrastive import ContrastiveCollator
-from msdelta.grouped_retrieval import build_grouped_split, corpus_peptides, group_ids
 from msdelta.modeling_msdelta import MSDeltaForPreTraining
 from msdelta.processing_msdelta import MSDeltaProcessor
 from msdelta.retrieval import retrieval_metrics

@@ -15,8 +15,8 @@ import torch
 from datasets import load_from_disk
 from transformers import HfArgumentParser, Trainer, TrainingArguments, set_seed
 
+from msdelta.data import load_spectrum_datasets, peptide_key
 from msdelta.finetune_denoise import subset_splits
-from msdelta.grouped_retrieval import load_spectrum_datasets
 from msdelta.modeling_msdelta import MSDeltaForPreTraining
 from msdelta.processing_msdelta import MSDeltaProcessor
 from msdelta.reranking import (
@@ -26,7 +26,6 @@ from msdelta.reranking import (
     attach_teacher_embeddings,
     cross_modal_metrics,
     group_separation_metrics,
-    peptide_key,
     pooled_width,
 )
 from msdelta.wandb_distributed import init_wandb_run

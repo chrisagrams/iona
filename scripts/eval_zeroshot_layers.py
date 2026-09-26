@@ -21,8 +21,8 @@ import torch.nn.functional as F
 from datasets import load_from_disk
 
 from msdelta.contrastive import encoder_layer_states
+from msdelta.data import group_ids
 from msdelta.finetune_contrastive import ContrastiveCollator
-from msdelta.grouped_retrieval import group_ids
 from msdelta.modeling_msdelta import MSDeltaForPreTraining
 from msdelta.reranking import pool_sequence
 from msdelta.retrieval import retrieval_metrics

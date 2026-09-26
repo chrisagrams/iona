@@ -13,7 +13,8 @@ from pytorch_metric_learning.losses import SupConLoss
 from torch import Tensor, nn
 from torch.utils.data import Sampler
 
-from msdelta.reranking import group_separation_metrics, peptide_key, pool_sequence
+from msdelta.data import peptide_key
+from msdelta.reranking import group_separation_metrics, pool_sequence
 from msdelta.retrieval import retrieval_metrics
 
 

@@ -18,11 +18,16 @@ from datasets import load_from_disk
 from safetensors.torch import load_file
 from transformers import HfArgumentParser
 
+from msdelta.data import group_ids
 from msdelta.finetune_align import AlignDataArguments, AlignModelArguments
-from msdelta.grouped_retrieval import group_ids
 from msdelta.modeling_msdelta import MSDeltaForPreTraining
-from msdelta.reranking import (AlignmentCollator, PeptideCollator, PeptideEncoder,
-                               cross_modal_metrics, embed_spectrum)
+from msdelta.reranking import (
+    AlignmentCollator,
+    PeptideCollator,
+    PeptideEncoder,
+    cross_modal_metrics,
+    embed_spectrum,
+)
 from msdelta.retrieval import retrieval_metrics
 
 

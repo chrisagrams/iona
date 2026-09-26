@@ -14,9 +14,9 @@ import torch
 from datasets import concatenate_datasets, load_from_disk
 from transformers import HfArgumentParser
 
+from msdelta.data import load_spectrum_datasets
 from msdelta.finetune_align import AlignDataArguments, AlignModelArguments
 from msdelta.finetune_denoise import subset_splits
-from msdelta.grouped_retrieval import load_spectrum_datasets
 from msdelta.modeling_msdelta import MSDeltaForPreTraining
 from msdelta.processing_msdelta import MSDeltaProcessor
 from msdelta.reranking import attach_teacher_embeddings
