@@ -17,7 +17,8 @@ experimental spectra only, replicate-corpus peptides excluded), but trained from
 50M encoder at its final checkpoint (540,423) on ms-contrastive-100k ALONE -- the single-dataset
 recipe these ablations are meant to fix -- for 3 epochs, the encoder saved every half epoch
 (531 steps) so the same runs give the epoch curve. GradCache chunks are length-sorted and
-trimmed (gradcache_trim_padding; same gradient, tested).
+trimmed (gradcache_trim_padding; same gradient, tested) and gradient checkpointing is
+off: ~4x faster per step than the old settings (pbs/diag/gradcache_bench.py).
 """
 
 from __future__ import annotations
@@ -39,7 +40,10 @@ LOSSES = {"supcon": {}, "sigmoid": {"--loss": "sigmoid", "--sigmoid_init_scale":
 BATCHES = {"random": {}, "mass": {"--same_mass_batches": "true", "--mass_jitter": "1.0"}}
 COMMON = {"--pretrained_path": PRETRAINED, "--num_train_epochs": "3",
           "--save_steps": str(STEPS_PER_EPOCH // 2), "--save_total_limit": "10",
-          "--gradcache_trim_padding": "true"}
+          "--gradcache_trim_padding": "true",
+          # GradCache already bounds memory to one chunk (50M, chunk 4: ~7 GB of 64), so
+          # recomputing every forward for checkpointing only costs time.
+          "--gradient_checkpointing": "false"}
 
 
 def parse(path: Path) -> list[tuple[str, str]]:
