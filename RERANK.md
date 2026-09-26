@@ -42,7 +42,7 @@ python -m msdelta.psm_rerank score --no-embedding --rows rows/ --labfeat feature
 per spectrum). Accept targets with `q_value <= 0.01` for 1% FDR. The command also prints
 PSMs/peptides at 1% FDR for MSFragger's own ranking and for the rescored list.
 
-## What to expect (measured; notes/OBSERVATIONS.md)
+## What to expect (measured)
 
 On 8 runs of `psm-rerank-hek-hct116`, PSMs at 1% FDR:
 
