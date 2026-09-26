@@ -1,11 +1,13 @@
 #!/bin/bash -l
-# Build the dataset cache with one non-distributed process.
+# Build finalized pretraining and probe datasets with one non-distributed process.
+# Everything is stored under HF_HOME so the whole directory can be copied to DAOS.
 # Submit from the repository root, for example:
 # qsub -A PROJECT -q QUEUE \
 #   -l select=1:ncpus=64 -l walltime=12:00:00 \
 #   -l filesystems=home:flare -j oe -o /path/to/pbs/logs \
-#   -v ARGS_FILE=configs/msdelta-base-200m/training.args,DATASET_CACHE_DIR=/flare/PROJECT/hf/datasets \
+#   -v ARGS_FILE=configs/msdelta-base-200m/training.args,HF_HOME=/flare/UIC-HPC/homes/cgrams/hf \
 #   pbs/aurora-preprocess.pbs
+# Set PROBES_ONLY=1 to prepare probes without rebuilding the existing main dataset.
 
 module load frameworks
 
@@ -23,14 +25,16 @@ set -euo pipefail
 REPO_DIR=${REPO_DIR:-${PBS_O_WORKDIR:-$PWD}}
 VENV_DIR=${VENV_DIR:-$REPO_DIR/.venv}
 ARGS_FILE=${ARGS_FILE:?set ARGS_FILE to an MSDelta training args file}
-DATASET_CACHE_DIR=${DATASET_CACHE_DIR:?set DATASET_CACHE_DIR to a shared filesystem path}
+HF_HOME=${HF_HOME:?set HF_HOME to an absolute shared-filesystem path}
+DATASET_CACHE_DIR=${DATASET_CACHE_DIR:-$HF_HOME/datasets}
 PREPROCESSED_DATASET_DIR=${PREPROCESSED_DATASET_DIR:-$DATASET_CACHE_DIR/msdelta-preprocessed}
+PREPROCESSED_PROBE_DIR=${PREPROCESSED_PROBE_DIR:-$DATASET_CACHE_DIR/msdelta-probes}
 
 if [[ $ARGS_FILE != /* ]]; then
     ARGS_FILE=$REPO_DIR/$ARGS_FILE
 fi
-if [[ $DATASET_CACHE_DIR != /* ]]; then
-    echo "DATASET_CACHE_DIR must be an absolute shared-filesystem path" >&2
+if [[ $HF_HOME != /* || $DATASET_CACHE_DIR != /* || $PREPROCESSED_DATASET_DIR != /* || $PREPROCESSED_PROBE_DIR != /* ]]; then
+    echo "HF_HOME and dataset/probe paths must be absolute shared-filesystem paths" >&2
     exit 2
 fi
 if [[ ! -f $ARGS_FILE ]]; then
@@ -45,7 +49,9 @@ fi
 mkdir -p "$DATASET_CACHE_DIR"
 cd "$REPO_DIR"
 
-export HF_HOME=${HF_HOME:-${DATASET_CACHE_DIR%/datasets}}
+export HF_HOME
+export HF_DATASETS_CACHE=$DATASET_CACHE_DIR
+export HF_HUB_CACHE=$HF_HOME/hub
 export HF_HUB_OFFLINE=${HF_HUB_OFFLINE:-0}
 export HF_DATASETS_OFFLINE=${HF_DATASETS_OFFLINE:-0}
 export PYTHONPATH=$REPO_DIR${PYTHONPATH:+:$PYTHONPATH}
@@ -62,8 +68,14 @@ export ftp_proxy=${ftp_proxy:-$ALCF_PROXY}
 export no_proxy=${no_proxy:-admin,localhost,*.cm.aurora.alcf.anl.gov,aurora-*,*.aurora.alcf.anl.gov,*.alcf.anl.gov}
 export NO_PROXY=${NO_PROXY:-$no_proxy}
 
-echo "$(date -Is) preprocessing cache=$DATASET_CACHE_DIR args=$ARGS_FILE"
+PREPROCESS_ARGS=()
+if [[ ${PROBES_ONLY:-0} == 1 ]]; then
+    PREPROCESS_ARGS+=(--probes_only true)
+fi
+echo "$(date -Is) preprocessing hf_home=$HF_HOME args=$ARGS_FILE"
 exec "$VENV_DIR/bin/python" -m msdelta.preprocess \
     --args_file "$ARGS_FILE" \
     --dataset_cache_dir "$DATASET_CACHE_DIR" \
-    --preprocessed_dataset_dir "$PREPROCESSED_DATASET_DIR"
+    --preprocessed_dataset_dir "$PREPROCESSED_DATASET_DIR" \
+    --preprocessed_probe_dir "$PREPROCESSED_PROBE_DIR" \
+    "${PREPROCESS_ARGS[@]}"
