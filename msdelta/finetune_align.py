@@ -23,8 +23,7 @@ import numpy as np
 import torch
 from transformers import HfArgumentParser, Trainer, TrainingArguments, set_seed
 
-from msdelta.finetune_denoise import (MemoryProbe, load_description, select_device,
-                                      subset_splits)
+from msdelta.finetune_denoise import subset_splits
 from msdelta.modeling_msdelta import MSDeltaForPreTraining
 from msdelta.processing_msdelta import MSDeltaProcessor
 from msdelta.reranking import (
@@ -109,7 +108,6 @@ class AlignDataArguments:
 class AlignTrainingArguments(TrainingArguments):
     wandb_project: str | None = None
     wandb_entity: str | None = None
-    run_description: str | None = None
     eval_alignment_rows: int = field(
         default=2000,
         metadata={"help": "Spectra scored by the cross-modal evaluation. Candidates are "
@@ -208,7 +206,6 @@ class SequenceAlignmentTrainer(Trainer):
 
 
 def main(argv: list[str] | None = None) -> int:
-    select_device()
     parser = HfArgumentParser(
         (AlignModelArguments, AlignDataArguments, AlignTrainingArguments)  # pyright: ignore[reportArgumentType]
     )
@@ -266,34 +263,16 @@ def main(argv: list[str] | None = None) -> int:
                                  neg_source=model_args.neg_source,
                                  neg_ppm=model_args.neg_ppm)
 
-    student = sum(p.numel() for p in model.sequence_encoder.parameters())
-    frozen = (sum(p.numel() for p in model.spectrum_model.parameters())
-              if model.spectrum_model is not None else 0)
-    training_args.run_description = (training_args.run_description
-                                     or load_description())
-    description = (
-        f"Peptide encoder aligned to a frozen {Path(model_args.pretrained_path).parent.name} "
-        f"spectrum encoder under L2 on unit vectors. pooling={model_args.pooling}, "
-        f"student {student/1e6:.2f}M, teacher {frozen/1e6:.2f}M frozen, "
-        f"lr={training_args.learning_rate:g}, seed {training_args.seed}."
-    )
-    if training_args.run_description:
-        description = f"{training_args.run_description} -- {description}"
-    tags = ["reranking", "alignment", f"pool{model_args.pooling}",
-            f"lr{training_args.learning_rate:g}", f"seed{training_args.seed}"]
-
     wandb_run = None
     if training_args.wandb_project:
         wandb_run = init_wandb_run(
             project=training_args.wandb_project, run_name=training_args.run_name,
-            entity=training_args.wandb_entity, notes=description, tags=tags,
+            entity=training_args.wandb_entity,
             config={"model": asdict(model_args), "data": asdict(data_args),
                     "training": training_args.to_dict()},
         )
     try:
         if training_args.process_index == 0:
-            (out_dir / "RUN.md").write_text(f"# {training_args.run_name}\n\n{description}\n")
-            print(f"[align] {description}", flush=True)
             print(f"[align] embedding size {model.sequence_encoder.projection[-1].out_features}",
                   flush=True)
 
@@ -355,7 +334,6 @@ def main(argv: list[str] | None = None) -> int:
                 jitter=model_args.mass_batch_jitter, seed=training_args.seed)
             print(f"[align] mass-bucketed batches of {training_args.per_device_train_batch_size} "
                   f"(jitter +-{model_args.mass_batch_jitter:g} Da)", flush=True)
-        trainer.add_callback(MemoryProbe(every=50))
         trainer.train()
 
         if trainer.is_world_process_zero() and datasets.get("validation") is not None:

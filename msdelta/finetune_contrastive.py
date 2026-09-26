@@ -28,7 +28,7 @@ from msdelta.contrastive import (GroupBatchSampler, MSDeltaForContrastive,
                                  embedding_size, group_separation_summary,
                                  retrieval_summary,
                                  subset_by_group)
-from msdelta.finetune_denoise import MemoryProbe, load_description, select_device, subset_splits
+from msdelta.finetune_denoise import subset_splits
 from msdelta.modeling_msdelta import MSDeltaForPreTraining
 from msdelta.processing_msdelta import MSDeltaProcessor
 from msdelta.reranking import (AlignmentCollator, REPLICATE_REPO, build_alignment_datasets,
@@ -210,7 +210,6 @@ class ContrastiveDataArguments:
 class ContrastiveTrainingArguments(TrainingArguments):
     wandb_project: str | None = None
     wandb_entity: str | None = None
-    run_description: str | None = None
     eval_retrieval_rows: int = field(
         default=0,
         metadata={"help": "Spectra to embed when scoring retrieval inside evaluate(). "
@@ -474,7 +473,6 @@ class ContrastiveCollator(AlignmentCollator):
 
 
 def main(argv: list[str] | None = None) -> int:
-    select_device()
     parser = HfArgumentParser(
         (ContrastiveModelArguments, ContrastiveDataArguments, ContrastiveTrainingArguments)  # pyright: ignore[reportArgumentType]
     )
@@ -528,31 +526,13 @@ def main(argv: list[str] | None = None) -> int:
                              "train; use pooling=layer_mix or a non-zero "
                              "encoder_lr_scale")
 
-    training_args.run_description = training_args.run_description or load_description()
-    description = (
-        f"Spectrum encoder from {Path(model_args.pretrained_path).parent.name} fine-tuned "
-        f"with supervised contrastive loss on {data_args.dataset_repo} (replicates of one "
-        f"peptide+charge are positives), temperature {model_args.temperature}, plus "
-        f"KL={model_args.kl_weight} to the frozen pretrained intensity head so the encoder "
-        f"separates peptides without forgetting the peak chemistry. "
-        f"Batches are {data_args.groups_per_batch} groups x {data_args.replicates} "
-        f"replicates. pooling={model_args.pooling}, embedding "
-        f"{embedding_size(encoder, model_args.pooling)}, seed {training_args.seed}.")
-    if training_args.run_description:
-        description = f"{training_args.run_description} -- {description}"
-
     wandb_run = None
     if training_args.wandb_project:
         wandb_run = init_wandb_run(
             project=training_args.wandb_project, run_name=training_args.run_name,
-            entity=training_args.wandb_entity, notes=description,
-            tags=["contrastive", "spectrum-encoder", model_args.pooling],
+            entity=training_args.wandb_entity,
             config={"model": asdict(model_args), "data": asdict(data_args)})
     try:
-        if training_args.process_index == 0:
-            (out_dir / "RUN.md").write_text(f"# {training_args.run_name}\n\n{description}\n")
-            print(f"[contrastive] {description}", flush=True)
-
         with training_args.main_process_first(local=False, desc="contrastive data"):
             datasets = load_contrastive_datasets(data_args, processor)
         if data_args.max_samples:
@@ -591,7 +571,6 @@ def main(argv: list[str] | None = None) -> int:
             pair_loss=model_args.pair_loss,
             pairs_per_batch=data_args.pairs_per_batch,
             positive_fraction=data_args.positive_fraction)
-        trainer.add_callback(MemoryProbe(every=50))
         trainer.add_callback(SaveEncoderCallback(model, processor))
         # Pass it explicitly. Trainer.train() defaults resume_from_checkpoint to None
         # and never falls back to args.resume_from_checkpoint, so the CLI flag parses
