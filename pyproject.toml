@@ -12,6 +12,7 @@ dependencies = [
     "matplotlib",
     "pyyaml",
     "pyarrow>=24.0.0",
+    "pandas>=3.0",
     "pyteomics>=4.7.5",
     "lxml>=5.0",
     "scikit-learn>=1.8.0",

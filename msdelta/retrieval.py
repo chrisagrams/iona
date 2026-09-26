@@ -88,7 +88,8 @@ def retrieval_metrics(embeddings, labels, device, *, gpus=None):
     vectors = torch.nn.functional.normalize(vectors, dim=-1)
     targets = torch.as_tensor(labels, dtype=torch.long, device=device)
     calculator = RetrievalAccuracyCalculator(
-        include=("precision_at_1", "mean_average_precision", "recall_at_5"),
+        include=("precision_at_1", "mean_average_precision", "recall_at_5",
+                 "mean_average_precision_at_r", "r_precision"),
         k=min(100, len(vectors) - 1),
         device=device,
         knn_func=FaissKNN(index_init_fn=faiss.IndexFlatIP, gpus=gpus),
@@ -98,6 +99,8 @@ def retrieval_metrics(embeddings, labels, device, *, gpus=None):
         "Hit@1": scores["precision_at_1"],
         "MAP@100": scores["mean_average_precision"],
         "R@5": scores["recall_at_5"],
+        "MAP@R": scores["mean_average_precision_at_r"],
+        "R-Precision": scores["r_precision"],
     }
 
 
