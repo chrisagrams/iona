@@ -49,46 +49,7 @@ class DenoiseFinetuneArguments(TrainingArguments):
     peak_pair_budget: int = 4_194_304
     wandb_project: str | None = None
     wandb_entity: str | None = None
-    run_description: str | None = None
     eval_test_split: bool = True
-
-
-def describe_run(model_args, data_args, training_args) -> tuple[str, list[str]]:
-    """A description and W&B tags derived from the run's settings."""
-    if model_args.random_init:
-        origin = "randomly initialised encoder (CONTROL: no pretraining)"
-    else:
-        origin = f"encoder from {Path(model_args.pretrained_path).parent.name}"
-
-    if model_args.encoder_lr_scale == 0:
-        encoder = "encoder frozen throughout"
-    else:
-        encoder = (f"encoder at {model_args.encoder_lr_scale:g}x the head's rate"
-                   f"{f', frozen for {model_args.freeze_encoder_steps} steps' if model_args.freeze_encoder_steps else ''}")
-
-    sentence = (
-        f"Per-peak noise classification (noise = positive class) on "
-        f"{data_args.dataset_repo}, max_peaks={data_args.max_peaks}. {origin}. "
-        f"lr={training_args.learning_rate:g}, {encoder}, "
-        f"{training_args.num_train_epochs:g} epochs, head width "
-        f"{model_args.head_hidden_size}, seed {training_args.seed}."
-    )
-    if training_args.run_description:
-        sentence = f"{training_args.run_description} -- {sentence}"
-
-    tags = [
-        "denoise",
-        "scratch" if model_args.random_init else "pretrained",
-        f"lr{training_args.learning_rate:g}",
-        f"els{model_args.encoder_lr_scale:g}",
-        f"ep{training_args.num_train_epochs:g}",
-        f"head{model_args.head_hidden_size}",
-        f"seed{training_args.seed}",
-        f"peaks{data_args.max_peaks}",
-    ]
-    if model_args.encoder_lr_scale == 0 and not model_args.random_init:
-        tags.append("frozen-encoder")
-    return sentence, tags
 
 
 def denoise_metrics(prediction) -> dict[str, float]:
@@ -288,22 +249,12 @@ def main(argv: list[str] | None = None) -> int:
     )
     model, pretrained = build_denoising_model(model_args.pretrained_path, model_args)
 
-    description, tags = describe_run(model_args, data_args, training_args)
-    if training_args.process_index == 0:
-        (out_dir / "RUN.md").write_text(
-            f"# {training_args.run_name}\n\n{description}\n\n"
-            f"tags: {', '.join(tags)}\n"
-        )
-        print(f"[denoise] {description}", flush=True)
-
     wandb_run = None
     if training_args.wandb_project:
         wandb_run = init_wandb_run(
             project=training_args.wandb_project,
             run_name=training_args.run_name,
             entity=training_args.wandb_entity,
-            notes=description,
-            tags=tags,
             config={
                 "model": model_args.pretrained_path,
                 "random_init": model_args.random_init,
