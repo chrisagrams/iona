@@ -15,7 +15,15 @@ import time
 from pathlib import Path
 
 import numpy as np
+import pyarrow as pa
+import pyarrow.parquet as pq
 import torch
+from huggingface_hub import hf_hub_download, snapshot_download
+from safetensors.torch import load_file
+
+from msdelta.modeling_msdelta import MSDeltaForPreTraining
+from msdelta.processing_msdelta import MSDeltaProcessor
+from msdelta.reranking import AlignmentCollator, PeptideCollator, PeptideEncoder, embed_spectrum
 
 REPO_ID = "Gaolaboratory/psm-rerank-hek-hct116"
 # Pinned: later revisions moved the run tables.
@@ -53,18 +61,7 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--max-peaks", type=int, default=512)
     ap.add_argument("--max-spectra", type=int, default=0)
     ap.add_argument("--batch-size", type=int, default=16)
-    ap.add_argument("--vectors-out", default="", help="also save the unit vectors here")
     cli = ap.parse_args(argv)
-
-    import pyarrow as pa
-    import pyarrow.parquet as pq
-    from huggingface_hub import hf_hub_download
-    from safetensors.torch import load_file
-
-    from msdelta.modeling_msdelta import MSDeltaForPreTraining
-    from msdelta.processing_msdelta import MSDeltaProcessor
-    from msdelta.reranking import (AlignmentCollator, PeptideCollator, PeptideEncoder,
-                                   pool_sequence, student_readout)
 
     device = torch.device("xpu" if torch.xpu.is_available() else "cpu")
     t0 = time.time()
@@ -81,7 +78,6 @@ def main(argv: list[str] | None = None) -> int:
     def local(path_or_repo: str) -> str:
         if Path(path_or_repo).exists():
             return path_or_repo
-        from huggingface_hub import snapshot_download
         return snapshot_download(path_or_repo)
 
     encoder_dir, student_dir = local(cli.encoder), local(cli.student)
@@ -95,10 +91,8 @@ def main(argv: list[str] | None = None) -> int:
         width = int(state["sequence_encoder.projection.3.weight"].shape[0])
     processor = MSDeltaProcessor.from_pretrained(encoder_dir, max_peaks=cli.max_peaks)
     encoder = MSDeltaForPreTraining.from_pretrained(encoder_dir).to(device).eval()
-    enc = getattr(encoder, "msdelta", encoder)
     student = PeptideEncoder(embedding_size=width, hidden_size=256,
-                             num_layers=4, num_heads=8, pooling=pooling,
-                             readout=student_readout(state))
+                             num_layers=4, num_heads=8, pooling=pooling)
     student.load_state_dict({k.removeprefix("sequence_encoder."): v for k, v in state.items()
                              if k.startswith("sequence_encoder.")})
     student = student.to(device).eval()
@@ -124,11 +118,8 @@ def main(argv: list[str] | None = None) -> int:
     with torch.no_grad():
         for s in range(0, len(feats), cli.batch_size):
             b = collator(feats[s:s + cli.batch_size])
-            mask = b["attention_mask"].to(device)
-            hidden = enc(mz=b["mz"].to(device), log_intensity=b["log_intensity"].to(device),
-                         attention_mask=mask).last_hidden_state
-            spec.append(torch.nn.functional.normalize(
-                pool_sequence(hidden, mask, pooling).float(), dim=-1).cpu())
+            spec.append(embed_spectrum(encoder, b["mz"].to(device), b["log_intensity"].to(device),
+                                       b["attention_mask"].to(device), pooling).cpu())
     spec = torch.cat(spec)
     print(f"[embed] spectra embedded ({time.time() - t0:.0f}s)", flush=True)
 
@@ -150,32 +141,16 @@ def main(argv: list[str] | None = None) -> int:
             for k in KEEP:
                 out[k].append(c.get(k))
     pc = PeptideCollator()
-    cos, null, pep_vecs = [], [], []
-    perm = np.random.default_rng(0).permutation(len(rows))
-    perm = np.where(perm == np.arange(len(rows)), np.roll(perm, 1), perm)   # never self
+    cos = []
     with torch.no_grad():
         for s in range(0, len(peptides), 512):
             b = pc(peptides[s:s + 512], [min(max(z, 0), 7) for z in charges[s:s + 512]])
             emb = student(**{k: v.to(device) for k, v in b.items()}).float().cpu()
             own = spec[torch.tensor(owner[s:s + 512])]
             cos.append((emb * own).sum(-1))
-            if cli.vectors_out:
-                pep_vecs.append(emb.half().numpy())
-            null.append((emb * spec[torch.tensor(perm[owner[s:s + 512]])]).sum(-1))
     out["cosine"] = torch.cat(cos).tolist()
-    # Leakage control: each candidate against a random other spectrum; should give AUROC ~0.5.
-    out["cosine_null"] = torch.cat(null).tolist()
     Path(cli.out).parent.mkdir(parents=True, exist_ok=True)
     pq.write_table(pa.table(out), cli.out)
-    if cli.vectors_out:
-        vd = Path(cli.vectors_out); vd.mkdir(parents=True, exist_ok=True)
-        np.save(vd / "spectrum.npy", spec.half().numpy())
-        np.save(vd / "peptide.npy", np.concatenate(pep_vecs))
-        pq.write_table(pa.table({"candidate": out["candidate"],
-                                 "owner": np.asarray(owner, dtype=np.int64),
-                                 "null_owner": perm[np.asarray(owner)].astype(np.int64)}),
-                       vd / "index.parquet")
-        print(f"[embed] vectors -> {vd}", flush=True)
     print(f"[embed] wrote {len(peptides):,} candidates to {cli.out} "
           f"({time.time() - t0:.0f}s)", flush=True)
     return 0

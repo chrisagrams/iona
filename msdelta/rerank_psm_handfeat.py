@@ -2,7 +2,7 @@
 
     python -m msdelta.rerank_psm_handfeat --run HEK293/0718-1.parquet --out OUT.parquet
 
-The msdelta.rescoring features (minus embedding_cosine) from the raw peaks, at an ion-trap
+The msdelta.rescoring features from the raw peaks, at an ion-trap
 tolerance of max(250 ppm, 0.05 Da). Keyed by `candidate` to join stage 1's rows. CPU only.
 """
 
@@ -13,6 +13,12 @@ import time
 from pathlib import Path
 
 import numpy as np
+import pyarrow as pa
+import pyarrow.parquet as pq
+from huggingface_hub import hf_hub_download
+
+from msdelta.rerank_psm_embed import to_notation
+from msdelta.rescoring import FEATURE_NAMES, extract_features
 
 REPO_ID = "Gaolaboratory/psm-rerank-hek-hct116"
 # Pinned: later revisions moved the run tables.
@@ -28,30 +34,21 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--da-floor", type=float, default=0.05)
     cli = ap.parse_args(argv)
 
-    import pyarrow as pa
-    import pyarrow.parquet as pq
-    from huggingface_hub import hf_hub_download
-
-    from msdelta.rerank_psm_embed import to_notation
-    from msdelta.rescoring import FEATURE_NAMES, extract_features
-
     t0 = time.time()
     path = hf_hub_download(REPO_ID, cli.run, repo_type="dataset", revision=REVISION)
     rows = pq.read_table(path, columns=["charge", "precursor_mz", "mz", "intensity",
                                         "candidates"]).to_pylist()
-    names = [n for n in FEATURE_NAMES if n != "embedding_cosine"]
-    out = {"candidate": [], **{f"hf_{n}": [] for n in names}}
+    out = {"candidate": [], **{f"hf_{n}": [] for n in FEATURE_NAMES}}
     for r in rows:
         mz = np.asarray(r["mz"], dtype=np.float64)
         it = np.asarray(r["intensity"], dtype=np.float64)
         for c in r["candidates"]:
             v = extract_features(to_notation(c["sequence"], c["modifications"]), mz, it,
-                                 float(r["precursor_mz"]), int(r["charge"]), 0.0,
+                                 float(r["precursor_mz"]), int(r["charge"]),
                                  cli.ppm, cli.da_floor)
             out["candidate"].append(c["candidate_id"])
             for n, x in zip(FEATURE_NAMES, v):
-                if n != "embedding_cosine":
-                    out[f"hf_{n}"].append(float(x))
+                out[f"hf_{n}"].append(float(x))
     Path(cli.out).parent.mkdir(parents=True, exist_ok=True)
     pq.write_table(pa.table(out), cli.out)
     print(f"[handfeat] {cli.run}: {len(out['candidate']):,} candidates "

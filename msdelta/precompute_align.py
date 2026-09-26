@@ -6,20 +6,20 @@
 
 from __future__ import annotations
 
-import os
 import sys
+from dataclasses import dataclass
 from pathlib import Path
 
 import torch
+from datasets import concatenate_datasets, load_from_disk
 from transformers import HfArgumentParser
-
-from dataclasses import dataclass
 
 from msdelta.finetune_align import AlignDataArguments, AlignModelArguments
 from msdelta.finetune_denoise import subset_splits
+from msdelta.grouped_retrieval import load_spectrum_datasets
 from msdelta.modeling_msdelta import MSDeltaForPreTraining
 from msdelta.processing_msdelta import MSDeltaProcessor
-from msdelta.reranking import attach_teacher_embeddings, build_alignment_datasets
+from msdelta.reranking import attach_teacher_embeddings
 
 
 @dataclass
@@ -59,7 +59,6 @@ def main(argv: list[str] | None = None) -> int:
         max_peaks=data_args.max_peaks,
     )
 
-    from msdelta.grouped_retrieval import load_spectrum_datasets
     datasets = load_spectrum_datasets(
         data_args.dataset_format, data_args.dataset_repo, processor,
         include_consensus=data_args.include_consensus,
@@ -87,8 +86,6 @@ def main(argv: list[str] | None = None) -> int:
 
 
 def _shard(cache, model_args, precompute_args, device) -> int:
-    from datasets import load_from_disk
-
     n, i = precompute_args.num_shards, precompute_args.shard_index
     teacher = MSDeltaForPreTraining.from_pretrained(model_args.pretrained_path)
     for name in ("train", "validation"):
@@ -104,15 +101,13 @@ def _shard(cache, model_args, precompute_args, device) -> int:
             {name: part}, teacher, model_args.pooling,
             batch_size=precompute_args.batch_size,
             max_peptide_length=model_args.max_peptide_length, device=device,
-            pad_spectra_to=getattr(precompute_args, "pad_spectra_to", 0))[name]
+            pad_spectra_to=precompute_args.pad_spectra_to)[name]
         part.save_to_disk(str(out))
         print(f"[precompute] shard {i}/{n} {name}: {len(part):,} rows", flush=True)
     return 0
 
 
 def _merge(cache, model_args, data_args, precompute_args) -> int:
-    from datasets import concatenate_datasets, load_from_disk
-
     n = precompute_args.num_shards
     datasets = {}
     for name in ("train", "validation"):

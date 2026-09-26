@@ -6,16 +6,13 @@ unit vectors so the loss matches cosine retrieval.
 
 from __future__ import annotations
 
-import contextlib
-import os
-import re
 from dataclasses import dataclass
 
 import numpy as np
 import torch
 import torch.nn.functional as F
+from datasets import load_dataset
 from torch import Tensor, nn
-from torch.utils.data import Sampler
 
 from msdelta.fourier import FourierFeatures
 
@@ -24,72 +21,18 @@ RESIDUES = "ACDEFGHIKLMNPQRSTVWYn"
 PAD, UNK = 0, 1
 RESIDUE_TO_ID = {residue: index + 2 for index, residue in enumerate(RESIDUES)}
 VOCAB_SIZE = len(RESIDUE_TO_ID) + 2
-_MOD = re.compile(r"\[([+-]?[0-9.]+)\]")
 
 
-
-# ---------------------------------------------------------------------------- probes
-
-# Debug checks, enabled with MSDELTA_PROBES=1.
-PROBES = os.environ.get("MSDELTA_PROBES", "") not in ("", "0", "false", "False")
-
-# Force SDPA onto the unfused MATH backend (workaround for fused-kernel page faults on XPU).
-SDPA_MATH = os.environ.get("MSDELTA_SDPA_MATH", "") not in ("", "0", "false", "False")
+POOLING_MODES = ("mean", "mean+max")
 
 
-def _sdpa_context():
-    """MATH-only SDPA when MSDELTA_SDPA_MATH is set, otherwise a no-op."""
-    if not SDPA_MATH:
-        return contextlib.nullcontext()
-    from torch.nn.attention import SDPBackend, sdpa_kernel
-    return sdpa_kernel(SDPBackend.MATH)
-
-
-def probe(where: str, *, sync: Tensor | None = None, **tensors) -> None:
-    """Check tensors for non-finite values; `sync` blocks until the device queue drains."""
-    if not PROBES:
-        return
-    if sync is not None and sync.device.type == "xpu":
-        torch.xpu.synchronize()
-    for name, value in tensors.items():
-        if not isinstance(value, Tensor):
-            continue
-        if value.dtype.is_floating_point and not torch.isfinite(value).all():
-            n = int((~torch.isfinite(value)).sum())
-            raise RuntimeError(f"[probe {where}] {name}: {n} non-finite of {value.numel()}")
-
-
-def probe_index(where: str, name: str, index: Tensor, limit: int) -> None:
-    """Raise on out-of-range embedding indices, which fault on GPU instead of raising."""
-    if not PROBES or index.numel() == 0:
-        return
-    low, high = int(index.min()), int(index.max())
-    if low < 0 or high >= limit:
-        raise RuntimeError(
-            f"[probe {where}] {name} out of range for a table of {limit}: "
-            f"min {low}, max {high}"
-        )
-
-
-# "weighted" variants weight each token (e.g. by intensity) before averaging.
-POOLING_MODES = ("mean", "mean+max", "weighted_mean", "weighted_mean+max")
-
-
-def pool_sequence(tokens: Tensor, mask: Tensor, mode: str = "mean+max",
-                  weights: Tensor | None = None) -> Tensor:
+def pool_sequence(tokens: Tensor, mask: Tensor, mode: str = "mean+max") -> Tensor:
     """Reduce variable-length token embeddings to one vector. Both towers must use the same mode."""
     if mode not in POOLING_MODES:
         raise ValueError(f"pooling must be one of {POOLING_MODES}, got {mode!r}")
     mask = mask.bool().unsqueeze(-1)
-    if mode.startswith("weighted"):
-        if weights is None:
-            raise ValueError(f"pooling {mode!r} needs per-peak weights")
-        # Normalised to stay on the same scale as the unweighted mean.
-        w = (weights.unsqueeze(-1) * mask).clamp_min(0)
-        mean = (tokens * w).sum(1) / w.sum(1).clamp_min(1e-9)
-    else:
-        mean = (tokens * mask).sum(1) / mask.sum(1).clamp_min(1)
-    if mode in ("mean", "weighted_mean"):
+    mean = (tokens * mask).sum(1) / mask.sum(1).clamp_min(1)
+    if mode == "mean":
         return mean
     maximum = torch.nan_to_num(tokens.masked_fill(~mask, float("-inf")).max(1).values,
                                neginf=0.0)
@@ -98,7 +41,7 @@ def pool_sequence(tokens: Tensor, mask: Tensor, mode: str = "mean+max",
 
 def pooled_width(hidden_size: int, mode: str) -> int:
     """Width `pool_sequence` produces, so the projection can be sized without a forward."""
-    return 2 * hidden_size if mode.endswith("mean+max") else hidden_size
+    return 2 * hidden_size if mode == "mean+max" else hidden_size
 
 
 def parse_peptide(peptide: str) -> tuple[list[int], list[float]]:
@@ -183,21 +126,9 @@ class PeptideEncoder(nn.Module):
         mod_n_freqs: int = 16,
         dropout: float = 0.1,
         pooling: str = "mean+max",
-        readout: str = "pool",
     ):
         super().__init__()
         self.pooling = pooling
-        # "pool": `pooling` over tokens; "cls": a learned prepended token; "attn": a learned
-        # query attending over tokens.
-        if readout not in ("pool", "cls", "attn"):
-            raise ValueError(f"readout must be pool, cls or attn, not {readout!r}")
-        self.readout = readout
-        if readout == "cls":
-            self.cls = nn.Parameter(torch.randn(1, 1, hidden_size) * 0.02)
-        if readout == "attn":
-            self.attn_query = nn.Parameter(torch.randn(1, 1, hidden_size) * 0.02)
-            self.attn = nn.MultiheadAttention(hidden_size, num_heads, dropout=dropout,
-                                              batch_first=True)
         self.residue = nn.Embedding(VOCAB_SIZE, hidden_size, padding_idx=PAD)
         self.position = nn.Embedding(max_length, hidden_size)
         self.charge = nn.Embedding(n_charges, hidden_size)
@@ -212,158 +143,54 @@ class PeptideEncoder(nn.Module):
         self.encoder = nn.TransformerEncoder(layer, num_layers=num_layers,
                                              enable_nested_tensor=False)
         self.norm = nn.LayerNorm(hidden_size)
-        width = pooled_width(hidden_size, pooling) if readout == "pool" else hidden_size
+        width = pooled_width(hidden_size, pooling)
         self.projection = nn.Sequential(
             nn.Linear(width, width), nn.GELU(), nn.Dropout(dropout),
             nn.Linear(width, embedding_size),
         )
 
     def forward(self, residues, modifications, sequence_mask, charge) -> Tensor:
-        probe_index("student.in", "residues", residues, self.residue.num_embeddings)
-        probe_index("student.in", "charge", charge, self.charge.num_embeddings)
-        probe("student.in", modifications=modifications)
         length = residues.shape[1]
         position = torch.arange(length, device=residues.device).clamp_max(
             self.position.num_embeddings - 1
         )
-        probe_index("student.pos", "position", position, self.position.num_embeddings)
         hidden = self.residue(residues) + self.position(position)[None]
         # Only modified residues get a mass contribution.
         modified = (modifications.abs() > 1e-6).unsqueeze(-1)
         mod = self.mod_projection(self.mod_features(modifications).to(hidden.dtype))
         hidden = hidden + mod * modified
         hidden = hidden + self.charge(charge.clamp(0, self.charge.num_embeddings - 1))[:, None]
-        if self.readout == "cls":
-            hidden = torch.cat([self.cls.expand(hidden.shape[0], -1, -1).to(hidden.dtype),
-                                hidden], dim=1)
-            sequence_mask = torch.cat([torch.ones_like(sequence_mask[:, :1]),
-                                       sequence_mask], dim=1)
         # Autocast off, activations cast to the weights' dtype: the fused eval fast path
         # ignores autocast on XPU and fails on a dtype mismatch.
         param_dtype = next(self.encoder.parameters()).dtype
         with torch.autocast(device_type=hidden.device.type, enabled=False):
             hidden = hidden.to(param_dtype)
-            with _sdpa_context():
-                hidden = self.norm(
-                    self.encoder(hidden, src_key_padding_mask=~sequence_mask.bool())
-                )
-        probe("student.encoded", sync=hidden, hidden=hidden)
-        if self.readout == "cls":
-            pooled = hidden[:, 0]
-        elif self.readout == "attn":
-            query = self.attn_query.expand(hidden.shape[0], -1, -1).to(hidden.dtype)
-            pooled = self.attn(query, hidden, hidden,
-                               key_padding_mask=~sequence_mask.bool(),
-                               need_weights=False)[0][:, 0]
-        else:
-            pooled = pool_sequence(hidden, sequence_mask, self.pooling)
-        out = F.normalize(self.projection(pooled).float(), dim=-1)
-        probe("student.out", sync=out, out=out)
-        return out
+            hidden = self.norm(self.encoder(hidden, src_key_padding_mask=~sequence_mask.bool()))
+        pooled = pool_sequence(hidden, sequence_mask, self.pooling)
+        return F.normalize(self.projection(pooled).float(), dim=-1)
 
 
-
-def lit_contrastive_loss(target, predicted, group, negatives=None, neg_valid=None,
-                         temperature: float = 0.05) -> Tensor:
-    """Cross-modal SupCon: spectrum targets as anchors, in-batch peptides plus hard negatives as candidates."""
-    t = F.normalize(target.float(), dim=-1)
-    p = F.normalize(predicted.float(), dim=-1)
-    logits = t @ p.T / temperature                                  # (B, B)
-    positive = (group[:, None] == group[None, :]).float()
-    all_logits = logits
-    if negatives is not None:
-        n = F.normalize(negatives.float(), dim=-1)                  # (B, K, D)
-        hard = torch.einsum("bd,bkd->bk", t, n) / temperature
-        hard = hard.masked_fill(~neg_valid, float("-inf"))
-        all_logits = torch.cat([logits, hard], dim=1)
-    log_prob = logits - torch.logsumexp(all_logits, dim=1, keepdim=True)
-    per_anchor = -(log_prob * positive).sum(1) / positive.sum(1)
-    return per_anchor.mean()
-
-
-def student_readout(state: dict, prefix: str = "sequence_encoder.") -> str:
-    """Which PeptideEncoder readout a saved student used, inferred from its weight names."""
-    keys = {k[len(prefix):] if k.startswith(prefix) else k for k in state}
-    return "cls" if "cls" in keys else "attn" if "attn_query" in keys else "pool"
+@torch.no_grad()
+def embed_spectrum(spectrum_model, mz, log_intensity, attention_mask, pooling: str) -> Tensor:
+    """Unit-length pooled embedding of a batch of spectra from a frozen MSDeltaForPreTraining."""
+    hidden = spectrum_model.msdelta(mz=mz, log_intensity=log_intensity,
+                                    attention_mask=attention_mask).last_hidden_state
+    return F.normalize(pool_sequence(hidden, attention_mask, pooling).float(), dim=-1)
 
 
 class SequenceAlignmentModel(nn.Module):
-    """Frozen spectrum teacher, trainable peptide student, L2 between them."""
+    """Peptide student trained onto precomputed teacher targets with L2 on unit vectors."""
 
-    def __init__(self, spectrum_model: nn.Module | None, sequence_encoder: PeptideEncoder,
-                 pooling: str = "mean+max", loss: str = "mse", temperature: float = 0.05,
-                 mse_weight: float = 0.0):
-        """`spectrum_model=None` trains against precomputed targets."""
+    def __init__(self, sequence_encoder: PeptideEncoder):
         super().__init__()
-        self.spectrum_model = spectrum_model
         self.sequence_encoder = sequence_encoder
-        if pooling != sequence_encoder.pooling:
-            raise ValueError(
-                f"teacher pooling {pooling!r} != student pooling {sequence_encoder.pooling!r}"
-            )
-        self.pooling = pooling
-        # "mse": regress onto the teacher embedding. "lit": cross-modal contrastive against
-        # the frozen teacher, plus mse_weight x the MSE term.
-        if loss not in ("mse", "lit"):
-            raise ValueError(f"loss must be mse or lit, not {loss!r}")
-        self.loss, self.temperature, self.mse_weight = loss, temperature, mse_weight
-        # Frozen and in eval mode, so dropout does not vary the targets.
-        if self.spectrum_model is not None:
-            self.spectrum_model.requires_grad_(False)
-            self.spectrum_model.eval()
 
-    def train(self, mode: bool = True):
-        super().train(mode)
-        if self.spectrum_model is not None:
-            self.spectrum_model.eval()
-        return self
-
-    def _lit_loss(self, predicted, target, group, neg_residues, neg_modifications,
-                  neg_sequence_mask, neg_charge, neg_valid) -> Tensor:
-        if group is None:        # no collator groups: each row is its own peptide
-            group = torch.arange(len(predicted), device=predicted.device)
-        negatives = None
-        if neg_residues is not None:
-            b, k = neg_valid.shape
-            negatives = self.sequence_encoder(neg_residues, neg_modifications,
-                                              neg_sequence_mask, neg_charge).view(b, k, -1)
-        return lit_contrastive_loss(target, predicted, group, negatives, neg_valid,
-                                    self.temperature)
-
-    @torch.no_grad()
-    def embed_spectrum(self, mz, log_intensity, attention_mask) -> Tensor:
-        encoder = getattr(self.spectrum_model, "msdelta", self.spectrum_model)
-        hidden = encoder(mz=mz, log_intensity=log_intensity,
-                         attention_mask=attention_mask).last_hidden_state
-        return F.normalize(pool_sequence(hidden, attention_mask, self.pooling).float(), dim=-1)
-
-    def forward(self, residues, modifications, sequence_mask, charge,
-                mz=None, log_intensity=None, attention_mask=None, target=None,
-                return_dict: bool = True, return_loss: bool = True,
-                neg_residues=None, neg_modifications=None, neg_sequence_mask=None,
-                neg_charge=None, neg_valid=None, peptide_group=None):
-        # return_loss is unused; its presence lets Trainer's can_return_loss() report an eval loss.
-        if target is None:
-            if self.spectrum_model is None:
-                raise ValueError("no teacher and no precomputed target in the batch")
-            target = self.embed_spectrum(mz, log_intensity, attention_mask)
-            probe("teacher.out", sync=target, target=target)
-        else:
-            target = F.normalize(target.float(), dim=-1)
+    def forward(self, residues, modifications, sequence_mask, charge, target):
+        target = F.normalize(target.float(), dim=-1)
         predicted = self.sequence_encoder(residues, modifications, sequence_mask, charge)
-        probe("loss.in", sync=predicted, predicted=predicted, target=target)
         # Mean squared L2; equals 2 - 2cos on unit vectors.
-        mse = ((predicted - target) ** 2).sum(dim=-1).mean()
-        if self.loss == "mse":
-            loss = mse
-        else:
-            loss = self._lit_loss(predicted, target, peptide_group, neg_residues,
-                                  neg_modifications, neg_sequence_mask, neg_charge,
-                                  neg_valid) + self.mse_weight * mse
-        if not return_dict:
-            return (loss, predicted, target)
+        loss = ((predicted - target) ** 2).sum(dim=-1).mean()
         return {"loss": loss, "embeddings": predicted, "target": target}
-
 
 
 @torch.no_grad()
@@ -371,16 +198,9 @@ def attach_teacher_embeddings(datasets: dict, spectrum_model: nn.Module, pooling
                               batch_size: int = 16, max_peptide_length: int = 64,
                               device: str | torch.device | None = None,
                               pad_spectra_to: int = 0) -> dict:
-    """Run the frozen teacher once and store its embedding as a `target` column.
-
-    Call on one process before the Trainer is built; the teacher then stays out of the wrapped module.
-    """
-    model = SequenceAlignmentModel(spectrum_model, PeptideEncoder(
-        embedding_size=1, hidden_size=8, num_layers=1, num_heads=1, pooling=pooling),
-        pooling=pooling)
+    """Run the frozen teacher once and store its embedding as a `target` column."""
     device = device or ("xpu" if torch.xpu.is_available() else "cpu")
-    model.spectrum_model.to(device).eval()
-    # pad_spectra_to=max_peaks gives fixed-width batches and deterministic memory.
+    spectrum_model.to(device).eval()
     collator = AlignmentCollator(max_peptide_length=max_peptide_length,
                                  pad_spectra_to=pad_spectra_to)
 
@@ -389,16 +209,14 @@ def attach_teacher_embeddings(datasets: dict, spectrum_model: nn.Module, pooling
                 for mz, li, pep, ch in zip(batch["mz"], batch["log_intensity"],
                                            batch["peptide"], batch["charge"])]
         inputs = collator(rows)
-        target = model.embed_spectrum(
-            inputs["mz"].to(device), inputs["log_intensity"].to(device),
-            inputs["attention_mask"].to(device))
-        probe("precompute.target", sync=target, target=target)
+        target = embed_spectrum(spectrum_model, inputs["mz"].to(device),
+                                inputs["log_intensity"].to(device),
+                                inputs["attention_mask"].to(device), pooling)
         return {"target": target.float().cpu().tolist()}
 
     return {name: split.map(embed, batched=True, batch_size=batch_size,
                             desc=f"teacher embeddings ({name})")
             for name, split in datasets.items()}
-
 
 
 @torch.no_grad()
@@ -491,16 +309,14 @@ REPLICATE_REPO = "chrisagrams/ms2-peptide-replicate-retrieval"
 def build_alignment_datasets(repo_id, processor, num_proc=None, validation_fraction=0.1,
                              seed=0):
     """Spectrum/sequence pairs, split by peptide."""
-    from datasets import load_dataset
-
     raw = load_dataset(repo_id)
     split = "train" if "train" in raw else list(raw)[0]
 
     # Spectra above max_peaks are dropped, not truncated, and the count is printed.
-    max_peaks = getattr(processor, "max_peaks", None)
+    max_peaks = processor.max_peaks
 
     def prepare(example):
-        if max_peaks is not None and len(example["mz"]) > max_peaks:
+        if len(example["mz"]) > max_peaks:
             return {"mz": [], "log_intensity": [], "peptide": "", "charge": 0, "precursor": 0.0}
         try:
             values = processor(
@@ -530,7 +346,7 @@ def build_alignment_datasets(repo_id, processor, num_proc=None, validation_fract
                        num_proc=num_proc, desc="drop empty pairs")
     dropped = before - len(rows)
     if dropped:
-        oversized = sum(1 for n in raw[split]["mz"] if max_peaks and len(n) > max_peaks)
+        oversized = sum(1 for n in raw[split]["mz"] if len(n) > max_peaks)
         print(f"[alignment] dropped {dropped:,} of {before:,} pairs "
               f"({100 * dropped / before:.1f}%); {oversized:,} were over max_peaks="
               f"{max_peaks}. Peak count tracks charge and peptide length, so this is a "
@@ -547,169 +363,26 @@ def build_alignment_datasets(repo_id, processor, num_proc=None, validation_fract
     }
 
 
-
-def hard_negatives(peptide: str, rng, k: int, min_delta: float = 0.05,
-                   windows=(3, 4)) -> list[str]:
-    """Up to k spectrally distinguishable rearrangements of a peptide.
-
-    Adjacent swaps and local shuffles (never reversals); the C-terminal residue stays fixed.
-    """
-    from msdelta.chemistry import RESIDUE_MASSES
-    from msdelta.rescoring import split_peptide
-    residues, mods = split_peptide(peptide)
-    n = len(residues)
-    if n < 3:
-        return []
-    mass = [RESIDUE_MASSES.get(r, 0.0) + m for r, m in zip(residues, mods)]
-
-    def fmt(order):
-        return "".join(residues[i] + (f"[{mods[i]:.4f}]" if abs(mods[i]) > 1e-6 else "")
-                       for i in order)
-
-    def distinguishable(order):
-        prefix_old = prefix_new = 0.0
-        for j in range(n - 1):
-            prefix_old += mass[j]; prefix_new += mass[order[j]]
-            if abs(prefix_new - prefix_old) > min_delta:
-                return True
-        return False
-
-    pool = set()
-    base = list(range(n))
-    for i in range(n - 2):                                  # adjacent swaps, C-term fixed
-        o = base.copy(); o[i], o[i + 1] = o[i + 1], o[i]
-        if distinguishable(o):
-            pool.add(tuple(o))
-    for _ in range(4 * k):                                  # local shuffles
-        w = int(rng.choice(windows))
-        if n - 1 < w:
-            continue
-        i = int(rng.integers(0, n - w))                     # window within [0, n-1)
-        seg = [int(x) for x in rng.permutation(base[i:i + w])]
-        o = base[:i] + seg + base[i + w:]
-        if o != base and distinguishable(o):
-            pool.add(tuple(o))
-    own = fmt(base)
-    cands = sorted({fmt(o) for o in pool} - {own})
-    if len(cands) > k:
-        cands = [cands[i] for i in rng.choice(len(cands), k, replace=False)]
-    return cands
-
-
-# ------------------------------------------------------------------ mass-aware training
-
-def peptide_neutral_mass(peptide: str) -> float:
-    """Monoisotopic neutral mass of a peptide in our notation (`C[57.0215]`, `[42.0106]P`)."""
-    from msdelta.chemistry import RESIDUE_MASSES
-    mods = sum(float(x) for x in re.findall(r"\[([-+]?\d+\.?\d*)\]", peptide))
-    residues = re.sub(r"\[[^\]]*\]", "", peptide)
-    return sum(RESIDUE_MASSES[r] for r in residues) + mods + 18.010565
-
-
-def _il(peptide: str) -> str:
-    """I/L-collapsed, modification-stripped sequence."""
-    return re.sub(r"\[[^\]]*\]", "", peptide).replace("I", "L")
-
-
-class MassNegativePool:
-    """Training peptides sorted by neutral mass, for same-mass hard negatives."""
-
-    def __init__(self, peptides):
-        uniq = sorted(set(peptides))
-        m = np.array([peptide_neutral_mass(p) for p in uniq])
-        order = np.argsort(m, kind="stable")
-        self.masses = m[order]
-        self.peptides = [uniq[i] for i in order]
-
-    def negatives(self, peptide: str, rng, k: int, ppm: float = 20.0) -> list[str]:
-        """Up to k OTHER peptides within +-ppm of this one's mass (I/L-equivalents excluded)."""
-        mass = peptide_neutral_mass(peptide)
-        tol = mass * ppm * 1e-6
-        lo = np.searchsorted(self.masses, mass - tol, "left")
-        hi = np.searchsorted(self.masses, mass + tol, "right")
-        own = _il(peptide)
-        cands = [self.peptides[i] for i in range(lo, hi) if _il(self.peptides[i]) != own]
-        if len(cands) <= k:
-            return cands
-        return [cands[i] for i in rng.choice(len(cands), k, replace=False)]
-
-
-class MassBatchSampler(Sampler):
-    """Batches of rows that are neighbours in mass (with jitter), reshuffled every epoch.
-
-    The epoch advances inside __iter__, since the Trainer never calls set_epoch on a custom batch_sampler.
-    """
-
-    def __init__(self, masses, batch_size: int, jitter: float = 0.5, seed: int = 0,
-                 drop_last: bool = False):
-        self.masses = np.asarray(masses, dtype=np.float64)
-        self.batch_size, self.jitter, self.seed, self.drop_last = batch_size, jitter, seed, drop_last
-        self.epoch = 0
-
-    def set_epoch(self, epoch: int):
-        self.epoch = epoch
-
-    def __len__(self):
-        n = len(self.masses) // self.batch_size
-        return n if self.drop_last or len(self.masses) % self.batch_size == 0 else n + 1
-
-    def __iter__(self):
-        rng = np.random.default_rng((self.seed, self.epoch))
-        self.epoch += 1
-        key = self.masses + rng.uniform(-self.jitter, self.jitter, len(self.masses))
-        order = np.argsort(key, kind="stable")
-        batches = [order[i:i + self.batch_size] for i in range(0, len(order), self.batch_size)]
-        if self.drop_last and len(batches[-1]) < self.batch_size:
-            batches = batches[:-1]
-        for j in rng.permutation(len(batches)):
-            yield batches[j].tolist()
-
 @dataclass
 class AlignmentCollator:
-    """Pad spectra and their peptides into one batch."""
+    """Pad spectra and their peptides into one batch; rows with a precomputed `target` skip the spectra."""
 
     max_peptide_length: int = 64
-    # Hard negatives per row (0 = none).
-    hard_negatives: int = 0
-    neg_min_delta: float = 0.05
-    neg_seed: int = 0
-    # "swap": rearrangements; "mass": training peptides within neg_ppm (needs neg_pool).
-    neg_source: str = "swap"
-    neg_ppm: float = 20.0
-    neg_pool: object = None
-
-    # Fixed peptide shapes on the cached-target path.
-    fixed_shapes: bool = True
-
     # 0 pads spectra to the batch maximum; max_peaks gives a fixed width.
     pad_spectra_to: int = 0
 
     def __post_init__(self):
         self.peptides = PeptideCollator(max_length=self.max_peptide_length)
         self.padded = PeptideCollator(max_length=self.max_peptide_length, pad_to_max=True)
-        self._rng = np.random.default_rng(self.neg_seed)
-
-    def _negatives(self, features) -> dict[str, Tensor]:
-        k = self.hard_negatives
-        peps = [f["peptide"] for f in features]
-        charges = [int(f.get("charge", 0)) for f in features]
-        flat, valid = [], []
-        for pep in peps:
-            if self.neg_source == "mass":
-                neg = self.neg_pool.negatives(pep, self._rng, k, self.neg_ppm)
-            else:
-                neg = hard_negatives(pep, self._rng, k, self.neg_min_delta)
-            valid.append([True] * len(neg) + [False] * (k - len(neg)))
-            flat += neg + [pep] * (k - len(neg))            # padding rows are masked out
-        tok = self.padded(flat, [c for c in charges for _ in range(k)])
-        group = {p: i for i, p in enumerate(dict.fromkeys(peps))}
-        return {**{f"neg_{name}": v for name, v in tok.items()},
-                "neg_valid": torch.tensor(valid, dtype=torch.bool),
-                "peptide_group": torch.tensor([group[p] for p in peps], dtype=torch.long)}
 
     def __call__(self, features: list[dict]) -> dict[str, Tensor]:
         if not features:
             raise ValueError("features must not be empty")
+        peptides = [f["peptide"] for f in features]
+        charges = [int(f.get("charge", 0)) for f in features]
+        if features[0].get("target") is not None:
+            target = torch.as_tensor([f["target"] for f in features], dtype=torch.float32)
+            return {"target": target, **self.padded(peptides, charges)}
         lengths = [len(f["mz"]) for f in features]
         width = self.pad_spectra_to or max(max(lengths), 1)
         batch = len(features)
@@ -723,47 +396,5 @@ class AlignmentCollator:
             log_intensity[row, :length] = torch.as_tensor(feature["log_intensity"],
                                                           dtype=torch.float32)
             attention_mask[row, :length] = 1
-        peptide_batch = self.peptides([f["peptide"] for f in features],
-                                      [int(f.get("charge", 0)) for f in features])
-        if features[0].get("target") is not None:
-            # Precomputed target: drop the spectrum columns.
-            padded = (self.padded if self.fixed_shapes else self.peptides)(
-                [f["peptide"] for f in features],
-                [int(f.get("charge", 0)) for f in features])
-            out = {"target": torch.as_tensor([f["target"] for f in features],
-                                             dtype=torch.float32), **padded}
-            if self.hard_negatives:
-                out |= self._negatives(features)
-            return out
         return {"mz": mz, "log_intensity": log_intensity,
-                "attention_mask": attention_mask, **peptide_batch}
-
-
-@torch.no_grad()
-def teacher_embedding_size(spectrum_model, pooling: str, collator=None) -> int:
-    """Width of the frozen teacher's output, measured with a dummy forward."""
-    collator = collator or AlignmentCollator()
-    was_training = spectrum_model.training
-    spectrum_model.eval()
-    batch = collator([{"mz": [100.0, 200.0], "log_intensity": [1.0, 1.0],
-                       "peptide": "AK", "charge": 0}])
-    device = next(spectrum_model.parameters()).device
-    encoder = getattr(spectrum_model, "msdelta", spectrum_model)
-    try:
-        hidden = encoder(mz=batch["mz"].to(device),
-                         log_intensity=batch["log_intensity"].to(device),
-                         attention_mask=batch["attention_mask"].to(device)).last_hidden_state
-        return int(pool_sequence(hidden, batch["attention_mask"].to(device), pooling).shape[-1])
-    finally:
-        spectrum_model.train(was_training)
-
-
-def build_alignment_model(spectrum_model, pooling="mean+max", hidden_size=256,
-                          num_layers=4, num_heads=8, dropout=0.1, max_peptide_length=64):
-    """Attach a peptide encoder sized to whatever teacher was supplied."""
-    embedding_size = teacher_embedding_size(spectrum_model, pooling)
-    encoder = PeptideEncoder(embedding_size=embedding_size, hidden_size=hidden_size,
-                             num_layers=num_layers, num_heads=num_heads,
-                             max_length=max_peptide_length, dropout=dropout,
-                             pooling=pooling)
-    return SequenceAlignmentModel(spectrum_model, encoder, pooling=pooling)
+                "attention_mask": attention_mask, **self.peptides(peptides, charges)}

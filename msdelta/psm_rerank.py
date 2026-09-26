@@ -23,6 +23,12 @@ import json
 from pathlib import Path
 
 import numpy as np
+import pandas as pd
+import pyarrow.parquet as pq
+import torch
+from huggingface_hub import snapshot_download
+from safetensors.torch import load_file, save_file
+from sklearn.preprocessing import StandardScaler
 
 from msdelta.rerank_psm_fdr import (WS_FEATURES, accepted, calibrate,
                                     fit_linear, load_lab_features, qvalues,
@@ -31,8 +37,6 @@ from msdelta.rerank_psm_fdr import (WS_FEATURES, accepted, calibrate,
 
 def load_table(rows: str, labfeat: str, lab_columns=None):
     """Stage-1 rows + lab features + within-spectrum embedding features, one frame."""
-    import pandas as pd
-    import pyarrow.parquet as pq
     files = sorted(glob.glob(str(Path(rows) / "*.parquet"))) if Path(rows).is_dir() else [rows]
     df = pd.concat([pq.read_table(f).to_pandas() for f in files], ignore_index=True)
     lf, lab = load_lab_features(labfeat, df["run_id"].unique())
@@ -56,7 +60,6 @@ def load_table(rows: str, labfeat: str, lab_columns=None):
 
 
 def feature_matrix(df, cols, medians=None):
-    import pandas as pd
     X = df[list(cols)].apply(pd.to_numeric, errors="coerce")
     med = X.median() if medians is None else pd.Series(medians, dtype=float)
     return X.fillna(med).fillna(0.0).to_numpy(float), {k: float(v) for k, v in med.items()}
@@ -69,7 +72,6 @@ def engine_score(df):
 
 def score_perrun(df, spec, cols, folds=3, iters=10, seed=0, max_neg=0):
     """Percolator-style: each run on its own, 3-fold by spectrum, iterative labels, linear."""
-    from sklearn.preprocessing import StandardScaler
     X, _ = feature_matrix(df, cols)
     decoy = df["is_decoy"].to_numpy(bool); ms = engine_score(df)
     runs = df["run_id"].to_numpy(); score = np.zeros(len(df))
@@ -105,7 +107,6 @@ class GlobalModel:
         self.state, self.hidden = state, hidden
 
     def net(self):
-        import torch
         n = torch.nn.Sequential(torch.nn.Linear(len(self.cols), self.hidden), torch.nn.ReLU(),
                                 torch.nn.Dropout(0.1), torch.nn.Linear(self.hidden, self.hidden),
                                 torch.nn.ReLU(), torch.nn.Linear(self.hidden, 1))
@@ -114,7 +115,6 @@ class GlobalModel:
         return n
 
     def score(self, df):
-        import torch
         X, _ = feature_matrix(df, self.cols, self.medians)
         X = (X - self.mean) / np.where(self.std > 0, self.std, 1.0)
         net = self.net().eval()
@@ -123,8 +123,6 @@ class GlobalModel:
                               torch.tensor(X, dtype=torch.float32).split(65536)]).numpy()
 
     def save(self, out: Path):
-        import torch
-        from safetensors.torch import save_file
         out.mkdir(parents=True, exist_ok=True)
         save_file({k: v.contiguous() for k, v in self.state.items()}, str(out / "model.safetensors"))
         (out / "rescorer.json").write_text(json.dumps({
@@ -133,10 +131,8 @@ class GlobalModel:
 
     @classmethod
     def load(cls, path: str):
-        from safetensors.torch import load_file
         p = Path(path)
         if not p.exists():
-            from huggingface_hub import snapshot_download
             p = Path(snapshot_download(path))
         cfg = json.loads((p / "rescorer.json").read_text())
         return cls(cfg["features"], cfg["medians"], cfg["mean"], cfg["std"],
@@ -144,7 +140,6 @@ class GlobalModel:
 
 
 def train_global(df, spec, cols, seed=0, epochs=8, max_neg=1_000_000) -> GlobalModel:
-    import torch
     X, med = feature_matrix(df, cols)
     decoy = df["is_decoy"].to_numpy(bool); ms = engine_score(df)
     rank1 = np.flatnonzero(df["search_rank"].to_numpy() == 1)
@@ -170,7 +165,6 @@ def train_global(df, spec, cols, seed=0, epochs=8, max_neg=1_000_000) -> GlobalM
 
 
 def summarize(df, spec, score, label):
-    import pandas as pd
     top = top_per_spectrum(spec, score)
     decoy = df["is_decoy"].to_numpy(bool)[top]
     r = accepted(score[top], decoy, df["peptide"].to_numpy()[top])
@@ -193,8 +187,6 @@ def main(argv=None) -> int:
     s.add_argument("--out", required=True)
     s.add_argument("--mode", default="perrun", choices=["perrun", "global"])
     s.add_argument("--model", default="", help="global mode: a model dir or Hub repo id")
-    s.add_argument("--no-embedding", action="store_true",
-                   help="lab features only (the control: what the embedding adds)")
     s.add_argument("--seed", type=int, default=0)
     t = sp.add_parser("train")
     t.add_argument("--rows", required=True); t.add_argument("--labfeat", required=True)
@@ -218,11 +210,9 @@ def main(argv=None) -> int:
         score = model.score(df)
     else:
         df, spec, lab = load_table(cli.rows, cli.labfeat)
-        cols = lab if cli.no_embedding else lab + WS_FEATURES
-        score = score_perrun(df, spec, cols, seed=cli.seed)
+        score = score_perrun(df, spec, lab + WS_FEATURES, seed=cli.seed)
     summarize(df, spec, engine_score(df), "MSFragger (e-value)")
-    out, _ = summarize(df, spec, score, f"rescored ({cli.mode}"
-                       f"{', no embedding' if cli.no_embedding else ''})")
+    out, _ = summarize(df, spec, score, f"rescored ({cli.mode})")
     Path(cli.out).parent.mkdir(parents=True, exist_ok=True)
     out.to_parquet(cli.out)
     print(f"[rerank] wrote {len(out):,} top PSMs to {cli.out}", flush=True)

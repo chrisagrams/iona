@@ -1,13 +1,8 @@
-"""Percolator-style rescoring: features + a small classifier, ranked by the logit.
-
-Features cover the spectrum alone, the candidate alone, and the candidate matched to the spectrum.
-"""
+"""Hand-built PSM features: the spectrum alone, the candidate alone, and the two matched."""
 
 from __future__ import annotations
 
 import math
-import re
-from dataclasses import dataclass, field
 
 import numpy as np
 
@@ -22,15 +17,12 @@ FEATURE_NAMES = (
     # match -- most of the signal
     "matched_peaks", "frag_coverage_b", "frag_coverage_y", "frag_coverage_all",
     "explained_intensity", "longest_b_run", "longest_y_run", "median_frag_error_ppm",
-    # the model's contribution, one number among the rest
-    "embedding_cosine",
 )
 
 # Kyte-Doolittle hydrophobicity.
 _GRAVY = {"A": 1.8, "R": -4.5, "N": -3.5, "D": -3.5, "C": 2.5, "Q": -3.5, "E": -3.5,
           "G": -0.4, "H": -3.2, "I": 4.5, "L": 3.8, "K": -3.9, "M": 1.9, "F": 2.8,
           "P": -1.6, "S": -0.8, "T": -0.7, "W": -0.9, "Y": -1.3, "V": 4.2}
-_MOD = re.compile(r"\[([+-]?\d+\.?\d*)\]")
 
 
 def split_peptide(peptide: str) -> tuple[list[str], list[float]]:
@@ -155,160 +147,8 @@ def match_features(peptide: str, mz: np.ndarray, intensity: np.ndarray,
 
 def extract_features(peptide: str, mz: np.ndarray, intensity: np.ndarray,
                      precursor_mz: float, charge: int,
-                     embedding_cosine: float = 0.0,
                      tolerance_ppm: float = 20.0, da_floor: float = 0.0) -> np.ndarray:
     values = {**spectrum_features(mz, intensity),
               **candidate_features(peptide, precursor_mz, charge),
-              **match_features(peptide, mz, intensity, tolerance_ppm, da_floor),
-              "embedding_cosine": float(embedding_cosine)}
+              **match_features(peptide, mz, intensity, tolerance_ppm, da_floor)}
     return np.array([values[name] for name in FEATURE_NAMES], dtype=np.float32)
-
-
-# ------------------------------------------------------------------ decoys
-
-def pseudo_reverse(peptide: str) -> str:
-    """Reverse the sequence, keeping the C-terminal residue fixed (preserves mass)."""
-    residues, mods = split_peptide(peptide)
-    if len(residues) < 3:
-        return peptide
-    order = list(range(len(residues) - 2, -1, -1)) + [len(residues) - 1]
-    return "".join(residues[i] + (f"[{mods[i]:+.4f}]" if abs(mods[i]) > 1e-6 else "")
-                   for i in order)
-
-
-def near_miss(peptide: str, rng: np.random.Generator) -> str:
-    """Swap two adjacent residues: same mass, nearly the same fragments."""
-    residues, mods = split_peptide(peptide)
-    if len(residues) < 4:
-        return peptide
-    i = int(rng.integers(0, len(residues) - 2))
-    order = list(range(len(residues)))
-    order[i], order[i + 1] = order[i + 1], order[i]
-    return "".join(residues[j] + (f"[{mods[j]:+.4f}]" if abs(mods[j]) > 1e-6 else "")
-                   for j in order)
-
-
-def il_equivalent(peptide: str) -> str | None:
-    """Swap I and L: identical mass and fragments, so indistinguishable by MS."""
-    residues, mods = split_peptide(peptide)
-    if not any(r in "IL" for r in residues):
-        return None
-    swapped = ["L" if r == "I" else "I" if r == "L" else r for r in residues]
-    return "".join(s + (f"[{m:+.4f}]" if abs(m) > 1e-6 else "")
-                   for s, m in zip(swapped, mods))
-
-
-@dataclass
-class CandidateSet:
-    """One spectrum's candidates: the truth, plus decoys of decreasing difficulty."""
-
-    peptides: list[str] = field(default_factory=list)
-    labels: list[int] = field(default_factory=list)
-    kinds: list[str] = field(default_factory=list)
-
-
-def build_candidates(peptide: str, rng: np.random.Generator,
-                     mass_matched: list[str] | None = None,
-                     n_near_miss: int = 2) -> CandidateSet:
-    """Truth plus near-miss, reversed and mass-matched decoys."""
-    out = CandidateSet([peptide], [1], ["true"])
-    for _ in range(n_near_miss):
-        alternative = near_miss(peptide, rng)
-        if alternative != peptide and alternative not in out.peptides:
-            out.peptides.append(alternative); out.labels.append(0)
-            out.kinds.append("near_miss")
-    reversed_peptide = pseudo_reverse(peptide)
-    if reversed_peptide != peptide and reversed_peptide not in out.peptides:
-        out.peptides.append(reversed_peptide); out.labels.append(0)
-        out.kinds.append("reverse")
-    for other in (mass_matched or []):
-        if other not in out.peptides:
-            out.peptides.append(other); out.labels.append(0)
-            out.kinds.append("mass_matched")
-    return out
-
-
-# ------------------------------------------------------------- classifier
-
-import torch  # noqa: E402
-from torch import Tensor, nn  # noqa: E402
-
-
-class RescoringClassifier(nn.Module):
-    """A small MLP over the feature vector, with standardisation stored in the module."""
-
-    def __init__(self, n_features: int, hidden_size: int = 128, layers: int = 2,
-                 dropout: float = 0.1):
-        super().__init__()
-        self.register_buffer("center", torch.zeros(n_features))
-        self.register_buffer("scale", torch.ones(n_features))
-        body, width = [], n_features
-        for _ in range(layers):
-            body += [nn.Linear(width, hidden_size), nn.GELU(), nn.Dropout(dropout)]
-            width = hidden_size
-        self.body = nn.Sequential(*body)
-        self.head = nn.Linear(width, 1)
-
-    def fit_standardizer(self, features: Tensor) -> None:
-        self.center.copy_(features.mean(0))
-        self.scale.copy_(features.std(0).clamp_min(1e-6))
-
-    def forward(self, features: Tensor) -> Tensor:
-        return self.head(self.body((features - self.center) / self.scale)).squeeze(-1)
-
-
-def train_rescorer(features: np.ndarray, labels: np.ndarray, groups: np.ndarray,
-                   drop_embedding: bool = False, epochs: int = 40,
-                   hidden_size: int = 128, lr: float = 1e-3, seed: int = 0,
-                   validation_fraction: float = 0.2,
-                   split_keys: np.ndarray | None = None) -> dict:
-    """Train on (spectrum, candidate) pairs and report ranking quality."""
-    torch.manual_seed(seed)
-    columns = [i for i, name in enumerate(FEATURE_NAMES)
-               if not (drop_embedding and name == "embedding_cosine")]
-    x = torch.tensor(features[:, columns], dtype=torch.float32)
-    y = torch.tensor(labels, dtype=torch.float32)
-
-    # Hold out by peptide when split_keys is given, otherwise by spectrum.
-    keys = split_keys if split_keys is not None else groups
-    unique = np.unique(keys)
-    rng = np.random.default_rng(seed)
-    held = set(rng.choice(unique, size=max(1, int(len(unique) * validation_fraction)),
-                          replace=False).tolist())
-    is_validation = np.array([k in held for k in keys])
-    train_idx = torch.tensor(np.flatnonzero(~is_validation))
-    valid_idx = torch.tensor(np.flatnonzero(is_validation))
-
-    model = RescoringClassifier(len(columns), hidden_size=hidden_size)
-    model.fit_standardizer(x[train_idx])
-    optimizer = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=1e-2)
-    # Weight positives to offset the decoy imbalance.
-    positive_weight = ((y[train_idx] == 0).sum() / (y[train_idx] == 1).sum().clamp_min(1))
-    loss_fn = nn.BCEWithLogitsLoss(pos_weight=positive_weight)
-
-    model.train()
-    for _ in range(epochs):
-        order = torch.randperm(len(train_idx))
-        for start in range(0, len(order), 256):
-            batch = train_idx[order[start : start + 256]]
-            optimizer.zero_grad()
-            loss_fn(model(x[batch]), y[batch]).backward()
-            optimizer.step()
-
-    model.eval()
-    with torch.no_grad():
-        scores = model(x[valid_idx]).numpy()
-    truth = labels[valid_idx.numpy()]
-    groups_v = groups[valid_idx.numpy()]
-
-    from sklearn.metrics import roc_auc_score
-    hits = ranked = 0
-    for group in np.unique(groups_v):
-        rows = groups_v == group
-        if truth[rows].sum() != 1:
-            continue
-        ranked += 1
-        hits += int(scores[rows].argmax() == truth[rows].argmax())
-    return {"auroc": float(roc_auc_score(truth, scores)),
-            "hit@1": hits / max(ranked, 1), "spectra": ranked,
-            "pairs": int(len(truth)), "features": len(columns), "model": model}

@@ -18,15 +18,16 @@ from pathlib import Path
 
 import numpy as np
 import torch
+from datasets import load_dataset, load_from_disk
+
+from msdelta.contrastive import MSDeltaForContrastive, embed_dataset, retrieval_metrics_topk
+from msdelta.finetune_contrastive import ContrastiveCollator
+from msdelta.grouped_retrieval import build_grouped_split, group_ids, replicate_corpus_peptides
+from msdelta.modeling_msdelta import MSDeltaForPreTraining
+from msdelta.processing_msdelta import MSDeltaProcessor
 
 
 def prepare(cli) -> int:
-    from datasets import load_dataset
-
-    from msdelta.grouped_retrieval import (build_grouped_split,
-                                           replicate_corpus_peptides)
-    from msdelta.processing_msdelta import MSDeltaProcessor
-
     processor = MSDeltaProcessor.from_pretrained(cli.processor, max_peaks=cli.max_peaks)
     exclude = replicate_corpus_peptides() if cli.exclude_replicate else set()
     print(f"[prepare] excluding {len(exclude):,} replicate-corpus peptides", flush=True)
@@ -46,62 +47,14 @@ def prepare(cli) -> int:
     return 0
 
 
-def binned_embeddings(rows, width: float, max_mz: float = 2000.0) -> torch.Tensor:
-    """Binned-spectrum baseline: log1p(I) summed into fixed m/z bins. No learning."""
-    n_bins = int(np.ceil(max_mz / width))
-    out = torch.zeros(len(rows), n_bins)
-    for i, (mz, li) in enumerate(zip(rows["mz"], rows["log_intensity"])):
-        mz = np.asarray(mz, dtype=np.float64)
-        inten = np.clip(np.asarray(li, dtype=np.float64), 0, None)
-        keep = (mz >= 0) & (mz < max_mz)
-        idx = torch.from_numpy((mz[keep] / width).astype(np.int64))
-        out[i].index_add_(0, idx, torch.from_numpy(inten[keep]).float())
-    return out
-
-
 def score_model(path, pooling, rows, groups, experimental, collator, device,
                 batch_size) -> dict:
-    from msdelta.contrastive import (MSDeltaForContrastive, embed_dataset,
-                                     retrieval_metrics_topk)
-    from msdelta.modeling_msdelta import MSDeltaForPreTraining
-
-    if path.startswith("binned:"):
-        emb = binned_embeddings(rows, float(path.split(":", 1)[1]))
-        return _variants(emb, groups, experimental, device, retrieval_metrics_topk)
-    if path.startswith("pca:"):
-        # pca:<bin width>:<dims>:<train sample dir>, fitted on train, test projected.
-        from datasets import load_from_disk
-        _, width, dims, fit_dir = path.split(":", 3)
-        fit = binned_embeddings(load_from_disk(fit_dir), float(width))
-        fit = torch.nn.functional.normalize(fit, dim=-1)
-        mean = fit.mean(0, keepdim=True)
-        _, _, v = torch.pca_lowrank(fit - mean, q=int(dims), center=False, niter=4)
-        x = torch.nn.functional.normalize(binned_embeddings(rows, float(width)), dim=-1)
-        emb = (x - mean) @ v[:, :int(dims)]
-        return _variants(emb, groups, experimental, device, retrieval_metrics_topk)
     encoder = MSDeltaForPreTraining.from_pretrained(path)
-    # With a projection head, score both the head output and the pre-head features.
-    head_file = Path(path) / "projection_head.pt"
-    head = torch.load(head_file, map_location="cpu") if head_file.exists() else None
-    model = MSDeltaForContrastive(
-        encoder, None, pooling=pooling, kl_weight=0,
-        projection_hidden=head["projection_hidden"] if head else 0,
-        projection_dim=head["projection_dim"] if head else 0,
-        projection_dropout=head["projection_dropout"] if head else 0.1)
-    if head:
-        model.projection.load_state_dict(head["state_dict"])
-    model = model.to(device)
-    out = {}
+    model = MSDeltaForContrastive(encoder, None, pooling=pooling, kl_weight=0).to(device)
     try:
-        readouts = ("head", "pooled") if head else ("head",)
-        for readout in readouts:
-            model.readout = readout
-            emb, _ = embed_dataset(model, rows, collator, device, max_rows=len(rows),
-                                   batch_size=batch_size)
-            prefix = "pooled_" if readout == "pooled" else ""
-            out |= {prefix + k: v for k, v in
-                    _variants(emb, groups, experimental, device,
-                              retrieval_metrics_topk).items()}
+        emb, _ = embed_dataset(model, rows, collator, device, max_rows=len(rows),
+                               batch_size=batch_size)
+        out = _variants(emb, groups, experimental, device, retrieval_metrics_topk)
     finally:
         del model, encoder
         if device.type == "xpu":
@@ -120,11 +73,6 @@ def _variants(emb, groups, experimental, device, metric) -> dict:
 
 
 def score(cli) -> int:
-    from datasets import load_from_disk
-
-    from msdelta.finetune_contrastive import ContrastiveCollator
-    from msdelta.grouped_retrieval import group_ids
-
     device = torch.device("xpu" if torch.xpu.is_available() else "cpu")
     models = []
     for line in Path(cli.models).read_text().splitlines():

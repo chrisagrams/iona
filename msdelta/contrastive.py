@@ -13,7 +13,7 @@ from pytorch_metric_learning.losses import SupConLoss
 from torch import Tensor, nn
 from torch.utils.data import Sampler
 
-from msdelta.reranking import pool_sequence, pooled_width
+from msdelta.reranking import group_separation_metrics, peptide_key, pool_sequence
 
 
 class GroupBatchSampler(Sampler[list[int]]):
@@ -64,94 +64,6 @@ class GroupBatchSampler(Sampler[list[int]]):
         self.epoch += 1
 
 
-class PairBatchSampler(Sampler[list[int]]):
-    """Batches of pairs, rows (2i, 2i+1), with `positive_fraction` of them same-peptide.
-
-    Reshuffles each epoch on its own, like GroupBatchSampler.
-    """
-
-    def __init__(self, groups, pairs_per_batch: int = 8,
-                 positive_fraction: float = 0.5, seed: int = 0,
-                 batches_per_epoch: int | None = None):
-        if not 0.0 < positive_fraction < 1.0:
-            raise ValueError("positive_fraction must be strictly between 0 and 1: at 0 "
-                             "nothing is ever pulled together, at 1 nothing is pushed "
-                             "apart, and either way the loss is degenerate")
-        if pairs_per_batch < 1:
-            raise ValueError("pairs_per_batch must be >= 1")
-        groups = np.asarray(groups)
-        self.members: dict[int, np.ndarray] = {}
-        for group in np.unique(groups):
-            index = np.flatnonzero(groups == group)
-            # Singleton groups can only serve as negatives.
-            self.members[int(group)] = index
-        self.positive_pool = [g for g, m in self.members.items() if len(m) >= 2]
-        if len(self.members) < 2:
-            raise ValueError("need at least two groups to form a negative pair")
-        if not self.positive_pool:
-            raise ValueError("no group has two spectra, so no positive pair exists")
-        self.pairs_per_batch = pairs_per_batch
-        self.positive_fraction = positive_fraction
-        self.seed = seed
-        self.epoch = 0
-        total_rows = int(sum(len(m) for m in self.members.values()))
-        # Default epoch covers the corpus once in expectation.
-        self.batches_per_epoch = batches_per_epoch or max(
-            1, total_rows // (2 * pairs_per_batch))
-
-    def __len__(self) -> int:
-        return self.batches_per_epoch
-
-    def set_epoch(self, epoch: int) -> None:
-        self.epoch = epoch
-
-    def __iter__(self):
-        rng = np.random.default_rng([self.seed, self.epoch])
-        n_positive = max(1, min(self.pairs_per_batch - 1,
-                                round(self.pairs_per_batch * self.positive_fraction)))
-        groups = list(self.members)
-        for _ in range(self.batches_per_epoch):
-            batch: list[int] = []
-            for _ in range(n_positive):
-                pool = self.members[int(rng.choice(self.positive_pool))]
-                batch.extend(int(i) for i in rng.choice(pool, size=2, replace=False))
-            for _ in range(self.pairs_per_batch - n_positive):
-                a, b = rng.choice(groups, size=2, replace=False)
-                batch.append(int(rng.choice(self.members[int(a)])))
-                batch.append(int(rng.choice(self.members[int(b)])))
-            yield batch
-        self.epoch += 1
-
-
-def pair_contrastive_loss(embeddings: Tensor, groups: Tensor, margin: float = 1.0,
-                          positive_weight: float = 1.0) -> dict[str, Tensor]:
-    """Margin contrastive loss over adjacent pairs (Hadsell et al., 2006).
-
-    Same peptide: pull together. Different: push apart up to `margin`.
-    """
-    if embeddings.shape[0] % 2:
-        raise ValueError(f"pair loss needs an even number of rows, got "
-                         f"{embeddings.shape[0]}")
-    left, right = embeddings[0::2], embeddings[1::2]
-    same = groups[0::2] == groups[1::2]
-    distance = (left - right).norm(dim=-1)
-    positive = distance.pow(2)
-    negative = F.relu(margin - distance).pow(2)
-    loss = torch.where(same, positive_weight * positive, negative).mean()
-    return {
-        "loss": loss,
-        "pair_positive": positive[same].mean().detach() if same.any()
-                         else embeddings.new_zeros(()),
-        "pair_negative": negative[~same].mean().detach() if (~same).any()
-                         else embeddings.new_zeros(()),
-        "pair_positive_fraction": same.float().mean().detach(),
-        "pair_distance_same": distance[same].mean().detach() if same.any()
-                              else embeddings.new_zeros(()),
-        "pair_distance_diff": distance[~same].mean().detach() if (~same).any()
-                              else embeddings.new_zeros(()),
-    }
-
-
 def supervised_contrastive_loss(embeddings: Tensor, groups: Tensor,
                                 temperature: float = 0.07) -> Tensor:
     """SupCon (Khosla et al., 2020) via pytorch_metric_learning: every same-group pair is a positive."""
@@ -168,50 +80,9 @@ def head_kl(logits: Tensor, reference_logits: Tensor, attention_mask: Tensor) ->
     return torch.where(valid, terms, torch.zeros_like(terms)).sum(-1).mean()
 
 
-class LayerMixPooler(nn.Module):
-    """Softmax-weighted mix of every layer's output (ELMo-style), mean-pooled to d_model.
-
-    Each layer is LayerNorm'd first so scale differences across depth don't decide the mix.
-    """
-
-    def __init__(self, num_layers: int, hidden_size: int, normalise: bool = True,
-                 learn_scale: bool = True):
-        super().__init__()
-        if num_layers < 1:
-            raise ValueError(f"need at least one layer to mix, got {num_layers}")
-        # Zeros: the mixture starts uniform.
-        self.mix = nn.Parameter(torch.zeros(num_layers))
-        self.gamma = nn.Parameter(torch.ones(())) if learn_scale else None
-        self.norm = (nn.LayerNorm(hidden_size, elementwise_affine=False)
-                     if normalise else None)
-
-    @property
-    def weights(self) -> Tensor:
-        """The mixture as it would be applied, for logging."""
-        return torch.softmax(self.mix, dim=0)
-
-    def forward(self, states: list[Tensor], attention_mask: Tensor) -> Tensor:
-        if len(states) != self.mix.numel():
-            raise ValueError(f"expected {self.mix.numel()} layer states, got {len(states)}")
-        stacked = torch.stack([self.norm(h) if self.norm is not None else h
-                               for h in states], dim=0)          # (L, B, S, D)
-        weights = torch.softmax(self.mix, dim=0).to(stacked.dtype)
-        mixed = (stacked * weights[:, None, None, None]).sum(0)   # (B, S, D)
-        mask = attention_mask.unsqueeze(-1).to(mixed.dtype)
-        pooled = (mixed * mask).sum(1) / mask.sum(1).clamp_min(1e-9)
-        if self.gamma is not None:
-            pooled = pooled * self.gamma
-        return pooled
-
-
 def encoder_layer_states(encoder: nn.Module, mz: Tensor, log_intensity: Tensor,
                          attention_mask: Tensor) -> tuple[list[Tensor], Tensor]:
     """Run the encoder and capture every block's output (via forward hooks) plus the input embedding."""
-    if getattr(encoder, "gradient_checkpointing", False) and encoder.training:
-        raise RuntimeError(
-            "layer-mix pooling cannot read intermediate states under gradient "
-            "checkpointing; disable one of them"
-        )
     captured: dict[int, Tensor] = {}
     handles = [encoder.embed.register_forward_hook(
         lambda _m, _i, out: captured.__setitem__(0, out))]
@@ -230,38 +101,15 @@ def encoder_layer_states(encoder: nn.Module, mz: Tensor, log_intensity: Tensor,
     return [captured[i] for i in range(expected)], final
 
 
-def layer_mix_width(model: nn.Module) -> int:
-    """d_model: a sequence mean, with no max concatenation."""
-    return _hidden_size(model)
-
-
-def _hidden_size(model: nn.Module) -> int:
-    hidden = getattr(getattr(model, "config", None), "hidden_size", None)
-    if hidden is None:
-        hidden = getattr(model.config.encoder, "hidden_size")
-    return hidden
-
-
 class MSDeltaForContrastive(nn.Module):
     """Spectrum encoder trained to separate peptides while still explaining peaks."""
 
     def __init__(self, model: nn.Module, reference: nn.Module | None = None,
                  pooling: str = "mean+max", temperature: float = 0.07,
-                 kl_weight: float = 1.0, layer_mix_norm: bool = True,
-                 pair_loss: bool = False, pair_margin: float = 1.0,
-                 pair_positive_weight: float = 1.0, projection_hidden: int = 0,
-                 projection_dim: int = 0, projection_dropout: float = 0.1):
+                 kl_weight: float = 1.0):
         super().__init__()
         self.model = model
         self.reference = reference
-        self.layer_mix = None
-        if pooling == "layer_mix":
-            encoder = getattr(model, "msdelta", model)
-            self.layer_mix = LayerMixPooler(
-                num_layers=len(encoder.blocks) + 1,   # + the pre-block embedding
-                hidden_size=_hidden_size(model),
-                normalise=layer_mix_norm,
-            )
         if self.reference is not None:
             # Frozen and in eval mode so the KL target does not move.
             self.reference.requires_grad_(False)
@@ -269,24 +117,6 @@ class MSDeltaForContrastive(nn.Module):
         self.pooling = pooling
         self.temperature = temperature
         self.kl_weight = kl_weight
-        # Optional projection head; `readout` picks "head" or "pooled" for embed().
-        self.projection = None
-        self.readout = "head"
-        if projection_dim > 0:
-            width = embedding_size(model, pooling)
-            hidden = projection_hidden or width
-            self.projection = nn.Sequential(
-                nn.Linear(width, hidden), nn.GELU(), nn.Dropout(projection_dropout),
-                nn.Linear(hidden, projection_dim))
-            std = getattr(getattr(model, "config", None), "initializer_range", 0.02)
-            for layer in self.projection:
-                if isinstance(layer, nn.Linear):
-                    nn.init.normal_(layer.weight, std=std)
-                    nn.init.zeros_(layer.bias)
-        # Pair mode expects rows from PairBatchSampler.
-        self.pair_loss = pair_loss
-        self.pair_margin = pair_margin
-        self.pair_positive_weight = pair_positive_weight
 
     def train(self, mode: bool = True):
         super().train(mode)
@@ -296,32 +126,15 @@ class MSDeltaForContrastive(nn.Module):
 
     def embed(self, mz, log_intensity, attention_mask) -> tuple[Tensor, Tensor]:
         encoder = getattr(self.model, "msdelta", self.model)
-        if self.layer_mix is not None:
-            # `hidden` stays the final state: it feeds the intensity head for the KL term.
-            states, hidden = encoder_layer_states(encoder, mz, log_intensity,
-                                                  attention_mask)
-            pooled = self.layer_mix(states, attention_mask)
-        else:
-            hidden = encoder(mz=mz, log_intensity=log_intensity,
-                             attention_mask=attention_mask).last_hidden_state
-            pooled = pool_sequence(hidden, attention_mask, self.pooling)
-        if self.projection is not None and self.readout == "head":
-            pooled = self.projection(pooled)
+        hidden = encoder(mz=mz, log_intensity=log_intensity,
+                         attention_mask=attention_mask).last_hidden_state
+        pooled = pool_sequence(hidden, attention_mask, self.pooling)
         return F.normalize(pooled.float(), dim=-1), hidden
 
     def forward(self, mz, log_intensity, attention_mask, group,
-                reference_logits=None, return_dict: bool = True,
-                return_loss: bool = True):
+                reference_logits=None, return_loss: bool = True):
         embeddings, hidden = self.embed(mz, log_intensity, attention_mask)
-        extra: dict[str, Tensor] = {}
-        if self.pair_loss:
-            pair = pair_contrastive_loss(embeddings, group, self.pair_margin,
-                                         self.pair_positive_weight)
-            contrastive = pair.pop("loss")
-            extra = pair
-        else:
-            contrastive = supervised_contrastive_loss(embeddings, group,
-                                                      self.temperature)
+        contrastive = supervised_contrastive_loss(embeddings, group, self.temperature)
 
         kl = embeddings.new_zeros(())
         if self.kl_weight > 0:
@@ -339,24 +152,14 @@ class MSDeltaForContrastive(nn.Module):
             kl = head_kl(logits, reference_logits, attention_mask)
 
         loss = contrastive + self.kl_weight * kl
-        if not return_dict:
-            return (loss, embeddings)
         return {"loss": loss, "contrastive": contrastive.detach(), "kl": kl.detach(),
-                "embeddings": embeddings, **extra}
-
-
-def embedding_size(model: nn.Module, pooling: str = "mean+max") -> int:
-    if pooling == "layer_mix":
-        return layer_mix_width(model)
-    return pooled_width(_hidden_size(model), pooling)
+                "embeddings": embeddings}
 
 
 @torch.no_grad()
 def group_separation_summary(model, dataset, collator, device, max_rows: int = 2000,
                              batch_size: int = 16) -> dict[str, float]:
     """Embed a validation split and report how well replicates cluster."""
-    from msdelta.reranking import group_separation_metrics
-
     embeddings, groups = embed_dataset(model, dataset, collator, device,
                                        max_rows=max_rows, batch_size=batch_size)
     if embeddings is None:
@@ -367,8 +170,6 @@ def group_separation_summary(model, dataset, collator, device, max_rows: int = 2
 def embed_dataset(model, dataset, collator, device, max_rows: int = 2000,
                   batch_size: int = 16):
     """Embed rows and return (embeddings, group ids)."""
-    from msdelta.reranking import peptide_key
-
     was_training = model.training
     model.eval()
     rows = list(dataset)[:max_rows]

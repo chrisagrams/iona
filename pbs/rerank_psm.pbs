@@ -6,7 +6,7 @@
 #        pbs/rerank_psm.pbs
 #
 # Stage 1 embeds one run per tile (existing tables reused); stage 2 writes
-# results/rerank/psm/$TAG.json. SAVE_VECTORS=1 (default) also saves the unit vectors.
+# results/rerank/psm/$TAG.json.
 
 #PBS -N msdelta-rerank-psm
 #PBS -A UIC-HPC
@@ -23,7 +23,6 @@ ENCODER=${ENCODER:?set ENCODER}; STUDENT=${STUDENT:?set STUDENT}; CACHE=${CACHE:
 VENV_DIR=${VENV_DIR:-$REPO_DIR/.venv}
 SCRATCH_ROOT=${SCRATCH_ROOT:-/lus/flare/projects/${PROJECT:-UIC-HPC}/$USER/msdelta}
 ROWS=${ROWS:-$SCRATCH_ROOT/rerank-psm/$TAG/rows}
-SAVE_VECTORS=${SAVE_VECTORS-1}     # R5; SAVE_VECTORS= (empty) to skip
 
 set +u
 source /usr/share/lmod/lmod/init/bash
@@ -52,7 +51,6 @@ for run in $RUNS; do
     if [[ -f $out ]]; then echo "  reuse $out"; continue; fi
     ZE_AFFINITY_MASK=$i "$PY" -m msdelta.rerank_psm_embed --run "$run" --encoder "$ENCODER" \
         --student "$STUDENT" --cache "$CACHE" --out "$out" \
-        ${SAVE_VECTORS:+--vectors-out "$SCRATCH_ROOT/rerank-psm/$TAG/vectors/$(basename "$run" .parquet)"} \
         > "$ROWS/.$(basename "$run").log" 2>&1 &
     pids+=($!); i=$((i + 1))
 done

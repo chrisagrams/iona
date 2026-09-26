@@ -18,22 +18,13 @@ from pathlib import Path
 import numpy as np
 import torch
 import torch.nn.functional as F
+from datasets import load_from_disk
 
-
-def all_but_top(embeddings: np.ndarray, components: int) -> np.ndarray:
-    """Center embeddings and remove their leading principal directions."""
-    if components <= 0:
-        return embeddings
-    limit = min(embeddings.shape)
-    if components >= limit:
-        raise ValueError(
-            f"all-but-top components ({components}) must be smaller than "
-            f"min(n_spectra, embedding_size) ({limit})"
-        )
-    centered = embeddings - embeddings.mean(axis=0, keepdims=True)
-    _, _, directions = np.linalg.svd(centered, full_matrices=False)
-    top = directions[:components]
-    return centered - (centered @ top.T) @ top
+from msdelta.contrastive import encoder_layer_states, retrieval_metrics_topk
+from msdelta.finetune_contrastive import ContrastiveCollator
+from msdelta.grouped_retrieval import group_ids
+from msdelta.modeling_msdelta import MSDeltaForPreTraining
+from msdelta.reranking import pool_sequence
 
 
 def fit_abtt(fit: torch.Tensor, max_components: int) -> tuple[torch.Tensor, torch.Tensor]:
@@ -52,7 +43,7 @@ def fit_abtt(fit: torch.Tensor, max_components: int) -> tuple[torch.Tensor, torc
 
 def apply_abtt(x: torch.Tensor, mean: torch.Tensor, directions: torch.Tensor,
                components: int) -> torch.Tensor:
-    """all_but_top with a given fit: x - mean, minus its projection on the top directions."""
+    """All-but-the-top with a given fit: x - mean, minus its projection on the top directions."""
     centered = x - mean
     top = directions[:components]
     return centered - (centered @ top.T) @ top if components > 0 else centered
@@ -74,14 +65,6 @@ def main(argv: list[str] | None = None) -> int:
     abtt = [int(d) for d in re.split(r"[,:\s]+", cli.abtt) if d]
     if abtt and not cli.fit_data:
         ap.error("--abtt needs --fit-data (the train fit is the headline)")
-
-    from datasets import load_from_disk
-
-    from msdelta.contrastive import encoder_layer_states, retrieval_metrics_topk
-    from msdelta.finetune_contrastive import ContrastiveCollator
-    from msdelta.grouped_retrieval import group_ids
-    from msdelta.modeling_msdelta import MSDeltaForPreTraining
-    from msdelta.reranking import pool_sequence
 
     device = torch.device("xpu" if torch.xpu.is_available() else "cpu")
     models = [l.split() for l in Path(cli.models).read_text().splitlines()

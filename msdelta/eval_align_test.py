@@ -14,6 +14,16 @@ from pathlib import Path
 
 import numpy as np
 import torch
+from datasets import load_from_disk
+from safetensors.torch import load_file
+from transformers import HfArgumentParser
+
+from msdelta.contrastive import retrieval_metrics_topk
+from msdelta.finetune_align import AlignDataArguments, AlignModelArguments
+from msdelta.grouped_retrieval import group_ids
+from msdelta.modeling_msdelta import MSDeltaForPreTraining
+from msdelta.reranking import (AlignmentCollator, PeptideCollator, PeptideEncoder,
+                               cross_modal_metrics, embed_spectrum)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -29,18 +39,6 @@ def main(argv: list[str] | None = None) -> int:
                     help="also write embeddings + keys (.npz)")
     cli = ap.parse_args(argv)
 
-    from datasets import load_from_disk
-    from safetensors.torch import load_file
-    from transformers import HfArgumentParser
-
-    from msdelta.contrastive import retrieval_metrics_topk
-    from msdelta.finetune_align import AlignDataArguments, AlignModelArguments
-    from msdelta.grouped_retrieval import group_ids
-    from msdelta.modeling_msdelta import MSDeltaForPreTraining
-    from msdelta.reranking import (AlignmentCollator, PeptideEncoder,
-                                   SequenceAlignmentModel, cross_modal_metrics,
-                                   student_readout)
-
     device = torch.device("xpu" if torch.xpu.is_available() else "cpu")
     manifest = dict(line.split(": ", 1) for line in
                     (Path(cli.cache) / "MANIFEST.txt").read_text().splitlines()
@@ -50,7 +48,7 @@ def main(argv: list[str] | None = None) -> int:
                                            "--pretrained_path", manifest["teacher"]],
                                      args_file_flag="--args_file",
                                      return_remaining_strings=True)
-    teacher = MSDeltaForPreTraining.from_pretrained(manifest["teacher"])
+    teacher = MSDeltaForPreTraining.from_pretrained(manifest["teacher"]).to(device).eval()
     state = load_file(str(Path(cli.run) / "final" / "model.safetensors"))
     student = PeptideEncoder(embedding_size=int(manifest["embedding_size"]),
                              hidden_size=model_args.sequence_hidden_size,
@@ -58,18 +56,16 @@ def main(argv: list[str] | None = None) -> int:
                              num_heads=model_args.sequence_num_heads,
                              max_length=model_args.max_peptide_length,
                              dropout=model_args.sequence_dropout,
-                             pooling=model_args.pooling,
-                             readout=student_readout(state))
-    model = SequenceAlignmentModel(teacher, student, pooling=manifest["pooling"])
+                             pooling=model_args.pooling)
     prefix = "sequence_encoder."
     student_state = {k[len(prefix):]: v for k, v in state.items() if k.startswith(prefix)}
     student.load_state_dict(student_state, strict=True)
-    model = model.to(device).eval()
+    student = student.to(device).eval()
 
     rows = load_from_disk(cli.data)
     rows = rows.select(np.flatnonzero(np.array(rows["source"]) == "experimental"))
     collator = AlignmentCollator(max_peptide_length=model_args.max_peptide_length,
-                                 pad_spectra_to=int(manifest.get("max_peaks", 512)))
+                                 pad_spectra_to=int(manifest["max_peaks"]))
     features = list(rows)
 
     # candidates: every distinct (peptide, charge) among the test rows, in first-seen order
@@ -84,13 +80,14 @@ def main(argv: list[str] | None = None) -> int:
     with torch.no_grad():
         for start in range(0, len(features), cli.batch_size):
             batch = collator(features[start:start + cli.batch_size])
-            spectra.append(model.embed_spectrum(batch["mz"].to(device),
-                                                batch["log_intensity"].to(device),
-                                                batch["attention_mask"].to(device)).cpu())
-        dummy = [{"mz": [100.0], "log_intensity": [1.0], "peptide": p, "charge": c}
-                 for p, c in candidates]
-        for start in range(0, len(dummy), 256):
-            batch = collator(dummy[start:start + 256])
+            spectra.append(embed_spectrum(teacher, batch["mz"].to(device),
+                                          batch["log_intensity"].to(device),
+                                          batch["attention_mask"].to(device),
+                                          manifest["pooling"]).cpu())
+        peptide_collator = PeptideCollator(max_length=model_args.max_peptide_length)
+        for start in range(0, len(candidates), 256):
+            chunk = candidates[start:start + 256]
+            batch = peptide_collator([p for p, _ in chunk], [c for _, c in chunk])
             sequences.append(student(batch["residues"].to(device),
                                      batch["modifications"].to(device),
                                      batch["sequence_mask"].to(device),
