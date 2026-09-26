@@ -14,6 +14,7 @@ from torch import Tensor, nn
 from torch.utils.data import Sampler
 
 from msdelta.reranking import group_separation_metrics, peptide_key, pool_sequence
+from msdelta.retrieval import retrieval_metrics
 
 
 class GroupBatchSampler(Sampler[list[int]]):
@@ -193,101 +194,6 @@ def embed_dataset(model, dataset, collator, device, max_rows: int = 2000,
     return torch.cat(embeddings), groups
 
 
-def retrieval_metrics_exact(embeddings: Tensor, groups) -> dict[str, float]:
-    """Hit@1, Precision@1, R-Precision, MAP@R, R@5 and MAP@100 by exact search.
-
-    Queries with no other spectrum of their peptide are excluded.
-    """
-    e = F.normalize(embeddings.float(), dim=-1)
-    g = torch.as_tensor(groups, dtype=torch.long)
-    sim = e @ e.T
-    n = len(e)
-    eye = torch.eye(n, dtype=torch.bool)
-    sim = sim.masked_fill(eye, float("-inf"))
-    relevant = (g[:, None] == g[None, :]) & ~eye
-    n_rel = relevant.sum(1)
-    scorable = n_rel > 0
-    if not scorable.any():
-        return {}
-
-    order = sim.argsort(dim=1, descending=True)
-    hit = relevant.gather(1, order)
-
-    at5 = hit[:, :5].sum(1).float() / n_rel.clamp(min=1).float()
-    k = min(100, n - 1)
-    top = hit[:, :k].float()
-    csum = top.cumsum(1)
-    ranks = torch.arange(1, k + 1, dtype=torch.float32).unsqueeze(0)
-    ap = ((csum / ranks) * top).sum(1) / n_rel.clamp(min=1).float()
-
-    # MAP@R and R-Precision use a per-query cutoff R.
-    all_ranks = torch.arange(1, n + 1, dtype=torch.float32).unsqueeze(0)
-    within_r = all_ranks <= n_rel.unsqueeze(1).float()
-    hit_f = hit.float()
-    r_prec = (hit_f * within_r).sum(1) / n_rel.clamp(min=1).float()
-    csum_all = hit_f.cumsum(1)
-    ap_r = (((csum_all / all_ranks) * hit_f) * within_r).sum(1) / n_rel.clamp(min=1).float()
-
-    p1 = float(hit[scorable, 0].float().mean())
-    return {
-        "Hit@1": p1,
-        "Precision@1": p1,
-        "R-Precision": float(r_prec[scorable].mean()),
-        "MAP@R": float(ap_r[scorable].mean()),
-        "R@5": float(at5[scorable].mean()),
-        "MAP@100": float(ap[scorable].mean()),
-    }
-
-
-def retrieval_metrics_topk(embeddings: Tensor, groups, k: int = 100, chunk: int = 2048,
-                           device=None) -> dict[str, float]:
-    """retrieval_metrics_exact via chunked top-k, without n x n matrices. Requires every R <= k."""
-    e = F.normalize(embeddings.float(), dim=-1)
-    if device is not None:
-        e = e.to(device)
-    g = torch.as_tensor(np.asarray(groups), dtype=torch.long, device=e.device)
-    n = len(e)
-    n_rel_all = torch.bincount(g)[g] - 1
-    if int(n_rel_all.max()) > k:
-        raise ValueError(f"a query has R={int(n_rel_all.max())} relevant items > k={k}; "
-                         f"use retrieval_metrics_exact or raise k")
-    k = min(k, n - 1)
-    ranks = torch.arange(1, k + 1, dtype=torch.float32, device=e.device).unsqueeze(0)
-    sums = dict.fromkeys(("hit1", "at5", "ap100", "rprec", "mapr"), 0.0)
-    scorable = 0
-    for start in range(0, n, chunk):
-        q = torch.arange(start, min(start + chunk, n), device=e.device)
-        sim = e[q] @ e.T
-        sim[torch.arange(len(q), device=e.device), q] = float("-inf")
-        idx = sim.topk(k, dim=1).indices
-        hit = (g[idx] == g[q].unsqueeze(1)).float()
-        n_rel = n_rel_all[q].float()
-        keep = n_rel > 0
-        if not keep.any():
-            continue
-        hit, n_rel = hit[keep], n_rel[keep]
-        prec = hit.cumsum(1) / ranks
-        within_r = ranks <= n_rel.unsqueeze(1)
-        sums["hit1"] += float(hit[:, 0].sum())
-        sums["at5"] += float((hit[:, :5].sum(1) / n_rel).sum())
-        sums["ap100"] += float(((prec * hit).sum(1) / n_rel).sum())
-        sums["rprec"] += float(((hit * within_r).sum(1) / n_rel).sum())
-        sums["mapr"] += float(((prec * hit * within_r).sum(1) / n_rel).sum())
-        scorable += int(keep.sum())
-    if not scorable:
-        return {}
-    p1 = sums["hit1"] / scorable
-    return {
-        "Hit@1": p1,
-        "Precision@1": p1,
-        "R-Precision": sums["rprec"] / scorable,
-        "MAP@R": sums["mapr"] / scorable,
-        "R@5": sums["at5"] / scorable,
-        "MAP@100": sums["ap100"] / scorable,
-        "queries": float(scorable),
-    }
-
-
 def retrieval_summary(model, dataset, collator, device, max_rows: int = 2000,
                       batch_size: int = 16) -> dict[str, float]:
     """Retrieval metrics on a validation split, prefixed with retrieval/."""
@@ -298,7 +204,7 @@ def retrieval_summary(model, dataset, collator, device, max_rows: int = 2000,
     counts = np.bincount(groups)
     if (counts > 1).sum() < 2:
         return {}
-    scores = retrieval_metrics_exact(embeddings, groups)
+    scores = retrieval_metrics(embeddings, groups, device)
     if not scores:
         return {}
     return {f"retrieval/{k}": v for k, v in scores.items()} | {

@@ -20,11 +20,12 @@ import torch
 import torch.nn.functional as F
 from datasets import load_from_disk
 
-from msdelta.contrastive import encoder_layer_states, retrieval_metrics_topk
+from msdelta.contrastive import encoder_layer_states
 from msdelta.finetune_contrastive import ContrastiveCollator
 from msdelta.grouped_retrieval import group_ids
 from msdelta.modeling_msdelta import MSDeltaForPreTraining
 from msdelta.reranking import pool_sequence
+from msdelta.retrieval import retrieval_metrics
 
 
 def fit_abtt(fit: torch.Tensor, max_components: int) -> tuple[torch.Tensor, torch.Tensor]:
@@ -117,7 +118,7 @@ def main(argv: list[str] | None = None) -> int:
 
         def score(emb):
             return {f"experimental/{k}": v for k, v in
-                    retrieval_metrics_topk(emb, g, device=device).items()}
+                    retrieval_metrics(emb, g, device).items()}
 
         for key, emb in per_layer.items():
             result["layers"][key] = score(emb[mask])

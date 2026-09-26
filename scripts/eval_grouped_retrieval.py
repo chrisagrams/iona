@@ -20,11 +20,12 @@ import numpy as np
 import torch
 from datasets import load_dataset, load_from_disk
 
-from msdelta.contrastive import MSDeltaForContrastive, embed_dataset, retrieval_metrics_topk
+from msdelta.contrastive import MSDeltaForContrastive, embed_dataset
 from msdelta.finetune_contrastive import ContrastiveCollator
 from msdelta.grouped_retrieval import build_grouped_split, group_ids, replicate_corpus_peptides
 from msdelta.modeling_msdelta import MSDeltaForPreTraining
 from msdelta.processing_msdelta import MSDeltaProcessor
+from msdelta.retrieval import retrieval_metrics
 
 
 def prepare(cli) -> int:
@@ -54,7 +55,7 @@ def score_model(path, pooling, rows, groups, experimental, collator, device,
     try:
         emb, _ = embed_dataset(model, rows, collator, device, max_rows=len(rows),
                                batch_size=batch_size)
-        out = _variants(emb, groups, experimental, device, retrieval_metrics_topk)
+        out = _variants(emb, groups, experimental, device, retrieval_metrics)
     finally:
         del model, encoder
         if device.type == "xpu":
@@ -67,7 +68,9 @@ def _variants(emb, groups, experimental, device, metric) -> dict:
     out = {}
     for variant, mask in (("all", np.ones(len(groups), dtype=bool)),
                           ("experimental", experimental)):
-        metrics = metric(emb[torch.from_numpy(mask)], groups[mask], device=device)
+        metrics = metric(emb[torch.from_numpy(mask)], groups[mask], device)
+        _, inverse, counts = np.unique(groups[mask], return_inverse=True, return_counts=True)
+        metrics["queries"] = float((counts[inverse] > 1).sum())
         out |= {f"{variant}/{k}": v for k, v in metrics.items()}
     return out
 

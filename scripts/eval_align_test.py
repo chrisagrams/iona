@@ -18,12 +18,12 @@ from datasets import load_from_disk
 from safetensors.torch import load_file
 from transformers import HfArgumentParser
 
-from msdelta.contrastive import retrieval_metrics_topk
 from msdelta.finetune_align import AlignDataArguments, AlignModelArguments
 from msdelta.grouped_retrieval import group_ids
 from msdelta.modeling_msdelta import MSDeltaForPreTraining
 from msdelta.reranking import (AlignmentCollator, PeptideCollator, PeptideEncoder,
                                cross_modal_metrics, embed_spectrum)
+from msdelta.retrieval import retrieval_metrics
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -101,7 +101,7 @@ def main(argv: list[str] | None = None) -> int:
                  cand_charge=np.array([c for _, c in candidates]))
     metrics = cross_modal_metrics(sequence_emb, spectrum_emb, spectrum_group,
                                   np.arange(len(candidates)))
-    teacher_ref = retrieval_metrics_topk(spectrum_emb, group_ids(rows), device=device)
+    teacher_ref = retrieval_metrics(spectrum_emb, group_ids(rows), device)
     metrics |= {f"teacher_spectrum/{k}": v for k, v in teacher_ref.items()}
     out = {"run": cli.run, "cache": cli.cache, "teacher": manifest["teacher"],
            "data": cli.data, "n_spectra": len(features), "n_candidates": len(candidates),
