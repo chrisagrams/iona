@@ -32,14 +32,15 @@ charge) embed close together; evaluated by spectrum-to-spectrum retrieval.
 | fine-tuned 50M | same, except stage 1 ran 24 epochs | 0.839 | 0.523 |
 | replicate corpus only 400M | the 400M stage-1 model alone (12 epochs); 3 seeds (1 on yeast) | 0.713 | 0.520 |
 | replicate corpus only 50M | the 50M stage-1 model alone (24 epochs); 3 seeds (1 on yeast) | 0.656 | 0.499 |
-| frozen + ABTT (best encoder) | no contrastive training; see `0_shot/` | 0.432 (200M@540k) | 0.709 (400M@220k) |
+| frozen + ABTT (best encoder) | no contrastive training; see `0_shot/` | 0.660 (400M@330k) | 0.709 (400M@220k) |
 
 - The fine-tuned models are one seed each: the end-of-epoch seed with the best **validation** MAP@R
   on ms-contrastive-100k (400M: seed 0, 0.8639 vs 0.8629 / 0.8634; 50M: seed 1, 0.8357 vs 0.8314 / 0.8342).
   Another 400M seed scores higher on yeast (seed 1: 0.656); it was not selected because that would use
   the test set.
-- Frozen + ABTT: the encoder, layer and number of removed components are the best on each benchmark,
-  so these bars are upper bounds for that method.
+- Frozen + ABTT: the encoder, layer and number of removed components are the best on each benchmark
+  (of 24 encoders in-distribution, 6 on yeast), so in principle upper bounds; where checked (three 50M
+  encoders), validation selection picked the same layer and D.
 - Reading: fine-tuning gives the best in-distribution retrieval by a wide margin, but on unseen data
   the frozen encoder with ABTT transfers better than any fine-tuned model.
 
@@ -61,14 +62,15 @@ baselines, in-distribution and on two unseen nine-species subsets.
 | Iona spectrum encoder 50M | 0.839 | 0.523 | 0.820 |
 | Iona spectrum encoder 400M (replicate corpus only) | 0.713 | 0.520 | 0.787 |
 | Iona spectrum encoder 50M (replicate corpus only) | 0.656 | 0.499 | 0.757 |
-| frozen + ABTT (best encoder) | 0.432 | 0.709 | not run |
+| frozen + ABTT (best encoder) | 0.660 | 0.709 | 0.703 |
 | GLEAMS | 0.646 | 0.770 | 0.834 |
 | binned cosine (best width) | 0.729 | **0.916** | **0.916** |
 
 - **Mouse 20k**: the Mus musculus spectra of the Noble lab nine-species benchmark (Zenodo
   10.5281/zenodo.12819175, `nine-species-balanced.zip`; Tide + Percolator labels at 1% FDR), groups of
   peptide + charge with >= 2 spectra capped at 20, whole groups sampled (seed 0) to 20,003 spectra in
-  4,026 groups; no spectrum exceeds 512 peaks. Frozen + ABTT was not run on it.
+  4,026 groups; no spectrum exceeds 512 peaks. Frozen + ABTT on mouse is the better of the two encoders
+  tried there (400M@330k and 400M@220k, the best in-distribution and on yeast), not of all 24.
 - Reading: in-distribution the Iona encoders lead every baseline. On unseen yeast both baselines are
   ahead of every model of ours; on unseen mouse the Iona 400M encoder is level with GLEAMS (0.846 vs
   0.834) and binned cosine leads (0.916).

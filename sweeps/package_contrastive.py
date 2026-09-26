@@ -186,6 +186,17 @@ def zeroshot_rows():
                             raw_final=float(r["raw_final"]), raw_best_layer=float(r["raw_best_block"]),
                             abtt_best=float(r["abtt_best"]), abtt_D=r["abtt_best_D"], abtt_layer=r["abtt_best_layer"],
                             abtt_fit="ms-contrastive-100k train"))
+    # mouse 20k: only the two best in-distribution/yeast encoders were run (400M@220k, 400M@330k)
+    for f in sorted(RES.glob("mouse20k_zeroshot_*/zs_*.json")):
+        d = json.loads(f.read_text())
+        sc, ck = re.match(r"zs_0*(\d+m)_ck0*(\d+k)", f.stem).groups()
+        tr = d["abtt"]["train"]
+        best = max(((D, lay, v["experimental/MAP@R"]) for D, L in tr.items() if D != "center"
+                    for lay, v in L.items()), key=lambda t: t[2])
+        out.append(dict(benchmark="mouse-20k", encoder=f"{sc}@{ck}",
+                        raw_final=d["layers"]["final"]["experimental/MAP@R"],
+                        raw_best_layer=max(v["experimental/MAP@R"] for v in d["layers"].values()),
+                        abtt_best=best[2], abtt_D=best[0], abtt_layer=best[1], abtt_fit="ms-contrastive-100k train"))
     for f in sorted((RES / "nine20k_zeroshot").glob("zs_*.json")):
         d = json.loads(f.read_text())
         sc, ck = re.match(r"zs_0*(\d+m)_ck0*(\d+k)", f.stem).groups()
@@ -201,25 +212,12 @@ def zeroshot_rows():
 
 
 def fig_zeroshot(zs):
-    with plt.rc_context(STYLE):
-        fig, axes = plt.subplots(1, 2, figsize=(12, 4.2), sharey=True)
-        for ax, bench, title in ((axes[0], "ms-contrastive-100k", "ms-contrastive-100k test (in-distribution)"),
-                                 (axes[1], "yeast-20k", "yeast 20k subset (unseen)")):
-            ax.yaxis.grid(True, color=GRIDC, lw=0.8); ax.set_axisbelow(True)
-            rs = {r["encoder"]: r for r in zs if r["benchmark"] == bench}
-            enc = sorted(rs, key=lambda e: (int(e.split("m@")[0]), int(e.split("@")[1][:-1])))
-            x = np.arange(len(enc))
-            ax.bar(x - 0.2, [rs[e]["raw_best_layer"] for e in enc], 0.38, color=BINNED, label="frozen, best layer", zorder=2)
-            ax.bar(x + 0.2, [rs[e]["abtt_best"] for e in enc], 0.38, color=OURS, label="frozen, best layer + ABTT", zorder=2)
-            for i, e in enumerate(enc):
-                ax.text(i + 0.2, rs[e]["abtt_best"] + 0.01, f"{rs[e]['abtt_best']:.2f}", ha="center", fontsize=7.5)
-            ax.set_xticks(x); ax.set_xticklabels([e.upper().replace("K", "k") for e in enc], rotation=30, ha="right")
-            ax.set_title(title, loc="left", fontsize=10.5)
-        axes[0].set_ylabel("MAP@R (experimental spectra)")
-        axes[1].legend(frameon=False, fontsize=8.5, loc="upper left")
-        fig.suptitle("Zero-shot retrieval from the pretrained encoder (no contrastive training)", x=0.07, ha="left",
-                     fontsize=13, fontweight="bold", y=1.02)
-        fig.savefig(FIG / "C_zeroshot.png"); plt.close(fig)
+    """Drawn by the paper folder's standalone script from the exported CSV (so the two cannot differ)."""
+    import runpy, shutil
+    out = REPO / "paper" / "experiments" / "spectrum_embedding" / "0_shot"
+    shutil.copy(FIG / "C_zeroshot.csv", out / "C_zeroshot.csv")
+    runpy.run_path(str(out / "plot_zeroshot.py"), run_name="__main__")
+    shutil.copy(out / "C_zeroshot.png", FIG / "C_zeroshot.png")
 
 
 def fig_transfer(rows, zs, panels=None, baselines=True, out="C_transfer.png",
@@ -375,7 +373,7 @@ def export_plot_data(rows, zs, ab):
             out.append(dict(benchmark=b, model="frozen + ABTT (best encoder)", scale=sc, pretrain_ckpt=ck,
                             finetune_stage="", seed="", map_at_r=z["abtt_best"], hit_at_1="",
                             note=f"frozen encoder, layer {z['abtt_layer']}, ABTT D={z['abtt_D']} (fit: {z['abtt_fit']}); "
-                                 f"encoder/layer/D chosen on this benchmark"))
+                                 f"best of {len(zb)} frozen encoders, encoder/layer/D chosen on this benchmark"))
         return out
     out = ours("ms-contrastive-100k") + ours("yeast-20k")
     write_plot_csv("C_transfer_ours.csv", out)
@@ -429,7 +427,7 @@ def main():
         for r in ab:
             w.writerow({k: (f"{v:.5f}" if isinstance(v, float) else v) for k, v in r.items()})
     print("ablation rows", len(ab))
-    fig_benchmarks(rows); fig_pretraining(rows); fig_zeroshot(zs); fig_ablation(ab)
+    fig_benchmarks(rows); fig_pretraining(rows); fig_ablation(ab)
     # C_transfer: only the benchmarks every method was scored on (the 8-species OOD validation had no GLEAMS/frozen)
     fig_transfer(rows, zs, panels=[("ms-contrastive-100k", "ms-contrastive-100k test\n(in-distribution)", 8),
                                    ("yeast-20k", "yeast 20k subset\n(unseen)", 8),
@@ -439,6 +437,7 @@ def main():
                                    ("yeast-20k", "yeast 20k subset\n(unseen)", 1)],
                  baselines=False, out="C_transfer_ours.png", title="Our models in-distribution vs unseen")
     export_plot_data(rows, zs, ab)
+    fig_zeroshot(zs)                      # after the export: it plots the exported CSV
     print(f"rows {len(rows)}, zero-shot rows {len(zs)}")
     agg = defaultdict(list)
     for r in rows:

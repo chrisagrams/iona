@@ -7,8 +7,8 @@ encoder, optionally post-process the embeddings, and retrieve by cosine similari
 
 | file | content |
 |---|---|
-| `C_zeroshot.png` | MAP@R per frozen encoder (size@pretraining steps): best layer raw vs best layer + ABTT |
-| `C_zeroshot.csv` | the plotted values plus the chosen layer and number of components |
+| `C_zeroshot.png` | left: all 24 frozen encoders on ms-contrastive-100k test, MAP@R vs pretraining steps, one line per size (solid: best layer + ABTT, dashed: best layer raw); right: the 6 encoders scored on yeast 20k, raw vs ABTT |
+| `C_zeroshot.csv` | the plotted values plus the chosen layer and number of components; also the two frozen 400M encoders scored on mouse 20k (used in `../C_transfer`, not plotted here) |
 | `plot_zeroshot.py` | regenerates the figure from the CSV (`python plot_zeroshot.py`; matplotlib + numpy) |
 
 CSV columns: `benchmark`, `encoder`, `raw_final` (last layer, raw), `raw_best_layer` (best layer, raw),
@@ -27,16 +27,24 @@ ABTT statistics were fitted on).
 
 ## Results
 
-- ABTT roughly doubles retrieval for every encoder (in-distribution best 0.43, 200M@540k; yeast best
-  0.71, 400M@220k).
+- ABTT roughly doubles retrieval for every encoder. In-distribution the best is 0.66 (400M@330k); every
+  400M checkpoint from 120k on (0.54-0.66) is above every smaller encoder (at most 0.44). Yeast best:
+  0.71 (400M@220k).
+- Frozen retrieval does not rise steadily with pretraining: most sizes peak at 120k-330k and dip later
+  (400M@430k 0.54).
 - On unseen yeast the frozen 400M encoder with ABTT (0.71) beats every fine-tuned model we have there
   (at most 0.66), though not GLEAMS (0.77, see `../benchmarks/`).
 
 ## Caveats
 
-- The layer and D shown for each encoder are the best **on that benchmark's test set**, so the ABTT
-  bars are upper bounds; a fair number would pick them on a validation set.
+- The layer and D shown for each encoder are the best **on that benchmark's test set**, so in principle
+  upper bounds. A validation pass (choose on ms-contrastive-100k validation, report test) was completed
+  for three encoders (50M@220k/330k/540k): validation picked the same layer and D as test every time,
+  so for those the reported numbers are unchanged. The remaining encoders were not re-checked.
+- Updated 2026-09-26: the in-distribution panel previously showed 8 encoders from an early summary
+  (best 0.43, 200M@540k); it now shows all 24.
 - The two panels cover different encoder sets (what was evaluated on each benchmark).
 
-Provenance: msdelta repository, `sweeps/package_contrastive.py` (from `results/finetune/contrastive/zeroshot-layers-abtt/`
-and `results/finetune/contrastive/nine20k_zeroshot/`).
+Provenance: msdelta repository, `sweeps/package_contrastive.py` (from `results/finetune/contrastive/zeroshot-layers-abtt/`,
+summarised by `sweeps/summarise_zeroshot.py`, `results/finetune/contrastive/nine20k_zeroshot/` and
+`results/finetune/contrastive/mouse20k_zeroshot_*/`).
