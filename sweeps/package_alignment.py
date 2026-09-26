@@ -42,7 +42,9 @@ STUDENTS = {
 }
 DATASETS = [("yhydra", "ms-contrastive-100k test\n(in-distribution for ours)"),
             ("c11_cap20", "HEK\n(unseen, low-res MS2)"),
-            ("nine_yeast", "nine-species yeast\n(unseen, high-res)")]
+            ("nine_yeast", "nine-species yeast\n(unseen, high-res)"),
+            ("mouse", "nine-species mouse\n(unseen, high-res)")]
+MOUSE = REPO / "results" / "finetune" / "align" / "mouse_yhydra" / "compare_mouse.json"   # job 8870879
 WINDOWS = [("open", "", "open search"), ("1.1Da", "/window_1.1Da", "±1.1 Da"), ("20ppm", "/window_20ppm", "20 ppm")]
 
 
@@ -54,9 +56,13 @@ def window_rows():
     rows = []
     for ds, _ in DATASETS:
         yh_done = False
-        for f in sorted((BASE / ds / "xmodal").glob("xmodal_*.json")):
-            m = re.search(r"xmodal_(.+)-(\d+)\.json$", f.name)
-            run, job = m.group(1), m.group(2)
+        files = [MOUSE] if ds == "mouse" else sorted((BASE / ds / "xmodal").glob("xmodal_*.json"))
+        for f in files:
+            if ds == "mouse":   # the released 400M-teacher models from the Hub
+                run, job = "v2_align-ft-a1-align-100k-400m-c7final", "8870879"
+            else:
+                m = re.search(r"xmodal_(.+)-(\d+)\.json$", f.name)
+                run, job = m.group(1), m.group(2)
             if k := re.search(r"100k-(050m-c7s600|400m-oodsel|400m-c7final)$", run):
                 label, teacher, training = STUDENTS[k.group(1)][0], STUDENTS[k.group(1)][2], "standard"
             elif k := re.search(r"a8-(massb(?:_hn4)?)_seed\d$", run):
@@ -95,7 +101,7 @@ def fig_windows(rows, fixed=None, out="A_windows.png"):
     wl = [w[2] for w in WINDOWS]
     plotted = []
     with plt.rc_context(STYLE):
-        fig, axes = plt.subplots(1, 3, figsize=(13, 4.4), sharey=True)
+        fig, axes = plt.subplots(1, len(DATASETS), figsize=(4.3 * len(DATASETS), 4.4), sharey=True)
         for ax, (ds, title) in zip(axes, DATASETS):
             ax.yaxis.grid(True, color=GRIDC, lw=0.8); ax.set_axisbelow(True)
             lines = [("yHydra (L2)", "yHydra", YHYDRA, "s", "--")]
@@ -123,11 +129,11 @@ def fig_windows(rows, fixed=None, out="A_windows.png"):
             if outside and max(outside) > 0:
                 ceil = 1 - max(outside)
                 ax.plot([1.75, 2.25], [ceil, ceil], color=MUTED, lw=1.2, ls=":")
-                ax.text(1.7, ceil + 0.03, f"ceiling {ceil:.2f}", ha="right", va="center", fontsize=7.5, color=MUTED)
-            ax.set_xticks(range(3)); ax.set_xticklabels(wl); ax.set_xlim(-0.3, 2.3)
+                ax.text(2.3, ceil, f"ceiling\n{ceil:.2f}", ha="left", va="center", fontsize=7.5, color=MUTED)
+            ax.set_xticks(range(3)); ax.set_xticklabels(wl); ax.set_xlim(-0.3, 2.75)
             ax.set_title(title + ("\nours: " + "; ".join(names) if fixed else ""), loc="left", fontsize=10.5)
         axes[0].set_ylim(0, 1.05); axes[0].set_ylabel("Hit@1 (spectrum → peptide)")
-        axes[1].set_xlabel("candidate peptides restricted to the precursor-mass window", labelpad=8)
+        fig.supxlabel("candidate peptides restricted to the precursor-mass window", y=-0.04, fontsize=9.5)
         fig.suptitle("Peptide retrieval vs yHydra: open search and precursor-mass windows", x=0.07, ha="left",
                      fontsize=13, fontweight="bold", y=1.1 if fixed else 1.03)
         leg = [("yHydra", YHYDRA, "s", "--"),
@@ -136,8 +142,8 @@ def fig_windows(rows, fixed=None, out="A_windows.png"):
             leg.append(("ours, mass-aware training", "#7c3aed", "D", "-"))
         fig.legend(handles=[Line2D([], [], color=c, marker=mk, ls=ls, lw=2, ms=7, mec="white", mew=1.2)
                             for _, c, mk, ls in leg], labels=[l for l, *_ in leg], frameon=False,
-                   fontsize=9, ncol=3, loc="upper center", bbox_to_anchor=(0.5, -0.02))
-        fig.text(0.07, -0.15, "Ceiling (HEK, 20 ppm): for 24% of HEK spectra the true peptide is more than 20 ppm from the recorded precursor, mostly because a heavier isotope peak\nwas recorded as the precursor (about 1 Da above the monoisotopic mass); these fall outside a 20 ppm window, so no method can exceed 0.76.", fontsize=8, color=MUTED)
+                   fontsize=9, ncol=3, loc="upper center", bbox_to_anchor=(0.5, -0.07))
+        fig.text(0.07, -0.2, "Ceilings (20 ppm): for 24% of HEK and 10% of mouse spectra the true peptide is more than 20 ppm from the recorded precursor, mostly because a heavier\nisotope peak was recorded as the precursor (about 1 Da above the monoisotopic mass); these fall outside a 20 ppm window, so no method can recover them.", fontsize=8, color=MUTED)
         fig.savefig(FIG / out); plt.close(fig)
     return plotted
 

@@ -21,7 +21,8 @@ STYLE = {"font.family": "DejaVu Sans", "font.size": 10, "axes.edgecolor": "#9ca3
          "axes.spines.top": False, "axes.spines.right": False, "savefig.bbox": "tight", "figure.dpi": 200}
 DATASETS = [("yhydra", "ms-contrastive-100k test\n(in-distribution for ours)"),
             ("c11_cap20", "HEK\n(unseen, low-res MS2)"),
-            ("nine_yeast", "nine-species yeast\n(unseen, high-res)")]
+            ("nine_yeast", "nine-species yeast\n(unseen, high-res)"),
+            ("mouse", "nine-species mouse\n(unseen, high-res)")]
 WINDOWS = ["open search", "±1.1 Da", "20 ppm"]
 LINES = [("yHydra", "#f59e0b", "s", "--"), ("ours", "#1e3a8a", "o", "-")]
 
@@ -33,7 +34,7 @@ def msd(v):
 def windows():
     rows = list(csv.DictReader(open(HERE / "A_windows.csv")))
     with plt.rc_context(STYLE):
-        fig, axes = plt.subplots(1, 3, figsize=(13, 4.4), sharey=True)
+        fig, axes = plt.subplots(1, len(DATASETS), figsize=(4.3 * len(DATASETS), 4.4), sharey=True)
         for ax, (ds, title) in zip(axes, DATASETS):
             ax.yaxis.grid(True, color=GRIDC, lw=0.8); ax.set_axisbelow(True)
             for lab, col, mk, ls in LINES:
@@ -51,17 +52,17 @@ def windows():
             if out and max(out) > 0:
                 ceil = 1 - max(out)
                 ax.plot([1.75, 2.25], [ceil, ceil], color=MUTED, lw=1.2, ls=":")
-                ax.text(1.7, ceil + 0.03, f"ceiling {ceil:.2f}", ha="right", va="center", fontsize=7.5, color=MUTED)
-            ax.set_xticks(range(3)); ax.set_xticklabels(WINDOWS); ax.set_xlim(-0.3, 2.3)
+                ax.text(2.3, ceil, f"ceiling\n{ceil:.2f}", ha="left", va="center", fontsize=7.5, color=MUTED)
+            ax.set_xticks(range(3)); ax.set_xticklabels(WINDOWS); ax.set_xlim(-0.3, 2.75)
             ax.set_title(title, loc="left", fontsize=10.5)
         axes[0].set_ylim(0, 1.05); axes[0].set_ylabel("Hit@1 (spectrum → peptide)")
-        axes[1].set_xlabel("candidate peptides restricted to the precursor-mass window", labelpad=8)
+        fig.supxlabel("candidate peptides restricted to the precursor-mass window", y=-0.04, fontsize=9.5)
         fig.suptitle("Peptide retrieval vs yHydra: open search and precursor-mass windows", x=0.07, ha="left",
                      fontsize=13, fontweight="bold", y=1.03)
         fig.legend(handles=[Line2D([], [], color=c, marker=mk, ls=ls, lw=2, ms=7, mec="white", mew=1.2)
                             for _, c, mk, ls in LINES], labels=[l for l, *_ in LINES], frameon=False,
-                   fontsize=9, ncol=2, loc="upper center", bbox_to_anchor=(0.5, -0.02))
-        fig.text(0.07, -0.15, "Ceiling (HEK, 20 ppm): for 24% of HEK spectra the true peptide is more than 20 ppm from the recorded precursor, mostly because a heavier isotope peak\nwas recorded as the precursor (about 1 Da above the monoisotopic mass); these fall outside a 20 ppm window, so no method can exceed 0.76.", fontsize=8, color=MUTED)
+                   fontsize=9, ncol=2, loc="upper center", bbox_to_anchor=(0.5, -0.07))
+        fig.text(0.07, -0.2, "Ceilings (20 ppm): for 24% of HEK and 10% of mouse spectra the true peptide is more than 20 ppm from the recorded precursor, mostly because a heavier\nisotope peak was recorded as the precursor (about 1 Da above the monoisotopic mass); these fall outside a 20 ppm window, so no method can recover them.", fontsize=8, color=MUTED)
         fig.savefig(HERE / "A_windows.png"); plt.close(fig)
 
 

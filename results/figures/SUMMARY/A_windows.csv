@@ -29,3 +29,9 @@ nine_yeast,yHydra (L2),,,,20 ppm,0.89010,75476,0.00000,yHydra
 nine_yeast,"ours, 400M teacher (OOD-selected)",standard,"C7 400M seed 1, step 600 (chosen on 8-species validation)",8867776,open search,0.41021,75476,,ours
 nine_yeast,"ours, 400M teacher (OOD-selected)",standard,"C7 400M seed 1, step 600 (chosen on 8-species validation)",8867776,±1.1 Da,0.65940,75476,0.00000,ours
 nine_yeast,"ours, 400M teacher (OOD-selected)",standard,"C7 400M seed 1, step 600 (chosen on 8-species validation)",8867776,20 ppm,0.76530,75476,0.00000,ours
+mouse,yHydra (L2),,,,open search,0.23760,19710,,yHydra
+mouse,yHydra (L2),,,,±1.1 Da,0.76870,19710,0.00000,yHydra
+mouse,yHydra (L2),,,,20 ppm,0.85124,19710,0.10325,yHydra
+mouse,"ours, 400M teacher",standard,"C7 400M seed 0, end of epoch",8870879,open search,0.92501,19710,,ours
+mouse,"ours, 400M teacher",standard,"C7 400M seed 0, end of epoch",8870879,±1.1 Da,0.98640,19710,0.00000,ours
+mouse,"ours, 400M teacher",standard,"C7 400M seed 0, end of epoch",8870879,20 ppm,0.89437,19710,0.10325,ours
