@@ -111,7 +111,7 @@ echo "  run dir    : $RUN_DIR"
 echo "  wandb run  : $WANDB_RUN_ID"
 sed 's/^/  node: /' "$PBS_NODEFILE"
 
-# Preflight: tile count, W&B key, and outbound route.
+# Preflight: tile count, and W&B key and outbound route when W&B is on.
 "$VENV_DIR/bin/python" -c "
 import torch, sys
 n = torch.xpu.device_count()
@@ -119,12 +119,14 @@ print(f'  torch={torch.__version__} xpus={n} xccl={torch.distributed.is_xccl_ava
 if n != $XPUS_PER_HOST:
     sys.exit(f'  visible tiles {n} != XPUS_PER_HOST $XPUS_PER_HOST; set_device(LOCAL_RANK) would go out of range')
 "
-[[ -n ${WANDB_API_KEY:-} ]] || { echo "WANDB_API_KEY not loaded -- see pbs/load_keys.sh" >&2; exit 2; }
-# Any HTTP response means the proxy works; api.wandb.ai returns 404 to a bare GET.
-wandb_code=$(curl --silent --show-error --max-time 30 -o /dev/null -w '%{http_code}' https://api.wandb.ai || echo 000)
-[[ $wandb_code != 000 ]] \
-    || { echo "no outbound route to api.wandb.ai through $ALCF_PROXY" >&2; exit 2; }
-echo "  wandb      : reachable (HTTP $wandb_code)"
+if [[ -n ${WANDB_PROJECT:-} ]]; then
+    [[ -n ${WANDB_API_KEY:-} ]] || { echo "WANDB_API_KEY not loaded -- see pbs/load_keys.sh" >&2; exit 2; }
+    # Any HTTP response means the proxy works; api.wandb.ai returns 404 to a bare GET.
+    wandb_code=$(curl --silent --show-error --max-time 30 -o /dev/null -w '%{http_code}' https://api.wandb.ai || echo 000)
+    [[ $wandb_code != 000 ]] \
+        || { echo "no outbound route to api.wandb.ai through $ALCF_PROXY" >&2; exit 2; }
+    echo "  wandb      : reachable (HTTP $wandb_code)"
+fi
 echo "  preflight  : ok"
 
 # Optional: build the teacher-embedding cache in one process before training.

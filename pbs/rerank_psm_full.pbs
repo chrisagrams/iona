@@ -1,7 +1,8 @@
 #!/bin/bash -l
 # Full-dataset stage 1 for PSM reranking: every run of Gaolaboratory/psm-rerank-hek-hct116.
 #
-#   qsub -q capacity -l select=4 -l walltime=02:00:00 -v TAG=a1-050m-c7s600 pbs/rerank_psm_full.pbs
+#   qsub -q capacity -l select=4 -l walltime=02:00:00 \
+#        -v TAG=...,RUNS_FILE=...,ENCODER=...,STUDENT=...,CACHE=... pbs/rerank_psm_full.pbs
 #
 # Writes $SCRATCH/rerank-psm/$TAG/{rows,handfeat}/<run>.parquet, runs spread over nodes x tiles.
 
@@ -16,12 +17,11 @@ set -uo pipefail
 export REPO_DIR=${REPO_DIR:-${PBS_O_WORKDIR:-$PWD}}
 cd "$REPO_DIR"
 export TAG=${TAG:?set TAG}
-export RUNS_FILE=${RUNS_FILE:-$REPO_DIR/sweeps/arms/psm_rerank_all_runs.txt}
+export RUNS_FILE=${RUNS_FILE:?set RUNS_FILE to a file listing runs, one per line}
+export ENCODER=${ENCODER:?set ENCODER to the contrastive encoder checkpoint}
+export STUDENT=${STUDENT:?set STUDENT to the alignment run final/ directory}
+export CACHE=${CACHE:?set CACHE to the teacher-embedding cache}
 SCRATCH_ROOT=${SCRATCH_ROOT:-/lus/flare/projects/${PROJECT:-UIC-HPC}/$USER/msdelta}
-R=$SCRATCH_ROOT/runs
-export ENCODER=${ENCODER:-$R/sweep-cont050m_ep01_seed1-8860522/checkpoint-600/encoder}
-export STUDENT=${STUDENT:-$R/v2_align-ft-a1-align-100k-050m-c7s600-8861093/final}
-export CACHE=${CACHE:-$SCRATCH_ROOT/align-targets-a1-050m-c7s600}
 export BASE=$SCRATCH_ROOT/rerank-psm/$TAG
 export PY=${VENV_DIR:-$REPO_DIR/.venv}/bin/python
 mkdir -p "$BASE/rows" "$BASE/handfeat" "$BASE/logs"
