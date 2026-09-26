@@ -11,6 +11,7 @@ import torch
 import torch.nn.functional as F
 from pytorch_metric_learning.losses import SupConLoss
 from torch import Tensor, nn
+from torch.utils.checkpoint import get_device_states, set_device_states
 from torch.utils.data import Sampler
 
 from msdelta.data import peptide_key
@@ -229,27 +230,6 @@ def subset_by_group(dataset, max_samples: int, group_key, min_members: int = 4):
     return dataset.select(indices)
 
 
-def _rng_state(device) -> tuple:
-    """CPU and device RNG, so a replayed forward draws the same dropout masks."""
-    device_state = None
-    if device.type == "xpu" and torch.xpu.is_available():
-        device_state = torch.xpu.get_rng_state(device)
-    elif device.type == "cuda" and torch.cuda.is_available():
-        device_state = torch.cuda.get_rng_state(device)
-    return torch.get_rng_state(), device_state
-
-
-def _restore_rng(state: tuple, device) -> None:
-    cpu_state, device_state = state
-    torch.set_rng_state(cpu_state)
-    if device_state is None:
-        return
-    if device.type == "xpu":
-        torch.xpu.set_rng_state(device_state, device)
-    elif device.type == "cuda":
-        torch.cuda.set_rng_state(device_state, device)
-
-
 def gradcache_step(model, batch, chunk_size: int, accelerator=None) -> dict[str, Tensor]:
     """One GradCache step (Gao et al., 2021): a contrastive batch larger than memory allows.
 
@@ -266,7 +246,7 @@ def gradcache_step(model, batch, chunk_size: int, accelerator=None) -> dict[str,
     cached = []
     with torch.no_grad():
         for chunk in chunks:
-            states.append(_rng_state(chunk["mz"].device))
+            states.append((torch.get_rng_state(), *get_device_states(chunk["mz"])))
             cached.append(model.embed(chunk["mz"], chunk["log_intensity"],
                                       chunk["attention_mask"])[0])
 
@@ -278,8 +258,9 @@ def gradcache_step(model, batch, chunk_size: int, accelerator=None) -> dict[str,
 
     # 3. re-embed with grad, push the cached gradient through, add the KL term.
     kl_total = torch.zeros((), device=contrastive.device)
-    for chunk, grad, state in zip(chunks, grads, states):
-        _restore_rng(state, chunk["mz"].device)
+    for chunk, grad, (cpu_state, devices, device_states) in zip(chunks, grads, states):
+        torch.set_rng_state(cpu_state)
+        set_device_states(devices, device_states, device_type=chunk["mz"].device.type)
         embeddings, hidden = model.embed(chunk["mz"], chunk["log_intensity"],
                                          chunk["attention_mask"])
         surrogate = (embeddings * grad).sum()
