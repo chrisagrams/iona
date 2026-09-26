@@ -596,7 +596,7 @@ def main(argv: list[str] | None = None) -> int:
         # Pass it explicitly. Trainer.train() defaults resume_from_checkpoint to None
         # and never falls back to args.resume_from_checkpoint, so the CLI flag parses
         # cleanly and is then IGNORED -- the run restarts from scratch while looking as
-        # though it resumed. See pbs/aurora-finetune-sweep.pbs RESUME_JOB.
+        # though it resumed.
         trainer.train(resume_from_checkpoint=training_args.resume_from_checkpoint)
         # FT31: a run whose sampler yields no batch "finishes" at step 0 and then writes
         # final/ and metrics exactly like a real one; the C2/C4 smoke 8859890 reported

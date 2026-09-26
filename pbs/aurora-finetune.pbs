@@ -186,7 +186,7 @@ EXTRA=()
 # MAX_SAMPLES caps ROWS, so the run finishes real epochs and every end-of-training path
 # executes: evaluation, checkpoint writes, save_total_limit rotation,
 # load_best_model_at_end, the test pass, the final save. MAX_STEPS stops before all of
-# that and is only good for measuring throughput. See aurora-finetune-sweep.pbs.
+# that and is only good for measuring throughput.
 if [[ -n ${MAX_SAMPLES:-} ]]; then
     EXTRA+=(--max_samples "$MAX_SAMPLES"
             --eval_steps "${SMOKE_EVAL_STEPS:-25}" --save_steps "${SMOKE_EVAL_STEPS:-25}"
