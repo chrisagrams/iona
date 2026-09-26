@@ -9,6 +9,5 @@
   "intermediate_size": 5120,
   "model_type": "msdelta",
   "num_attention_heads": 20,
-  "num_hidden_layers": 20,
-  "zero_bias_diagonal": true
+  "num_hidden_layers": 20
 }
