@@ -119,9 +119,13 @@ def benchmark_rows():
     src = EMB["A2"][1][1]
     rows.append(dict(method="MSFragger (e-value)", seed="", source=f"{src.name}:methods/all/msfragger",
                      psms=json.loads(src.read_text())["methods"]["all"]["msfragger"]["psms_1pct"]))
-    for k, lab in (("ms2rescore:searchonly", "MS2Rescore, MSFragger features"),
-                   ("ms2rescore:full", "MS2Rescore, MSFragger features + MS2PIP + DeepLC")):
-        rows.append(dict(method=lab, seed="", psms=ms2r[k]["all"]["pooled"], source=f"results_ms2rescore.json:{k}"))
+    sro = json.loads((REPO / "baselines_wip" / "results_ms2rescore_searchonly8.json").read_text())
+    k_emb = "ms2rescore:searchonly+embedding(400M teacher, cosws)"
+    for k, lab, src in (("ms2rescore:searchonly", "MS2Rescore, MSFragger features", ms2r),
+                        (k_emb, "MS2Rescore, MSFragger features + Iona embedding", sro),
+                        ("ms2rescore:full", "MS2Rescore, MSFragger features + MS2PIP + DeepLC", ms2r)):
+        fname = "results_ms2rescore_searchonly8.json" if src is sro else "results_ms2rescore.json"
+        rows.append(dict(method=lab, seed="", psms=src[k]["all"]["pooled"], source=f"{fname}:{k}"))
     emb = json.loads((REPO / "baselines_wip" / "results_ms2rescore_emb8_a2.json").read_text())
     for k, lab in (("ms2rescore:full+embedding(400M teacher, cosws)", "MS2Rescore, MSFragger features + MS2PIP + DeepLC + Iona embedding"),):
         rows.append(dict(method=lab, seed="", psms=emb[k]["all"]["pooled"], source=f"results_ms2rescore_emb8_a2.json:{k}"))

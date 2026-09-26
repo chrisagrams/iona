@@ -48,7 +48,9 @@ the result file each number was read from.
 - **+ null control**: the same five features computed with the embedding of a random other spectrum
   in place of the query's. It adds the same number of features with the same distributions but no
   information about the match, so any gain it gives is an artefact of adding features.
-- **MS2Rescore** (v4.0.2): the same 8 runs, pooled 1% FDR. "MSFragger features" uses MSFragger's search
+- **MS2Rescore** (v4.0.2): the same 8 runs, pooled 1% FDR. "+ Iona embedding" adds the five Iona embedding
+  features as extra rescoring columns (MSFragger features + Iona embedding: 102,751 vs 100,974 plain and 101,007
+  with the null control, one run each). "MSFragger features" uses MSFragger's search
   features only; "+ MS2PIP + DeepLC" adds MS2PIP (predicted fragment intensities), DeepLC (predicted
   retention time) and MS2Rescore's own fragment-match features. MS2Rescore does NOT use the rich features.
 - **Seeds**: our classifier uses 3 seeds (fold assignment and initialisation) on the 8 runs; the
@@ -89,4 +91,5 @@ features.
   with rich features both read 128,909: the first is one run, the second the mean of 129,041 / 128,751 / 128,934.)
 
 Provenance: msdelta repository, `sweeps/package_rerank.py` (from `results/rerank/psm/` and
-`baselines_wip/results_ms2rescore.json`, `baselines_wip/results_ms2rescore_emb8_a2.json`).
+`baselines_wip/results_ms2rescore.json`, `baselines_wip/results_ms2rescore_emb8_a2.json`,
+`baselines_wip/results_ms2rescore_searchonly8.json`).
