@@ -53,25 +53,6 @@ class DenoiseFinetuneArguments(TrainingArguments):
     eval_test_split: bool = True
 
 
-def select_device() -> None:
-    """Bind this process to its XPU tile under a per-rank or job-wide ZE_AFFINITY_MASK."""
-    local_rank = int(os.environ.get("LOCAL_RANK", "-1"))
-    if local_rank < 0 or not torch.xpu.is_available():
-        return
-    visible = torch.xpu.device_count()
-    local_world = int(os.environ.get("LOCAL_WORLD_SIZE", "1"))
-    if visible == 1:
-        torch.xpu.set_device(0)
-    elif visible >= local_world:
-        torch.xpu.set_device(local_rank)
-    else:
-        raise RuntimeError(
-            f"{visible} visible tiles for {local_world} local ranks: neither a per-rank "
-            "mask (1 tile) nor a job-wide mask (>= one tile per rank). Ranks would share "
-            "a tile."
-        )
-
-
 def describe_run(model_args, data_args, training_args) -> tuple[str, list[str]]:
     """A description and W&B tags derived from the run's settings."""
     if model_args.random_init:
@@ -295,8 +276,6 @@ def subset_splits(datasets: dict, max_samples: int, process_index: int = 0) -> d
 
 
 def main(argv: list[str] | None = None) -> int:
-    select_device()
-
     parser = HfArgumentParser(
         (DenoiseModelArguments, DenoiseDataArguments, DenoiseFinetuneArguments)  # pyright: ignore[reportArgumentType]
     )
