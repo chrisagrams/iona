@@ -1,0 +1,6 @@
+# C4b (8870949) scored on ms-contrastive-100k test
+c4_s400m_ck010k_seed0 /lus/flare/projects/UIC-HPC/khuss/msdelta/runs/sweep-s400m_ck010k_seed0-8870949/final
+c4_s400m_ck120k_seed0 /lus/flare/projects/UIC-HPC/khuss/msdelta/runs/sweep-s400m_ck120k_seed0-8870949/final
+c4_s400m_ck330k_seed0 /lus/flare/projects/UIC-HPC/khuss/msdelta/runs/sweep-s400m_ck330k_seed0-8870949/final
+c4_s400m_ck430k_seed0 /lus/flare/projects/UIC-HPC/khuss/msdelta/runs/sweep-s400m_ck430k_seed0-8870949/final
+c4_s400m_ck540k_seed0 /lus/flare/projects/UIC-HPC/khuss/msdelta/runs/sweep-s400m_ck540k_seed0-8870949/final
