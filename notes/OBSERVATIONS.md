@@ -1730,3 +1730,11 @@ B. iona-rerank (per-run linear) on MS2Rescore's own features (all-ranks export; 
 MS2Rescore peak RSS 37 GB on HILIC14 (240k PSMs, 8-run set); the 18-run set's runs are ~5.7x larger (HILIC1: 1.37M PSMs,
 144k spectra) -> ~200 GB each; 18 or 9 in parallel exceed the ~1 TB node. Would need MAXPAR<=3 and ~70 min per run:
 ~7 h per arm (plain, + embedding, + null) -> not feasible before the deadline alongside the other capacity jobs.
+
+## MS2Rescore with MSFragger features only +/- Iona embedding (job 8870788, 8 runs, ~23:59 UTC)
+
+    plain 100,974 (HEK 97,722 / HCT116 2,950) -- identical to the earlier search-only run, so reproducible
+    + Iona embedding 102,751 (99,445 / 3,119); + null 101,007 (97,652 / 2,976)
+    net embedding - null = +1,744 (+1.73%): HEK +1,793 (null -70), HCT116 +143 (emb +169 vs null +26).
+    Clean: the null adds nothing, the embedding adds 1.7% in MS2Rescore's own classifier -- the same picture as
+    Iona-rerank with MSFragger features (+2.5%).
