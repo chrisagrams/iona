@@ -7,7 +7,7 @@
 #
 # Stage 1 (msdelta.rerank_psm_embed) runs one dataset file per tile, downloading through the
 # ALCF proxy with the HF token (the dataset is private). Stage 2 (msdelta.rerank_psm_fdr)
-# reads every stage-1 table and writes results/rerank/psm/$TAG.json. Stage-1 tables that
+# reads every stage-1 table and writes results/raw/rerank/psm/$TAG.json. Stage-1 tables that
 # already exist are reused, so a timed-out job resumes. By default (SAVE_VECTORS=1) it also writes the unit
 # vectors for R5 under $SCRATCH_ROOT/rerank-psm/$TAG/vectors/<run>/ (~1 GB per run).
 
@@ -68,4 +68,4 @@ grep -h "\[embed\] wrote\|Error\|Traceback" "$ROWS"/.*.log | cut -c1-200
 (( failed )) && echo "  WARNING: some runs failed; stage 2 uses the tables that exist"
 
 echo "=== $(date -Is) stage 2: FDR"
-"$PY" -m msdelta.rerank_psm_fdr --rows "$ROWS" --out "results/rerank/psm/$TAG.json"
+"$PY" -m msdelta.rerank_psm_fdr --rows "$ROWS" --out "results/raw/rerank/psm/$TAG.json"

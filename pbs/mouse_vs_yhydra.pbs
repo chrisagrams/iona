@@ -14,7 +14,7 @@ SC=/lus/flare/projects/UIC-HPC/khuss/msdelta
 ZIP=$SC/eval-data/nine-species-noble/nine-species-balanced.zip
 D=${D:-$SC/baselines/mouse_noble}
 YE=$SC/baselines/yhydra
-OUT=results/finetune/align/mouse_yhydra; mkdir -p $OUT
+OUT=results/raw/finetune/align/mouse_yhydra; mkdir -p $OUT
 PE=$SC/shelf/portable_eval/mouse
 set +u; source /usr/share/lmod/lmod/init/bash; module load frameworks/2025.3.1; set -u
 source pbs/load_keys.sh

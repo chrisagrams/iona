@@ -45,6 +45,6 @@ ABTT statistics were fitted on).
   (best 0.43, 200M@540k); it now shows all 24.
 - The two panels cover different encoder sets (what was evaluated on each benchmark).
 
-Provenance: msdelta repository, `sweeps/package_contrastive.py` (from `results/finetune/contrastive/zeroshot-layers-abtt/`,
-summarised by `sweeps/summarise_zeroshot.py`, `results/finetune/contrastive/nine20k_zeroshot/` and
-`results/finetune/contrastive/mouse20k_zeroshot_*/`).
+Provenance: msdelta repository, `sweeps/package_contrastive.py` (from `results/raw/finetune/contrastive/zeroshot-layers-abtt/`,
+summarised by `sweeps/summarise_zeroshot.py`, `results/raw/finetune/contrastive/nine20k_zeroshot/` and
+`results/raw/finetune/contrastive/mouse20k_zeroshot_*/`).

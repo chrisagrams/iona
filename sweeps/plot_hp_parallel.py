@@ -1,10 +1,10 @@
 """Parallel-coordinates view of the 50m denoise hyperparameter grid (job 8840408, 216 arms).
 
-    .venv/bin/python sweeps/plot_hp_parallel.py   # -> results/figures/SUMMARY/D_hp_parallel.png + .csv
+    .venv/bin/python sweeps/plot_hp_parallel.py   # -> results/processed/figures/SUMMARY/D_hp_parallel.png + .csv
 
 One vertical axis per hyperparameter, one line per arm, coloured by test AUROC; the winning
 combination is drawn on top. Values come from the committed grid table
-results/finetune/denoise/grid_denoise_50m.txt (b = effective batch).
+results/raw/finetune/denoise/grid_denoise_50m.txt (b = effective batch).
 Plotting only (login node).
 """
 from __future__ import annotations
@@ -19,8 +19,8 @@ import numpy as np
 from matplotlib.colors import Normalize
 
 REPO = Path(__file__).resolve().parent.parent
-TABLE = REPO / "results" / "finetune" / "denoise" / "grid_denoise_50m.txt"   # job 8840408, 216 arms
-OUT = REPO / "results" / "figures" / "SUMMARY"
+TABLE = REPO / "results" / "raw" / "finetune" / "denoise" / "grid_denoise_50m.txt"   # job 8840408, 216 arms
+OUT = REPO / "results" / "processed" / "figures" / "SUMMARY"
 AXES = [("learning_rate", "learning rate", lambda v: float(v)),
         ("encoder_lr_scale", "encoder LR scale", lambda v: float(v)),
         ("num_train_epochs", "epochs", lambda v: int(v)),

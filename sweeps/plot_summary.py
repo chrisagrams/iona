@@ -1,7 +1,7 @@
 """Summary figures + tables for D / C / A / R (2026-09-25). Numbers are the recorded results in
 notes/OBSERVATIONS.md (job ids in the comments); run on the login node (plotting only).
 
-    .venv/bin/python sweeps/plot_summary.py   # -> results/figures/SUMMARY/*.png, results/SUMMARY_TABLES.md
+    .venv/bin/python sweeps/plot_summary.py   # -> results/processed/figures/SUMMARY/*.png, results/processed/tables/SUMMARY_TABLES.md
 """
 from __future__ import annotations
 
@@ -13,8 +13,8 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 REPO = Path(__file__).resolve().parent.parent
-OUT = REPO / "results" / "figures" / "SUMMARY"
-TABLES = REPO / "results" / "SUMMARY_TABLES.md"
+OUT = REPO / "results" / "processed" / "figures" / "SUMMARY"
+TABLES = REPO / "results" / "processed" / "tables" / "SUMMARY_TABLES.md"
 OURS, BASE, OTHER, NULL, LIGHT = "#2563eb", "#9ca3af", "#f59e0b", "#d1d5db", "#93c5fd"
 plt.rcParams.update({"figure.dpi": 130, "axes.spines.top": False, "axes.spines.right": False,
                      "font.size": 9})
@@ -51,7 +51,7 @@ C_ZS_ID = {"50m": (0.208, 0.401), "100m": (0.140, 0.328), "200m": (0.191, 0.432)
            "400m": (0.216, 0.414)}   # frozen best block raw -> ABTT, 100k test (400m @10k; 200m @540k)
 C_ZS_OOD = {"50m": (0.385, 0.602), "100m": (0.178, 0.421), "200m": (0.339, 0.654),
             "400m": (0.510, 0.709)}  # yeast 20k, frozen best block raw -> ABTT (50m/100m/400m @220k, 200m @540k);
-                                     # from results/finetune/contrastive/nine20k_zeroshot/
+                                     # from results/raw/finetune/contrastive/nine20k_zeroshot/
 C_TRAJ_OOD = {0: [0.606, 0.655, 0.596, 0.596]}  # seed0 yeast20k at step 300/600/900/final
 
 # ---------------------------------------------------------------- A (peptide embeddings)
@@ -98,7 +98,7 @@ def save(fig, name):
 
 
 D_CKPTS = [10000, 120000, 220000, 330000, 430000, 540423]   # pretraining steps shared by all four scales
-D_CSV = REPO / "results" / "denoise_scaling_pretraining.csv"
+D_CSV = REPO / "results" / "processed" / "tables" / "denoise_scaling_pretraining.csv"
 
 
 def denoise_cells(metric="test_auroc"):
@@ -260,7 +260,7 @@ def fig_r():
 
 
 def tables():
-    L = ["# Summary tables (2026-09-25)", "", "Source: notes/OBSERVATIONS.md (job ids there). Figures: results/figures/SUMMARY/.", ""]
+    L = ["# Summary tables (2026-09-25)", "", "Source: notes/OBSERVATIONS.md (job ids there). Figures: results/processed/figures/SUMMARY/.", ""]
     L += ["## D: denoise", "", "| scale | pretrained + fine-tuned | from scratch | gain |", "|---|---|---|---|"]
     L += [f"| {s} | {D_SCALE[s]:.4f} | {D_SCRATCH[s]:.4f} | +{D_SCALE[s] - D_SCRATCH[s]:.3f} |" for s in D_SCALE]
     L += ["", "Pretrained: mean ± sd over 6 seeds. Scratch: 3 seeds at 100m–400m; 50m is a single run at the same config (lr 2e-4, eff. batch 12, 4 epochs).",

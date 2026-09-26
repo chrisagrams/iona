@@ -48,4 +48,4 @@ fi
     --job "$JOB" ${BASELINE:+--baseline "$BASELINE"} \
     ${ARMS:+--arms "$ARMS"} \
     --runs "$SCRATCH_ROOT/runs" \
-    --out "results/finetune/contrastive/retrieval_vs_separation_${JOB}${SUFFIX}.json"
+    --out "results/raw/finetune/contrastive/retrieval_vs_separation_${JOB}${SUFFIX}.json"

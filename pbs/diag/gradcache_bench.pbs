@@ -11,7 +11,7 @@ S=/lus/flare/projects/UIC-HPC/khuss/msdelta
 set +u; source /usr/share/lmod/lmod/init/bash; module load frameworks/2025.3.1; set -u
 export ONEAPI_DEVICE_SELECTOR=level_zero:gpu ZE_FLAT_DEVICE_HIERARCHY=FLAT PYTHONPATH=$PWD OMP_NUM_THREADS=8
 export HF_HOME=$S/huggingface HF_HUB_OFFLINE=1 HF_DATASETS_OFFLINE=1
-O=results/finetune/contrastive/gradcache_bench; mkdir -p $O
+O=results/raw/finetune/contrastive/gradcache_bench; mkdir -p $O
 i=0
 for s in 50m 100m 200m 400m; do
   c="4,8,16,32,64"; [ $s = 400m ] && c="4,16,32,64"

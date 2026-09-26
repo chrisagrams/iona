@@ -90,6 +90,6 @@ features.
   comparison is pending. (MS2Rescore + MS2PIP + DeepLC + Iona embedding and Iona-rerank
   with rich features both read 128,909: the first is one run, the second the mean of 129,041 / 128,751 / 128,934.)
 
-Provenance: msdelta repository, `sweeps/package_rerank.py` (from `results/rerank/psm/` and
+Provenance: msdelta repository, `sweeps/package_rerank.py` (from `results/raw/rerank/psm/` and
 `baselines_wip/results_ms2rescore.json`, `baselines_wip/results_ms2rescore_emb8_a2.json`,
 `baselines_wip/results_ms2rescore_searchonly8.json`).

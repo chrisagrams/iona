@@ -88,7 +88,7 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--max-rows", type=int, default=2000)
     # DeltaMZBias is O(batch * peaks^2 * n_freqs); 16 x 512 peaks is 8 GiB.
     ap.add_argument("--batch-size", type=int, default=16)
-    ap.add_argument("--out", default="results/finetune/contrastive/retrieval_vs_separation.json")
+    ap.add_argument("--out", default="results/raw/finetune/contrastive/retrieval_vs_separation.json")
     cli = ap.parse_args(argv)
 
     from msdelta.finetuning.contrastive.finetune_contrastive import ContrastiveCollator

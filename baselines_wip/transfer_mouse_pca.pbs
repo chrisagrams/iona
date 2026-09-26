@@ -17,7 +17,7 @@ set +u; source /usr/share/lmod/lmod/init/bash; module load frameworks/2025.3.1; 
 export ONEAPI_DEVICE_SELECTOR=level_zero:gpu ZE_FLAT_DEVICE_HIERARCHY=FLAT PYTHONPATH=$PWD OMP_NUM_THREADS=8
 export HF_HOME=$S/huggingface HF_HUB_OFFLINE=1 HF_DATASETS_OFFLINE=1
 PY=.venv/bin/python
-R=results/finetune/contrastive
+R=results/raw/finetune/contrastive
 
 echo "=== $(date -Is) PCA on the existing benchmarks (tiles 8-11, background)"
 pca() {  # tile, then data:outdir pairs run in sequence on that tile

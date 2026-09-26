@@ -22,7 +22,7 @@ import json
 from pathlib import Path
 
 RUNS = Path("/lus/flare/projects/UIC-HPC/khuss/msdelta/runs")
-RES = Path(__file__).resolve().parent.parent / "results/finetune/contrastive"
+RES = Path(__file__).resolve().parent.parent / "results/raw/finetune/contrastive"
 PICKS = {
     "400m": dict(run="sweep-cont400m_ep01_seed0-8860522", name="c7b_cont400m_final_seed0",
                  seed=0, arch="20 layers x 1280", width=2560, stage1_epochs=12,

@@ -2,7 +2,7 @@
 
     .venv/bin/python sweeps/package_rerank.py
 
-Reads the committed per-run rescoring results (results/rerank/psm/*.json; A2 seed 0 from its log)
+Reads the committed per-run rescoring results (results/raw/rerank/psm/*.json; A2 seed 0 from its log)
 and the MS2Rescore baseline (baselines_wip/results_ms2rescore.json). Nothing typed in. Plotting only.
 
     R_embedding_gain.png / .csv   % more PSMs at 1% FDR from adding our embedding features vs a null control
@@ -26,8 +26,8 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 REPO = Path(__file__).resolve().parent.parent
-PSM = REPO / "results" / "rerank" / "psm"
-FIG = REPO / "results" / "figures" / "SUMMARY"
+PSM = REPO / "results" / "raw" / "rerank" / "psm"
+FIG = REPO / "results" / "processed" / "figures" / "SUMMARY"
 INK, MUTED, GRIDC = "#1f2937", "#6b7280", "#e5e7eb"
 STYLE = {"font.family": "DejaVu Sans", "font.size": 10, "axes.edgecolor": "#9ca3af", "axes.linewidth": 0.8,
          "axes.labelcolor": INK, "text.color": INK, "xtick.color": MUTED, "ytick.color": MUTED,

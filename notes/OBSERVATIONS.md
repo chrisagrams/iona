@@ -3,6 +3,11 @@
 Things we believe and why, separate from `STATUS.md` (what is running) and `TODO.md`
 (what is broken). Each entry says what would overturn it.
 
+> **Paths (2026-09-26 reorg):** entries below keep the paths as they were when written. Since then
+> `results/finetune` -> `results/raw/finetune`, `results/rerank` -> `results/raw/rerank`,
+> `results/figures` -> `results/processed/figures`, and the top-level `results/*.csv` and
+> `results/SUMMARY_TABLES.md` -> `results/processed/tables/`. See `results/README.md`.
+
 ---
 
 ## READ THIS FIRST: the contrastive separation ratio has sd 0.75 at a fixed seed

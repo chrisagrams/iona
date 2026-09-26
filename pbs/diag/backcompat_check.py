@@ -1,7 +1,7 @@
 """Backward compatibility of the msdelta reorganisation and the standard PeptideEmbedderModel, on real
 models (run from the NEW tree; the OLD tree's path is given for the spectrum comparison).
 
-    python pbs/diag/backcompat_check.py --old-repo /home/khuss/code/msdelta --out results/backcompat.json
+    python pbs/diag/backcompat_check.py --old-repo /home/khuss/code/msdelta --out results/raw/diag/backcompat.json
 
 1. Peptide embedder, released Hub model (Gaolaboratory/iona-peptide-embedder-400m, local HF cache):
    new PeptideEmbedderModel.from_pretrained  vs  the old loading path (PeptideEncoder built by hand,

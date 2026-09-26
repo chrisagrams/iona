@@ -2,7 +2,7 @@
 # Cross-over of MS2Rescore and our rescorer on the 8 psm-rerank-hek-hct116 runs (one node).
 #   B. (default) MS2Rescore full writing ALL candidates (arm fullall) -> $M/all8, then OUR per-run
 #      classifier on MS2Rescore's features (set ms+ms2r; variants none / +embws / +nullws),
-#      seeds $SEEDS -> results/rerank/psm/a2-400m_ms2r_seed<s>.json
+#      seeds $SEEDS -> results/raw/rerank/psm/a2-400m_ms2r_seed<s>.json
 #   C. (default) MS2Rescore full WITHOUT DeepLC, plain / + our embedding (cosws) / + null in its place
 #      -> $M/nodeeplc8/{nodeeplc,cosws/nodeeplc,null/nodeeplc}, counted -> baselines_wip/results_ms2rescore_nodeeplc8.json
 #   A. (PARTS includes lab) MS2Rescore full + the lab's feature table, plain / + embedding / + null
@@ -28,7 +28,7 @@ if [[ $SMOKE == 1 ]]; then
   SEEDS=${SEEDS:-0}; LAB8=$M/smoke_lab8; ALL8=$M/smoke_all8; RES=$M/smoke_results; TAGOUT=smoke_
 else
   RUNS=${RUNS:-$RUNS8}; LIMIT=0; SEEDS=${SEEDS:-"0 1 2"}; LAB8=$M/lab8; ALL8=$M/all8
-  RES=$REPO/results/rerank/psm; TAGOUT=
+  RES=$REPO/results/raw/rerank/psm; TAGOUT=
 fi
 IDS=$(for r in $RUNS; do echo -n "${r##*/},"; done); IDS=${IDS%,}
 PARTS=${PARTS:-"all nodeeplc"}; SETS=${SETS:-ms+ms2r}

@@ -68,4 +68,4 @@ search), 3 seeds each. Teacher quality = the teacher's own spectrum-retrieval MA
 A better teacher gives a better student. Three teachers are too few for a curve, so this is kept as a table.
 
 Provenance: msdelta repository, `sweeps/package_alignment.py` (student test results from
-`results/finetune/align/`, yHydra comparisons from the per-dataset cross-modal result files).
+`results/raw/finetune/align/`, yHydra comparisons from the per-dataset cross-modal result files).

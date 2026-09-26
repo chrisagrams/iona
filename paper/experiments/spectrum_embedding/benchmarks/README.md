@@ -51,4 +51,4 @@ Metric: MAP@R over experimental spectra; relevant = same modified peptide and ch
 - "C7 400M" here is the mean of 3 seeds; `../C_transfer_ours.png` shows the single validation-selected seed.
 
 Provenance: msdelta repository, `sweeps/package_contrastive.py` (our results from
-`results/finetune/contrastive/<benchmark>/`, GLEAMS from its per-benchmark metrics files).
+`results/raw/finetune/contrastive/<benchmark>/`, GLEAMS from its per-benchmark metrics files).

@@ -5,7 +5,7 @@
 #        -v RUNS="dir1 dir2",CACHE=/lus/.../align-targets-x,ARGS_FILE=configs/.../training.args \
 #        pbs/eval_align_test.pbs
 #
-# One student per tile, in parallel; outputs to results/finetune/align/.
+# One student per tile, in parallel; outputs to results/raw/finetune/align/.
 
 #PBS -N msdelta-evalalign
 #PBS -A UIC-HPC
@@ -37,20 +37,20 @@ export HF_HOME=${HF_HOME:-$SCRATCH_ROOT/huggingface}
 export HF_HUB_OFFLINE=${HF_HUB_OFFLINE:-1}
 export HF_DATASETS_OFFLINE=${HF_DATASETS_OFFLINE:-1}
 
-mkdir -p results/finetune/align
+mkdir -p results/raw/finetune/align
 i=0; pids=()
 for run in $RUNS; do
     name=$(basename "$run")
     ZE_AFFINITY_MASK=$i "$VENV_DIR/bin/python" -m msdelta.eval_align_test --run "$run" \
         --cache "$CACHE" --args_file "$ARGS_FILE" --data "$DATA" \
-        --out "results/finetune/align/test_$name.json" > "results/finetune/align/.test_$name.log" 2>&1 &
+        --out "results/raw/finetune/align/test_$name.json" > "results/raw/finetune/align/.test_$name.log" 2>&1 &
     pids+=($!); i=$((i + 1))
 done
 failed=0
 for p in "${pids[@]}"; do wait "$p" || failed=1; done
 for run in $RUNS; do
     name=$(basename "$run"); echo "== $name"
-    grep -E '"crossmodal/(hit@1|hit@5|mrr|n_candidates)"|"teacher_spectrum/MAP@R"' "results/finetune/align/.test_$name.log" \
-        || tail -5 "results/finetune/align/.test_$name.log"
+    grep -E '"crossmodal/(hit@1|hit@5|mrr|n_candidates)"|"teacher_spectrum/MAP@R"' "results/raw/finetune/align/.test_$name.log" \
+        || tail -5 "results/raw/finetune/align/.test_$name.log"
 done
 exit $failed

@@ -29,7 +29,7 @@ import numpy as np
 
 REPO = Path(__file__).resolve().parent.parent
 RUNS = "/lus/flare/projects/UIC-HPC/khuss/msdelta/runs"
-FIGS = REPO / "results" / "figures" / "C_contrastive" / "C1_recipe"
+FIGS = REPO / "results" / "processed" / "figures" / "C_contrastive" / "C1_recipe"
 JOBS = ("8856460", "8856643", "8856642")
 METRIC = "retrieval/MAP@R"
 INK, MUTED, GRID = "#1a1a1a", "#6b7280", "#e5e7eb"

@@ -16,5 +16,5 @@ PY=$OLD/.venv/bin/python
 echo "=== $(date -Is) test suite ($REPO_DIR)"
 $PY -m pytest tests -p no:cacheprovider -q 2>&1 | tail -25
 echo "=== $(date -Is) real-model backward compatibility"
-$PY pbs/diag/backcompat_check.py --old-repo $OLD --out $REPO_DIR/results/backcompat.json
+$PY pbs/diag/backcompat_check.py --old-repo $OLD --out $REPO_DIR/results/raw/diag/backcompat.json
 echo "=== $(date -Is) done"

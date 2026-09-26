@@ -27,7 +27,7 @@ SCRATCH_ROOT=${SCRATCH_ROOT:-/lus/flare/projects/$PROJECT/$USER/msdelta}
 SPLIT=${SPLIT:-test}
 DATA=${DATA:-$SCRATCH_ROOT/eval-data/ms-contrastive-100k-$SPLIT-mp512}
 PROCESSOR=${PROCESSOR:-/flare/UIC-HPC/khuss/msdelta/pretrained/msdelta-50m-production-01-checkpoint-220000}
-OUT_DIR=${OUT_DIR:-results/finetune/contrastive/grouped100k-$SPLIT}
+OUT_DIR=${OUT_DIR:-results/raw/finetune/contrastive/grouped100k-$SPLIT}
 SHARDS=${SHARDS:-12}
 
 set +u
