@@ -80,11 +80,24 @@ figure (they were not scored on every benchmark); see `C_transfer_ours` and `0_s
 ## C_pretraining_scaling
 
 - Recipe: replicate corpus only, SupCon loss, lr 1e-4, KL 10, temperature 0.002, 64 peptide groups x 4
-  replicates per batch, 24 epochs; 3 seeds per point; evaluated on the ms-contrastive-100k test.
-- 50M and 100M across pretraining checkpoints 10k-540k; 200M and 400M at 220k only.
-  Jobs 8860092 / 8860863 (sizes at 220k) and 8860093 (checkpoints).
-- Reading: MAP@R rises steeply from 10k to 120k pretraining steps (50M: 0.447 -> 0.627) and flattens
-  after about 220k; 100M is at or above 50M at every checkpoint; 400M (0.703) is above the others at 220k.
+  replicates per batch, 24 epochs; evaluated on the ms-contrastive-100k test.
+- All four sizes across pretraining checkpoints 10k-540k. 3 seeds per point for 50M and 100M and for
+  every size at 220k; the other 200M and 400M points are one seed (seed 0). Jobs 8860092 / 8860863
+  (sizes at 220k), 8860093 (50M/100M checkpoints), 8870949 (200M/400M checkpoints).
+
+| MAP@R | 10k | 120k | 220k | 330k | 430k | 540k |
+|---|---|---|---|---|---|---|
+| 400M | 0.552 | 0.698 | 0.703 | 0.709 | 0.706 | **0.715** |
+| 200M | 0.531 | 0.643 | 0.658 | 0.614 | 0.667 | 0.666 |
+| 100M | 0.510 | 0.646 | 0.665 | 0.666 | 0.672 | 0.671 |
+| 50M | 0.447 | 0.627 | 0.657 | 0.655 | 0.664 | 0.665 |
+
+- Reading: MAP@R rises steeply from 10k to 120k pretraining steps and flattens after about 220k. From
+  120k on, 400M is about 0.04 above every smaller size and still improves slowly to 540k (0.715); 50M,
+  100M and 200M plateau together at 0.66-0.67.
+- 200M at 330k (0.614, one seed) is an outlier; the same checkpoint is also among 200M's weakest as a
+  frozen encoder (see `0_shot/`), so it looks like a weaker starting checkpoint rather than a failed
+  fine-tuning run.
 
 ## C_pretraining_ablation
 

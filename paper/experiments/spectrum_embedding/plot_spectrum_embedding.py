@@ -129,7 +129,7 @@ def pretraining_scaling():
         ax.set_title("Pretraining and scale improve spectrum retrieval", loc="left", fontsize=13, fontweight="bold", pad=12)
         ax.legend(handles=handles, title="model size", frameon=False, fontsize=9, title_fontsize=9.5,
                   loc="upper left", bbox_to_anchor=(1.01, 1.0))
-        fig.text(0.01, -0.04, "Replicate-corpus recipe (24 epochs), mean ± sd over 3 seeds.", fontsize=8, color=MUTED)
+        fig.text(0.01, -0.04, "Replicate-corpus recipe (24 epochs). Mean ± sd over 3 seeds for 50M, 100M and all sizes at 220k; other 200M and 400M points are one seed.", fontsize=8, color=MUTED)
         fig.savefig(HERE / "C_pretraining_scaling.png"); plt.close(fig)
 
 

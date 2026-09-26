@@ -174,7 +174,7 @@ def fig_pretraining(rows):
                      fontweight="bold", pad=12)
         ax.legend(handles=handles, title="model size", frameon=False, fontsize=9, title_fontsize=9.5,
                   loc="upper left", bbox_to_anchor=(1.01, 1.0))
-        fig.text(0.01, -0.04, "Replicate-corpus recipe (24 epochs), mean ± sd over 3 seeds.",
+        fig.text(0.01, -0.04, "Replicate-corpus recipe (24 epochs). Mean ± sd over 3 seeds for 50M, 100M and all sizes at 220k; other 200M and 400M points are one seed.",
                  fontsize=8, color=MUTED)
         fig.savefig(FIG / "C_pretraining_scaling.png"); plt.close(fig)
 
@@ -188,13 +188,13 @@ def zeroshot_rows():
                             abtt_best=float(r["abtt_best"]), abtt_D=r["abtt_best_D"], abtt_layer=r["abtt_best_layer"],
                             abtt_fit="ms-contrastive-100k train"))
     # mouse 20k: only the two best in-distribution/yeast encoders were run (400M@220k, 400M@330k)
-    for f in sorted(RES.glob("mouse20k_zeroshot_*/zs_*.json")):
+    for f in sorted(list(RES.glob("mouse20k_zeroshot_*/zs_*.json")) + list(RES.glob("human20k_zeroshot/zs_*.json"))):
         d = json.loads(f.read_text())
         sc, ck = re.match(r"zs_0*(\d+m)_ck0*(\d+k)", f.stem).groups()
         tr = d["abtt"]["train"]
         best = max(((D, lay, v["experimental/MAP@R"]) for D, L in tr.items() if D != "center"
                     for lay, v in L.items()), key=lambda t: t[2])
-        out.append(dict(benchmark="mouse-20k", encoder=f"{sc}@{ck}",
+        out.append(dict(benchmark="human-20k" if "human20k" in str(f) else "mouse-20k", encoder=f"{sc}@{ck}",
                         raw_final=d["layers"]["final"]["experimental/MAP@R"],
                         raw_best_layer=max(v["experimental/MAP@R"] for v in d["layers"].values()),
                         abtt_best=best[2], abtt_D=best[0], abtt_layer=best[1], abtt_fit="ms-contrastive-100k train"))
