@@ -32,4 +32,4 @@ export OMP_NUM_THREADS=${OMP_NUM_THREADS:-8}
 export PYTHONPATH=$REPO_DIR${PYTHONPATH:+:$PYTHONPATH}
 export HF_HOME=${HF_HOME:-$SCRATCH_ROOT/huggingface}
 export HF_HUB_OFFLINE=1 HF_DATASETS_OFFLINE=1
-"$VENV_DIR/bin/python" -m msdelta.precompute_align --args_file "$ARGS_FILE" --pretrained_path "$PRETRAINED_PATH" --target_cache "$TARGET_CACHE"
+"$VENV_DIR/bin/python" "$REPO_DIR/scripts/precompute_align.py" --args_file "$ARGS_FILE" --pretrained_path "$PRETRAINED_PATH" --target_cache "$TARGET_CACHE"

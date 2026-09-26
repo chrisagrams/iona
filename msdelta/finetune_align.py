@@ -55,7 +55,7 @@ class AlignDataArguments:
     max_peaks: int = 512
     validation_fraction: float = 0.1
     max_samples: int = 0
-    # Output of `python -m msdelta.precompute_align`; when set, no teacher is loaded.
+    # Output of `python scripts/precompute_align.py`; when set, no teacher is loaded.
     target_cache: str | None = None
 
 

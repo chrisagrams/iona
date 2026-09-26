@@ -40,7 +40,7 @@ export HF_HOME=${HF_HOME:-$SCRATCH_ROOT/huggingface}
 export HF_HUB_OFFLINE=${HF_HUB_OFFLINE:-1}
 export HF_DATASETS_OFFLINE=${HF_DATASETS_OFFLINE:-1}
 PY="$VENV_DIR/bin/python"
-run() { "$PY" -m msdelta.precompute_align --args_file "$ARGS_FILE" --pretrained_path "$PRETRAINED_PATH" \
+run() { "$PY" "$REPO_DIR/scripts/precompute_align.py" --args_file "$ARGS_FILE" --pretrained_path "$PRETRAINED_PATH" \
         --target_cache "$TARGET_CACHE" --num_shards "$SHARDS" "$@"; }
 
 if [[ ! -d $TARGET_CACHE/_flat/train ]]; then
