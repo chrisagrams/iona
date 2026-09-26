@@ -252,17 +252,6 @@ class DenoiseFinetuneTrainer(DenoisingTrainer):
         return scheduler
 
 
-def load_description(argv: list[str] | None = None) -> str | None:
-    """Read DESCRIPTION.md beside the --args_file, if present."""
-    argv = list(sys.argv[1:] if argv is None else argv)
-    for flag, value in zip(argv, argv[1:]):
-        if flag == "--args_file":
-            path = Path(value).parent / "DESCRIPTION.md"
-            if path.exists():
-                return " ".join(path.read_text().split())
-    return None
-
-
 def subset_splits(datasets: dict, max_samples: int, process_index: int = 0) -> dict:
     """Cap every split at max_samples rows (0 = no cap)."""
     if max_samples <= 0:
@@ -299,7 +288,6 @@ def main(argv: list[str] | None = None) -> int:
     )
     model, pretrained = build_denoising_model(model_args.pretrained_path, model_args)
 
-    training_args.run_description = training_args.run_description or load_description()
     description, tags = describe_run(model_args, data_args, training_args)
     if training_args.process_index == 0:
         (out_dir / "RUN.md").write_text(
