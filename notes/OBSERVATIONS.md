@@ -1738,3 +1738,14 @@ MS2Rescore peak RSS 37 GB on HILIC14 (240k PSMs, 8-run set); the 18-run set's ru
     net embedding - null = +1,744 (+1.73%): HEK +1,793 (null -70), HCT116 +143 (emb +169 vs null +26).
     Clean: the null adds nothing, the embedding adds 1.7% in MS2Rescore's own classifier -- the same picture as
     Iona-rerank with MSFragger features (+2.5%).
+
+## Mouse (Noble nine-species-balanced, Mus musculus) vs yHydra (job 8870879, 2026-09-26 00:53 UTC)
+
+25,490 annotated spectra; shared (yHydra-representable) queries 19,710; Iona = iona-contrastive-400m + iona-peptide-embedder-400m.
+    Hit@1          open     +-1.1 Da   20 ppm (ceiling 0.897: 10.3% of true peptides outside 20 ppm)
+    yHydra (L2)    0.238    0.769      0.851
+    Iona           0.925    0.986      0.894
+    Iona, full set (every query / every candidate, open): 0.763
+Far stronger than on yeast (DeepNovo nine-species test: open 0.39, 20 ppm 0.76 vs yHydra 0.89). CAVEAT before claiming:
+mouse was NOT used to select this model, but the training corpus (ms-contrastive-100k) may overlap public mouse data
+(the MassIVE-KB overlap question from C11 is still open) -- check provenance / peptide overlap before calling it unseen.
