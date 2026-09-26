@@ -11,6 +11,11 @@ of the five production runs, in log space,
 N = parameters, D = peaks seen (steps x 512 spectra x 512 peaks), compute C = 6 N D -- the conventions
 of scripts/plot_pretrain_efficiency_powerlaw.py (repository root), whose no-E fit this reproduces.
 Writes three figures and prints both fits (with AIC and held-out checks) and fit_parameters.csv.
+
+Also (end of training only, 540,423 steps, one point per size): final_loss_vs_parameters.png and
+final_loss_fit.csv, fitting L(N) = A (N/1e8)^-alpha with and without a floor E; and the crossover tables
+equal_steps.csv (every size's loss at each logged step) and equal_compute.csv (every size's loss at
+shared compute budgets, log-log interpolated between logged steps, and which size is best).
 """
 import csv
 from pathlib import Path
@@ -156,5 +161,57 @@ def main():
         fig.tight_layout(); fig.savefig(HERE / "scaling_law_fit_loglog.png"); plt.close(fig)
 
 
+def extras():
+    from scipy.optimize import curve_fit
+    rows = load()
+    by = {m: sorted([r for r in rows if r["model"] == m], key=lambda r: r["step"]) for m in MODELS}
+    # final loss vs parameters
+    fin = [by[m][-1] for m in MODELS]
+    n = np.array([r["parameters"] for r in fin]); l = np.array([r["eval_loss"] for r in fin])
+    pp, cp = curve_fit(lambda x, A, a: A * (x / N_SCALE) ** -a, n, l, p0=(0.06, 0.1))
+    pf, cf = curve_fit(lambda x, E, A, a: E + A * (x / N_SCALE) ** -a, n, l, p0=(0.05, 0.005, 0.5), maxfev=100000)
+    ep, ef = np.sqrt(np.diag(cp)), np.sqrt(np.diag(cf))
+    rp = l - pp[0] * (n / N_SCALE) ** -pp[1]; rf = l - (pf[0] + pf[1] * (n / N_SCALE) ** -pf[2])
+    with open(HERE / "final_loss_fit.csv", "w") as fh:
+        fh.write("form,E,E_se,A,alpha,alpha_se,RMSE,residuals_25M_50M_100M_200M_400M\n")
+        fh.write(f"power_law,,,{pp[0]:.5f},{pp[1]:.4f},{ep[1]:.4f},{np.sqrt(np.mean(rp**2)):.5f},{' '.join(f'{x:+.5f}' for x in rp)}\n")
+        fh.write(f"power_law_plus_floor,{pf[0]:.5f},{ef[0]:.5f},{pf[1]:.5f},{pf[2]:.4f},{ef[2]:.4f},"
+                 f"{np.sqrt(np.mean(rf**2)):.5f},{' '.join(f'{x:+.5f}' for x in rf)}\n")
+    with plt.rc_context(STYLE):
+        fig, ax = plt.subplots(figsize=(6.4, 4.6)); nn = np.logspace(np.log10(1.8e7), np.log10(8e8), 200)
+        ax.plot(nn, pp[0] * (nn / N_SCALE) ** -pp[1], "--", color="#9ca3af", lw=1.4,
+                label=f"power law: {pp[0]:.4f}·(N/10⁸)^−{pp[1]:.3f}")
+        ax.plot(nn, pf[0] + pf[1] * (nn / N_SCALE) ** -pf[2], ":", color="#1e3a8a", lw=1.6,
+                label=f"power law + floor: {pf[0]:.4f} + {pf[1]:.4f}·(N/10⁸)^−{pf[2]:.2f}")
+        ax.axhline(pf[0], color="#1e3a8a", lw=0.8, alpha=0.4)
+        ax.plot(n, l, "o", color="#1e3a8a", ms=7, zorder=3)
+        for x, y, m in zip(n, l, MODELS):
+            ax.annotate(f"{m}\n{y:.4f}", (x, y), textcoords="offset points", xytext=(6, 4), fontsize=8)
+        ax.set_xscale("log"); ax.set_yscale("log"); ax.set_xlabel("parameters N")
+        ax.set_ylabel("evaluation loss, end of training")
+        ax.set_title("End-of-training loss vs model size (same data, 3 epochs)", loc="left", fontsize=10)
+        ax.legend(frameon=False, fontsize=8); ax.grid(True, color="#e5e7eb", lw=0.6, which="both")
+        fig.savefig(HERE / "final_loss_vs_parameters.png"); plt.close(fig)
+    # crossover tables
+    steps = [r["step"] for r in by["50M"]]
+    with open(HERE / "equal_steps.csv", "w") as fh:
+        fh.write("step," + ",".join(MODELS) + ",best\n")
+        for st in steps:
+            v = {m: next(r["eval_loss"] for r in by[m] if r["step"] == st) for m in MODELS}
+            fh.write(f"{st}," + ",".join(f"{v[m]:.5f}" for m in MODELS) + f",{min(v, key=v.get)}\n")
+    with open(HERE / "equal_compute.csv", "w") as fh:
+        fh.write("flops," + ",".join(MODELS) + ",best\n")
+        for c in np.logspace(17, np.log10(by["400M"][-1]["flops"]), 19):
+            v = {}
+            for m in MODELS:
+                f = np.array([r["flops"] for r in by[m]]); y = np.array([r["eval_loss"] for r in by[m]])
+                if f[0] <= c <= f[-1] * 1.0001:
+                    v[m] = float(np.exp(np.interp(np.log(c), np.log(f), np.log(y))))
+            fh.write(f"{c:.3e}," + ",".join(f"{v[m]:.5f}" if m in v else "" for m in MODELS)
+                     + f",{min(v, key=v.get) if v else ''}\n")
+    print("final-loss fits:", np.round(pp, 4), np.round(pf, 4))
+
+
 if __name__ == "__main__":
     main()
+    extras()

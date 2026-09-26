@@ -10,6 +10,9 @@ pretraining steps of its encoder, with a power-law fit.
 | `D_denoise_loss_scaling.png` | left: test loss vs pretraining steps per model size, with the fit (dotted); right: reducible loss L − E_N on log-log axes |
 | `D_denoise_loss_scaling.csv` | the plotted data: one row per (model size, pretraining checkpoint) |
 | `plot_denoise_loss_scaling.py` | fits and regenerates the figure from the CSV (`python plot_denoise_loss_scaling.py`; matplotlib, numpy, scipy) |
+| `fit_alternatives.py` | fits every functional form tried (below) to the same CSV and writes `fit_comparison.csv` and one figure per alternative (`python fit_alternatives.py`) |
+| `fit_comparison.csv` | all four forms: parameters, standard errors, R², RMSE, χ²/dof, held-out errors |
+| `D_loss_fit_chinchilla.png`, `D_loss_fit_compute.png`, `D_loss_fit_pure_power.png` | the three alternatives that were not used, each against the data |
 
 CSV columns: `scale`, `parameters` (exact count, from the checkpoint), `pretraining_steps`, `n_seeds`,
 `mean_test_loss`, `se_test_loss` (standard error over seeds), `per_seed_test_loss` (space-separated).
@@ -40,9 +43,20 @@ shared by all sizes; weighted least squares (weights: standard error over seeds,
 - Reading: denoising loss decreases as a power law in pretraining steps with one exponent shared by all
   sizes. The asymptotic loss E_N improves up to 200M and not beyond (200M and 400M are equal within
   error).
-- Why this form: a model with a power law in model size as well (E + A·N^−α + B·S^−β) fits worse
-  (χ²/dof 5.5 vs 3.2) and needs an implausible α ≈ 2, because the loss saturates in size; one power law
-  in compute (N × S) through all points fits poorly (R² 0.92, systematic by size).
+- Every form tried (`fit_comparison.csv`; weighted least squares on the same 29 points):
+
+| form | R² | RMSE | χ²/dof | held out 540k (max err) | held out 400M (max err) |
+|---|---|---|---|---|---|
+| **per-size floor + shared step power law** (used) | **0.997** | **0.0011** | **3.2** | **0.0020** | – (floor is per size) |
+| E + A·N^−α + B·S^−β (Chinchilla form) | 0.995 | 0.0014 | 5.5 | 0.0029 | 0.0056 |
+| E + A·(N·S)^−γ (one curve in compute) | 0.924 | 0.0053 | 67 | 0.0074 | 0.0126 |
+| A·N^−α·S^−β (no floor) | 0.908 | 0.0058 | 70 | 0.0097 | 0.0163 |
+
+- Why this form: the Chinchilla form fits the size axis with an implausible α ≈ 2.1 because denoising
+  loss saturates in model size (200M and 400M are equal within error), so a power law in N does not
+  hold; one curve in compute misses systematically by size (at equal compute 100M/200M sit below it,
+  50M/400M above); dropping the floor fails outright. The per-size floor makes no claim about N and
+  isolates the part that is a power law: pretraining steps.
 
 ## Caveats
 

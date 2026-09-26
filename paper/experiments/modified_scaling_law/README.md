@@ -14,7 +14,10 @@ repository root, whose fit this reproduces exactly).
 | `scaling_law_fit_loglog.png` | the fit with E along both axes: loss vs data per model size (left), loss vs model size at 10k/50k/200k/540k steps (right) |
 | `pretrain_eval_loss.csv` | every logged evaluation of the five production runs (`model`, `run`, `parameters`, `step`, `peaks_seen`, `flops`, `eval_loss`, `post_warmup`) |
 | `fit_parameters.csv` | both fits: parameters, log-space R², AIC, held-out errors |
-| `plot_modified_scaling_law.py` | fits and draws everything from the CSV (`python plot_modified_scaling_law.py`; matplotlib, numpy, scipy) |
+| `final_loss_vs_parameters.png`, `final_loss_fit.csv` | end-of-training loss (540,423 steps) vs parameters, fitted with a pure power law and with a power law plus floor |
+| `equal_steps.csv` | every size's eval loss at each logged step (equal data), and the best size |
+| `equal_compute.csv` | every size's eval loss at shared compute budgets (log-log interpolated between logged steps), and the best size |
+| `plot_modified_scaling_law.py` | fits and draws everything from `pretrain_eval_loss.csv` (`python plot_modified_scaling_law.py`; matplotlib, numpy, scipy) |
 
 ## Data and conventions
 
@@ -56,6 +59,34 @@ Compute-optimal frontier implied by each fit:
   (α 0.14 vs 0.55); the data exponent β is unchanged. Inside the data the two frontiers are close; they
   diverge in extrapolation (the form without E predicts steady returns, the form with E diminishing
   returns towards E ≈ 0.039). The 400M run's final checkpoints flatten above both frontiers.
+
+## End of training: loss vs model size
+
+One point per size, all at 540,423 steps (the same data), `final_loss_fit.csv`:
+
+| | E | A | α | RMSE | largest residual |
+|---|---|---|---|---|---|
+| L = A (N/10⁸)^−α | – | 0.059 | 0.089 ± 0.015 | 0.0015 | +0.0018 (25M), +0.0017 (400M) |
+| **L = E + A (N/10⁸)^−α** | **0.052 ± 0.001** | 0.005 | 0.83 ± 0.16 | **0.0004** | 0.0006 |
+
+The pure power law misses systematically (above at both ends, below in between); with a floor every
+point is within 0.0006. 400M (0.0543) is within 3% of the floor, so the step from 200M gains only 1.2%
+(per doubling: 25M→50M −10.7%, 50M→100M −5.1%, 100M→200M −5.9%, 200M→400M −1.2%). At a fixed data
+budget this floor is the irreducible loss plus the data term; separating them needs runs on different
+amounts of data. (This floor, 0.052, is higher than the joint fit's E = 0.039 because the joint fit also
+has a data term.)
+
+## Crossovers (which size is best at a given budget)
+
+- Equal steps (`equal_steps.csv`, equal data): from 10k steps on the larger model is better at every
+  step; 400M is ahead of 200M from 10k (−1.8%) to 200k (−3.6%), narrowing to −1.2% at the end. At 5k
+  (first post-warm-up evaluation) 400M is marginally behind 200M (0.1325 vs 0.1313).
+- Equal compute (`equal_compute.csv`): the best size moves up with compute, 25M up to about 4e18 FLOPs,
+  50M to about 2e19, then 200M, and 400M only beyond 200M's final budget (400M's final loss 0.0543 is
+  below 200M's 0.0549, at twice the compute). 100M is never the best in these budgets. This is the
+  pattern of Kaplan et al. (2020): each size is compute-optimal over a range of budgets.
+- Equal-compute comparisons use mid-schedule checkpoints of fixed 540k-step cosine schedules, which
+  disadvantage the larger model at a given budget (it is earlier in its schedule).
 
 ## Caveats
 
