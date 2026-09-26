@@ -11,13 +11,16 @@ import sys
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
+import numpy as np
 import torch
-from transformers import (DataCollatorWithPadding, HfArgumentParser,
+from sklearn.metrics import (accuracy_score, auc, balanced_accuracy_score, f1_score,
+                             precision_recall_curve, precision_score, recall_score,
+                             roc_auc_score)
+from transformers import (DataCollatorWithPadding, HfArgumentParser, Trainer,
                           TrainingArguments, set_seed)
 
 from msdelta.configuration_msdelta import MSDeltaConfig, MSDeltaDenoisingConfig
 from msdelta.data import build_denoising_datasets
-from transformers import Trainer
 from msdelta.denoising import DenoisingTrainer
 from msdelta.modeling_msdelta import MSDeltaForDenoising, MSDeltaForPreTraining
 from msdelta.processing_msdelta import MSDeltaProcessor
@@ -57,12 +60,6 @@ def denoise_metrics(prediction) -> dict[str, float]:
 
     Labels outside {0, 1, -100} are dropped and counted rather than raising.
     """
-    import numpy as np
-    from sklearn.metrics import (
-        accuracy_score, auc, balanced_accuracy_score, f1_score,
-        precision_recall_curve, precision_score, recall_score, roc_auc_score,
-    )
-
     # Keep the 2-D form for per_spectrum_auroc.
     logits_2d = np.asarray(prediction.predictions, dtype=np.float64)
     labels_2d = np.asarray(prediction.label_ids, dtype=np.float64)
@@ -107,9 +104,6 @@ def denoise_metrics(prediction) -> dict[str, float]:
 
 def per_spectrum_auroc(logits_2d, labels_2d) -> dict[str, float]:
     """AUROC computed within each spectrum, then averaged. Single-class spectra are counted as unscorable."""
-    import numpy as np
-    from sklearn.metrics import roc_auc_score
-
     if logits_2d.ndim != 2:
         return {"auroc_per_spectrum": float("nan"), "spectra_scored": 0.0,
                 "spectra_unscorable": 0.0}
