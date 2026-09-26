@@ -5,6 +5,7 @@ from __future__ import annotations
 import re
 from functools import partial
 
+import numpy as np
 import torch
 from datasets import Dataset, DatasetDict, load_dataset, load_from_disk
 
@@ -250,3 +251,182 @@ def build_retrieval_evaluation_datasets(
             labels,
         )
     return evaluation_datasets
+
+
+# Fine-tuning spectra: replicate pairs and grouped analytes, one spectrum per row.
+
+
+def peptide_key(peptide: str, charge: int) -> str:
+    """Identity used to decide whether two spectra are the same peptide and charge."""
+    return f"{peptide}_{charge}"
+
+
+def build_alignment_datasets(repo_id, processor, num_proc=None, validation_fraction=0.1,
+                             seed=0):
+    """Spectrum/sequence pairs, split by peptide."""
+    raw = load_dataset(repo_id)
+    split = "train" if "train" in raw else list(raw)[0]
+
+    # Spectra above max_peaks are dropped, not truncated, and the count is printed.
+    max_peaks = processor.max_peaks
+
+    def prepare(example):
+        if len(example["mz"]) > max_peaks:
+            return {"mz": [], "log_intensity": [], "peptide": "", "charge": 0, "precursor": 0.0}
+        try:
+            values = processor(
+                torch.as_tensor(example["mz"], dtype=torch.float32),
+                torch.as_tensor(example["intensity"], dtype=torch.float32),
+                padding=False,
+            )
+        except (ValueError, KeyError, TypeError):
+            return {"mz": [], "log_intensity": [], "peptide": "", "charge": 0, "precursor": 0.0}
+        return {
+            "mz": values["mz"][0] if values["mz"] and isinstance(values["mz"][0], list)
+                  else values["mz"],
+            "log_intensity": (values["log_intensity"][0]
+                              if values["log_intensity"]
+                              and isinstance(values["log_intensity"][0], list)
+                              else values["log_intensity"]),
+            "peptide": example.get("peptide") or "",
+            "charge": int(example.get("charge") or 0),
+            # Measured precursor m/z, used by the rescorer.
+            "precursor": float(example.get("precursor") or 0.0),
+        }
+
+    rows = raw[split].map(prepare, remove_columns=raw[split].column_names,
+                          num_proc=num_proc, desc="preprocess alignment pairs")
+    before = len(rows)
+    rows = rows.filter(lambda e: len(e["mz"]) > 0 and bool(e["peptide"]),
+                       num_proc=num_proc, desc="drop empty pairs")
+    dropped = before - len(rows)
+    if dropped:
+        oversized = sum(1 for n in raw[split]["mz"] if len(n) > max_peaks)
+        print(f"[alignment] dropped {dropped:,} of {before:,} pairs "
+              f"({100 * dropped / before:.1f}%); {oversized:,} were over max_peaks="
+              f"{max_peaks}. Peak count tracks charge and peptide length, so this is a "
+              f"biased loss, not a random one.", flush=True)
+
+    peptides = sorted(set(rows["peptide"]))
+    generator = np.random.default_rng(seed)
+    held_out = set(generator.choice(
+        peptides, size=max(1, int(len(peptides) * validation_fraction)), replace=False
+    ).tolist())
+    return {
+        "train": rows.filter(lambda e: e["peptide"] not in held_out, desc="train split"),
+        "validation": rows.filter(lambda e: e["peptide"] in held_out, desc="validation split"),
+    }
+
+
+def corpus_peptides(repo_id: str) -> set[str]:
+    """Every peptide in a corpus, across all of its splits."""
+    raw = load_dataset(repo_id)
+    return {p for split in raw.values() for p in split["peptide"]}
+
+
+def flatten_analyte(example, include_consensus: bool) -> dict[str, list]:
+    """One analyte row -> parallel lists, one entry per spectrum."""
+    spectra = list(example["experimental"])
+    sources = ["experimental"] * len(spectra)
+    if include_consensus:
+        spectra = [example["consensus"], *spectra]
+        sources = ["consensus", *sources]
+    return {
+        "mz": [list(s["mz"]) for s in spectra],
+        "intensity": [list(s["intensity"]) for s in spectra],
+        "peptide": [example["peptide"]] * len(spectra),
+        "charge": [int(example["charge"])] * len(spectra),
+        "precursor": [float(example.get("precursor") or 0.0)] * len(spectra),
+        "source": sources,
+        "analyte_id": [str(example.get("analyte_id") or "")] * len(spectra),
+    }
+
+
+def _process(processor, mz, intensity):
+    values = processor(torch.as_tensor(mz, dtype=torch.float32),
+                       torch.as_tensor(intensity, dtype=torch.float32), padding=False)
+    out_mz, out_li = values["mz"], values["log_intensity"]
+    if out_mz and isinstance(out_mz[0], list):
+        out_mz, out_li = out_mz[0], out_li[0]
+    return out_mz, out_li
+
+
+def build_grouped_split(split, processor, include_consensus: bool,
+                        exclude_peptides: set[str] | None = None, num_proc=None):
+    """Flatten, drop excluded peptides and oversized spectra, and process one split."""
+    max_peaks = getattr(processor, "max_peaks", None)
+    exclude = exclude_peptides or set()
+    before_analytes = len(split)
+    if exclude:
+        split = split.filter(lambda e: e["peptide"] not in exclude, num_proc=num_proc,
+                             desc="exclude peptides seen in training")
+    excluded = before_analytes - len(split)
+
+    def flatten_batch(batch):
+        out = {k: [] for k in ("mz", "intensity", "peptide", "charge", "precursor",
+                               "source", "analyte_id")}
+        for i in range(len(batch["peptide"])):
+            row = flatten_analyte({k: batch[k][i] for k in batch}, include_consensus)
+            for k in out:
+                out[k].extend(row[k])
+        return out
+
+    flat = split.map(flatten_batch, batched=True, remove_columns=split.column_names,
+                     num_proc=num_proc, desc="flatten analytes")
+
+    def prepare(example):
+        empty = {"mz": [], "log_intensity": []}
+        if max_peaks is not None and len(example["mz"]) > max_peaks:
+            return empty
+        if len(example["mz"]) == 0:
+            return empty
+        try:
+            mz, li = _process(processor, example["mz"], example["intensity"])
+        except (ValueError, KeyError, TypeError):
+            return empty
+        return {"mz": mz, "log_intensity": li}
+
+    rows = flat.map(prepare, remove_columns=["intensity"], num_proc=num_proc,
+                    desc="preprocess spectra")
+    before = len(rows)
+    rows = rows.filter(lambda e: len(e["mz"]) > 0, num_proc=num_proc,
+                       desc="drop oversized or invalid spectra")
+    print(f"[grouped] {before_analytes:,} analytes, {excluded:,} excluded by peptide; "
+          f"{before:,} spectra, {before - len(rows):,} dropped "
+          f"({100 * (before - len(rows)) / max(before, 1):.1f}%, over max_peaks="
+          f"{max_peaks} or invalid); {len(rows):,} kept", flush=True)
+    return rows
+
+
+def build_grouped_datasets(repo_id, processor, include_consensus: bool = False,
+                           exclude_peptides: set[str] | None = None, num_proc=None,
+                           splits=("train", "validation", "test")):
+    """The corpus's own peptide-disjoint splits, flattened."""
+    raw = load_dataset(repo_id)
+    return {name: build_grouped_split(raw[name], processor, include_consensus,
+                                      exclude_peptides, num_proc)
+            for name in splits}
+
+
+def group_ids(rows) -> np.ndarray:
+    """Integer group per row, by peptide_key."""
+    keys = [peptide_key(p, int(c)) for p, c in zip(rows["peptide"], rows["charge"])]
+    return np.unique(np.array(keys), return_inverse=True)[1]
+
+
+def load_spectrum_datasets(dataset_format: str, repo_id: str, processor, *,
+                           include_consensus: bool = False,
+                           exclude_peptides_from: str | None = None, num_proc=None,
+                           validation_fraction: float = 0.1, seed: int = 0) -> dict:
+    """train + validation, one spectrum per row, from the replicate or grouped corpus."""
+    if dataset_format == "replicate":
+        return build_alignment_datasets(repo_id, processor, num_proc=num_proc,
+                                        validation_fraction=validation_fraction,
+                                        seed=seed)
+    if dataset_format != "grouped":
+        raise ValueError(f"dataset_format must be replicate or grouped, "
+                         f"not {dataset_format!r}")
+    exclude = corpus_peptides(exclude_peptides_from) if exclude_peptides_from else set()
+    return build_grouped_datasets(repo_id, processor, include_consensus=include_consensus,
+                                  exclude_peptides=exclude, num_proc=num_proc,
+                                  splits=("train", "validation"))

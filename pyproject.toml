@@ -13,7 +13,9 @@ dependencies = [
     "matplotlib",
     "pyyaml",
     "pyarrow>=24.0.0",
+    "pandas>=3.0",
     "pyteomics>=4.7.5",
+    "lxml>=5.0",
     "scikit-learn>=1.8.0",
     "huggingface-hub>=1.20.1",
     "datasets>=4.0.0",
@@ -22,6 +24,7 @@ dependencies = [
     "deepspeed>=0.15.0; sys_platform == 'linux'",
     "pytorch-metric-learning>=2.9.0",
     "sentence-transformers>=6.0.0",
+    "tqdm",
     "faiss-gpu-cu12>=1.14.1; sys_platform == 'linux' and platform_machine == 'x86_64' and python_version < '3.14'",
     "faiss-cpu>=1.14.1; sys_platform != 'linux' or platform_machine != 'x86_64' or python_version >= '3.14'",
 ]
@@ -38,6 +41,7 @@ xpu = [
 [project.scripts]
 iona-train = "iona.train:main"
 iona-preprocess = "iona.preprocess:main"
+iona-denoise = "iona.denoise_mzml:main"
 
 [dependency-groups]
 dev = [
