@@ -1,0 +1,13 @@
+# zero-shot VALIDATION pass (layer/D selection), part B: 50m + 100m
+zs_050m_ck010k /flare/UIC-HPC/khuss/msdelta/pretrained/msdelta-50m-production-01-checkpoint-10000
+zs_050m_ck120k /flare/UIC-HPC/khuss/msdelta/pretrained/msdelta-50m-production-01-checkpoint-120000
+zs_050m_ck220k /flare/UIC-HPC/khuss/msdelta/pretrained/msdelta-50m-production-01-checkpoint-220000
+zs_050m_ck330k /flare/UIC-HPC/khuss/msdelta/pretrained/msdelta-50m-production-01-checkpoint-330000
+zs_050m_ck430k /flare/UIC-HPC/khuss/msdelta/pretrained/msdelta-50m-production-01-checkpoint-430000
+zs_050m_ck540k /flare/UIC-HPC/khuss/msdelta/pretrained/msdelta-50m-production-01-checkpoint-540423
+zs_100m_ck010k /flare/UIC-HPC/khuss/msdelta/pretrained/msdelta-100m-production-01-checkpoint-10000
+zs_100m_ck120k /flare/UIC-HPC/khuss/msdelta/pretrained/msdelta-100m-production-01-checkpoint-120000
+zs_100m_ck220k /flare/UIC-HPC/khuss/msdelta/pretrained/msdelta-100m-production-01-checkpoint-220000
+zs_100m_ck330k /flare/UIC-HPC/khuss/msdelta/pretrained/msdelta-100m-production-01-checkpoint-330000
+zs_100m_ck430k /flare/UIC-HPC/khuss/msdelta/pretrained/msdelta-100m-production-01-checkpoint-430000
+zs_100m_ck540k /flare/UIC-HPC/khuss/msdelta/pretrained/msdelta-100m-production-01-checkpoint-540423
