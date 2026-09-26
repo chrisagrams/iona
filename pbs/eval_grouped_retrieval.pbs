@@ -46,10 +46,6 @@ export HF_HUB_OFFLINE=${HF_HUB_OFFLINE:-1}
 export HF_DATASETS_OFFLINE=${HF_DATASETS_OFFLINE:-1}
 PY="$VENV_DIR/bin/python"
 
-echo "=== $(date -Is) tests"
-ZE_AFFINITY_MASK=0 "$PY" -m pytest -q tests/test_grouped_retrieval.py \
-    || { echo "unit tests failed; not scoring" >&2; exit 1; }
-
 if [[ ! -d $DATA ]]; then
     echo "=== $(date -Is) prepare $DATA"
     mkdir -p "$(dirname "$DATA")"

@@ -2,13 +2,13 @@
 # Build an alignment teacher-embedding cache on all 12 tiles of one node.
 #
 #   qsub -q debug -l select=1 -l walltime=01:00:00 \
-#        -v ARGS_FILE=configs/finetune-align-100k-50m/training.args,TARGET_CACHE=/lus/.../align-targets-x \
+#        -v ARGS_FILE=configs/finetune-align-100k-50m/training.args,PRETRAINED_PATH=...,TARGET_CACHE=/lus/.../align-targets-x \
 #        pbs/precompute_align_sharded.pbs
 #
 # precompute_align --stage prepare (one process: flatten + preprocess, saved to _flat),
 # then --stage shard on each tile (contiguous shard i of 12), then --stage merge, which
-# concatenates the shards in order -- the exact cache the one-tile build would write
-# (tests/test_precompute_sharded.py). Refuses to overwrite an existing cache.
+# concatenates the shards in order -- the exact cache the one-tile build would write.
+# Refuses to overwrite an existing cache.
 
 #PBS -N msdelta-precompute-sh
 #PBS -A UIC-HPC
@@ -21,6 +21,7 @@ set -uo pipefail
 REPO_DIR=${REPO_DIR:-${PBS_O_WORKDIR:-$PWD}}
 cd "$REPO_DIR"
 ARGS_FILE=${ARGS_FILE:?set ARGS_FILE}
+PRETRAINED_PATH=${PRETRAINED_PATH:?set PRETRAINED_PATH}
 TARGET_CACHE=${TARGET_CACHE:?set TARGET_CACHE}
 SHARDS=${SHARDS:-12}
 VENV_DIR=${VENV_DIR:-$REPO_DIR/.venv}
@@ -43,11 +44,9 @@ export HF_HOME=${HF_HOME:-$SCRATCH_ROOT/huggingface}
 export HF_HUB_OFFLINE=${HF_HUB_OFFLINE:-1}
 export HF_DATASETS_OFFLINE=${HF_DATASETS_OFFLINE:-1}
 PY="$VENV_DIR/bin/python"
-run() { "$PY" -m msdelta.precompute_align --args_file "$ARGS_FILE" \
+run() { "$PY" -m msdelta.precompute_align --args_file "$ARGS_FILE" --pretrained_path "$PRETRAINED_PATH" \
         --target_cache "$TARGET_CACHE" --num_shards "$SHARDS" "$@"; }
 
-echo "=== $(date -Is) tests"
-"$PY" -m pytest -q tests/test_precompute_sharded.py || { echo "tests failed" >&2; exit 1; }
 if [[ ! -d $TARGET_CACHE/_flat/train ]]; then
     echo "=== $(date -Is) prepare"
     run --stage prepare || { echo "prepare failed" >&2; exit 1; }

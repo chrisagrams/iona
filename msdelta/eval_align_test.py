@@ -56,7 +56,8 @@ def main(argv: list[str] | None = None) -> int:
                     (Path(cli.cache) / "MANIFEST.txt").read_text().splitlines()
                     if ": " in line)
     model_args, _, _ = HfArgumentParser((AlignModelArguments, AlignDataArguments)) \
-        .parse_args_into_dataclasses(args=["--args_file", cli.args_file],
+        .parse_args_into_dataclasses(args=["--args_file", cli.args_file,
+                                           "--pretrained_path", manifest["teacher"]],
                                      args_file_flag="--args_file",
                                      return_remaining_strings=True)
     teacher = MSDeltaForPreTraining.from_pretrained(manifest["teacher"])

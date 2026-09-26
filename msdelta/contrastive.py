@@ -849,8 +849,7 @@ def gradcache_step(model, batch, chunk_size: int, accelerator=None) -> dict[str,
     embedding each chunk twice. The KL term is per-sample, so it rides along in step 3
     where the activations already exist.
 
-    The gradient is exact, not an approximation, and `tests/test_contrastive.py` asserts
-    that against a direct full-batch backward.
+    The gradient is exact, not an approximation.
     """
     keys = ("mz", "log_intensity", "attention_mask")
     total = len(batch["group"])

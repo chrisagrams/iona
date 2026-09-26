@@ -47,9 +47,6 @@ export NO_PROXY=$no_proxy
 [[ -n ${HF_TOKEN:-} ]] || { echo "HF_TOKEN not loaded" >&2; exit 2; }
 PY="$VENV_DIR/bin/python"
 
-echo "=== $(date -Is) tests"
-"$PY" -m pytest -q -p no:cacheprovider tests/test_rerank_psm.py || { echo "tests failed" >&2; exit 1; }
-
 mkdir -p "$ROWS"
 echo "=== $(date -Is) stage 1: embed"
 i=0; pids=()

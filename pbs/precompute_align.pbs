@@ -2,7 +2,7 @@
 # Build a teacher-embedding cache only -- no alignment training afterwards.
 #
 #   qsub -q debug -l select=1 -l walltime=00:30:00 \
-#        -v ARGS_FILE=configs/finetune-align-100k-50m/training.args,TARGET_CACHE=/lus/.../align-targets-x \
+#        -v ARGS_FILE=configs/finetune-align-100k-50m/training.args,PRETRAINED_PATH=...,TARGET_CACHE=/lus/.../align-targets-x \
 #        pbs/precompute_align.pbs
 #
 # aurora-finetune.pbs builds a cache as step one of training a student. This is for when
@@ -18,6 +18,7 @@ set -uo pipefail
 REPO_DIR=${REPO_DIR:-${PBS_O_WORKDIR:-$PWD}}
 cd "$REPO_DIR"
 ARGS_FILE=${ARGS_FILE:?set ARGS_FILE}
+PRETRAINED_PATH=${PRETRAINED_PATH:?set PRETRAINED_PATH}
 TARGET_CACHE=${TARGET_CACHE:?set TARGET_CACHE}
 VENV_DIR=${VENV_DIR:-$REPO_DIR/.venv}
 SCRATCH_ROOT=${SCRATCH_ROOT:-/lus/flare/projects/UIC-HPC/$USER/msdelta}
@@ -33,4 +34,4 @@ export OMP_NUM_THREADS=${OMP_NUM_THREADS:-8}
 export PYTHONPATH=$REPO_DIR${PYTHONPATH:+:$PYTHONPATH}
 export HF_HOME=${HF_HOME:-$SCRATCH_ROOT/huggingface}
 export HF_HUB_OFFLINE=1 HF_DATASETS_OFFLINE=1
-"$VENV_DIR/bin/python" -m msdelta.precompute_align --args_file "$ARGS_FILE" --target_cache "$TARGET_CACHE"
+"$VENV_DIR/bin/python" -m msdelta.precompute_align --args_file "$ARGS_FILE" --pretrained_path "$PRETRAINED_PATH" --target_cache "$TARGET_CACHE"

@@ -1,12 +1,12 @@
 #!/bin/bash -l
-# Fine-tune a pretrained encoder for per-peak noise classification on Aurora.
+# Fine-tune a pretrained encoder on Aurora (denoise, contrastive or align; set MODULE).
 #
 #   qsub -q debug -l select=1 -l walltime=01:00:00 \
-#        -v ARGS_FILE=configs/finetune-denoise-50m/training.args,MAX_STEPS=60 \
+#        -v ARGS_FILE=configs/finetune-denoise-50m/training.args,PRETRAINED_PATH=/path/to/ckpt,MAX_STEPS=60 \
 #        pbs/aurora-finetune.pbs
 #
 #   qsub -q capacity -l select=1 -l walltime=06:00:00 \
-#        -v ARGS_FILE=configs/finetune-denoise-50m/training.args \
+#        -v ARGS_FILE=configs/finetune-denoise-50m/training.args,PRETRAINED_PATH=/path/to/ckpt \
 #        pbs/aurora-finetune.pbs
 #
 # Simpler than pbs/aurora-pretrain.pbs on purpose: no telegraf sidecar, no probe
@@ -30,7 +30,8 @@ cd "$REPO_DIR"
 VENV_DIR=${VENV_DIR:-$REPO_DIR/.venv}
 PROJECT=${PROJECT:-UIC-HPC}
 SCRATCH_ROOT=${SCRATCH_ROOT:-/lus/flare/projects/$PROJECT/$USER/msdelta}
-ARGS_FILE=${ARGS_FILE:?set ARGS_FILE to a denoise finetune args file}
+ARGS_FILE=${ARGS_FILE:?set ARGS_FILE to a finetune args file}
+PRETRAINED_PATH=${PRETRAINED_PATH:?set PRETRAINED_PATH to the checkpoint to fine-tune from}
 # 12, not 8: Aurora is 6 Max 1550 GPUs x 2 tiles, and FLAT hierarchy exposes all twelve.
 # aurora-pretrain.pbs defaults to 8 because it reserves tiles 4,5 and 10,11 for the probe
 # sidecars; this job has none, so using 8 would idle a third of the node.
@@ -173,11 +174,13 @@ if [[ -n ${PRECOMPUTE_CACHE:-} ]]; then
         echo "  precompute : reusing $PRECOMPUTE_CACHE"
     else
         echo "  precompute : building $PRECOMPUTE_CACHE (one process, one tile)"
-        ZE_AFFINITY_MASK=0 "$VENV_DIR/bin/python" -m msdelta.precompute_align             --args_file "$ARGS_FILE" --target_cache "$PRECOMPUTE_CACHE"             --batch_size "${PRECOMPUTE_BATCH:-16}" "${EXTRA_PRE[@]}"             || { echo "precompute failed" >&2; exit 2; }
+        ZE_AFFINITY_MASK=0 "$VENV_DIR/bin/python" -m msdelta.precompute_align             --args_file "$ARGS_FILE" --pretrained_path "$PRETRAINED_PATH" --target_cache "$PRECOMPUTE_CACHE"             --batch_size "${PRECOMPUTE_BATCH:-16}" "${EXTRA_PRE[@]}"             || { echo "precompute failed" >&2; exit 2; }
     fi
 fi
 
 EXTRA=()
+[[ -n ${WANDB_PROJECT:-} ]] && EXTRA+=(--wandb_project "$WANDB_PROJECT")
+[[ -n ${WANDB_ENTITY:-} ]] && EXTRA+=(--wandb_entity "$WANDB_ENTITY")
 [[ -n ${PRECOMPUTE_CACHE:-} ]] && EXTRA+=(--target_cache "$PRECOMPUTE_CACHE")
 # Independent of the smoke modes below: a full run may still want a different evaluation
 # cadence from the config's. At 28,630 steps the config's eval_steps=200 is 143
@@ -217,6 +220,7 @@ exec mpiexec \
         exec "$@"
     ' _ "$VENV_DIR/bin/python" -m "$MODULE" \
         --args_file "$ARGS_FILE" \
+        --pretrained_path "$PRETRAINED_PATH" \
         --run_name "$RUN_NAME" \
         --output_dir "$RUN_DIR" \
         "${EXTRA[@]}" \
