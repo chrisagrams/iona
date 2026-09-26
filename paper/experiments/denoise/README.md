@@ -12,6 +12,7 @@ architecture trained from a random initialisation.
 | `denoise_scaling_pretraining.csv` | the plotted data: one row per (scale, pretraining steps), with every seed's AUROC and AUPRC |
 | `plot_denoise_scaling.py` | regenerates the figure from the CSV (`python plot_denoise_scaling.py`; matplotlib + numpy) |
 | `HP/` | the hyperparameter search that fixed the fine-tuning recipe (own README) |
+| `loss_scaling/` | test loss vs pretraining steps with a power-law fit (own README) |
 
 CSV columns: `scale`, `pretraining_steps` (0 = from scratch), `n_seeds`, `mean_auroc`, `sd_auroc`
 (blank for a single run), `min_auroc`, `max_auroc`, `per_seed_auroc` (space-separated), `mean_auprc`, `sd_auprc`, `per_seed_auprc`
