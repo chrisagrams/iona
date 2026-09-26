@@ -1,6 +1,6 @@
 """Fine-tune the spectrum encoder contrastively, with KL to its own pretrained head.
 
-    python -m msdelta.finetune_contrastive --args_file configs/finetune-contrastive-replicate-50m/training.args
+    python -m msdelta.finetune_contrastive --args_file configs/finetune/contrastive-replicate-50m/training.args
 """
 
 from __future__ import annotations

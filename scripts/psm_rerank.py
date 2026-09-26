@@ -1,17 +1,17 @@
 """Rescore database-search PSMs with the lab's features + our embedding features.
 
     # 1. embeddings (GPU recommended): one table per run
-    python -m msdelta.rerank_psm_embed --run RUN.parquet --out rows/RUN.parquet \
+    python scripts/rerank_psm_embed.py --run RUN.parquet --out rows/RUN.parquet \
         --encoder Gaolaboratory/iona-contrastive-400m --student Gaolaboratory/iona-peptide-embedder-400m
     # 2a. rescore, per run (default; Percolator-style, trains on each run itself)
-    python -m msdelta.psm_rerank score --rows rows/ --labfeat features/ --out psms.parquet
+    python scripts/psm_rerank.py score --rows rows/ --labfeat features/ --out psms.parquet
     # 2b. or apply the pretrained global model (no training on the new run)
-    python -m msdelta.psm_rerank score --mode global --model Gaolaboratory/iona-rerank-400m \
+    python scripts/psm_rerank.py score --mode global --model Gaolaboratory/iona-rerank-400m \
         --rows rows/ --labfeat features/ --out psms.parquet
     # (train a global model yourself)
-    python -m msdelta.psm_rerank train --rows rows/ --labfeat features/ --out model_dir/
+    python scripts/psm_rerank.py train --rows rows/ --labfeat features/ --out model_dir/
 
-Inputs are stage-1 tables from msdelta.rerank_psm_embed and the lab's per-candidate feature
+Inputs are stage-1 tables from scripts/rerank_psm_embed.py and the lab's per-candidate feature
 tables. Output is the top candidate per spectrum with its score and q-value.
 """
 
@@ -30,7 +30,7 @@ from huggingface_hub import snapshot_download
 from safetensors.torch import load_file, save_file
 from sklearn.preprocessing import StandardScaler
 
-from msdelta.rerank_psm_fdr import (WS_FEATURES, accepted, calibrate,
+from rerank_psm_fdr import (WS_FEATURES, accepted, calibrate,
                                     fit_linear, load_lab_features, qvalues,
                                     top_per_spectrum, within_spectrum)
 

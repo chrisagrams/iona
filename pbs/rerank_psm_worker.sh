@@ -13,12 +13,12 @@ for (( t = 0; t < TILES; t++ )); do
       run=${RUNS[$i]}; name=$(basename "$run")
       rows="$BASE/rows/$name"; hand="$BASE/handfeat/$name"; log="$BASE/logs/$name.log"
       if [[ ! -f $rows ]]; then
-        ZE_AFFINITY_MASK=$t "$PY" -m msdelta.rerank_psm_embed --run "$run" --encoder "$ENCODER" \
+        ZE_AFFINITY_MASK=$t "$PY" "$REPO_DIR/scripts/rerank_psm_embed.py" --run "$run" --encoder "$ENCODER" \
           --student "$STUDENT" --cache "$CACHE" --out "$rows.tmp" >> "$log" 2>&1 \
           && mv "$rows.tmp" "$rows" || { echo "[node $RANK tile $t] EMBED FAILED $run"; continue; }
       fi
       if [[ ! -f $hand ]]; then
-        OMP_NUM_THREADS=1 "$PY" -m msdelta.rerank_psm_handfeat --run "$run" --out "$hand.tmp" >> "$log" 2>&1 \
+        OMP_NUM_THREADS=1 "$PY" "$REPO_DIR/scripts/rerank_psm_handfeat.py" --run "$run" --out "$hand.tmp" >> "$log" 2>&1 \
           && mv "$hand.tmp" "$hand" || echo "[node $RANK tile $t] HANDFEAT FAILED $run"
       fi
       echo "[node $RANK tile $t] done $run"

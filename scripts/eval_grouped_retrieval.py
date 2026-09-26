@@ -1,9 +1,9 @@
 """Score saved contrastive encoders on ms-contrastive-100k's held-out split. No training.
 
     # once, on a compute node: flatten + preprocess the split to disk
-    python -m msdelta.eval_grouped_retrieval prepare --out-data DIR --processor CKPT
+    python scripts/eval_grouped_retrieval.py prepare --out-data DIR --processor CKPT
     # then one process per tile, each taking every num_shards-th model
-    python -m msdelta.eval_grouped_retrieval score --data DIR --models FILE \
+    python scripts/eval_grouped_retrieval.py score --data DIR --models FILE \
         --shard I --num-shards N --out-dir DIR
 
 --models is a text file, one `name path [pooling]` per line (pooling defaults to mean+max).

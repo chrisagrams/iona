@@ -1,6 +1,6 @@
 """Compute the frozen teacher's spectrum embeddings once, to disk.
 
-    python -m msdelta.precompute_align --args_file configs/finetune-align-100k-50m/training.args \
+    python -m msdelta.precompute_align --args_file configs/finetune/align-100k-50m/training.args \
         --target_cache /path/to/cache
 """
 

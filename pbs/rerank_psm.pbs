@@ -49,7 +49,7 @@ i=0; pids=()
 for run in $RUNS; do
     out="$ROWS/$(basename "$run")"
     if [[ -f $out ]]; then echo "  reuse $out"; continue; fi
-    ZE_AFFINITY_MASK=$i "$PY" -m msdelta.rerank_psm_embed --run "$run" --encoder "$ENCODER" \
+    ZE_AFFINITY_MASK=$i "$PY" "$REPO_DIR/scripts/rerank_psm_embed.py" --run "$run" --encoder "$ENCODER" \
         --student "$STUDENT" --cache "$CACHE" --out "$out" \
         > "$ROWS/.$(basename "$run").log" 2>&1 &
     pids+=($!); i=$((i + 1))
@@ -60,4 +60,4 @@ grep -h "\[embed\] wrote\|Error\|Traceback" "$ROWS"/.*.log | cut -c1-200
 (( failed )) && echo "  WARNING: some runs failed; stage 2 uses the tables that exist"
 
 echo "=== $(date -Is) stage 2: FDR"
-"$PY" -m msdelta.rerank_psm_fdr --rows "$ROWS" --out "results/rerank/psm/$TAG.json"
+"$PY" "$REPO_DIR/scripts/rerank_psm_fdr.py" --rows "$ROWS" --out "results/rerank/psm/$TAG.json"

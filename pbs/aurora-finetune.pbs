@@ -2,11 +2,11 @@
 # Fine-tune a pretrained encoder on Aurora (denoise, contrastive or align; set MODULE).
 #
 #   qsub -q debug -l select=1 -l walltime=01:00:00 \
-#        -v ARGS_FILE=configs/finetune-denoise-50m/training.args,PRETRAINED_PATH=/path/to/ckpt,MAX_STEPS=60 \
+#        -v ARGS_FILE=configs/finetune/denoise-50m/training.args,PRETRAINED_PATH=/path/to/ckpt,MAX_STEPS=60 \
 #        pbs/aurora-finetune.pbs
 #
 #   qsub -q capacity -l select=1 -l walltime=06:00:00 \
-#        -v ARGS_FILE=configs/finetune-denoise-50m/training.args,PRETRAINED_PATH=/path/to/ckpt \
+#        -v ARGS_FILE=configs/finetune/denoise-50m/training.args,PRETRAINED_PATH=/path/to/ckpt \
 #        pbs/aurora-finetune.pbs
 #
 # Optional: MAX_STEPS or MAX_SAMPLES (smoke runs), EVAL_STEPS, SEED, PRECOMPUTE_CACHE (align).

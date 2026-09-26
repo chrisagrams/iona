@@ -1,5 +1,5 @@
 #!/bin/bash -l
-# Score alignment students on the ms-contrastive-100k test split (msdelta.eval_align_test).
+# Score alignment students on the ms-contrastive-100k test split (scripts/eval_align_test.py).
 #
 #   qsub -q debug-scaling -l select=1 -l walltime=00:30:00 \
 #        -v RUNS="dir1 dir2",CACHE=/lus/.../align-targets-x,ARGS_FILE=configs/.../training.args \
@@ -41,7 +41,7 @@ mkdir -p results/finetune/align
 i=0; pids=()
 for run in $RUNS; do
     name=$(basename "$run")
-    ZE_AFFINITY_MASK=$i "$VENV_DIR/bin/python" -m msdelta.eval_align_test --run "$run" \
+    ZE_AFFINITY_MASK=$i "$VENV_DIR/bin/python" "$REPO_DIR/scripts/eval_align_test.py" --run "$run" \
         --cache "$CACHE" --args_file "$ARGS_FILE" --data "$DATA" \
         --out "results/finetune/align/test_$name.json" > "results/finetune/align/.test_$name.log" 2>&1 &
     pids+=($!); i=$((i + 1))

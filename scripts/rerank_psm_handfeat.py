@@ -1,6 +1,6 @@
 """Stage 1b of the PSM-reranking eval: our hand-built fragment features per candidate.
 
-    python -m msdelta.rerank_psm_handfeat --run HEK293/0718-1.parquet --out OUT.parquet
+    python scripts/rerank_psm_handfeat.py --run HEK293/0718-1.parquet --out OUT.parquet
 
 The msdelta.rescoring features from the raw peaks, at an ion-trap
 tolerance of max(250 ppm, 0.05 Da). Keyed by `candidate` to join stage 1's rows. CPU only.
@@ -17,7 +17,7 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 from huggingface_hub import hf_hub_download
 
-from msdelta.rerank_psm_embed import to_notation
+from rerank_psm_embed import to_notation
 from msdelta.rescoring import FEATURE_NAMES, extract_features
 
 REPO_ID = "Gaolaboratory/psm-rerank-hek-hct116"

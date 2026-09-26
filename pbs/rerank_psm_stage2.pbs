@@ -37,12 +37,12 @@ pids=()
 for run in $RUNS; do
     out="$BASE/handfeat/$(basename "$run")"
     [[ -f $out ]] && continue
-    OMP_NUM_THREADS=1 "$PY" -m msdelta.rerank_psm_handfeat --run "$run" --out "$out" \
+    OMP_NUM_THREADS=1 "$PY" "$REPO_DIR/scripts/rerank_psm_handfeat.py" --run "$run" --out "$out" \
         > "$BASE/handfeat/.$(basename "$run").log" 2>&1 &
     pids+=($!)
 done
 for p in "${pids[@]}"; do wait "$p"; done
 grep -h "handfeat\]\|Error" "$BASE"/handfeat/.*.log | cut -c1-200
 echo "=== $(date -Is) stage 2: FDR"
-"$PY" -m msdelta.rerank_psm_fdr --rows "$BASE/rows" --handfeat "$BASE/handfeat" \
+"$PY" "$REPO_DIR/scripts/rerank_psm_fdr.py" --rows "$BASE/rows" --handfeat "$BASE/handfeat" \
     --out "results/rerank/psm/${TAG}_full.json"

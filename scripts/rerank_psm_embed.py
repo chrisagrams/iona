@@ -1,11 +1,11 @@
 """Stage 1 of the PSM-reranking eval: embed spectra and candidates, write per-candidate rows.
 
-    python -m msdelta.rerank_psm_embed --run HEK293/0718-1.parquet --encoder ENC \
+    python scripts/rerank_psm_embed.py --run HEK293/0718-1.parquet --encoder ENC \
         --student RUN/final --cache CACHE --out OUT.parquet
 
 For every candidate, writes MSFragger's scores plus `cosine`, the student's peptide
 embedding against the spectrum embedding. Spectra above max_peaks keep their most intense
-peaks. Stage 2 (msdelta.rerank_psm_fdr) turns these rows into PSMs at 1% FDR.
+peaks. Stage 2 (scripts/rerank_psm_fdr.py) turns these rows into PSMs at 1% FDR.
 """
 
 from __future__ import annotations

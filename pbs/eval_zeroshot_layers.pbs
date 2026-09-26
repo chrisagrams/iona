@@ -41,7 +41,7 @@ mkdir -p "$OUT_DIR"
 n=$(grep -cv '^#' "$MODELS")
 pids=()
 for (( i = 0; i < n; i++ )); do
-    ZE_AFFINITY_MASK=$i "$VENV_DIR/bin/python" -m msdelta.eval_zeroshot_layers --models "$MODELS" \
+    ZE_AFFINITY_MASK=$i "$VENV_DIR/bin/python" "$REPO_DIR/scripts/eval_zeroshot_layers.py" --models "$MODELS" \
         --data "$DATA" --out-dir "$OUT_DIR" --shard "$i" --num-shards "$n" "${EXTRA[@]}" \
         > "$OUT_DIR/.shard$i.log" 2>&1 &
     pids+=($!)

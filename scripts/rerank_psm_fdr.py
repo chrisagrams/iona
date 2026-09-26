@@ -1,6 +1,6 @@
 """Stage 2 of the PSM-reranking eval: PSMs and peptides at 1% FDR, per method.
 
-    python -m msdelta.rerank_psm_fdr --rows DIR_OF_STAGE1_PARQUETS --out OUT.json
+    python scripts/rerank_psm_fdr.py --rows DIR_OF_STAGE1_PARQUETS --out OUT.json
 
 Target-decoy competition with the +1 correction: each method picks one candidate per
 spectrum, and accepted targets at q <= 0.01 are counted. Methods are MSFragger's e-value,

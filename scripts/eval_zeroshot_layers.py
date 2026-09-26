@@ -1,6 +1,6 @@
 """Zero-shot retrieval from FROZEN pretrained encoders, at every depth, on the 100k test.
 
-    python -m msdelta.eval_zeroshot_layers --models FILE --out-dir DIR [--shard I --num-shards N]
+    python scripts/eval_zeroshot_layers.py --models FILE --out-dir DIR [--shard I --num-shards N]
 
 Mean+max pooling of every block's output plus the final state; no training, no head.
 --models: one `name path` per line. --abtt D,... --fit-data TRAIN_DIR also scores each layer

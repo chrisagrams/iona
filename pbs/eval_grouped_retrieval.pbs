@@ -43,7 +43,7 @@ PY="$VENV_DIR/bin/python"
 if [[ ! -d $DATA ]]; then
     echo "=== $(date -Is) prepare $DATA"
     mkdir -p "$(dirname "$DATA")"
-    ZE_AFFINITY_MASK=0 "$PY" -m msdelta.eval_grouped_retrieval prepare \
+    ZE_AFFINITY_MASK=0 "$PY" "$REPO_DIR/scripts/eval_grouped_retrieval.py" prepare \
         --out-data "$DATA" --processor "${PROCESSOR:?set PROCESSOR to a checkpoint to take the processor config from}" --split "$SPLIT" \
         || { echo "prepare failed" >&2; exit 1; }
 fi
@@ -53,7 +53,7 @@ echo "=== $(date -Is) score on $SHARDS tiles"
 mkdir -p "$OUT_DIR"
 pids=()
 for (( i = 0; i < SHARDS; i++ )); do
-    ZE_AFFINITY_MASK=$i "$PY" -m msdelta.eval_grouped_retrieval score \
+    ZE_AFFINITY_MASK=$i "$PY" "$REPO_DIR/scripts/eval_grouped_retrieval.py" score \
         --data "$DATA" --models "$MODELS" --out-dir "$OUT_DIR" \
         --shard "$i" --num-shards "$SHARDS" > "$OUT_DIR/.shard$i.log" 2>&1 &
     pids+=($!)

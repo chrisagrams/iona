@@ -1,7 +1,7 @@
 """Score an alignment student on ms-contrastive-100k's TEST split. No training.
 
-    python -m msdelta.eval_align_test --run RUN_DIR --cache CACHE_DIR \
-        --args_file configs/finetune-align-100k-50m/training.args --data EVAL_DATA --out OUT.json
+    python scripts/eval_align_test.py --run RUN_DIR --cache CACHE_DIR \
+        --args_file configs/finetune/align-100k-50m/training.args --data EVAL_DATA --out OUT.json
 
 Ranks every test spectrum against every test analyte (Hit@1, Hit@5, MRR).
 """
