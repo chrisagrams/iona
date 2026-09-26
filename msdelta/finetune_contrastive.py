@@ -1,6 +1,6 @@
 """Fine-tune the spectrum encoder contrastively, with KL to its own pretrained head.
 
-    python -m msdelta.finetune_contrastive --args_file configs/finetune-contrastive-50m/training.args
+    python -m msdelta.finetune_contrastive --args_file configs/finetune-contrastive-replicate-50m/training.args
 
 Produces an encoder whose embedding space separates peptides, which is what the
 alignment tower needs and what the pretrained checkpoint does not provide -- see
