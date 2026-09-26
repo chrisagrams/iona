@@ -8,12 +8,12 @@ from transformers import (
     AutoProcessor,
 )
 
-from msdelta.configuration_msdelta import (
+from msdelta.models.configuration_msdelta import (
     MSDeltaConfig,
     MSDeltaDenoisingConfig,
     MSDeltaRetrievalConfig,
 )
-from msdelta.modeling_msdelta import (
+from msdelta.models.modeling_msdelta import (
     MSDeltaForDenoising,
     MSDeltaForDenoisingOutput,
     MSDeltaForPreTraining,
@@ -23,7 +23,7 @@ from msdelta.modeling_msdelta import (
     MSDeltaModel,
     MSDeltaPreTrainedModel,
 )
-from msdelta.processing_msdelta import (
+from msdelta.models.processing_msdelta import (
     MSDeltaDataCollatorForPreTraining,
     MSDeltaDataCollatorForRetrieval,
     MSDeltaProcessor,
