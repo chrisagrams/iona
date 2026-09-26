@@ -1,0 +1,59 @@
+#!/bin/bash -l
+# Retrieval with vs without a precursor filter on the same embeddings (pbs/diag/mass_window_eval.py).
+#
+#   qsub -q debug -l select=1 -l walltime=01:00:00 pbs/diag/mass_window_eval.pbs
+#
+# 12 embedding shards (one per tile; cached .npy, so a timed-out job resumes), then the analysis
+# on tile 0. Embeddings: $SCRATCH_ROOT/embeddings/mass-window/<dataset>/<model>.npy
+
+#PBS -N msdelta-masswin
+#PBS -A UIC-HPC
+#PBS -l place=scatter
+#PBS -l filesystems=home:flare
+#PBS -j oe
+#PBS -o pbs/logs/
+
+set -uo pipefail
+REPO_DIR=${REPO_DIR:-${PBS_O_WORKDIR:-$PWD}}
+cd "$REPO_DIR"
+MODELS=${MODELS:-sweeps/arms/mass_window_models.txt}
+SCRATCH_ROOT=${SCRATCH_ROOT:-/lus/flare/projects/UIC-HPC/$USER/msdelta}
+EMB_DIR=${EMB_DIR:-$SCRATCH_ROOT/embeddings/mass-window}
+OUT=${OUT:-results/finetune/contrastive/mass-window/summary.json}
+SHARDS=${SHARDS:-12}
+DATA=("validation=$SCRATCH_ROOT/eval-data/ms-contrastive-100k-validation-mp512"
+      "oodval=$SCRATCH_ROOT/baselines/nine_oodval20k/prepared")
+
+set +u
+source /usr/share/lmod/lmod/init/bash
+module load "${FRAMEWORKS_MODULE:-frameworks/2025.3.1}"
+set -u
+export ONEAPI_DEVICE_SELECTOR=level_zero:gpu
+export ZE_FLAT_DEVICE_HIERARCHY=FLAT
+export ZE_AFFINITY_MASK=0
+export OMP_NUM_THREADS=${OMP_NUM_THREADS:-8}
+export PYTHONPATH=$REPO_DIR${PYTHONPATH:+:$PYTHONPATH}
+export HF_HOME=${HF_HOME:-$SCRATCH_ROOT/huggingface}
+export HF_HUB_OFFLINE=1 HF_DATASETS_OFFLINE=1
+PY="$REPO_DIR/.venv/bin/python"
+LOGS=$(dirname "$OUT"); mkdir -p "$LOGS" "$EMB_DIR"
+
+echo "=== $(date -Is) embed on $SHARDS tiles"
+pids=()
+for (( i = 0; i < SHARDS; i++ )); do
+    ZE_AFFINITY_MASK=$i "$PY" pbs/diag/mass_window_eval.py embed --models "$MODELS" \
+        --data "${DATA[@]}" --emb-dir "$EMB_DIR" --shard "$i" --num-shards "$SHARDS" \
+        > "$LOGS/.embed$i.log" 2>&1 &
+    pids+=($!)
+done
+failed=0
+for i in "${!pids[@]}"; do
+    wait "${pids[$i]}" || { echo "  shard $i failed:"; tail -5 "$LOGS/.embed$i.log"; failed=1; }
+done
+grep -h "s)$\|cached" "$LOGS"/.embed*.log
+
+echo "=== $(date -Is) analyse"
+"$PY" pbs/diag/mass_window_eval.py analyse --models "$MODELS" --data "${DATA[@]}" \
+    --emb-dir "$EMB_DIR" --out "$OUT" || failed=1
+echo "=== $(date -Is) done (failed=$failed)"
+exit $failed

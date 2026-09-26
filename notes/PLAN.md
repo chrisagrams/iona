@@ -45,7 +45,7 @@ Status: ✅ answered · 🟡 partly · ⏳ running/queued · ⬜ not started
 | C5 | Do contrastive HPs transfer across scale/checkpoint? | ✅ | same winner in all 5 cells (4 scales + 50m@540k), mean pairwise ρ +0.81; t0.03 beat t0.07 in all 4 cells tested |
 | C6 | Does best-model selection / early stopping matter? | ✅ | no: −0.002, −0.006 (n.s.); `final/` == last checkpoint |
 | C7 | Does training on ms-contrastive-100k beat the replicate corpus, and does scale show there? | ✅ | **yes**: one epoch, test exp MAP@R 50m 0.839, **400m 0.868** (Hit@1 0.913), vs replicate-only 0.656 / 0.714 and binned cosine 0.730; selected on VALIDATION (400m seed 0 0.864). Uploaded private: Gaolaboratory/iona-contrastive-400m, -50m (sha verified). Job 8860522 |
-| C8 | Does a per-pair sigmoid loss (SigLIP, Zhai et al. 2023) beat SupCon? | ⬜ | SupCon is a softmax over the batch with every positive in every denominator, so positives compete (target 1/(K-1) each). Sigmoid scores each pair independently (learnable temperature + bias). Ablation at the C1 recipe, 50m, 3 seeds, after C7 so data and loss do not change together |
+| C8 | Does a per-pair sigmoid loss (SigLIP, Zhai et al. 2023) beat SupCon? | ✅ | **No; keep SupCon.** 50m@540k, ms-contrastive-100k only, 3 seeds, 3 epochs: validation exp MAP@R sigmoid 0.761 / 0.788 (random / same-mass) vs SupCon 0.858 / 0.868; OOD 0.514 / 0.637 vs 0.645 / 0.724. Job 8872141; see Design decisions |
 | C9 | Does an MLP projection head (master's MSDeltaForRetrieval) help the embedding -- retrieving on the head output, or on the pre-head features (SimCLR)? | ✅ | **No; keep the no-head design.** 24 epochs, 3 seeds, small eval: no head 0.877, head output 0.825, pre-head 0.705 (3 epochs: 0.60 / 0.30 / 0.29). Job 8860587 |
 | C10 | Zero-shot scaling: how does FROZEN-encoder retrieval scale with model size and pretraining? (kept to show how much training improves embeddings) | 🟡 | best-layer exp MAP@R @220k: 50m 0.208, 100m 0.140, 200m 0.151, 400m 0.432. **All-but-the-top** (Mu & Viswanath 2018; mean + top-D PCs fitted on TRAIN removed): 50m best block 0.208 -> 0.395, final 0.112 -> 0.296 at D=32, still rising. Full run (D 8/32/64/128): 8 of 10 encoders done (job 8865987 hit the 1 h debug limit), ~2x everywhere, 200m@540k 0.432, 400m@10k 0.414 (OBSERVATIONS 2026-09-25). **Deferred (user, lower priority)**: (a) rerun 400m@220k and 400m@430k on capacity with 2 h walltime (`pbs/eval_zeroshot_layers.pbs`, same MODELS/ABTT; skips finished encoders); (b) extend D to 256 for ALL encoders, since D=128 was best for 200m/400m (edge of range, optimum unlocated) |
 
@@ -90,13 +90,177 @@ peptide among each spectrum's candidates, paired seeds (arms share split and ini
 | C16 (user 2026-09-25) | C7 recipe from the FINAL 200m checkpoint (540,423), 1 seed: stage 1 replicate corpus (12 ep) -> stage 2 one epoch ms-contrastive-100k (encoder every 300 steps); then C eval (100k test, nine-species), A student + yHydra, R reranking (per-run lab +-emb +null). `sweeps/make_c16.py` | ⏳ | smoke -> stage 1 (~2 h) -> stage 2 (~11-12 h); done ~Sep 26 04:00-06:00 UTC |
 | C17 (not a priority, user 2026-09-25) | C7 recipe at 100m to add a scaling point (50/100/200/400m); needs a checkpoint choice (220k matches C7 50m/400m, 540k matches C16) | ⬜ | parked |
 | C18 (camera-ready, user 2026-09-25) | GLEAMS-inspired: (a) train on MassIVE-KB / more diverse data; (b) precursor mass + charge as encoder inputs | ⬜ | deferred to camera-ready |
-| C19 (proposed) | GLEAMS-inspired same-mass negatives for C: grouped batches of peptide groups with NEARBY masses; 50m, continue the replicate-corpus encoder 1 epoch ms-contrastive-100k (C7 recipe but batches); eval open + windowed retrieval, OOD set, yeast. ~9-10 h | ⬜ | awaiting go |
+| C19 | GLEAMS-inspired same-mass negatives: batches of peptide groups with NEARBY neutral masses | ✅ | **Yes; adopted.** Same run as C8: SupCon same-mass vs random, validation 0.868 vs 0.858 (+0.009), OOD 0.724 vs 0.645 (+0.080), ahead at every half-epoch snapshot. Open vs precursor-windowed evaluation: job 8872964. See Design decisions |
 | C12 (low priority; likely rebuttal period; seed count TBD) | Repeat the C7 recipe from the FINAL 400m pretraining checkpoint (540,423; now backed up and verified identical to Chris's) instead of 220k, which was used because pretraining had not finished then: stage 1 (replicate corpus, 12 ep, t 0.002, KL 10) + stage 2 (1 epoch ms-contrastive-100k), 3 seeds, select on validation; compare with iona-contrastive-400m (220k base) on the 100k test, C11 and the ABTT zero-shot curve | ⏳ | added 2026-09-25 (user) |
 | S25 (later; user 2026-09-25) | A NEW 25m scale exists (Gaolaboratory/iona-base-25m; Chris's runs msdelta-25m-production-01 / msdelta-base-25m-production-01 under cgrams/msdelta-runs). Recreate the scale results with it: denoise ladder (D1/D3), contrastive (C2/C4/C7), zero-shot + ABTT (C10), alignment (A1), so every scaling curve gains a 25m point | ⬜ | deferred; first check which 25m run is canonical and back its checkpoints up (as for 400m) |
 
 R1's first pass runs now with the current best encoders: they are ~2.3x better than the
 one behind the −0.109, which is the question, and it proves the pipeline so the final
 C1 winners can go through it immediately.
+
+## Design decisions
+
+Every choice in the current recipes, whether it was TESTED or just SET, and the runs behind it.
+"Set, untested" means nobody has measured an alternative, so it's a candidate for an ablation and not a finding.
+The collapsible block under each decision lists the runs that rejected the alternatives.
+
+### Contrastive (spectrum encoder), current recipe
+
+SupCon loss, t 0.002, KL 10 to the frozen pretrained intensity head, lr 1e-4 cosine, same-mass batches of 85 groups × 3 spectra, trained from the pretrained checkpoint on ms-contrastive-100k alone, mean+max pooling with no projection head, GradCache chunk 4 with length trimming and no gradient checkpointing. Selected on validation MAP@R and checked on the OOD validation set.
+
+| decision | chosen | status |
+|---|---|---|
+| loss | SupCon (multi-positive softmax) | tested (C8) |
+| batch composition | same-mass blocks (C19) | tested (C19); 75/25 mixed ablation planned |
+| same-mass jitter | ±1.0 Da | **set, untested** |
+| batch shape | P85 × K3 | K fixed by the data; P under test (hp-single) |
+| temperature | 0.002 | tested at the old recipe (C1); retested per scale in hp-single |
+| KL anchor | weight 10 | tested at the old recipe; retested (kl0/1/30) in hp-single |
+| learning rate | 1e-4 | tested at the old recipe; retested (5e-5 … 4e-4) in hp-single |
+| training data | ms-contrastive-100k only, from pretrained | single vs two-stage compared only indirectly |
+| head / readout | none; mean+max over the last layer | tested (C9); layer mix only on the rejected metric |
+| pretrained init | required | tested (C3) |
+| model selection | validation, never test | rule |
+| metric | experimental MAP@R, open gallery | tested (C0); filtered variant: job 8872964 |
+| GradCache trimming, no gradient checkpointing | on / off | benchmarked; the result is exact, so this is speed only |
+
+<details><summary><b>Loss: SupCon, not per-pair sigmoid (C8)</b></summary>
+
+50m@540k, ms-contrastive-100k only, 3 seeds, 3 epochs, encoder every half epoch (training job 8872141; results in `results/finetune/contrastive/c8c19-{validation,oodval}/`). Experimental MAP@R, mean of 3 seeds:
+
+| arm | 0.5 ep | 1 | 1.5 | 2 | 2.5 | 3 ep | OOD at 3 ep |
+|---|---|---|---|---|---|---|---|
+| SupCon, random batches | .813 | .834 | .844 | .855 | .857 | .858 | .645 |
+| **SupCon, same-mass** | **.824** | **.846** | **.858** | **.864** | **.867** | **.868** | **.724** |
+| sigmoid, random | .617 | .696 | .728 | .750 | .758 | .761 | .514 |
+| sigmoid, same-mass | .676 | .737 | .765 | .779 | .786 | .788 | .637 |
+
+Sigmoid trails SupCon by about 0.08–0.10 at every snapshot and drifts about 45% further from the pretrained intensity head (training-log KL). Its learnable scale and bias started at 10 and −10 (SigLIP's values) and were not tuned, so this rejects SigLIP-as-published, not every sigmoid loss.
+</details>
+
+<details><summary><b>Same-mass batches (C19)</b></summary>
+
+`GroupBatchSampler(group_masses=…)`: each epoch the peptide groups are sorted by theoretical neutral mass plus uniform(±1 Da) noise, cut into consecutive blocks of 85 groups, and the blocks are shuffled. A batch then spans a median 2.83 Da (p10 2.15, p90 4.20), against about 2,073 Da for random batches, so in-batch negatives are the near-mass peptides a precursor window would leave. Idea from GLEAMS, which mines negative pairs within 10 ppm precursor m/z.
+
+Evidence: the table above. SupCon same-mass beats random at every snapshot: +0.009 on validation and **+0.080 on OOD** at 3 epochs, 3 seeds each.
+
+Open questions:
+- Does the gain survive a precursor filter at evaluation, or does it only teach what the filter does anyway? Job 8872964 (`pbs/diag/mass_window_eval.py`) compares open, ±1 Da and 20 ppm same-charge retrieval on the same embeddings.
+- Does a mix keep the benefit and restore the global structure? 75% same-mass / 25% random batches is planned after that analysis.
+</details>
+
+<details><summary><b>Jitter ±1.0 Da: set, not tuned</b></summary>
+
+Where it came from: the value was picked when C19 was implemented (2026-09-26), adapting A8's `MassBatchSampler` (`reranking.py`, jitter default 0.5 Da, also never tuned). The jitter only makes block boundaries differ from epoch to epoch, so the same 85 groups don't share every batch.
+
+Why the value matters less than it looks: with 85 groups per block, the block span (median 2.83 Da) comes from the density of peptide masses, not from the jitter. A jitter far below the span changes little; one far above it (e.g. 50 Da) turns the batches back towards random.
+
+Candidate ablation if it becomes interesting: jitter 0 / 1 / 5 / 25 Da. Not queued.
+</details>
+
+<details><summary><b>Batch shape P85 × K3</b></summary>
+
+- Every ms-contrastive-100k group has exactly 3 experimental spectra, so K ≤ 3. The planned P64×K4 arm failed ("replicates=4 but grouped analytes have 3 spectra"; hp-single smoke) and became P170×K3.
+- P85×K3 = 255 spectra keeps the old recipe's batch size (P64×K4 = 256).
+- Older evidence at a fixed number of epochs: widths above 64 lost steeply at 3 epochs (sweep-conneg, job 8856643), but that is confounded with the number of optimizer steps. C1 found wider batches help only when trained long.
+- hp-single tests P170×K3 and P128×K2.
+</details>
+
+<details><summary><b>Temperature 0.002, KL 10, lr 1e-4 (old recipe; being retested)</b></summary>
+
+- **KL** (OBSERVATIONS, "KL regularisation is not needed in general"):
+
+  | lr | KL 0 | KL 10 |
+  |---|---|---|
+  | 2e-5 | **7.71** | 6.69 |
+  | 1e-4 | 6.41 | 7.14 |
+  | 5e-4 | 1.35 (collapsed) | **7.83** |
+
+  These are separation-ratio values. KL is a stabiliser at high learning rates, and KL 100 was worse than KL 10 in every cell.
+- **Temperature:** in sweep-conneg the best was 0.005 at 50m/100m, and 0.003 at 200m, the coldest value tried. C1 froze 0.002 after the longer runs.
+- All three were tuned on the replicate corpus with two-stage training. The single-dataset recipe hasn't been tuned yet: hp-single (job 8872806; 12 arms at 50m, then other scales) retests lr, temperature, KL and P/K one factor at a time.
+</details>
+
+<details><summary><b>Single-stage (ms-contrastive-100k only), not two-stage</b></summary>
+
+- The C7 release (Iona) is two-stage: 12 epochs on the replicate corpus, then 1 epoch on ms-contrastive-100k. The 50m model reaches validation 0.83; 400m reaches 0.863.
+- The single-stage C8×C19 SupCon/random arm (50m@540k, 3 epochs) reaches 0.858 with no replicate-corpus stage.
+- This is **not a controlled comparison**: the base checkpoint differs (220k vs 540k), and so does stage-2 length (1 vs 3 epochs). It was enough to drop stage 1 for simplicity. A controlled A/B wasn't run.
+</details>
+
+<details><summary><b>No projection head; mean+max of the last layer (C9, layer mix)</b></summary>
+
+- C9 (24 epochs, 3 seeds, small eval): no head 0.877; head output 0.825; pre-head features 0.705. Job 8860587.
+- Layer mix (learned weights over depths) was rejected on the separation ratio: trained mix 1.49 vs a single block 1.53 (job 8842806). That metric was later shown not to predict retrieval (C0), so layer mix is **not rejected on MAP@R**. It's a parked retry.
+</details>
+
+<details><summary><b>Pretrained init is required (C3)</b></summary>
+
+Random init trained contrastively ends at chance at every scale (MAP@100 ≈ 0.01, Hit@1 ≈ 0.03, 6 seeds), below even the untrained pretrained encoder.
+</details>
+
+<details><summary><b>Selection on validation; metric = experimental MAP@R over an open gallery (C0)</b></summary>
+
+- The separation ratio does not predict retrieval (ρ −0.04 within scale), so it's reported but never selected on.
+- Every model is selected on ms-contrastive-100k validation, with the 8-species OOD set (`nine_oodval20k`) as a second check. After the zero-shot episode (layer and D picked on test), test is never used for selection.
+- "Open gallery" means no precursor filter. A search engine applies one, which is why the filtered variant is being measured (C19 above).
+</details>
+
+<details><summary><b>GradCache: trimmed chunks, no gradient checkpointing</b></summary>
+
+Exact: the tests check the gradients equal the untrimmed ones. Step time, untrimmed → trimmed, no checkpointing, chunk 4 (`pbs/diag/gradcache_bench.pbs`):
+
+| model | untrimmed | trimmed |
+|---|---|---|
+| 50m | 20.5 s | 5.1 s |
+| 100m | 22.3 s | 6.9 s |
+| 200m | 33.0 s | 9.1 s |
+| 400m | 42.9 s | 13.2 s |
+
+Gradient checkpointing is redundant under GradCache (which already bounds memory) and costs about 4×.
+</details>
+
+### Alignment (peptide embedder), current recipe and caveats
+
+A PeptideEncoder student regresses (L2 on unit vectors) onto the frozen C7 spectrum encoder's embeddings of that peptide's spectra. Readout is mean+max pooling, with 8 heads, 3 epochs, on ms-contrastive-100k, selected on validation loss. The released model is the A2 400m teacher: test Hit@1 0.923.
+
+<details><summary><b>Loss: plain L2, not LiT / hard negatives (A4)</b></summary>
+
+- Test Hit@1: MSE 0.898–0.899; LiT (SupCon-style multi-positive) 0.898; LiT + 4 hard negatives 0.895–0.897; LiT + MSE 0.892–0.896.
+- It's a tie on retrieval, so the simpler loss was kept.
+- LiT + hard negatives improved reranking slightly: MLP 94,224 vs 93,843, null arm 93,557. A6 would test it with the 400m teacher. Low priority.
+</details>
+
+<details><summary><b>Readout: mean+max pooling, not CLS / attention (A3)</b></summary>
+
+Test Hit@1: pool 0.899, cls 0.894, attn 0.893. Near-miss discrimination (adjacent swaps): 70.6% vs 68.5%. Order-aware readouts did not fix the swap blindness.
+</details>
+
+<details><summary><b>Teacher quality carries over (A2)</b></summary>
+
+50m teacher 0.898 → 400m teacher 0.923 test Hit@1, 3 seeds each.
+</details>
+
+<details><summary><b>Caveats (what was NOT varied)</b></summary>
+
+- **Training length:** 3 epochs only, no epoch sweep, so whether longer training helps is unknown.
+- **Data:** ms-contrastive-100k only (about 88k peptides). Replicate-corpus peptides are excluded; no MassIVE-KB, no other species.
+- **Seeds:** 3 for A1/A2/A3; the release is one seed, chosen on validation.
+- **Teacher:** frozen throughout, and always a C7 two-stage encoder. There's no student for the single-stage C19 recipe. A7 (random / frozen / replicate-only teachers) is queued at low priority.
+- **Architecture:** hidden 256, 4 layers, 8 heads were set, never swept. num_heads isn't recoverable from the weights, so old final/ dirs assume 8.
+- **Selection:** on validation LOSS, not validation Hit@1 (A8 would select on windowed Hit@1).
+- **Known blind spot:** adjacent-residue swaps (about 70% near-miss accuracy).
+- **Domain:** unseen data is much worse (nine-species open Hit@1 0.39 for A2; HEK ion-trap 0.06). The windowed numbers are what a search sees.
+- **Not mass-aware:** A8 (same-mass batches + ±20 ppm hard negatives) was built but never run.
+</details>
+
+### Denoise, current recipe
+
+<details><summary><b>lr 2e-4, early-stopping 0.5 (D4); fine-tune the encoder, don't freeze it</b></summary>
+
+- D4: the lr 2e-4 / es 0.5 cell wins at checkpoint 1 and at 540,423.
+- A frozen encoder with a trained head gets test AUROC 0.798, against 0.932 fine-tuned (50m), so the paper reports fine-tuned only.
+</details>
 
 ## Baselines to build (to-do)
 
