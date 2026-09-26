@@ -1,4 +1,4 @@
-"""Provide a Hugging Face-native mass-spectrum transformer."""
+"""A foundation model for mass spectrometry."""
 
 from transformers import (
     AutoConfig,
