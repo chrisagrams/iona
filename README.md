@@ -31,4 +31,4 @@ token, and attention is biased by the m/z difference between every pair of peaks
 ### Peptide embedder
 | Model | Weights |
 |---|---|
-| iona-peptide-embedder-400m | <https://anonymous-hf.com/a/okrgczwxmuk6/> |
+| iona-peptide-embedder-400m | <https://anonymous-hf.com/a/4ilud8sqip5n/> |
