@@ -278,7 +278,11 @@ def fig_transfer(rows, zs, panels=None, baselines=True, out="C_transfer.png",
         fig.savefig(FIG / out); plt.close(fig)
 
 
-REP_LABEL = {"400m": "fine-tuned 400M (replicate corpus only)", "50m": "fine-tuned 50M (replicate corpus only)"}
+REP_LABEL = {"400m": "Iona spectrum encoder 400M (replicate corpus only)",
+             "50m": "Iona spectrum encoder 50M (replicate corpus only)"}
+# C_transfer names our fine-tuned models as released (Iona); the other figures keep "fine-tuned".
+TRANSFER_LABELS = {"fine-tuned 400M": "Iona spectrum encoder 400M", "fine-tuned 50M": "Iona spectrum encoder 50M",
+                   "replicate corpus only 400M": REP_LABEL["400m"], "replicate corpus only 50M": REP_LABEL["50m"]}
 
 
 RUNS = Path("/lus/flare/projects/UIC-HPC/khuss/msdelta/runs")
@@ -370,8 +374,7 @@ def export_plot_data(rows, zs, ab):
                              f"encoder/layer/D chosen on this benchmark"))
     write_plot_csv("C_transfer_ours.csv", out)
     # C_transfer: the same rows (replicate-only models relabelled) + GLEAMS and binned cosine (both widths)
-    rel = {"replicate corpus only 400M": REP_LABEL["400m"], "replicate corpus only 50M": REP_LABEL["50m"]}
-    tr = [dict(r, model=rel.get(r["model"], r["model"])) for r in out]
+    tr = [dict(r, model=TRANSFER_LABELS.get(r["model"], r["model"])) for r in out]
     for b in ("ms-contrastive-100k", "yeast-20k"):
         tr += [as_plot_row(r, "GLEAMS") for r in sel(rows, b, "GLEAMS (pretrained)")]
         bins = sel(rows, b, "binned cosine (1 Da bins)") + sel(rows, b, "binned cosine (0.1 Da bins)")
@@ -423,7 +426,7 @@ def main():
     # C_transfer: only the benchmarks every method was scored on (the 8-species OOD validation had no GLEAMS/frozen)
     fig_transfer(rows, zs, panels=[("ms-contrastive-100k", "ms-contrastive-100k test\n(in-distribution)", 8),
                                    ("yeast-20k", "yeast 20k subset\n(unseen)", 8)],
-                 labels={"replicate corpus only 400M": REP_LABEL["400m"], "replicate corpus only 50M": REP_LABEL["50m"]})
+                 labels=TRANSFER_LABELS)
     fig_transfer(rows, zs, panels=[("ms-contrastive-100k", "ms-contrastive-100k test\n(in-distribution)", 1),
                                    ("yeast-20k", "yeast 20k subset\n(unseen)", 1)],
                  baselines=False, out="C_transfer_ours.png", title="Our models in-distribution vs unseen")

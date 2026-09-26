@@ -67,9 +67,9 @@ def transfer_ours():
 def transfer():
     """Our models vs GLEAMS and binned cosine (the better bin width, tagged in the CSV)."""
     rows = read("C_transfer.csv")
-    series = [("fine-tuned 400M", "#1e3a8a"), ("fine-tuned 50M", "#93c5fd"),
-              ("fine-tuned 400M (replicate corpus only)", "#0d9488"),
-              ("fine-tuned 50M (replicate corpus only)", "#5eead4"),
+    series = [("Iona spectrum encoder 400M", "#1e3a8a"), ("Iona spectrum encoder 50M", "#93c5fd"),
+              ("Iona spectrum encoder 400M (replicate corpus only)", "#0d9488"),
+              ("Iona spectrum encoder 50M (replicate corpus only)", "#5eead4"),
               ("frozen + ABTT (best encoder)", "#7c3aed"), ("GLEAMS", "#f59e0b"), ("binned cosine", "#9ca3af")]
     panels = [("ms-contrastive-100k", "ms-contrastive-100k test\n(in-distribution)"),
               ("yeast-20k", "yeast 20k subset\n(unseen)")]

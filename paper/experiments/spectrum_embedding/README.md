@@ -51,20 +51,21 @@ baselines, on the two benchmarks where every method was scored.
 - **GLEAMS**: the published pretrained model, cosine similarity, no retraining.
 - **binned cosine**: 1 Da and 0.1 Da bins are both in the CSV; the bar is the better of the two on that
   benchmark (tagged `[plotted: best width]`), which favours the baseline.
-- "fine-tuned 400M/50M (replicate corpus only)" are the models called "replicate corpus only" elsewhere
-  in this folder: the first contrastive stage alone, without the ms-contrastive-100k epoch.
+- "Iona spectrum encoder 400M/50M" are the models called "fine-tuned 400M/50M" elsewhere in this folder
+  (released as `Gaolaboratory/iona-contrastive-400m` and `-50m`); "(replicate corpus only)" marks the models called
+  "replicate corpus only" elsewhere: the first contrastive stage alone, without the ms-contrastive-100k epoch.
 
 | model | ms-contrastive-100k | yeast 20k |
 |---|---|---|
-| fine-tuned 400M | **0.868** | 0.596 |
-| fine-tuned 50M | 0.839 | 0.523 |
-| fine-tuned 400M (replicate corpus only) | 0.713 | 0.520 |
-| fine-tuned 50M (replicate corpus only) | 0.656 | 0.499 |
+| Iona spectrum encoder 400M | **0.868** | 0.596 |
+| Iona spectrum encoder 50M | 0.839 | 0.523 |
+| Iona spectrum encoder 400M (replicate corpus only) | 0.713 | 0.520 |
+| Iona spectrum encoder 50M (replicate corpus only) | 0.656 | 0.499 |
 | frozen + ABTT (best encoder) | 0.432 | 0.709 |
 | GLEAMS | 0.646 | 0.770 |
 | binned cosine (best width) | 0.729 | **0.916** |
 
-- Reading: in-distribution our fine-tuned models lead every baseline; on the unseen yeast data both
+- Reading: in-distribution the Iona encoders lead every baseline; on the unseen yeast data both
   baselines are ahead of every model of ours, binned cosine by a wide margin.
 
 ## C_pretraining_scaling
