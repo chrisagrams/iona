@@ -12,7 +12,7 @@ import torch
 from accelerate.utils import DeepSpeedPlugin
 from transformers import HfArgumentParser, Trainer, set_seed
 
-from msdelta.callbacks import SidecarCallback, build_callbacks
+from msdelta.callbacks import SidecarCallback, WalltimeCheckpointCallback, build_callbacks
 from msdelta.configuration_msdelta import MSDeltaConfig
 from msdelta.data import build_pretraining_datasets, load_pretraining_datasets_from_disk
 from msdelta.modeling_msdelta import MSDeltaForPreTraining
@@ -44,6 +44,20 @@ class MSDeltaTrainer(Trainer):
                 plugins["retrieval"] = DeepSpeedPlugin(hf_ds_config=self.args.deepspeed)
             args["deepspeed_plugin"] = plugins
         return args
+
+    def _save_rng_state(self, output_dir: str) -> None:
+        """Create the checkpoint directory once before ranks write their RNG states.
+
+        Some distributed filesystems can report a spurious ``FileExistsError`` when
+        many ranks concurrently call ``os.makedirs(..., exist_ok=True)``.  Trainer
+        saves a distinct RNG state for every rank, so synchronize the directory
+        creation without suppressing any of those files.
+        """
+        if self.args.world_size > 1:
+            if self.args.process_index == 0:
+                os.makedirs(output_dir, exist_ok=True)
+            self.accelerator.wait_for_everyone()
+        super()._save_rng_state(output_dir)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -156,6 +170,9 @@ def main(argv: list[str] | None = None) -> int:
             retrieval_evaluation_datasets=retrieval_evaluation_datasets,
             include_probes=include_probes,
         )
+        if deadline := os.environ.get("MSDELTA_JOB_DEADLINE_EPOCH"):
+            margin = float(os.environ.get("MSDELTA_CHECKPOINT_MARGIN_SECONDS", "900"))
+            callbacks.append(WalltimeCheckpointCallback(float(deadline), margin))
         if training_args.probe_execution == "sidecar":
             sidecar_callback = SidecarCallback(out_dir, resolved)
             callbacks.append(sidecar_callback)

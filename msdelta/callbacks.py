@@ -6,6 +6,7 @@ import json
 import logging
 import subprocess
 import sys
+import time
 from pathlib import Path
 from typing import Any
 
@@ -27,6 +28,37 @@ from msdelta.training_args import MSDeltaTrainingArguments
 from msdelta.viz import render_bias_panels
 
 logger = logging.getLogger(__name__)
+
+
+class WalltimeCheckpointCallback(TrainerCallback):
+    """Save a resumable checkpoint and stop before the batch allocation expires."""
+
+    def __init__(
+        self,
+        deadline_epoch: float,
+        margin_seconds: float = 900,
+        *,
+        clock=time.time,
+    ):
+        if margin_seconds < 0:
+            raise ValueError("walltime checkpoint margin must be nonnegative")
+        self.deadline_epoch = deadline_epoch
+        self.margin_seconds = margin_seconds
+        self.clock = clock
+        self._requested = False
+
+    def on_step_end(self, args, state, control, **kwargs):
+        if self._requested or self.clock() < self.deadline_epoch - self.margin_seconds:
+            return control
+        logger.warning(
+            "Requesting checkpoint and clean stop at step %s with %.0f seconds left",
+            state.global_step,
+            max(0, self.deadline_epoch - self.clock()),
+        )
+        control.should_save = True
+        control.should_training_stop = True
+        self._requested = True
+        return control
 
 
 def is_logarithmic_eval_step(step: int, start_step: int) -> bool:
