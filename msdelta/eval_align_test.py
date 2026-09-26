@@ -1,7 +1,7 @@
 """Score an alignment student on ms-contrastive-100k's TEST split. No training.
 
     python -m msdelta.eval_align_test --run RUN_DIR --cache CACHE_DIR \
-        --args_file configs/a1-align-100k-.../training.args --data EVAL_DATA --out OUT.json
+        --args_file configs/finetune-align-100k-50m/training.args --data EVAL_DATA --out OUT.json
 
 The in-training check (finetune_align.evaluate_alignment) ranks the first 2,000
 VALIDATION spectra against the few hundred peptides that happen to occur in them. This

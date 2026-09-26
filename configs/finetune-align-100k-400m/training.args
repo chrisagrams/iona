@@ -1,10 +1,9 @@
---pretrained_path /lus/flare/projects/UIC-HPC/khuss/msdelta/runs/sweep-cont050m_ep01_seed1-8860522/checkpoint-600/encoder
 --dataset_repo chrisagrams/ms-contrastive-100k
 --max_peaks 512
 --validation_fraction 0.1
 --preprocessing_num_workers 24
---run_name a1-align-100k-050m-c7s600
---output_dir ./runs/a1-align-100k-050m-c7s600
+--run_name finetune-align-100k-400m
+--output_dir ./runs/finetune-align-100k-400m
 --pooling mean+max
 --sequence_hidden_size 256
 --sequence_num_layers 4
@@ -39,8 +38,6 @@
 --eval_alignment_rows 2000
 --seed 0
 --report_to wandb
---wandb_project msdelta-finetune-align
---wandb_entity CS_Pharm
 --dataset_format grouped
 --include_consensus false
 --exclude_replicate_peptides true
