@@ -2,7 +2,7 @@
 # Zero-shot, per-layer retrieval of frozen pretrained encoders on the 100k test.
 #
 #   qsub -q debug-scaling -l select=1 -l walltime=01:00:00 \
-#        -v MODELS=models.txt pbs/eval_zeroshot_layers.pbs
+#        -v MODELS=models.txt scripts/eval_zeroshot_layers.pbs
 #
 # One model per tile (up to 12). For all-but-the-top: -v MODELS=...,ABTT=1:2:4:8:16:32
 

@@ -3,7 +3,7 @@
 #
 #   qsub -q debug-scaling -l select=1 -l walltime=00:30:00 \
 #        -v RUNS="dir1 dir2",CACHE=/lus/.../align-targets-x,ARGS_FILE=configs/.../training.args \
-#        pbs/eval_align_test.pbs
+#        scripts/eval_align_test.pbs
 #
 # One student per tile, in parallel; outputs to results/finetune/align/.
 

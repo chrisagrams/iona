@@ -3,7 +3,7 @@
 #
 #   qsub -q debug -l select=1 -l walltime=00:30:00 \
 #        -v ARGS_FILE=configs/finetune/align-100k-50m/training.args,PRETRAINED_PATH=...,TARGET_CACHE=/lus/.../align-targets-x \
-#        pbs/precompute_align.pbs
+#        scripts/precompute_align.pbs
 #
 # Refuses to overwrite an existing cache.
 #PBS -N msdelta-precompute

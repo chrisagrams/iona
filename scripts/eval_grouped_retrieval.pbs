@@ -2,7 +2,7 @@
 # Score saved contrastive encoders on ms-contrastive-100k's held-out split. No training.
 #
 #   qsub -q debug -l select=1 -l walltime=01:00:00 \
-#        -v MODELS=models.txt,DATASET=chrisagrams/ms-contrastive-100k,PROCESSOR=/path/to/ckpt pbs/eval_grouped_retrieval.pbs
+#        -v MODELS=models.txt,DATASET=chrisagrams/ms-contrastive-100k,PROCESSOR=/path/to/ckpt scripts/eval_grouped_retrieval.pbs
 #
 # Prepares the split once, then scores one shard of models per tile. Resubmit to resume.
 
