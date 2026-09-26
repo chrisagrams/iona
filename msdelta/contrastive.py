@@ -66,12 +66,6 @@ class GroupBatchSampler(Sampler[list[int]]):
         self.epoch += 1
 
 
-def supervised_contrastive_loss(embeddings: Tensor, groups: Tensor,
-                                temperature: float = 0.07) -> Tensor:
-    """SupCon (Khosla et al., 2020) via pytorch_metric_learning: every same-group pair is a positive."""
-    return SupConLoss(temperature=temperature)(F.normalize(embeddings.float(), dim=-1), groups)
-
-
 def head_kl(logits: Tensor, reference_logits: Tensor, attention_mask: Tensor) -> Tensor:
     """KL(reference || current) over each spectrum's distribution across its real peaks."""
     valid = attention_mask.bool()
@@ -117,7 +111,7 @@ class MSDeltaForContrastive(nn.Module):
             self.reference.requires_grad_(False)
             self.reference.eval()
         self.pooling = pooling
-        self.temperature = temperature
+        self.contrastive_loss = SupConLoss(temperature=temperature)
         self.kl_weight = kl_weight
 
     def train(self, mode: bool = True):
@@ -136,7 +130,7 @@ class MSDeltaForContrastive(nn.Module):
     def forward(self, mz, log_intensity, attention_mask, group,
                 reference_logits=None, return_loss: bool = True):
         embeddings, hidden = self.embed(mz, log_intensity, attention_mask)
-        contrastive = supervised_contrastive_loss(embeddings, group, self.temperature)
+        contrastive = self.contrastive_loss(embeddings, group)
 
         kl = embeddings.new_zeros(())
         if self.kl_weight > 0:
@@ -278,8 +272,7 @@ def gradcache_step(model, batch, chunk_size: int, accelerator=None) -> dict[str,
 
     # 2. loss over the whole batch, gradient w.r.t. the embeddings only.
     leaves = [e.detach().requires_grad_(True) for e in cached]
-    contrastive = supervised_contrastive_loss(
-        torch.cat(leaves), batch["group"], model.temperature)
+    contrastive = model.contrastive_loss(torch.cat(leaves), batch["group"])
     contrastive.backward()
     grads = [leaf.grad for leaf in leaves]
 
