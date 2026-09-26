@@ -2,8 +2,8 @@
 --max_peaks 512
 --validation_fraction 0.1
 --preprocessing_num_workers 24
---run_name finetune-align-100k-50m
---output_dir ./runs/finetune-align-100k-50m
+--run_name align-100k-50m
+--output_dir ./runs/align-100k-50m
 --pooling mean+max
 --sequence_hidden_size 256
 --sequence_num_layers 4

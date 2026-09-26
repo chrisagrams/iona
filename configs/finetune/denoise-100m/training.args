@@ -1,8 +1,8 @@
 --dataset_repo chrisagrams/ms-denoise-100k
 --max_peaks 512
 --preprocessing_num_workers 24
---run_name denoise-ft-50m
---output_dir ./runs/denoise-ft-50m
+--run_name denoise-100m
+--output_dir ./runs/denoise-100m
 --freeze_encoder_steps 0
 --encoder_lr_scale 0.1
 --head_hidden_size 128

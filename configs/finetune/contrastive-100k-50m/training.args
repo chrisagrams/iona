@@ -7,8 +7,8 @@
 --kl_weight 10
 --groups_per_batch 85
 --replicates 3
---run_name finetune-contrastive-100k-400m
---output_dir ./runs/finetune-contrastive-100k-400m
+--run_name contrastive-100k-50m
+--output_dir ./runs/contrastive-100k-50m
 --learning_rate 1e-4
 --lr_scheduler_type cosine
 --warmup_steps 5
@@ -30,7 +30,7 @@
 --remove_unused_columns false
 --ddp_backend xccl
 --ddp_find_unused_parameters false
---seed 0
+--seed 1
 --report_to wandb
 --dataset_format grouped
 --include_consensus false
