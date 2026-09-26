@@ -222,7 +222,7 @@ def fig_zeroshot(zs):
 
 
 def fig_transfer(rows, zs, panels=None, baselines=True, out="C_transfer.png",
-                 title="Our models vs baselines, in-distribution and on unseen data"):
+                 title="Our models vs baselines, in-distribution and on unseen data", labels=None):
     """Per benchmark: every model of ours scored there (optionally vs GLEAMS and binned cosine)."""
     c7 = "C7 (replicate corpus -> ms-contrastive-100k)"
     def rep(b, sc):
@@ -247,6 +247,8 @@ def fig_transfer(rows, zs, panels=None, baselines=True, out="C_transfer.png",
                         ("yeast-20k", "yeast 20k subset\n(unseen, test)", 8)]
     if not baselines:
         series = [t for t in series if t[0] not in ("GLEAMS", "binned cosine")]
+    if labels:
+        series = [(labels.get(n, n), c, g) for n, c, g in series]
     with plt.rc_context(STYLE):
         fig, axes = plt.subplots(1, len(panels), figsize=(4.7 * len(panels) + (0 if baselines else -1), 4.8),
                                  sharey=True, gridspec_kw={"width_ratios": [w for *_, w in panels]})
@@ -274,6 +276,9 @@ def fig_transfer(rows, zs, panels=None, baselines=True, out="C_transfer.png",
                    labels=[n for n, _, _ in series], frameon=False, fontsize=8.5, ncol=4 if baselines else 3,
                    loc="upper center", bbox_to_anchor=(0.5, 0.03))
         fig.savefig(FIG / out); plt.close(fig)
+
+
+REP_LABEL = {"400m": "fine-tuned 400M (replicate corpus only)", "50m": "fine-tuned 50M (replicate corpus only)"}
 
 
 RUNS = Path("/lus/flare/projects/UIC-HPC/khuss/msdelta/runs")
@@ -364,6 +369,16 @@ def export_plot_data(rows, zs, ab):
                         note=f"frozen encoder, layer {z['abtt_layer']}, ABTT D={z['abtt_D']} (fit: {z['abtt_fit']}); "
                              f"encoder/layer/D chosen on this benchmark"))
     write_plot_csv("C_transfer_ours.csv", out)
+    # C_transfer: the same rows (replicate-only models relabelled) + GLEAMS and binned cosine (both widths)
+    rel = {"replicate corpus only 400M": REP_LABEL["400m"], "replicate corpus only 50M": REP_LABEL["50m"]}
+    tr = [dict(r, model=rel.get(r["model"], r["model"])) for r in out]
+    for b in ("ms-contrastive-100k", "yeast-20k"):
+        tr += [as_plot_row(r, "GLEAMS") for r in sel(rows, b, "GLEAMS (pretrained)")]
+        bins = sel(rows, b, "binned cosine (1 Da bins)") + sel(rows, b, "binned cosine (0.1 Da bins)")
+        best = max(r["map_at_r"] for r in bins)
+        tr += [as_plot_row(r, "binned cosine", r["method"] + (" [plotted: best width]" if r["map_at_r"] == best else ""))
+               for r in bins]
+    write_plot_csv("C_transfer.csv", tr)
     # C_pretraining_scaling: replicate-corpus recipe (24 ep) across sizes and pretraining checkpoints
     write_plot_csv("C_pretraining_scaling.csv",
                    [as_plot_row(r, f"replicate corpus only {r['scale'].upper()}", r["method"])
@@ -404,7 +419,11 @@ def main():
         for r in ab:
             w.writerow({k: (f"{v:.5f}" if isinstance(v, float) else v) for k, v in r.items()})
     print("ablation rows", len(ab))
-    fig_benchmarks(rows); fig_pretraining(rows); fig_zeroshot(zs); fig_transfer(rows, zs); fig_ablation(ab)
+    fig_benchmarks(rows); fig_pretraining(rows); fig_zeroshot(zs); fig_ablation(ab)
+    # C_transfer: only the benchmarks every method was scored on (the 8-species OOD validation had no GLEAMS/frozen)
+    fig_transfer(rows, zs, panels=[("ms-contrastive-100k", "ms-contrastive-100k test\n(in-distribution)", 8),
+                                   ("yeast-20k", "yeast 20k subset\n(unseen)", 8)],
+                 labels={"replicate corpus only 400M": REP_LABEL["400m"], "replicate corpus only 50M": REP_LABEL["50m"]})
     fig_transfer(rows, zs, panels=[("ms-contrastive-100k", "ms-contrastive-100k test\n(in-distribution)", 1),
                                    ("yeast-20k", "yeast 20k subset\n(unseen)", 1)],
                  baselines=False, out="C_transfer_ours.png", title="Our models in-distribution vs unseen")

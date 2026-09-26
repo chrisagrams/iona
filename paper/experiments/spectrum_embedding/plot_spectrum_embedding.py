@@ -1,7 +1,8 @@
-"""Regenerate the three figures in this folder from their CSVs.
+"""Regenerate the four figures in this folder from their CSVs.
 
     python plot_spectrum_embedding.py      # needs matplotlib + numpy
 
+    C_transfer.csv             -> C_transfer.png
     C_transfer_ours.csv        -> C_transfer_ours.png
     C_pretraining_scaling.csv  -> C_pretraining_scaling.png
     C_pretraining_ablation.csv -> C_pretraining_ablation.png
@@ -63,6 +64,44 @@ def transfer_ours():
         fig.savefig(HERE / "C_transfer_ours.png"); plt.close(fig)
 
 
+def transfer():
+    """Our models vs GLEAMS and binned cosine (the better bin width, tagged in the CSV)."""
+    rows = read("C_transfer.csv")
+    series = [("fine-tuned 400M", "#1e3a8a"), ("fine-tuned 50M", "#93c5fd"),
+              ("fine-tuned 400M (replicate corpus only)", "#0d9488"),
+              ("fine-tuned 50M (replicate corpus only)", "#5eead4"),
+              ("frozen + ABTT (best encoder)", "#7c3aed"), ("GLEAMS", "#f59e0b"), ("binned cosine", "#9ca3af")]
+    panels = [("ms-contrastive-100k", "ms-contrastive-100k test\n(in-distribution)"),
+              ("yeast-20k", "yeast 20k subset\n(unseen)")]
+    with plt.rc_context(STYLE):
+        fig, axes = plt.subplots(1, 2, figsize=(9.4, 4.8), sharey=True)
+        for ax, (b, title) in zip(axes, panels):
+            ax.yaxis.grid(True, color=GRIDC, lw=0.8); ax.set_axisbelow(True)
+            x = 0
+            for name, col in series:
+                sel = [r for r in rows if r["benchmark"] == b and r["model"] == name]
+                if name == "binned cosine":
+                    sel = [r for r in sel if "[plotted: best width]" in r["note"]]
+                if not sel:
+                    continue
+                if name == "GLEAMS":
+                    x += 0.5                                   # gap between ours and the baselines
+                m, s = msd([float(r["map_at_r"]) for r in sel])
+                ax.bar(x, m, 0.8, color=col, yerr=s if len(sel) > 1 else None, capsize=3, error_kw=ERR, zorder=2)
+                ax.text(x, m + s + 0.015, f"{m:.2f}", ha="center", fontsize=8)
+                if name.startswith("frozen"):
+                    enc = f"{sel[0]['scale'].upper()}@{sel[0]['pretrain_ckpt']}".replace("K", "k")
+                    ax.text(x, 0.02, enc, rotation=90, ha="center", va="bottom", fontsize=7.5, color="white")
+                x += 1
+            ax.set_xticks([]); ax.set_xlim(-0.7, x - 0.3); ax.set_title(title, loc="left", fontsize=10.5)
+        axes[0].set_ylim(0, 1.0); axes[0].set_ylabel("MAP@R (experimental spectra)")
+        fig.suptitle("Our models vs baselines, in-distribution and on unseen data", x=0.07, ha="left",
+                     fontsize=13, fontweight="bold", y=1.03)
+        fig.legend(handles=[plt.Rectangle((0, 0), 1, 1, color=c) for _, c in series], labels=[n for n, _ in series],
+                   frameon=False, fontsize=8.5, ncol=4, loc="upper center", bbox_to_anchor=(0.5, 0.03))
+        fig.savefig(HERE / "C_transfer.png"); plt.close(fig)
+
+
 def pretraining_scaling():
     rows = read("C_pretraining_scaling.csv")
     cells = defaultdict(list)
@@ -120,4 +159,4 @@ def pretraining_ablation():
 
 
 if __name__ == "__main__":
-    transfer_ours(); pretraining_scaling(); pretraining_ablation()
+    transfer(); transfer_ours(); pretraining_scaling(); pretraining_ablation()
