@@ -1,0 +1,1 @@
+HP-SINGLE ARM: 25m from pretrained checkpoint 540,423, setting 'p128k2' (--groups_per_batch 128 --replicates 2); SupCon + same-mass batches on ms-contrastive-100k only, 3 epochs, encoder every half epoch. sweeps/make_hp_single.py.

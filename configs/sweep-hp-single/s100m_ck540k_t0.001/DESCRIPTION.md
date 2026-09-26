@@ -1,0 +1,1 @@
+HP-SINGLE ARM: 100m from pretrained checkpoint 540,423, setting 't0.001' (--temperature 0.001); SupCon + same-mass batches on ms-contrastive-100k only, 3 epochs, encoder every half epoch. sweeps/make_hp_single.py.

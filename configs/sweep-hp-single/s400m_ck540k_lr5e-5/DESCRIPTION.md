@@ -1,0 +1,1 @@
+HP-SINGLE ARM: 400m from pretrained checkpoint 540,423, setting 'lr5e-5' (--learning_rate 5e-5); SupCon + same-mass batches on ms-contrastive-100k only, 3 epochs, encoder every half epoch. sweeps/make_hp_single.py.
