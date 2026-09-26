@@ -6,7 +6,7 @@ s050m_ck540k_lr2e-4
 s050m_ck540k_lr4e-4
 s050m_ck540k_lr5e-5
 s050m_ck540k_p128k2
-s050m_ck540k_p64k4
+s050m_ck540k_p170k3
 s050m_ck540k_t0.001
 s050m_ck540k_t0.005
 s050m_ck540k_t0.01

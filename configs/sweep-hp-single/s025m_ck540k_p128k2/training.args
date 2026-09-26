@@ -25,7 +25,7 @@
 --bf16 true
 --eval_strategy no
 --save_strategy steps
---save_steps 531
+--save_steps 352
 --save_total_limit 10
 --logging_steps 10
 --logging_first_step true

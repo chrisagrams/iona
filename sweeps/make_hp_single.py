@@ -14,7 +14,8 @@ One factor at a time around the base setting, 1 seed each (12 arms per size = on
     lr           5e-5, 2e-4, 4e-4
     temperature  0.001, 0.005, 0.01
     kl_weight    0, 1, 30
-    batch        64 x 4, 128 x 2            (~255 spectra per step, as the base)
+    batch        170 x 3 (twice the batch: more negatives), 128 x 2 (~255 spectra, smaller groups)
+                 (every ms-contrastive-100k group has exactly 3 experimental spectra, so K <= 3)
 
 3 epochs, the encoder saved every half epoch, so each run also gives its epoch curve. Selected
 on ms-contrastive-100k VALIDATION MAP@R (8-other-species OOD validation as the second check).
@@ -33,7 +34,7 @@ TEMPLATE = REPO / "configs" / "sweep-c8c19" / "s050m_ck540k_supcon_mass_seed0" /
 PRETRAINED = "/flare/UIC-HPC/khuss/msdelta/pretrained/msdelta-{}-production-01-checkpoint-540423"
 SIZES = ("25m", "50m", "100m", "200m", "400m")
 RUN_PREFIX = "v2_hp-single-"
-EPOCH_STEPS = 1062                       # at ~255 spectra per step
+TRAIN_GROUPS = 90288                     # ms-contrastive-100k train groups (training log)
 ARMS = {
     "base": {},
     "lr5e-5": {"--learning_rate": "5e-5"},
@@ -45,7 +46,7 @@ ARMS = {
     "kl0": {"--kl_weight": "0"},
     "kl1": {"--kl_weight": "1"},
     "kl30": {"--kl_weight": "30"},
-    "p64k4": {"--groups_per_batch": "64", "--replicates": "4"},
+    "p170k3": {"--groups_per_batch": "170", "--replicates": "3"},
     "p128k2": {"--groups_per_batch": "128", "--replicates": "2"},
 }
 
@@ -62,7 +63,9 @@ def arms() -> dict[str, tuple[str, str]]:
         for arm, over in ARMS.items():
             name = f"s{size.rjust(4, '0')}_ck540k_{arm}"
             o = {"--pretrained_path": PRETRAINED.format(size), "--seed": "0",
-                 "--num_train_epochs": "3", "--save_steps": str(EPOCH_STEPS // 2),
+                 "--num_train_epochs": "3",
+                 # every half epoch of THIS arm's schedule (steps/epoch = groups // P)
+                 "--save_steps": str(TRAIN_GROUPS // int(over.get("--groups_per_batch", "85")) // 2),
                  "--run_name": RUN_PREFIX + name, "--output_dir": f"./runs/{RUN_PREFIX}{name}", **over}
             pairs = [(k, o.pop(k) if k in o else v) for k, v in base]
             pairs += list(o.items())

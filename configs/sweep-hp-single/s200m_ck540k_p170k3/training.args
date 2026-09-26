@@ -6,10 +6,10 @@
 --pooling mean+max
 --temperature 0.002
 --kl_weight 10
---groups_per_batch 64
---replicates 4
---run_name v2_hp-single-s200m_ck540k_p64k4
---output_dir ./runs/v2_hp-single-s200m_ck540k_p64k4
+--groups_per_batch 170
+--replicates 3
+--run_name v2_hp-single-s200m_ck540k_p170k3
+--output_dir ./runs/v2_hp-single-s200m_ck540k_p170k3
 --learning_rate 1e-4
 --lr_scheduler_type cosine
 --warmup_steps 5
@@ -25,7 +25,7 @@
 --bf16 true
 --eval_strategy no
 --save_strategy steps
---save_steps 531
+--save_steps 265
 --save_total_limit 10
 --logging_steps 10
 --logging_first_step true
