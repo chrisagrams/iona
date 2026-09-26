@@ -1,0 +1,5 @@
+# mouse 20k: the 50M Iona encoder (validation-selected seed 1) and its stage-1 (replicate corpus, 24 ep) models
+c7b_cont050m_final_seed1 /lus/flare/projects/UIC-HPC/khuss/msdelta/runs/sweep-cont050m_ep01_seed1-8860522/final
+s050m_t0002_pk256_ep24_seed0 /lus/flare/projects/UIC-HPC/khuss/msdelta/runs/sweep-s050m_t0002_pk256_ep24_seed0-8857593/final
+s050m_t0002_pk256_ep24_seed1 /lus/flare/projects/UIC-HPC/khuss/msdelta/runs/sweep-s050m_t0002_pk256_ep24_seed1-8857593/final
+s050m_t0002_pk256_ep24_seed2 /lus/flare/projects/UIC-HPC/khuss/msdelta/runs/sweep-s050m_t0002_pk256_ep24_seed2-8857593/final

@@ -46,7 +46,7 @@ charge) embed close together; evaluated by spectrum-to-spectrum retrieval.
 ## C_transfer
 
 The `C_transfer_ours` models (same runs, same seed selection, same frozen + ABTT bars) next to the two
-baselines, on the two benchmarks where every method was scored.
+baselines, in-distribution and on two unseen nine-species subsets.
 
 - **GLEAMS**: the published pretrained model, cosine similarity, no retraining.
 - **binned cosine**: 1 Da and 0.1 Da bins are both in the CSV; the bar is the better of the two on that
@@ -55,18 +55,23 @@ baselines, on the two benchmarks where every method was scored.
   (released as `Gaolaboratory/iona-contrastive-400m` and `-50m`); "(replicate corpus only)" marks the models called
   "replicate corpus only" elsewhere: the first contrastive stage alone, without the ms-contrastive-100k epoch.
 
-| model | ms-contrastive-100k | yeast 20k |
-|---|---|---|
-| Iona spectrum encoder 400M | **0.868** | 0.596 |
-| Iona spectrum encoder 50M | 0.839 | 0.523 |
-| Iona spectrum encoder 400M (replicate corpus only) | 0.713 | 0.520 |
-| Iona spectrum encoder 50M (replicate corpus only) | 0.656 | 0.499 |
-| frozen + ABTT (best encoder) | 0.432 | 0.709 |
-| GLEAMS | 0.646 | 0.770 |
-| binned cosine (best width) | 0.729 | **0.916** |
+| model | ms-contrastive-100k | yeast 20k | mouse 20k |
+|---|---|---|---|
+| Iona spectrum encoder 400M | **0.868** | 0.596 | 0.846 |
+| Iona spectrum encoder 50M | 0.839 | 0.523 | 0.820 |
+| Iona spectrum encoder 400M (replicate corpus only) | 0.713 | 0.520 | 0.787 |
+| Iona spectrum encoder 50M (replicate corpus only) | 0.656 | 0.499 | 0.757 |
+| frozen + ABTT (best encoder) | 0.432 | 0.709 | not run |
+| GLEAMS | 0.646 | 0.770 | 0.834 |
+| binned cosine (best width) | 0.729 | **0.916** | **0.916** |
 
-- Reading: in-distribution the Iona encoders lead every baseline; on the unseen yeast data both
-  baselines are ahead of every model of ours, binned cosine by a wide margin.
+- **Mouse 20k**: the Mus musculus spectra of the Noble lab nine-species benchmark (Zenodo
+  10.5281/zenodo.12819175, `nine-species-balanced.zip`; Tide + Percolator labels at 1% FDR), groups of
+  peptide + charge with >= 2 spectra capped at 20, whole groups sampled (seed 0) to 20,003 spectra in
+  4,026 groups; no spectrum exceeds 512 peaks. Frozen + ABTT was not run on it.
+- Reading: in-distribution the Iona encoders lead every baseline. On unseen yeast both baselines are
+  ahead of every model of ours; on unseen mouse the Iona 400M encoder is level with GLEAMS (0.846 vs
+  0.834) and binned cosine leads (0.916).
 
 ## C_pretraining_scaling
 
