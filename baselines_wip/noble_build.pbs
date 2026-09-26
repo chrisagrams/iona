@@ -1,0 +1,15 @@
+#!/bin/bash -l
+# Build one Noble nine-species benchmark subset (prepared + export) for the transfer evaluations.
+#   qsub -q debug-scaling -l select=1 -l walltime=00:20:00 -v SPECIES=H.-sapiens,OUT=.../noble_human20k baselines_wip/noble_build.pbs
+#PBS -N noble-build
+#PBS -A UIC-HPC
+#PBS -l filesystems=home:flare
+#PBS -j oe
+#PBS -o /home/khuss/code/msdelta/pbs/logs/
+set -euo pipefail
+cd /home/khuss/code/msdelta
+set +u; source /usr/share/lmod/lmod/init/bash; module load frameworks/2025.3.1; set -u
+export ONEAPI_DEVICE_SELECTOR=level_zero:gpu ZE_FLAT_DEVICE_HIERARCHY=FLAT ZE_AFFINITY_MASK=0 PYTHONPATH=$PWD
+export HF_HOME=/lus/flare/projects/UIC-HPC/khuss/msdelta/huggingface HF_HUB_OFFLINE=1 HF_DATASETS_OFFLINE=1
+NOBLE_SPECIES=$SPECIES NOBLE_PER_SPECIES=${PER_SPECIES:-20000} .venv/bin/python baselines_wip/noble_build.py $OUT
+head -c 700 $OUT/prepared/PREPARED.json; echo

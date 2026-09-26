@@ -90,7 +90,9 @@ def main(out_dir, *_ignored):
         if not name.endswith(".mgf"):
             continue
         species = name.split("/")[1]
-        if species in EXCLUDE or (ONLY and species not in ONLY):
+        # EXCLUDE is the default for multi-species builds; naming a species in NOBLE_SPECIES builds it
+        # anyway (H. sapiens, user OK 2026-09-26: possible pretraining overlap noted, not a blocker).
+        if (species in EXCLUDE and species not in ONLY) or (ONLY and species not in ONLY):
             continue
         run = Path(name).stem
         for i, s in enumerate(read_mgf(zf.read(name).decode())):

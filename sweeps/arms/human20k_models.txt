@@ -1,0 +1,13 @@
+# nine-species HUMAN 20k (Noble, H. sapiens): Iona 400M/50M (+ replicate-only), binned cosine
+c7b_cont400m_final_seed0 /lus/flare/projects/UIC-HPC/khuss/msdelta/runs/sweep-cont400m_ep01_seed0-8860522/final
+c7b_cont400m_final_seed1 /lus/flare/projects/UIC-HPC/khuss/msdelta/runs/sweep-cont400m_ep01_seed1-8860522/final
+c7b_cont400m_final_seed2 /lus/flare/projects/UIC-HPC/khuss/msdelta/runs/sweep-cont400m_ep01_seed2-8860522/final
+s400m_t0002_pk256_ep12_seed0 /lus/flare/projects/UIC-HPC/khuss/msdelta/runs/sweep-s400m_t0002_pk256_ep12_seed0-8857593/final
+s400m_t0002_pk256_ep12_seed1 /lus/flare/projects/UIC-HPC/khuss/msdelta/runs/sweep-s400m_t0002_pk256_ep12_seed1-8857593/final
+s400m_t0002_pk256_ep12_seed2 /lus/flare/projects/UIC-HPC/khuss/msdelta/runs/sweep-s400m_t0002_pk256_ep12_seed2-8857593/final
+binned_w0.1 binned:0.1
+binned_w1.0005 binned:1.0005
+c7b_cont050m_final_seed1 /lus/flare/projects/UIC-HPC/khuss/msdelta/runs/sweep-cont050m_ep01_seed1-8860522/final
+s050m_t0002_pk256_ep24_seed0 /lus/flare/projects/UIC-HPC/khuss/msdelta/runs/sweep-s050m_t0002_pk256_ep24_seed0-8857593/final
+s050m_t0002_pk256_ep24_seed1 /lus/flare/projects/UIC-HPC/khuss/msdelta/runs/sweep-s050m_t0002_pk256_ep24_seed1-8857593/final
+s050m_t0002_pk256_ep24_seed2 /lus/flare/projects/UIC-HPC/khuss/msdelta/runs/sweep-s050m_t0002_pk256_ep24_seed2-8857593/final

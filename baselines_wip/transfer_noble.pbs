@@ -1,0 +1,34 @@
+#!/bin/bash -l
+# Spectrum-embedding transfer on a built Noble subset: our models + binned cosine on tiles 0-11 (one
+# model per tile), GLEAMS on CPU in the background.
+#   qsub -q debug-scaling -l select=1 -l walltime=01:00:00 -v C=<built dir>,MODELS=<list>,OUT=<results dir> baselines_wip/transfer_noble.pbs
+#PBS -N noble-transfer
+#PBS -A UIC-HPC
+#PBS -l filesystems=home:flare
+#PBS -j oe
+#PBS -o /home/khuss/code/msdelta/pbs/logs/
+set -uo pipefail
+cd /home/khuss/code/msdelta
+S=/lus/flare/projects/UIC-HPC/khuss/msdelta; G=$S/baselines/gleams
+set +u; source /usr/share/lmod/lmod/init/bash; module load frameworks/2025.3.1; set -u
+export ONEAPI_DEVICE_SELECTOR=level_zero:gpu ZE_FLAT_DEVICE_HIERARCHY=FLAT PYTHONPATH=$PWD OMP_NUM_THREADS=8
+export HF_HOME=$S/huggingface HF_HUB_OFFLINE=1 HF_DATASETS_OFFLINE=1
+PY=.venv/bin/python
+[ -d $C/prepared ] || { echo "no $C/prepared"; exit 1; }
+echo "=== $(date -Is) GLEAMS embed (CPU, background)"
+( cd $G && env -u PYTHONPATH CUDA_VISIBLE_DEVICES="" TF_CPP_MIN_LOG_LEVEL=2 $G/env/bin/python \
+    /home/khuss/code/msdelta/baselines_wip/gleams/embed_gleams.py $C/export 96 > $C/gleams_embed.log 2>&1 ) &
+gpid=$!
+n=$(grep -cv '^#' $MODELS); n=$(( n < 12 ? n : 12 ))
+echo "=== $(date -Is) ours + binned on $n tiles"; mkdir -p $OUT; pids=()
+for i in $(seq 0 $((n - 1))); do
+  ZE_AFFINITY_MASK=$i $PY -m msdelta.eval_grouped_retrieval score --data $C/prepared --models $MODELS \
+    --out-dir $OUT --shard $i --num-shards $n > $OUT/.shard$i.log 2>&1 &
+  pids+=($!)
+done
+for p in "${pids[@]}"; do wait $p || echo "a scoring shard failed"; done
+grep -h "MAP@R\|Error" $OUT/.shard*.log | cut -c1-160
+wait $gpid; tail -2 $C/gleams_embed.log
+echo "=== $(date -Is) GLEAMS score"
+$PY baselines_wip/gleams/score_retrieval.py $C/export $C/export/gleams_embed.npy $C/gleams_metrics.json 2>&1 | tail -3
+echo "=== $(date -Is) done"
