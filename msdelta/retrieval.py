@@ -8,7 +8,6 @@ import random
 from pathlib import Path
 from typing import cast
 
-import faiss
 import numpy as np
 import torch
 from accelerate.utils import broadcast_object_list
@@ -84,6 +83,10 @@ def retrieval_metrics(embeddings, labels, device, *, gpus=None):
     MAP@100 uses all relevant gallery items as its per-query denominator, including
     positives outside the retrieved top 100. FAISS excludes each query's own entry.
     """
+    # Imported here, not at module level: faiss is not in the Aurora venv, and only this
+    # probe needs it -- train, posttraining and callbacks import this module.
+    import faiss
+
     vectors = torch.as_tensor(embeddings, dtype=torch.float32, device=device)
     vectors = torch.nn.functional.normalize(vectors, dim=-1)
     targets = torch.as_tensor(labels, dtype=torch.long, device=device)

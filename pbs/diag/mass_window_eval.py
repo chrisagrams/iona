@@ -14,8 +14,9 @@ Experimental spectra only (queries and gallery), as in the headline experimental
 Windows, all on THEORETICAL values computed from the peptide (the quantity C19 sorts on), so a
 query's replicates are always inside its own window and R is unchanged:
     open          no filter (reproduces experimental/MAP@R)
-    mass_1Da      |neutral mass difference| <= 1 Da, any charge
-    mz_20ppm      same charge and |precursor m/z difference| <= 20 ppm (a standard library search)
+    mass_<w>Da    |neutral mass difference| <= w Da, any charge, w in MASS_WINDOWS_DA
+    mz_<w>ppm     same charge and |precursor m/z difference| <= w ppm (a library search's filter)
+The width is the only thing varied: same models, same embeddings, same queries.
 Diagnostics on open retrieval: MAP@R by crowding (number of other-peptide gallery spectra within
 1 Da of the query), and for Hit@1 failures the |mass difference| to the wrong top-1.
 I/L-isobaric peptides are different groups here, as in every other evaluation.
@@ -32,6 +33,8 @@ import torch
 import torch.nn.functional as F
 
 PROTON = 1.007276
+MASS_WINDOWS_DA = (100, 25, 5, 1, 0.1)
+MZ_WINDOWS_PPM = (100, 20, 10)
 
 
 def read_models(path):
@@ -93,6 +96,7 @@ def windowed_metrics(e, g, allowed_fn, chunk=1024, k=100):
     Same arithmetic as contrastive.retrieval_metrics_topk; filtered-out and self entries are
     -inf and never count as hits."""
     n = len(e)
+    k = min(k, n - 1)
     n_rel = torch.bincount(g)[g] - 1
     ranks = torch.arange(1, k + 1, dtype=torch.float32, device=e.device).unsqueeze(0)
     mapr = hit1 = 0.0
@@ -125,7 +129,7 @@ def analyse(cli) -> int:
     from msdelta.reranking import peptide_neutral_mass
 
     device = torch.device("xpu" if torch.xpu.is_available() else "cpu")
-    report = {"windows": ["open", "mass_1Da", "mz_20ppm"], "results": {}}
+    report = {"mass_windows_da": MASS_WINDOWS_DA, "mz_windows_ppm": MZ_WINDOWS_PPM, "results": {}}
     for dname, dpath in read_data(cli.data).items():
         rows = experimental_rows(dpath)
         g = torch.as_tensor(group_ids(rows), device=device)
@@ -133,20 +137,26 @@ def analyse(cli) -> int:
         mass = torch.as_tensor([peptide_neutral_mass(p) for p in rows["peptide"]],
                                dtype=torch.float64, device=device)
         mz = (mass + charge * PROTON) / charge
-        windows = {
-            "open": lambda q: torch.ones(len(q), len(g), dtype=torch.bool, device=device),
-            "mass_1Da": lambda q: (mass[q, None] - mass[None]).abs() <= 1.0,
-            "mz_20ppm": lambda q: (charge[q, None] == charge[None])
-                                  & ((mz[q, None] - mz[None]).abs() <= 20e-6 * mz[q, None]),
-        }
+        def mass_window(da):
+            return lambda q: (mass[q, None] - mass[None]).abs() <= da
+
+        def mz_window(ppm):
+            return lambda q: (charge[q, None] == charge[None]) \
+                & ((mz[q, None] - mz[None]).abs() <= ppm * 1e-6 * mz[q, None])
+
+        # Width sweep, everything else fixed: neutral-mass windows (any charge), then
+        # same-charge precursor m/z windows in ppm (a library search's filter).
+        windows = {"open": lambda q: torch.ones(len(q), len(g), dtype=torch.bool, device=device)}
+        windows |= {f"mass_{da:g}Da": mass_window(da) for da in MASS_WINDOWS_DA}
+        windows |= {f"mz_{ppm:g}ppm": mz_window(ppm) for ppm in MZ_WINDOWS_PPM}
         # crowding: other-group gallery spectra within 1 Da (model independent)
         crowd = torch.zeros(len(g), dtype=torch.long, device=device)
         cand = torch.zeros(len(g), dtype=torch.long, device=device)
         for s in range(0, len(g), 2048):
             q = torch.arange(s, min(s + 2048, len(g)), device=device)
             other = g[q, None] != g[None]
-            crowd[q] = (windows["mass_1Da"](q) & other).sum(1)
-            cand[q] = (windows["mz_20ppm"](q) & other).sum(1)
+            crowd[q] = (mass_window(1.0)(q) & other).sum(1)
+            cand[q] = (mz_window(20)(q) & other).sum(1)
         bins = [(0, 0), (1, 5), (6, 20), (21, 10**9)]
         info = {"spectra": len(g), "groups": int(g.max()) + 1,
                 "median_other_within_1Da": float(crowd.float().median()),
