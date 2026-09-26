@@ -1,0 +1,3 @@
+# frozen + ABTT on HEK (c11_cap20; fit: ms-contrastive-100k train10k)
+zs_400m_ck330k /flare/UIC-HPC/khuss/msdelta/pretrained/msdelta-400m-production-01-checkpoint-330000
+zs_400m_ck220k /flare/UIC-HPC/khuss/msdelta/pretrained/msdelta-400m-production-01-checkpoint-220000
