@@ -1,0 +1,37 @@
+[project]
+name = "prosit-transformer-eval"
+version = "0.1.0"
+description = "Evaluate the released Prosit Transformer on the Prosit 2020 HCD holdout with the MSDelta spectral-angle protocol."
+readme = "README.md"
+# The released model targets torch 1.8.1 and the authors' TAPE fork.
+requires-python = ">=3.8,<3.9"
+dependencies = [
+    "h5py",
+    "lmdb<1.5",
+    "numpy<1.25",
+    "tape_proteins",
+    "torch==1.8.1",
+    "tqdm",
+]
+
+[project.scripts]
+prosit-transformer-eval = "prosit_transformer_eval.evaluate:main"
+
+[tool.uv.sources]
+# The authors' fork carries ProteinBertForValuePredictionFragmentationProsit and
+# PrositFragmentationDataset; pinned to the commit the released model uses.
+tape_proteins = { git = "https://github.com/statisticalbiotechnology/tape", rev = "6ae5e3f726632668560cc5ea36f98474ce96fbce" }
+# torch 1.8.1 with CUDA 11.1, the oldest build that supports Ampere (sm_86).
+torch = { index = "pytorch-cu111" }
+
+[[tool.uv.index]]
+name = "pytorch-cu111"
+url = "https://download.pytorch.org/whl/cu111"
+explicit = true
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/prosit_transformer_eval"]
