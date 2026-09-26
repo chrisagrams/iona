@@ -8,12 +8,12 @@ denoising experiments.
 | file | content |
 |---|---|
 | `D_hp_parallel.png` | parallel-coordinates plot: one axis per hyperparameter, one line per configuration, coloured by test AUROC; best in red |
-| `D_hp_parallel.csv` | all 216 configurations with their test AUROC, sorted best first |
+| `D_hp_parallel.csv` | all 216 configurations with their test AUROC and AUPRC, sorted best first |
 | `plot_hp_parallel.py` | regenerates the figure from the CSV (`python plot_hp_parallel.py`; matplotlib + numpy) |
 
 CSV columns: `arm` (configuration name), `learning_rate`, `encoder_lr_scale` (encoder learning rate as a
 fraction of the head's; 0 = frozen encoder), `num_train_epochs`, `head_hidden_size`, `eff_batch`
-(effective batch size), `test_auroc`, `test_spectra_scored`.
+(effective batch size), `test_auroc`, `test_auprc` (4 decimals, as in the grid table), `test_spectra_scored`.
 
 ## Setup
 
@@ -21,11 +21,12 @@ fraction of the head's; 0 = frozen encoder), `num_train_epochs`, `head_hidden_si
   on `chrisagrams/ms-denoise-100k`.
 - **Grid** (3 x 4 x 2 x 3 x 3 = 216): learning rate {1e-6, 1e-5, 2e-4}; encoder LR scale {0 (frozen),
   0.1, 0.5, 1.0}; epochs {2, 4}; head width {128, 256, 512}; effective batch {12, 48, 144}.
-- **Metric**: test AUROC (8,584 test spectra), one run per configuration. Job 8840408.
+- **Metric**: test AUROC (8,584 test spectra), one run per configuration. Job 8840408. AUPRC (CSV
+  only): pooled over peaks, noise as the positive class; chance is the noise fraction, about 0.53.
 
 ## Results
 
-- Best: lr 2e-4, encoder 0.5x, 4 epochs, head 512, effective batch 12, AUROC 0.9320.
+- Best: lr 2e-4, encoder 0.5x, 4 epochs, head 512, effective batch 12, AUROC 0.9320 (AUPRC 0.9402).
 - Learning rate and a trainable encoder matter most: every configuration above 0.90 has lr 2e-4 (or
   3 at lr 1e-5 with encoder 1.0x); every frozen-encoder and every lr 1e-6 run is below 0.90 (168 of 216
   runs, drawn grey). 4 epochs beat 2. Head width barely matters.

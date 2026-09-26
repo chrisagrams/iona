@@ -9,17 +9,21 @@ architecture trained from a random initialisation.
 | file | content |
 |---|---|
 | `D_denoise.png` | test AUROC vs model size; one line per pretraining checkpoint, plus from scratch |
-| `denoise_scaling_pretraining.csv` | the plotted data: one row per (scale, pretraining steps), with every seed's AUROC |
+| `denoise_scaling_pretraining.csv` | the plotted data: one row per (scale, pretraining steps), with every seed's AUROC and AUPRC |
 | `plot_denoise_scaling.py` | regenerates the figure from the CSV (`python plot_denoise_scaling.py`; matplotlib + numpy) |
 | `HP/` | the hyperparameter search that fixed the fine-tuning recipe (own README) |
 
 CSV columns: `scale`, `pretraining_steps` (0 = from scratch), `n_seeds`, `mean_auroc`, `sd_auroc`
-(blank for a single run), `min_auroc`, `max_auroc`, `per_seed_auroc` (space-separated).
+(blank for a single run), `min_auroc`, `max_auroc`, `per_seed_auroc` (space-separated), `mean_auprc`, `sd_auprc`, `per_seed_auprc`
+(same seeds, same order as `per_seed_auroc`).
 
 ## Setup
 
 - **Data**: `chrisagrams/ms-denoise-100k`, spectra up to 512 peaks. Test split: 8,567 spectra scored.
-- **Metric**: per-peak noise classification AUROC on the test split, pooled over peaks.
+- **Metric**: per-peak noise classification AUROC on the test split, pooled over peaks. AUPRC is also
+  reported (CSV only), pooled over peaks with noise as the positive class, computed as the trapezoidal
+  area under the precision-recall curve. Noise is about 53% of test peaks, so a random classifier
+  scores AUPRC of about 0.53 (not 0.5).
 - **Fine-tuning recipe (every pretrained point)**: lr 2e-4, encoder learning rate 0.5x the head's,
   4 epochs, head width 512, effective batch 12. This configuration won the hyperparameter search at
   every scale (see `HP/`).

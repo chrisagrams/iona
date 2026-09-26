@@ -101,20 +101,20 @@ D_CKPTS = [10000, 120000, 220000, 330000, 430000, 540423]   # pretraining steps 
 D_CSV = REPO / "results" / "denoise_scaling_pretraining.csv"
 
 
-def denoise_cells():
-    """(scale, pretraining steps; 0 = from scratch) -> per-seed test AUROCs, read from the run dirs.
+def denoise_cells(metric="test_auroc"):
+    """(scale, pretraining steps; 0 = from scratch) -> per-seed test `metric`, read from the run dirs.
     Pretrained: plot_ladder.collect (fixed config lr 2e-4 / es 0.5 / 4 ep / head 512 / eff. batch 12).
     Scratch: random encoder at lr 2e-4 / eff. batch 12 / 4 ep -- 100m-400m 3 seeds (8847663),
     50m one run (arm lr2e4_ep4_b12 of 8841984)."""
     import sys; sys.path.insert(0, str(REPO / "sweeps"))
     import json, plot_ladder
     cov = plot_ladder.collect()
-    cells = {(sc, c): list(cov[(sc, c)]["test_auroc"]) for sc in D_SCALE for c in D_CKPTS if (sc, c) in cov}
+    cells = {(sc, c): list(cov[(sc, c)][metric]) for sc in D_SCALE for c in D_CKPTS if (sc, c) in cov}
     runs = Path(plot_ladder.RUNS)
     for sc in D_SCALE:
         dirs = ([runs / "sweep-lr2e4_ep4_b12-8841984"] if sc == "50m"
                 else [runs / f"sweep-{sc}_ep04_seed{i}-8847663" for i in (1, 2, 3)])
-        cells[(sc, 0)] = [json.loads((d / "all_results.json").read_text())["test_auroc"] for d in dirs]
+        cells[(sc, 0)] = [json.loads((d / "all_results.json").read_text())[metric] for d in dirs]
     return cells
 
 
@@ -153,12 +153,17 @@ def fig_d():
         fig.text(0.01, -0.02, "Mean ± sd over 3–5 seeds per point; 50M from scratch is a single run.",
                  fontsize=8, color=muted)
         save(fig, "D_denoise.png")
-    rows = ["scale,pretraining_steps,n_seeds,mean_auroc,sd_auroc,min_auroc,max_auroc,per_seed_auroc"]
+    # AUPRC: noise is the positive class, so chance = the test noise fraction (0.533), not 0.5.
+    prc = denoise_cells("test_auprc")
+    rows = ["scale,pretraining_steps,n_seeds,mean_auroc,sd_auroc,min_auroc,max_auroc,per_seed_auroc,"
+            "mean_auprc,sd_auprc,per_seed_auprc"]
     for x in xs:
         for c in [0] + D_CKPTS:
-            u = cells[(x, c)]
+            u, a = cells[(x, c)], prc[(x, c)]
+            assert len(a) == len(u), (x, c)
             rows.append(f"{x},{c},{len(u)},{np.mean(u):.5f},{sd(u) if len(u) > 1 else float('nan'):.5f},"
-                        f"{min(u):.5f},{max(u):.5f},{' '.join(f'{t:.5f}' for t in u)}")
+                        f"{min(u):.5f},{max(u):.5f},{' '.join(f'{t:.5f}' for t in u)},"
+                        f"{np.mean(a):.5f},{sd(a) if len(a) > 1 else float('nan'):.5f},{' '.join(f'{t:.5f}' for t in a)}")
     D_CSV.write_text("\n".join(rows).replace("nan", "") + "\n"); print("wrote", D_CSV.relative_to(REPO))
 
 

@@ -41,7 +41,7 @@ def load():
         if len(f) == 9 and f[0].startswith("lr") and "_es" in f[0]:
             rows.append(dict(arm=f[0], learning_rate=float(f[1]), encoder_lr_scale=float(f[2]),
                              num_train_epochs=int(f[3]), head_hidden_size=int(f[4]), eff_batch=int(f[5]),
-                             auroc=float(f[6]), spectra=8584))
+                             auroc=float(f[6]), auprc=float(f[8]), spectra=8584))
     return rows
 
 
@@ -104,8 +104,8 @@ def main():
         OUT.mkdir(parents=True, exist_ok=True)
         fig.savefig(OUT / "D_hp_parallel.png"); plt.close(fig)
     csv = OUT / "D_hp_parallel.csv"
-    csv.write_text("arm," + ",".join(keys) + ",test_auroc,test_spectra_scored\n" + "".join(
-        f"{r['arm']}," + ",".join(str(r[k]) for k in keys) + f",{r['auroc']:.5f},{r['spectra']}\n"
+    csv.write_text("arm," + ",".join(keys) + ",test_auroc,test_auprc,test_spectra_scored\n" + "".join(
+        f"{r['arm']}," + ",".join(str(r[k]) for k in keys) + f",{r['auroc']:.5f},{r['auprc']:.4f},{r['spectra']}\n"
         for r in sorted(rows, key=lambda r: -r["auroc"])))
     print("wrote", OUT / "D_hp_parallel.png", csv)
     print("best", best["arm"], round(best["auroc"], 4), "| below", lo, sum(r["auroc"] < lo for r in rows))
