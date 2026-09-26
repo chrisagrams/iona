@@ -9,6 +9,7 @@ from __future__ import annotations
 import numpy as np
 import torch
 import torch.nn.functional as F
+from pytorch_metric_learning.losses import SupConLoss
 from torch import Tensor, nn
 from torch.utils.data import Sampler
 
@@ -154,19 +155,7 @@ def pair_contrastive_loss(embeddings: Tensor, groups: Tensor, margin: float = 1.
 def supervised_contrastive_loss(embeddings: Tensor, groups: Tensor,
                                 temperature: float = 0.07) -> Tensor:
     """SupCon (Khosla et al., 2020) via pytorch_metric_learning: every same-group pair is a positive."""
-    return _SUPCON[temperature](F.normalize(embeddings.float(), dim=-1), groups)
-
-
-class _SupConCache(dict):
-    """One SupConLoss per temperature; it holds no state beyond that scalar."""
-
-    def __missing__(self, temperature: float):
-        from pytorch_metric_learning.losses import SupConLoss
-        self[temperature] = SupConLoss(temperature=temperature)
-        return self[temperature]
-
-
-_SUPCON = _SupConCache()
+    return SupConLoss(temperature=temperature)(F.normalize(embeddings.float(), dim=-1), groups)
 
 
 def head_kl(logits: Tensor, reference_logits: Tensor, attention_mask: Tensor) -> Tensor:
