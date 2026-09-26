@@ -1,6 +1,8 @@
 """Shrink a prepared split for CPU runs, keeping WHOLE analyte groups (seed 0).
 
-    python subsample.py IN_DIR OUT_DIR N_EXPERIMENTAL
+    python data/subsample_prepared.py IN_DIR OUT_DIR N_EXPERIMENTAL
+
+(e.g. ms-contrastive-100k-validation-mp512 -> ...-validation-mp512-sub5k with N = 5000)
 
 Draws analyte groups (peptide + charge) at random until at least N experimental spectra are
 kept; every row of a chosen group (its experimental replicates and its consensus spectrum)

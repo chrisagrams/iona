@@ -1,0 +1,20 @@
+#!/bin/bash -l
+# Reorganisation + PeptideEmbedderModel backward compatibility: the full CPU test suite from REPO_DIR,
+# then pbs/diag/backcompat_check.py on the real models (old tree vs new tree, old vs new loaders).
+#PBS -N backcompat
+#PBS -A UIC-HPC
+#PBS -l filesystems=home:flare
+#PBS -j oe
+#PBS -o /home/khuss/code/msdelta/pbs/logs/
+set -uo pipefail
+REPO_DIR=${REPO_DIR:?set REPO_DIR}; OLD=${OLD_REPO:-/home/khuss/code/msdelta}; cd $REPO_DIR
+S=/lus/flare/projects/UIC-HPC/khuss/msdelta
+set +u; source /usr/share/lmod/lmod/init/bash; module load frameworks/2025.3.1; set -u
+export ONEAPI_DEVICE_SELECTOR=level_zero:gpu ZE_FLAT_DEVICE_HIERARCHY=FLAT ZE_AFFINITY_MASK=0 PYTHONPATH=$REPO_DIR OMP_NUM_THREADS=16
+export HF_HOME=$S/huggingface HF_HUB_OFFLINE=1 HF_DATASETS_OFFLINE=1
+PY=$OLD/.venv/bin/python
+echo "=== $(date -Is) test suite ($REPO_DIR)"
+$PY -m pytest tests -p no:cacheprovider -q 2>&1 | tail -25
+echo "=== $(date -Is) real-model backward compatibility"
+$PY pbs/diag/backcompat_check.py --old-repo $OLD --out $REPO_DIR/results/backcompat.json
+echo "=== $(date -Is) done"
