@@ -1,0 +1,3 @@
+form,E,A,alpha,B,beta,log_R2,AIC,max_err_400M_held_out,max_err_final_checkpoints_held_out
+without_E,0.00000,0.05294,0.1375,0.02878,0.5709,0.9886,-260.89,0.00670,0.00626
+with_E,0.03914,0.01251,0.5483,0.02869,0.5725,0.9909,-267.65,0.00529,0.00519
