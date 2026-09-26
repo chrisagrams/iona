@@ -2,7 +2,7 @@
 
     python scripts/rerank_psm_handfeat.py --run HEK293/0718-1.parquet --out OUT.parquet
 
-The msdelta.rescoring features from the raw peaks, at an ion-trap
+The iona.rescoring features from the raw peaks, at an ion-trap
 tolerance of max(250 ppm, 0.05 Da). Keyed by `candidate` to join stage 1's rows. CPU only.
 """
 
@@ -18,7 +18,7 @@ import pyarrow.parquet as pq
 from huggingface_hub import hf_hub_download
 
 from rerank_psm_embed import to_notation
-from msdelta.rescoring import FEATURE_NAMES, extract_features
+from iona.rescoring import FEATURE_NAMES, extract_features
 
 
 def main(argv: list[str] | None = None) -> int:

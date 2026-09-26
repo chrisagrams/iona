@@ -20,16 +20,16 @@ import numpy as np
 import torch
 from datasets import load_dataset, load_from_disk
 
-from msdelta.contrastive import MSDeltaForContrastive, embed_dataset
-from msdelta.data import build_grouped_split, corpus_peptides, group_ids
-from msdelta.finetune_contrastive import ContrastiveCollator
-from msdelta.modeling_msdelta import MSDeltaForPreTraining
-from msdelta.processing_msdelta import MSDeltaProcessor
-from msdelta.retrieval import retrieval_metrics
+from iona.contrastive import IonaForContrastive, embed_dataset
+from iona.data import build_grouped_split, corpus_peptides, group_ids
+from iona.finetune_contrastive import ContrastiveCollator
+from iona.modeling_iona import IonaForPreTraining
+from iona.processing_iona import IonaProcessor
+from iona.retrieval import retrieval_metrics
 
 
 def prepare(cli) -> int:
-    processor = MSDeltaProcessor.from_pretrained(cli.processor, max_peaks=cli.max_peaks)
+    processor = IonaProcessor.from_pretrained(cli.processor, max_peaks=cli.max_peaks)
     exclude = corpus_peptides(cli.exclude_peptides_from) if cli.exclude_peptides_from else set()
     print(f"[prepare] excluding {len(exclude):,} peptides from {cli.exclude_peptides_from}", flush=True)
     raw = load_dataset(cli.repo)[cli.split]
@@ -51,8 +51,8 @@ def prepare(cli) -> int:
 
 def score_model(path, pooling, rows, groups, experimental, collator, device,
                 batch_size) -> dict:
-    encoder = MSDeltaForPreTraining.from_pretrained(path)
-    model = MSDeltaForContrastive(encoder, None, pooling=pooling, kl_weight=0).to(device)
+    encoder = IonaForPreTraining.from_pretrained(path)
+    model = IonaForContrastive(encoder, None, pooling=pooling, kl_weight=0).to(device)
     try:
         emb, _ = embed_dataset(model, rows, collator, device, max_rows=len(rows),
                                batch_size=batch_size)

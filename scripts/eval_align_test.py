@@ -18,17 +18,17 @@ from datasets import load_from_disk
 from safetensors.torch import load_file
 from transformers import HfArgumentParser
 
-from msdelta.data import group_ids
-from msdelta.finetune_align import AlignDataArguments, AlignModelArguments
-from msdelta.modeling_msdelta import MSDeltaForPreTraining
-from msdelta.reranking import (
+from iona.data import group_ids
+from iona.finetune_align import AlignDataArguments, AlignModelArguments
+from iona.modeling_iona import IonaForPreTraining
+from iona.reranking import (
     AlignmentCollator,
     PeptideCollator,
     PeptideEncoder,
     cross_modal_metrics,
     embed_spectrum,
 )
-from msdelta.retrieval import retrieval_metrics
+from iona.retrieval import retrieval_metrics
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -53,7 +53,7 @@ def main(argv: list[str] | None = None) -> int:
                                            "--pretrained_path", manifest["teacher"]],
                                      args_file_flag="--args_file",
                                      return_remaining_strings=True)
-    teacher = MSDeltaForPreTraining.from_pretrained(manifest["teacher"]).to(device).eval()
+    teacher = IonaForPreTraining.from_pretrained(manifest["teacher"]).to(device).eval()
     state = load_file(str(Path(cli.run) / "final" / "model.safetensors"))
     student = PeptideEncoder(embedding_size=int(manifest["embedding_size"]),
                              hidden_size=model_args.sequence_hidden_size,

@@ -6,7 +6,7 @@
 #        scripts/precompute_align.pbs
 #
 # Refuses to overwrite an existing cache.
-#PBS -N msdelta-precompute
+#PBS -N iona-precompute
 #PBS -A UIC-HPC
 #PBS -l place=scatter
 #PBS -l filesystems=home:flare

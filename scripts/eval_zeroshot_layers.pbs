@@ -6,7 +6,7 @@
 #
 # One model per tile (up to 12). For all-but-the-top: -v MODELS=...,ABTT=1:2:4:8:16:32
 
-#PBS -N msdelta-zeroshot
+#PBS -N iona-zeroshot
 #PBS -A UIC-HPC
 #PBS -l place=scatter
 #PBS -l filesystems=home:flare

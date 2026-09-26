@@ -52,4 +52,4 @@ unset WANDB_SERVICE
 # A fresh rendezvous on a free port keeps simultaneous probes independent.
 exec "$probe_python" -m torch.distributed.run \
     --standalone --nnodes=1 --nproc-per-node="${#probe_tiles[@]}" --max-restarts=0 \
-    --module msdelta.posttraining "$@"
+    --module iona.posttraining "$@"

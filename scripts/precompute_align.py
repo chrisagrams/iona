@@ -14,12 +14,12 @@ import torch
 from datasets import concatenate_datasets, load_from_disk
 from transformers import HfArgumentParser
 
-from msdelta.data import load_spectrum_datasets
-from msdelta.finetune_align import AlignDataArguments, AlignModelArguments
-from msdelta.finetune_denoise import subset_splits
-from msdelta.modeling_msdelta import MSDeltaForPreTraining
-from msdelta.processing_msdelta import MSDeltaProcessor
-from msdelta.reranking import attach_teacher_embeddings
+from iona.data import load_spectrum_datasets
+from iona.finetune_align import AlignDataArguments, AlignModelArguments
+from iona.finetune_denoise import subset_splits
+from iona.modeling_iona import IonaForPreTraining
+from iona.processing_iona import IonaProcessor
+from iona.reranking import attach_teacher_embeddings
 
 
 @dataclass
@@ -54,7 +54,7 @@ def main(argv: list[str] | None = None) -> int:
         return _shard(cache, model_args, precompute_args, device)
     if stage == "merge":
         return _merge(cache, model_args, data_args, precompute_args)
-    processor = MSDeltaProcessor.from_pretrained(
+    processor = IonaProcessor.from_pretrained(
         data_args.processor_name_or_path or model_args.pretrained_path,
         max_peaks=data_args.max_peaks,
     )
@@ -76,7 +76,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"[precompute] prepared flat splits under {cache / '_flat'}", flush=True)
         return 0
 
-    teacher = MSDeltaForPreTraining.from_pretrained(model_args.pretrained_path)
+    teacher = IonaForPreTraining.from_pretrained(model_args.pretrained_path)
     datasets = attach_teacher_embeddings(
         datasets, teacher, model_args.pooling,
         batch_size=precompute_args.batch_size,
@@ -87,7 +87,7 @@ def main(argv: list[str] | None = None) -> int:
 
 def _shard(cache, model_args, precompute_args, device) -> int:
     n, i = precompute_args.num_shards, precompute_args.shard_index
-    teacher = MSDeltaForPreTraining.from_pretrained(model_args.pretrained_path)
+    teacher = IonaForPreTraining.from_pretrained(model_args.pretrained_path)
     for name in ("train", "validation"):
         flat = cache / "_flat" / name
         out = cache / "_shards" / name / f"{i:03d}"

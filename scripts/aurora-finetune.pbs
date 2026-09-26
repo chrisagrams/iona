@@ -11,7 +11,7 @@
 #
 # Optional: MAX_STEPS or MAX_SAMPLES (smoke runs), EVAL_STEPS, SEED, PRECOMPUTE_CACHE (align).
 
-#PBS -N msdelta-denoise-ft
+#PBS -N iona-denoise-ft
 #PBS -A UIC-HPC
 #PBS -l place=scatter
 #PBS -l filesystems=home:flare
@@ -29,7 +29,7 @@ ARGS_FILE=${ARGS_FILE:?set ARGS_FILE to a finetune args file}
 PRETRAINED_PATH=${PRETRAINED_PATH:?set PRETRAINED_PATH to the checkpoint to fine-tune from}
 # All 12 tiles of an Aurora node.
 XPUS_PER_HOST=${XPUS_PER_HOST:-12}
-MODULE=${MODULE:-msdelta.finetune_denoise}
+MODULE=${MODULE:-iona.finetune_denoise}
 [[ $ARGS_FILE == /* ]] || ARGS_FILE=$REPO_DIR/$ARGS_FILE
 [[ -f $ARGS_FILE ]]    || { echo "args file not found: $ARGS_FILE" >&2; exit 2; }
 [[ -x $VENV_DIR/bin/python ]] || { echo "no venv at $VENV_DIR" >&2; exit 2; }
@@ -72,8 +72,8 @@ unset CCL_ZE_IPC
 unset CCL_ZE_IPC_EXCHANGE
 export MASTER_ADDR=${MASTER_ADDR:-$(head -n 1 "$PBS_NODEFILE")}
 export MASTER_PORT=${MASTER_PORT:-29500}
-export MSDELTA_XPUS_PER_HOST=$XPUS_PER_HOST
-export MSDELTA_WORLD_SIZE=$TOTAL_XPUS
+export IONA_XPUS_PER_HOST=$XPUS_PER_HOST
+export IONA_WORLD_SIZE=$TOTAL_XPUS
 export PYTHONPATH=$REPO_DIR${PYTHONPATH:+:$PYTHONPATH}
 
 # Datasets come from the populated cache; only W&B needs the network.
@@ -96,7 +96,7 @@ export WANDB_DIR=${WANDB_DIR:-$LOG_DIR}
 export WANDB_RESUME=${WANDB_RESUME:-allow}
 export WANDB_RUN_ID=${WANDB_RUN_ID:-$RUN_NAME-$JOB_ID}
 
-echo "=== msdelta finetune: $MODULE ==="
+echo "=== iona finetune: $MODULE ==="
 echo "  job        : $JOB_ID"
 echo "  hosts      : $NUM_HOSTS x $XPUS_PER_HOST tiles = $TOTAL_XPUS ranks"
 echo "  args       : $ARGS_FILE"
@@ -159,9 +159,9 @@ exec mpiexec \
         set -euo pipefail
         export RANK="${PMIX_RANK:-${PALS_RANKID:-${PMI_RANK:-}}}"
         [[ -n $RANK ]] || { echo "launcher provided no rank" >&2; exit 2; }
-        export WORLD_SIZE="$MSDELTA_WORLD_SIZE"
-        export LOCAL_RANK="${PALS_LOCAL_RANKID:-${MPI_LOCALRANKID:-$((RANK % MSDELTA_XPUS_PER_HOST))}}"
-        export LOCAL_WORLD_SIZE="$MSDELTA_XPUS_PER_HOST"
+        export WORLD_SIZE="$IONA_WORLD_SIZE"
+        export LOCAL_RANK="${PALS_LOCAL_RANKID:-${MPI_LOCALRANKID:-$((RANK % IONA_XPUS_PER_HOST))}}"
+        export LOCAL_WORLD_SIZE="$IONA_XPUS_PER_HOST"
         exec "$@"
     ' _ "$VENV_DIR/bin/python" -m "$MODULE" \
         --args_file "$ARGS_FILE" \

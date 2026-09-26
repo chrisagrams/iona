@@ -10,7 +10,7 @@
 # $SCRATCH_ROOT/rerank-psm/$TAG/{rows,handfeat}; existing ones are reused, so resubmit to
 # resume. The FDR report goes to results/rerank/psm/$TAG.json.
 
-#PBS -N msdelta-rerank-psm
+#PBS -N iona-rerank-psm
 #PBS -A UIC-HPC
 #PBS -l place=scatter
 #PBS -l filesystems=home:flare

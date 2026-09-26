@@ -5,7 +5,7 @@
 # qsub -A PROJECT -q QUEUE \
 #   -l select=1:ncpus=64 -l walltime=12:00:00 \
 #   -l filesystems=home:flare -j oe -o /path/to/pbs/logs \
-#   -v ARGS_FILE=configs/msdelta-base-200m/training.args,HF_HOME=/flare/UIC-HPC/homes/cgrams/hf \
+#   -v ARGS_FILE=configs/iona-base-200m/training.args,HF_HOME=/flare/UIC-HPC/homes/cgrams/hf \
 #   pbs/aurora-preprocess.pbs
 # Set PROBES_ONLY=1 to prepare probes without rebuilding the existing main dataset.
 
@@ -15,7 +15,7 @@ set -euo pipefail
 
 REPO_DIR=${REPO_DIR:-${PBS_O_WORKDIR:-$PWD}}
 VENV_DIR=${VENV_DIR:-$REPO_DIR/.venv}
-ARGS_FILE=${ARGS_FILE:?set ARGS_FILE to an MSDelta training args file}
+ARGS_FILE=${ARGS_FILE:?set ARGS_FILE to an Iona training args file}
 HF_HOME=${HF_HOME:?set HF_HOME to an absolute shared-filesystem path}
 DATASET_CACHE_DIR=${DATASET_CACHE_DIR:-$HF_HOME/datasets}
 PREPROCESSED_DATASET_DIR=${PREPROCESSED_DATASET_DIR:-$DATASET_CACHE_DIR/msdelta-preprocessed}
@@ -64,7 +64,7 @@ if [[ ${PROBES_ONLY:-0} == 1 ]]; then
     PREPROCESS_ARGS+=(--probes_only true)
 fi
 echo "$(date -Is) preprocessing hf_home=$HF_HOME args=$ARGS_FILE"
-exec "$VENV_DIR/bin/python" -m msdelta.preprocess \
+exec "$VENV_DIR/bin/python" -m iona.preprocess \
     --args_file "$ARGS_FILE" \
     --dataset_cache_dir "$DATASET_CACHE_DIR" \
     --preprocessed_dataset_dir "$PREPROCESSED_DATASET_DIR" \

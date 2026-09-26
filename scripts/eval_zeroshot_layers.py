@@ -20,12 +20,12 @@ import torch
 import torch.nn.functional as F
 from datasets import load_from_disk
 
-from msdelta.contrastive import encoder_layer_states
-from msdelta.data import group_ids
-from msdelta.finetune_contrastive import ContrastiveCollator
-from msdelta.modeling_msdelta import MSDeltaForPreTraining
-from msdelta.reranking import pool_sequence
-from msdelta.retrieval import retrieval_metrics
+from iona.contrastive import encoder_layer_states
+from iona.data import group_ids
+from iona.finetune_contrastive import ContrastiveCollator
+from iona.modeling_iona import IonaForPreTraining
+from iona.reranking import pool_sequence
+from iona.retrieval import retrieval_metrics
 
 
 def fit_abtt(fit: torch.Tensor, max_components: int) -> tuple[torch.Tensor, torch.Tensor]:
@@ -88,8 +88,8 @@ def main(argv: list[str] | None = None) -> int:
         if target.exists():
             print(f"  {name}: already scored", flush=True); continue
         t0 = time.time()
-        model = MSDeltaForPreTraining.from_pretrained(path).to(device).eval()
-        encoder = getattr(model, "msdelta", model)
+        model = IonaForPreTraining.from_pretrained(path).to(device).eval()
+        encoder = getattr(model, "iona", model)
         def embed(feats, raw):
             """Pooled vectors per layer: unit-norm halves, or raw float32 for abtt."""
             per_layer: dict[str, list] = {}

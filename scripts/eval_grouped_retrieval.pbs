@@ -6,7 +6,7 @@
 #
 # Prepares the split once, then scores one shard of models per tile. Resubmit to resume.
 
-#PBS -N msdelta-evalgrp
+#PBS -N iona-evalgrp
 #PBS -A UIC-HPC
 #PBS -l place=scatter
 #PBS -l filesystems=home:flare

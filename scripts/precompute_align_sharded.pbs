@@ -7,7 +7,7 @@
 #
 # Stages: prepare (one process), shard (one per tile), merge. Refuses to overwrite a cache.
 
-#PBS -N msdelta-precompute-sh
+#PBS -N iona-precompute-sh
 #PBS -A UIC-HPC
 #PBS -l place=scatter
 #PBS -l filesystems=home:flare

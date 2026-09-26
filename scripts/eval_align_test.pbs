@@ -7,7 +7,7 @@
 #
 # One student per tile, in parallel; outputs to results/finetune/align/.
 
-#PBS -N msdelta-evalalign
+#PBS -N iona-evalalign
 #PBS -A UIC-HPC
 #PBS -l place=scatter
 #PBS -l filesystems=home:flare

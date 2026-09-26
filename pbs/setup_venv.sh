@@ -21,6 +21,6 @@ print("cuda build:", torch.version.cuda)
 # A login node does not have a GPU.
 print("cuda available (login node, expect False):", torch.cuda.is_available())
 
-import msdelta.train, msdelta.modeling_msdelta, msdelta.data
-print("msdelta package imports OK")
+import iona.train, iona.modeling_iona, iona.data
+print("iona package imports OK")
 PY

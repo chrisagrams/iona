@@ -21,9 +21,9 @@ import torch
 from huggingface_hub import hf_hub_download, snapshot_download
 from safetensors.torch import load_file
 
-from msdelta.modeling_msdelta import MSDeltaForPreTraining
-from msdelta.processing_msdelta import MSDeltaProcessor
-from msdelta.reranking import AlignmentCollator, PeptideCollator, PeptideEncoder, embed_spectrum
+from iona.modeling_iona import IonaForPreTraining
+from iona.processing_iona import IonaProcessor
+from iona.reranking import AlignmentCollator, PeptideCollator, PeptideEncoder, embed_spectrum
 
 KEEP = ("msfragger_hyperscore", "search_rank", "search_delta_score",
         "search_neglog10_evalue", "num_matched_ions", "tot_num_ions", "massdiff",
@@ -90,8 +90,8 @@ def main(argv: list[str] | None = None) -> int:
     else:
         pooling = cli.pooling
         width = int(state["sequence_encoder.projection.3.weight"].shape[0])
-    processor = MSDeltaProcessor.from_pretrained(encoder_dir, max_peaks=cli.max_peaks)
-    encoder = MSDeltaForPreTraining.from_pretrained(encoder_dir).to(device).eval()
+    processor = IonaProcessor.from_pretrained(encoder_dir, max_peaks=cli.max_peaks)
+    encoder = IonaForPreTraining.from_pretrained(encoder_dir).to(device).eval()
     student = PeptideEncoder(embedding_size=width, hidden_size=256,
                              num_layers=4, num_heads=8, pooling=pooling)
     student.load_state_dict({k.removeprefix("sequence_encoder."): v for k, v in state.items()
