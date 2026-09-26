@@ -20,6 +20,15 @@ from tests.conftest import REPO, args_files
 PBS_SCRIPTS = sorted((REPO / "pbs").glob("*.pbs"))
 CONFIG_DIRS = sorted(p.parent for p in args_files())
 
+# The sweep generators (sweeps/) and the full generated grids are research-repo tooling
+# and are not shipped with the fine-tuning code; only the final recipe arms are. Tests
+# that exercise them skip when they are absent.
+HAS_SWEEPS = (REPO / "sweeps").is_dir()
+HAS_DENOISE_GRID = (REPO / "configs/sweep-denoise").is_dir()
+needs_denoise_grid = pytest.mark.skipif(
+    not (HAS_SWEEPS and HAS_DENOISE_GRID),
+    reason="sweeps/ and configs/sweep-denoise are not part of this checkout")
+
 
 @pytest.mark.parametrize("path", args_files(), ids=lambda p: p.parent.name)
 class TestArgsFiles:
@@ -150,6 +159,10 @@ class TestPBSScripts:
         # builds at runtime -- "pbs/logs/bisect-$variant-$JOB.log" matches as
         # "pbs/logs/bisect-" -- so it names no file and cannot be checked.
         candidates = (x.rstrip("/.") for x in refs if x)
+        if not HAS_SWEEPS:
+            # Generator and grid references only resolve where sweeps/ is checked out.
+            candidates = (x for x in candidates
+                          if not x.startswith(("sweeps/", "configs/sweep-")))
         missing = sorted(r for r in candidates
                          if not r.endswith(("-", "_")) and not (REPO / r).exists())
         assert not missing, f"missing: {missing}"
@@ -161,6 +174,7 @@ class TestPBSScripts:
                 assert not re.search(r"(TOKEN|KEY|SECRET|PASSWORD)=", line)
 
 
+@needs_denoise_grid
 class TestSweepGrid:
     def test_arms_match_their_template(self):
         """A stale grid would have run 72 arms at 8x the memory that fits on a tile."""
@@ -204,6 +218,7 @@ class TestSweepGrid:
                 assert _flags(directory / "training.args")["--run_name"].startswith("v2_")
 
 
+@needs_denoise_grid
 class TestSweepPartition:
     def _dry_run(self, nodes, env=None):
         with tempfile.NamedTemporaryFile("w", suffix=".nodes", delete=False) as handle:
