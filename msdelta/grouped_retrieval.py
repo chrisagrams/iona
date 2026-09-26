@@ -1,26 +1,4 @@
-"""chrisagrams/ms-contrastive-100k as one spectrum per row, for contrastive eval and training.
-
-The corpus ships ONE ROW PER ANALYTE (peptide+charge): a consensus spectrum plus exactly
-three experimental replicates, in train (100,000 analytes), validation (10,000) and test
-(10,000) splits that share no peptide. Our contrastive trainer, sampler and retrieval
-metrics all expect one spectrum per row carrying `peptide` and `charge`, so each analyte
-is flattened into up to four rows here and grouped back by peptide_key downstream.
-
-Two choices are exposed rather than fixed, because each changes what a number means:
-
-  include_consensus. A consensus spectrum is built FROM replicates, so it may sit
-  artificially close to them. Eval reports both variants from one embedding pass (see
-  eval_grouped_retrieval); training defaults to experimental-only so a positive pair is
-  never one spectrum and its own average.
-
-  exclude_peptides. Every contrastive model so far trained on
-  ms2-peptide-replicate-retrieval, and 40 of this corpus's 9,100 test peptides are in
-  it. Scoring those models here without removing them would reward memorisation.
-  Excluded by PEPTIDE (any charge), which is the conservative reading.
-
-Spectra above max_peaks are DROPPED, not truncated, exactly as build_alignment_datasets
-does and for the same reason; the count is printed, never swallowed.
-"""
+"""chrisagrams/ms-contrastive-100k flattened to one spectrum per row, for contrastive eval and training."""
 
 from __future__ import annotations
 
@@ -40,7 +18,7 @@ def replicate_corpus_peptides(repo_id: str = REPLICATE_REPO) -> set[str]:
 
 
 def flatten_analyte(example, include_consensus: bool) -> dict[str, list]:
-    """One analyte row -> parallel lists, one entry per spectrum. Pure; unit-tested."""
+    """One analyte row -> parallel lists, one entry per spectrum."""
     spectra = list(example["experimental"])
     sources = ["experimental"] * len(spectra)
     if include_consensus:
@@ -116,7 +94,7 @@ def build_grouped_split(split, processor, include_consensus: bool,
 def build_grouped_datasets(repo_id, processor, include_consensus: bool = False,
                            exclude_peptides: set[str] | None = None, num_proc=None,
                            splits=("train", "validation", "test")):
-    """The corpus's OWN splits, flattened. Never re-split: they are peptide-disjoint."""
+    """The corpus's own peptide-disjoint splits, flattened."""
     from datasets import load_dataset
 
     raw = load_dataset(repo_id)
@@ -126,7 +104,7 @@ def build_grouped_datasets(repo_id, processor, include_consensus: bool = False,
 
 
 def group_ids(rows) -> np.ndarray:
-    """Integer group per row, by peptide_key -- the same identity every metric uses."""
+    """Integer group per row, by peptide_key."""
     from msdelta.reranking import peptide_key
 
     keys = [peptide_key(p, int(c)) for p, c in zip(rows["peptide"], rows["charge"])]
@@ -137,15 +115,7 @@ def load_spectrum_datasets(dataset_format: str, repo_id: str, processor, *,
                            include_consensus: bool = False,
                            exclude_replicate_peptides: bool = True, num_proc=None,
                            validation_fraction: float = 0.1, seed: int = 0) -> dict:
-    """train + validation, one spectrum per row with peptide/charge/precursor, for either
-    corpus. Shared by contrastive training, the alignment teacher cache and the student,
-    so all three see the same rows for the same flags.
-
-      replicate  ms2-peptide-replicate-retrieval, re-split here by peptide (seed,
-                 validation_fraction), exactly as before.
-      grouped    ms-contrastive-100k's own peptide-disjoint splits, flattened; the
-                 split flags are ignored because nothing is re-split.
-    """
+    """train + validation, one spectrum per row, from the replicate or grouped corpus."""
     if dataset_format == "replicate":
         from msdelta.reranking import build_alignment_datasets
         return build_alignment_datasets(repo_id, processor, num_proc=num_proc,

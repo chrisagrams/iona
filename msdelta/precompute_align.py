@@ -2,17 +2,6 @@
 
     python -m msdelta.precompute_align --args_file configs/finetune-align-100k-50m/training.args \
         --target_cache /path/to/cache
-
-Separate from training on purpose. The teacher never learns, so its embedding for a
-spectrum is the same in epoch 10 as in epoch 1 and there is no reason to recompute it --
-but the stronger reason is that every alignment run that has faulted on twelve tiles
-loaded the 49.8M teacher onto the device, used it, and abandoned it, while the bisect
-that runs clean never loads one and the denoise fine-tune never abandons one (its encoder
-IS the trained model). Doing this in its own process means the training job never
-constructs a teacher at all, which removes that difference rather than reasoning about it.
-
-Runs on ONE tile. It is pure inference over a few thousand spectra and takes a couple of
-minutes; there is nothing to parallelise that would be worth the coordination.
 """
 
 from __future__ import annotations
@@ -24,7 +13,7 @@ from pathlib import Path
 import torch
 from transformers import HfArgumentParser
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 from msdelta.finetune_align import AlignDataArguments, AlignModelArguments
 from msdelta.finetune_denoise import subset_splits
@@ -35,28 +24,13 @@ from msdelta.reranking import attach_teacher_embeddings, build_alignment_dataset
 
 @dataclass
 class PrecomputeArguments:
-    """Deliberately NOT TrainingArguments.
+    """Not TrainingArguments: this is single-process inference; training flags are ignored."""
 
-    Parsing TrainingArguments pulls in HF's device and distributed validation -- it
-    refuses bf16 without a GPU, and with a ddp_backend set it asks accelerate for a
-    world size before any process group exists. None of that is relevant to a single
-    process doing inference, so this takes the three settings that are, and the training
-    flags in the shared args file are accepted and ignored.
-    """
-
-    batch_size: int = field(default=16, metadata={"help": "spectra per teacher forward"})
-    seed: int = field(default=0, metadata={"help": "must match the run that consumes this"})
-    # Sharded build, for caches too big for one tile inside a debug hour
-    # (ms-contrastive-100k: ~283k spectra, ~1.5 h at 50m on one tile):
-    #   stage prepare   one process: build the flattened splits, save to <cache>/_flat
-    #   stage shard     one process per tile: contiguous shard i of n -> <cache>/_shards
-    #   stage merge     one process: concatenate shards IN ORDER -> <cache>/{train,validation}
-    # Contiguous shards concatenated in index order are exactly the unsharded row order,
-    # so the merged cache is the one stage "all" (the default, unsharded) would write.
-    stage: str = field(default="all", metadata={"help": "all, prepare, shard or merge"})
-    pad_spectra_to: int = field(
-        default=0, metadata={"help": "shard stage: fixed spectrum width per batch (use "
-                                     "max_peaks when 12 shards share a node; see FT16)"})
+    batch_size: int = 16
+    seed: int = 0  # must match the run that consumes this
+    # Sharded build: prepare (flatten splits) -> shard (one process per tile) -> merge.
+    stage: str = "all"  # all, prepare, shard or merge
+    pad_spectra_to: int = 0
     num_shards: int = 1
     shard_index: int = 0
 
@@ -123,7 +97,6 @@ def _shard(cache, model_args, precompute_args, device) -> int:
         if not flat.exists():
             continue
         if out.exists():
-            # A rerun after some shards faulted: finished pieces are kept, not recomputed.
             print(f"[precompute] shard {i}/{n} {name}: already done", flush=True)
             continue
         part = load_from_disk(str(flat)).shard(num_shards=n, index=i, contiguous=True)
@@ -161,9 +134,6 @@ def _write_cache(cache, datasets, model_args, data_args, precompute_args) -> int
     for name, split in datasets.items():
         split.save_to_disk(str(cache / name))
     width = len(datasets["train"][0]["target"])
-    # The split is by PEPTIDE, and it is written here rather than recomputed at train
-    # time: re-splitting with a different seed would put replicates of a held-out peptide
-    # into training and turn the validation number into recall.
     (cache / "MANIFEST.txt").write_text(
         f"teacher: {model_args.pretrained_path}\n"
         f"pooling: {model_args.pooling}\n"

@@ -3,9 +3,7 @@
 #
 #   qsub -q capacity -l select=4 -l walltime=02:00:00 -v TAG=a1-050m-c7s600 pbs/rerank_psm_full.pbs
 #
-# Writes $SCRATCH/rerank-psm/$TAG/{rows,handfeat}/<run>.parquet (the same tables the
-# 16-run pass made, which are reused). Runs are listed largest first in
-# sweeps/arms/psm_rerank_all_runs.txt and dealt round-robin over nodes x tiles.
+# Writes $SCRATCH/rerank-psm/$TAG/{rows,handfeat}/<run>.parquet, runs spread over nodes x tiles.
 
 #PBS -N msdelta-rerank-full
 #PBS -A UIC-HPC

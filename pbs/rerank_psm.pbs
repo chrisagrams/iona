@@ -5,11 +5,8 @@
 #        -v TAG=a1-050m,RUNS="HEK293/0718-1.parquet ...",ENCODER=...,STUDENT=...,CACHE=... \
 #        pbs/rerank_psm.pbs
 #
-# Stage 1 (msdelta.rerank_psm_embed) runs one dataset file per tile, downloading through the
-# ALCF proxy with the HF token (the dataset is private). Stage 2 (msdelta.rerank_psm_fdr)
-# reads every stage-1 table and writes results/rerank/psm/$TAG.json. Stage-1 tables that
-# already exist are reused, so a timed-out job resumes. By default (SAVE_VECTORS=1) it also writes the unit
-# vectors for R5 under $SCRATCH_ROOT/rerank-psm/$TAG/vectors/<run>/ (~1 GB per run).
+# Stage 1 embeds one run per tile (existing tables reused); stage 2 writes
+# results/rerank/psm/$TAG.json. SAVE_VECTORS=1 (default) also saves the unit vectors.
 
 #PBS -N msdelta-rerank-psm
 #PBS -A UIC-HPC

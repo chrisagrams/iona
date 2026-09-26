@@ -1,19 +1,13 @@
 """Fine-tune the spectrum encoder contrastively, with KL to its own pretrained head.
 
     python -m msdelta.finetune_contrastive --args_file configs/finetune-contrastive-replicate-50m/training.args
-
-Produces an encoder whose embedding space separates peptides, which is what the
-alignment tower needs and what the pretrained checkpoint does not provide -- see
-msdelta/contrastive.py for the measurement that motivated this.
-
-The resulting checkpoint is then the `--pretrained_path` for the alignment run.
 """
 
 from __future__ import annotations
 
 import os
 import sys
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass
 from pathlib import Path
 
 import numpy as np
@@ -38,215 +32,52 @@ from msdelta.wandb_distributed import init_wandb_run
 
 @dataclass
 class ContrastiveModelArguments:
-    pretrained_path: str = field(default="", metadata={"help": "encoder to start from"})
-    pooling: str = field(
-        default="mean+max",
-        metadata={"help": "mean, mean+max, weighted_mean, weighted_mean+max, or "
-                          "layer_mix -- a trained convex mixture over every encoder "
-                          "depth, sequence-mean pooled to d_model."},
-    )
-    random_init: bool = field(
-        default=False,
-        metadata={"help": "Same architecture, NO pretrained weights. The control that "
-                          "asks whether contrastive training needs the pretrained "
-                          "encoder at all: the frozen probe already showed the "
-                          "pretrained embedding is indistinguishable from random "
-                          "(1.35 either way), so if a random encoder also reaches ~7.8 "
-                          "under this loss, pretraining contributes nothing to this "
-                          "objective either."},
-    )
-    pair_loss: bool = field(
-        default=False,
-        metadata={"help": "Replace the in-batch softmax with independent per-pair "
-                          "terms: same peptide pulls together, different pushes apart "
-                          "past a margin. Because pairs decompose, the number of "
-                          "peptides a step sees stops being bounded by memory -- "
-                          "gradient accumulation does the work GradCache does for the "
-                          "softmax loss. Requires the pair sampler, switched on by the "
-                          "same flag."},
-    )
-    pair_margin: float = field(
-        default=1.0,
-        metadata={"help": "Different-peptide pairs are pushed to at least this "
-                          "distance and then ignored. Embeddings are unit-norm so "
-                          "distance is in [0,2] and d^2 = 2-2cos; 1.0 asks for cosine "
-                          "<= 0.5."},
-    )
-    pair_positive_weight: float = field(
-        default=1.0,
-        metadata={"help": "Rebalances the two terms when the sampler's positive "
-                          "fraction is not 0.5."},
-    )
-    projection_dim: int = field(
-        default=0,
-        metadata={"help": "Width of an MLP projection head after pooling (master's "
-                          "SpectrumRetrievalHead shape). 0 = no head: the loss and "
-                          "retrieval use the normalised pooled vector, as every run so "
-                          "far has. With a head, the loss sees the projection and "
-                          "final/projection_head.pt is saved beside the encoder."})
-    projection_hidden: int = field(
-        default=0, metadata={"help": "Hidden width of the head; 0 = the pooled width."})
+    pretrained_path: str = ""
+    pooling: str = "mean+max"
+    random_init: bool = False
+    pair_loss: bool = False
+    pair_margin: float = 1.0
+    pair_positive_weight: float = 1.0
+    projection_dim: int = 0
+    projection_hidden: int = 0
     projection_dropout: float = 0.1
-    layer_mix_norm: bool = field(
-        default=True,
-        metadata={"help": "LayerNorm each depth before mixing. Off, the deepest blocks "
-                          "dominate by magnitude alone and the learned weights are "
-                          "decorative."},
-    )
-    layer_mix_lr: float = field(
-        default=1e-3,
-        metadata={"help": "Learning rate for the layer-mixture logits ONLY. They are a "
-                          "different kind of parameter from network weights and their "
-                          "scale is set by softmax geometry, not by the encoder: they "
-                          "start equal and must travel O(1-5) apart before the mixture "
-                          "is anything but uniform. At the encoder's 2e-5 that takes "
-                          "~150k steps, so a full run would have measured an unweighted "
-                          "average of all layers while appearing to learn one. At 1e-2 "
-                          "it collapses onto a single layer inside 1000 steps, which "
-                          "throws away the mixture just as completely. mix/entropy in "
-                          "the log says which failure is happening: pinned at ln(L) is "
-                          "too slow, crashing to 0 early is too fast."},
-    )
-    encoder_lr_scale: float = field(
-        default=1.0,
-        metadata={"help": "Encoder learning rate as a multiple of the head's. 0 freezes "
-                          "the encoder outright, which is the control that says whether "
-                          "the readout or the encoder is doing the work."},
-    )
-    temperature: float = field(default=0.07, metadata={"help": "SupCon temperature"})
-    kl_weight: float = field(
-        default=100.0,
-        metadata={"help": "weight on KL to the frozen pretrained head. 0 disables the "
-                          "regulariser and lets the encoder forget the chemistry. The "
-                          "default is 100 because the two terms are on very different "
-                          "scales: measured on real batches, contrastive is ~2.6 and the "
-                          "KL ~0.007, so at weight 1.0 the regulariser is 0.3% of the "
-                          "loss and constrains nothing. 100 puts them within an order of "
-                          "magnitude, which is where a regulariser can actually trade "
-                          "against the objective."})
+    layer_mix_norm: bool = True
+    layer_mix_lr: float = 1e-3
+    encoder_lr_scale: float = 1.0
+    temperature: float = 0.07
+    kl_weight: float = 100.0
 
 
 @dataclass
 class ContrastiveDataArguments:
     dataset_repo: str = REPLICATE_REPO
-    dataset_format: str = field(
-        default="replicate",
-        metadata={"help": "replicate: one spectrum per row, re-split here by peptide "
-                          "(ms2-peptide-replicate-retrieval). grouped: one ANALYTE per "
-                          "row, consensus + 3 experimental, with the corpus's own "
-                          "peptide-disjoint train/validation/test splits "
-                          "(ms-contrastive-100k); see msdelta/grouped_retrieval.py."})
-    include_consensus: bool = field(
-        default=False,
-        metadata={"help": "grouped only: train on the consensus spectrum as a fourth "
-                          "member. Off by default because a consensus is built FROM "
-                          "the replicates, so pairing it with them is partly pairing "
-                          "a spectrum with its own average."})
-    exclude_replicate_peptides: bool = field(
-        default=True,
-        metadata={"help": "grouped only: drop peptides that appear anywhere in "
-                          "ms2-peptide-replicate-retrieval (445 of 88,817 train "
-                          "peptides), so a model trained here can still be scored on "
-                          "that corpus -- and fed to the reranking chain built on it "
-                          "-- without having seen its held-out peptides."})
+    dataset_format: str = "replicate"
+    include_consensus: bool = False
+    exclude_replicate_peptides: bool = True
     processor_name_or_path: str | None = None
     max_peaks: int = 512
     validation_fraction: float = 0.1
-    fixed_width_batches: bool = field(
-        default=True,
-        metadata={"help": "Pad every spectrum batch to max_peaks instead of to the "
-                          "longest spectrum in the batch. DeltaMZBias is O(batch * "
-                          "width^2), so padding to the batch maximum makes memory "
-                          "depend on which spectra the sampler happened to draw: the "
-                          "same 200m config reserved 38.75 GB at seed 0 and 67.14 GB "
-                          "at seed 3, and the wide draws took a GPU page fault at 200m "
-                          "and 400m. Fixed width costs padding on narrow batches and "
-                          "buys a memory figure that can be measured once and trusted. "
-                          "Default on: an unpredictable crash is worse than a "
-                          "predictable cost."},
-    )
-    split_seed: int = field(
-        default=0,
-        metadata={"help": "Seed for the train/validation split ONLY, deliberately "
-                          "decoupled from training_args.seed. The split used to move "
-                          "with the training seed, which meant a seed sweep scored "
-                          "every arm on DIFFERENT held-out data and no two runs were "
-                          "comparable. Hold this fixed and vary --seed to measure "
-                          "training variance; vary this to measure split variance. "
-                          "They are different questions."},
-    )
+    fixed_width_batches: bool = True
+    split_seed: int = 0
     preprocessing_num_workers: int = 24
     max_samples: int = 0
-    # P*K IS the batch size -- the PK sampler supplies whole batches, so
-    # per_device_train_batch_size is not consulted for training and is set to match only
-    # so the two do not disagree in the logs. DeltaMZBias is O(batch * peaks^2), which at
-    # 512 peaks is 12.9 GB for a batch of 48 and OOMed a 64 GB tile; 6x4 with gradient
-    # checkpointing fits. Contrastive wants the largest batch that fits, since every
-    # other row in it is a negative.
-    pairs_per_batch: int = field(
-        default=8,
-        metadata={"help": "Pair sampler only: pairs per minibatch. The batch is 2x "
-                          "this many spectra, kept small on purpose -- pair terms are "
-                          "independent, so breadth comes from "
-                          "gradient_accumulation_steps rather than from a batch that "
-                          "has to fit in memory all at once."},
-    )
-    positive_fraction: float = field(
-        default=0.5,
-        metadata={"help": "Pair sampler only: fraction of pairs drawn from the same "
-                          "peptide."},
-    )
-    groups_per_batch: int = field(default=6, metadata={"help": "P in the PK sampler"})
-    replicates: int = field(default=4, metadata={"help": "K in the PK sampler"})
-    gradcache_chunk: int = field(
-        default=0,
-        metadata={"help": "spectra per forward when using GradCache (0 = off). With it "
-                          "on, groups_per_batch x replicates can far exceed what fits: "
-                          "peak memory is one chunk, not the batch. The gradient is "
-                          "exact -- tests assert it against a full-batch backward."})
+    pairs_per_batch: int = 8
+    positive_fraction: float = 0.5
+    groups_per_batch: int = 6
+    replicates: int = 4
+    gradcache_chunk: int = 0
 
 
 @dataclass
 class ContrastiveTrainingArguments(TrainingArguments):
     wandb_project: str | None = None
     wandb_entity: str | None = None
-    eval_retrieval_rows: int = field(
-        default=0,
-        metadata={"help": "Spectra to embed when scoring retrieval inside evaluate(). "
-                          "0 disables it and leaves eval_loss as the only eval metric, "
-                          "which is what every run before this did -- and eval_loss is "
-                          "not selectable here, because the contrastive objective is "
-                          "solved by epoch 0.18 of 3 and is measured on a 4-spectrum "
-                          "batch. Set this AND metric_for_best_model to make "
-                          "load_best_model_at_end pick on the task."})
-    eval_alignment_rows: int = field(
-        default=2000,
-        metadata={"help": "Spectra embedded for the post-training separation and "
-                          "retrieval summaries. Declared here rather than read off the "
-                          "namespace with hasattr, which silently fell back to 2000."})
+    eval_retrieval_rows: int = 0
+    eval_alignment_rows: int = 2000
 
 
 class SaveEncoderCallback(TrainerCallback):
-    """Write a loadable HF encoder into every checkpoint the Trainer saves.
-
-    MSDeltaForContrastive is a plain nn.Module wrapping a real PreTrainedModel, so the
-    Trainer saves it as a bare state dict: `checkpoint-N/model.safetensors` carries
-    `model.*` and `layer_mix.*` keys and no config.json, and nothing can load it without
-    first reconstructing the wrapper by hand. The end-of-run `final/` is fine because
-    main() saves the INNER model there explicitly; the intermediate checkpoints are the
-    gap, and they are the ones you want when a run dies or when a mid-training encoder
-    turns out to be the interesting one.
-
-    Making the wrapper a PreTrainedModel would fix this properly, and should be done if
-    this line survives -- it also brings resume and best-model selection. That is a
-    config class, a from_pretrained that rebuilds the inner model, and care to keep the
-    frozen reference encoder out of the serialised weights (it is a duplicate of the
-    pretrained encoder and would roughly double every checkpoint). This callback buys
-    the loadable artifact without any of that.
-
-    The unwrapped model is captured at construction rather than taken from kwargs,
-    because by save time the Trainer's model may be behind DeepSpeed or DDP.
-    """
+    """Save the inner HF encoder into every checkpoint, so intermediate checkpoints are loadable."""
 
     def __init__(self, model: nn.Module, processor=None):
         self.model = model
@@ -264,8 +95,6 @@ class SaveEncoderCallback(TrainerCallback):
             if self.processor is not None:
                 self.processor.save_pretrained(str(target))
         except Exception as error:
-            # A failed side-artifact must not take down a training run whose real
-            # checkpoint the Trainer has already written.
             print(f"[contrastive] could not save encoder into {target}: {error}",
                   flush=True)
 
@@ -289,12 +118,7 @@ class ContrastiveTrainer(Trainer):
         self.positive_fraction = positive_fraction
 
     def create_optimizer(self):
-        """Encoder and readout in separate groups, so one can move slower than the other.
-
-        The point of the sweep this supports: with a trained layer mixture, is the gain
-        coming from the readout or from moving the encoder? Only comparing the same
-        readout at several encoder rates answers that.
-        """
+        """Separate parameter groups for encoder, readout and layer mixture."""
         if self.optimizer is not None:
             return self.optimizer
         if self.encoder_lr_scale == 1.0 and self.layer_mix_lr is None:
@@ -326,12 +150,7 @@ class ContrastiveTrainer(Trainer):
         return self.optimizer
 
     def _log_layer_mix(self) -> None:
-        """Which depths the mixture actually chose -- the result, not a diagnostic.
-
-        A mixture that stays uniform means depth did not matter; one that concentrates
-        says where the peptide structure lives, and can be read against the frozen
-        layer probe that motivated this.
-        """
+        """Log the layer-mixture weights."""
         inner = self.model.module if hasattr(self.model, "module") else self.model
         mixer = getattr(inner, "layer_mix", None)
         if mixer is None:
@@ -344,8 +163,7 @@ class ContrastiveTrainer(Trainer):
                     "mix/gamma": float(mixer.gamma) if mixer.gamma is not None else 1.0})
 
     def _get_train_sampler(self, *args, **kwargs):
-        # Random batches hold about one positive PAIR; the PK sampler guarantees
-        # groups_per_batch * replicates * (replicates-1) / 2 of them.
+        # Batches come from the PK/pair sampler in get_train_dataloader.
         return None
 
     def get_train_dataloader(self):
@@ -378,22 +196,7 @@ class ContrastiveTrainer(Trainer):
 
     def evaluate(self, eval_dataset=None, ignore_keys=None,
                  metric_key_prefix: str = "eval"):
-        """Score RETRIEVAL at eval time, not just the contrastive loss.
-
-        Without this the only eval number is eval_loss, and the contrastive loss is
-        useless for model selection here: measured on 50m@330k it falls below 10% of
-        chance (ln 4 = 1.386) by epoch 0.18 of 3.0, so 94% of training optimises a task
-        that is already solved. Worse, it is computed on a FOUR-spectrum batch, so each
-        value is one noisy draw -- the last logged step of a real run was 0.142 while
-        epoch 2.90 had reached 0.0016. Selecting on that would pick noise.
-
-        These metrics are what load_best_model_at_end reads, so putting them here is
-        what makes `final/` the BEST encoder rather than whatever the last step left
-        behind. They also reach wandb, because Trainer logs whatever evaluate returns.
-
-        Kept cheap on purpose: retrieval_summary embeds eval_retrieval_rows spectra, so
-        the cost is one forward pass over a subset and nothing is trained on it.
-        """
+        """Add retrieval metrics to evaluate(), so load_best_model_at_end can select on them."""
         metrics = super().evaluate(eval_dataset=eval_dataset, ignore_keys=ignore_keys,
                                    metric_key_prefix=metric_key_prefix)
         dataset = eval_dataset if eval_dataset is not None else self.eval_dataset
@@ -407,8 +210,6 @@ class ContrastiveTrainer(Trainer):
             if self.is_world_process_zero():
                 print(f"[contrastive] retrieval eval failed inside evaluate(): {error}", flush=True)
             return metrics
-        # Prefix to match HF's convention so metric_for_best_model can name them:
-        #   retrieval/MAP@R  ->  eval_retrieval/MAP@R
         scored = {f"{metric_key_prefix}_{k}": v for k, v in extra.items()
                   if isinstance(v, (int, float))}
         metrics.update(scored)
@@ -417,8 +218,6 @@ class ContrastiveTrainer(Trainer):
 
     def compute_loss(self, model, inputs, return_outputs=False, **kwargs):
         outputs = model(**inputs)
-        # Both terms in the log: a run where the contrastive term falls while the KL
-        # climbs is buying separation by forgetting, and the totals alone hide that.
         if self.state.global_step % max(self.args.logging_steps, 1) == 0:
             self.log({"contrastive": float(outputs["contrastive"]),
                       "kl": float(outputs["kl"])})
@@ -431,8 +230,7 @@ def load_contrastive_datasets(data_args, processor) -> dict:
     from msdelta import grouped_retrieval as gr
 
     if data_args.dataset_format == "grouped":
-        # K above the group size makes the PK sampler draw with replacement, i.e. pair a
-        # spectrum with ITSELF as a positive -- a free, meaningless positive per group.
+        # K above the group size would pair a spectrum with itself.
         members = 3 + int(data_args.include_consensus)
         if data_args.replicates > members:
             raise ValueError(f"replicates={data_args.replicates} but grouped analytes "
@@ -446,9 +244,7 @@ def load_contrastive_datasets(data_args, processor) -> dict:
         validation_fraction=data_args.validation_fraction, seed=data_args.split_seed)
     if data_args.dataset_format != "grouped":
         return datasets
-    # max_peaks drops can leave an analyte with one spectrum: it has no positive, and
-    # the sampler would pair it with itself. Drop such rows from TRAIN only; eval
-    # metrics already skip queries with no relevant item.
+    # Drop train analytes left with a single spectrum by max_peaks.
     train = datasets["train"]
     ids = gr.group_ids(train)
     keep = np.flatnonzero(np.bincount(ids)[ids] >= 2)
@@ -489,17 +285,9 @@ def main(argv: list[str] | None = None) -> int:
         data_args.processor_name_or_path or model_args.pretrained_path,
         max_peaks=data_args.max_peaks)
     if model_args.random_init:
-        # from_config, never from_pretrained-then-reinitialise: loading first would
-        # leave any buffer the init does not touch still carrying pretrained values,
-        # which is a subtler thing to be wrong about than it looks. Matches
-        # build_denoising_model, which learned this the same way.
         from msdelta.configuration_msdelta import MSDeltaConfig
         config = MSDeltaConfig.from_pretrained(model_args.pretrained_path)
         encoder = MSDeltaForPreTraining(config)
-        # The reference is a SEPARATE random model with the same config, not a copy of
-        # the encoder, only if a KL target is asked for. Regularising a random encoder
-        # toward a DIFFERENT random function is meaningless, so the honest control is
-        # kl_weight 0; the arms that set it are kept for grid symmetry and say so.
         reference = MSDeltaForPreTraining(config) if model_args.kl_weight > 0 else None
         print("[contrastive] RANDOM INIT control: architecture of "
               f"{model_args.pretrained_path}, no pretrained weights", flush=True)
@@ -518,8 +306,7 @@ def main(argv: list[str] | None = None) -> int:
                                   projection_dim=model_args.projection_dim,
                                   projection_dropout=model_args.projection_dropout)
     if model_args.encoder_lr_scale == 0:
-        # A zero learning rate would still let weight decay and any stateful optimizer
-        # move the encoder. Freezing is the thing being asked for, so freeze it.
+        # Freeze outright; lr 0 would still let weight decay move it.
         encoder.requires_grad_(False)
         if model.layer_mix is None:
             raise SystemExit("a frozen encoder with a fixed pooling has nothing to "
@@ -536,9 +323,7 @@ def main(argv: list[str] | None = None) -> int:
         with training_args.main_process_first(local=False, desc="contrastive data"):
             datasets = load_contrastive_datasets(data_args, processor)
         if data_args.max_samples:
-            # By group, not by row: see subset_by_group. A contiguous slice of this
-            # corpus yields groups of about two, which makes the PK sampler draw
-            # duplicates and the contrastive objective meaningless.
+            # Subset by group so the PK sampler still has full groups.
             datasets = {name: subset_by_group(
                 split, data_args.max_samples,
                 lambda row: peptide_key(row["peptide"], int(row.get("charge", 0))),
@@ -572,18 +357,11 @@ def main(argv: list[str] | None = None) -> int:
             pairs_per_batch=data_args.pairs_per_batch,
             positive_fraction=data_args.positive_fraction)
         trainer.add_callback(SaveEncoderCallback(model, processor))
-        # Pass it explicitly. Trainer.train() defaults resume_from_checkpoint to None
-        # and never falls back to args.resume_from_checkpoint, so the CLI flag parses
-        # cleanly and is then IGNORED -- the run restarts from scratch while looking as
-        # though it resumed.
+        # Trainer.train() does not read args.resume_from_checkpoint on its own.
         trainer.train(resume_from_checkpoint=training_args.resume_from_checkpoint)
-        # FT31: a run whose sampler yields no batch "finishes" at step 0 and then writes
-        # final/ and metrics exactly like a real one; the C2/C4 smoke 8859890 reported
-        # 14/14 ok that way. Fail loudly instead.
         if trainer.state.global_step == 0:
             raise SystemExit("trained 0 optimizer steps -- too few groups/rows for one batch?")
 
-        # The number this whole exercise exists to move: does the space separate peptides?
         if datasets.get("validation") is not None:
             before_after = group_separation_summary(
                 model, datasets["validation"], collator, trainer.args.device,
@@ -594,10 +372,6 @@ def main(argv: list[str] | None = None) -> int:
                 trainer.log(before_after)
                 trainer.save_metrics("separation", before_after)
 
-            # The TASK, on the same rows. The separation ratio is a proxy that has never
-            # been checked against what it proxies for; reporting both on every run is
-            # what makes the correlation measurable across a grid instead of assumed.
-            # Never fatal: a missing or broken faiss must not lose a completed run.
             try:
                 retrieval = retrieval_summary(
                     model, datasets["validation"], collator, trainer.args.device,
@@ -613,8 +387,7 @@ def main(argv: list[str] | None = None) -> int:
                              if isinstance(v, (int, float))})
                 trainer.save_metrics("retrieval", retrieval)
 
-            # With a projection head, also score the PRE-head features on the same rows:
-            # which of the two is the better embedding is the question the head asks.
+            # With a projection head, also score the pre-head features.
             if model.projection is not None:
                 model.readout = "pooled"
                 try:
@@ -632,8 +405,6 @@ def main(argv: list[str] | None = None) -> int:
                     trainer.save_metrics("retrieval_pooled", pooled)
 
         if trainer.is_world_process_zero():
-            # save_pretrained on the inner model, so the result is a drop-in
-            # --pretrained_path for the alignment run.
             model.model.save_pretrained(str(out_dir / "final"))
             processor.save_pretrained(str(out_dir / "final"))
             if model.projection is not None:

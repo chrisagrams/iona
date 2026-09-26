@@ -9,12 +9,7 @@
 #        -v ARGS_FILE=configs/finetune-denoise-50m/training.args,PRETRAINED_PATH=/path/to/ckpt \
 #        pbs/aurora-finetune.pbs
 #
-# Simpler than pbs/aurora-pretrain.pbs on purpose: no telegraf sidecar, no probe
-# subprocesses, no DeepSpeed. One model, one dataset, one Trainer.
-#
-# MAX_STEPS exists for the debug-queue timing pass. Debug caps at 1h, which is not enough
-# to finish, so a short capped run measures steps/second and the resulting number sizes
-# the capacity walltime instead of guessing it.
+# Optional: MAX_STEPS or MAX_SAMPLES (smoke runs), EVAL_STEPS, SEED, PRECOMPUTE_CACHE (align).
 
 #PBS -N msdelta-denoise-ft
 #PBS -A UIC-HPC
@@ -32,25 +27,14 @@ PROJECT=${PROJECT:-UIC-HPC}
 SCRATCH_ROOT=${SCRATCH_ROOT:-/lus/flare/projects/$PROJECT/$USER/msdelta}
 ARGS_FILE=${ARGS_FILE:?set ARGS_FILE to a finetune args file}
 PRETRAINED_PATH=${PRETRAINED_PATH:?set PRETRAINED_PATH to the checkpoint to fine-tune from}
-# 12, not 8: Aurora is 6 Max 1550 GPUs x 2 tiles, and FLAT hierarchy exposes all twelve.
-# aurora-pretrain.pbs defaults to 8 because it reserves tiles 4,5 and 10,11 for the probe
-# sidecars; this job has none, so using 8 would idle a third of the node.
+# All 12 tiles of an Aurora node.
 XPUS_PER_HOST=${XPUS_PER_HOST:-12}
-# Which entry point to launch. The environment, proxy, credentials, preflight and rank
-# wiring are identical for every fine-tuning task, so they live here once rather than
-# being copied per task and drifting apart.
 MODULE=${MODULE:-msdelta.finetune_denoise}
 [[ $ARGS_FILE == /* ]] || ARGS_FILE=$REPO_DIR/$ARGS_FILE
 [[ -f $ARGS_FILE ]]    || { echo "args file not found: $ARGS_FILE" >&2; exit 2; }
 [[ -x $VENV_DIR/bin/python ]] || { echo "no venv at $VENV_DIR" >&2; exit 2; }
 
-# Name the run after the task, not after "denoise": this launcher is shared, and a
-# mislabelled run directory is the kind of thing that is only noticed weeks later.
 TASK=${TASK:-$(basename "${MODULE#*finetune_}")}
-# Every run before this prefix existed was produced by a pipeline with known bugs -- the
-# DDP freeze desync, the GPU page fault, the eval-only dtype crash. Their W&B history is
-# not comparable to anything after, and the surest way to stop someone averaging the two
-# together six weeks from now is for the names not to match. Bump it, do not remove it.
 RUN_PREFIX=${RUN_PREFIX:-v2_}
 RUN_NAME=${RUN_NAME:-$TASK-ft-$(basename "$(dirname "$ARGS_FILE")")}
 [[ $RUN_NAME == "$RUN_PREFIX"* ]] || RUN_NAME=$RUN_PREFIX$RUN_NAME
@@ -67,37 +51,25 @@ source /usr/share/lmod/lmod/init/bash
 module load "${FRAMEWORKS_MODULE:-frameworks/2025.3.1}"
 set -u
 
-# Level Zero only, flat hierarchy. The module now defaults ONEAPI_DEVICE_SELECTOR to
-# "opencl:gpu;level_zero:gpu", which double-counts every tile; forcing it back keeps the
-# device count equal to what the launcher assumes.
+# Level Zero only; the module default also lists OpenCL and double-counts tiles.
 export ONEAPI_DEVICE_SELECTOR=level_zero:gpu
 export ZE_FLAT_DEVICE_HIERARCHY=FLAT
-# Job-wide, listing every tile -- NOT one tile per rank. Each rank must see all of them
-# so that torch.xpu.set_device(LOCAL_RANK) can pick its own; pinning a rank to a single
-# tile leaves it with one visible device at index 0 and set_device(7) then raises
-# "device index out of range", which killed job 8839150.
+# Job-wide mask: every rank sees all tiles and picks its own by LOCAL_RANK.
 export ZE_AFFINITY_MASK=${ZE_AFFINITY_MASK:-$(seq -s, 0 $((XPUS_PER_HOST - 1)))}
 export OMP_NUM_THREADS=${OMP_NUM_THREADS:-4}
 export MKL_NUM_THREADS=${MKL_NUM_THREADS:-4}
 export OPENBLAS_NUM_THREADS=${OPENBLAS_NUM_THREADS:-4}
 export CCL_PROCESS_LAUNCHER=pmix CCL_ATL_TRANSPORT=mpi CCL_KVS_MODE=mpi
 export FI_MR_CACHE_MONITOR=${FI_MR_CACHE_MONITOR:-userfaultfd}
-# Recommended by the ALCF Aurora known-issues page for jobs at scale. They tune the
-# CXI completion queues and overflow buffers, which are undersized by default for
-# many-rank jobs, and TMPDIR keeps scratch off a shared filesystem.
+# ALCF-recommended CXI settings for many-rank jobs.
 export FI_CXI_DEFAULT_CQ_SIZE=${FI_CXI_DEFAULT_CQ_SIZE:-131072}
 export FI_CXI_OFLOW_BUF_SIZE=${FI_CXI_OFLOW_BUF_SIZE:-8388608}
 export FI_CXI_CQ_FILL_PERCENT=${FI_CXI_CQ_FILL_PERCENT:-20}
 export ZES_ENABLE_SYSMAN=${ZES_ENABLE_SYSMAN:-1}
 export TMPDIR=${TMPDIR:-/tmp}
-# Diagnostic: force SDPA onto the unfused MATH backend. See reranking.py.
+# Diagnostic: force SDPA onto the MATH backend.
 export MSDELTA_SDPA_MATH=${MSDELTA_SDPA_MATH:-}
-# Matching aurora-pretrain.pbs, which all-reduces 200M+ parameters successfully. These
-# select oneCCL's Level Zero IPC path for device-to-device transfers. It did not matter
-# while the DDP reducer held only the 0.082M-parameter head -- the first runs were
-# accidentally excluding the encoder -- but every run that actually all-reduces the
-# 49.9M-parameter encoder has taken a GPU page fault with them left in place
-# (8840007/8/10/11, 8840095).
+# oneCCL's Level Zero IPC path causes GPU page faults when all-reducing the encoder.
 unset CCL_ZE_IPC
 unset CCL_ZE_IPC_EXCHANGE
 export MASTER_ADDR=${MASTER_ADDR:-$(head -n 1 "$PBS_NODEFILE")}
@@ -105,11 +77,7 @@ export MASTER_PORT=${MASTER_PORT:-29500}
 export MSDELTA_XPUS_PER_HOST=$XPUS_PER_HOST
 export MSDELTA_WORLD_SIZE=$TOTAL_XPUS
 export PYTHONPATH=$REPO_DIR${PYTHONPATH:+:$PYTHONPATH}
-# Probes: dtype, index-range and finiteness checks, and -- the useful part --
-# a device synchronise at each stage, so an asynchronous GPU fault is reported
-# where it was caused rather than dozens of steps later. Set MSDELTA_PROBES=1 on
-# debug runs. Leave it unset for real training: the synchronises serialise the
-# queue and cost throughput.
+# MSDELTA_PROBES=1 adds per-stage checks and syncs for debugging; slow.
 export MSDELTA_PROBES=${MSDELTA_PROBES:-}
 
 # Datasets come from the populated cache; only W&B needs the network.
@@ -117,8 +85,7 @@ export HF_HOME=${HF_HOME:-$SCRATCH_ROOT/huggingface}
 export HF_HUB_OFFLINE=${HF_HUB_OFFLINE:-1}
 export HF_DATASETS_OFFLINE=${HF_DATASETS_OFFLINE:-1}
 
-# Outbound internet. Compute nodes have no route without these, and W&B fails closed --
-# it retries, stalls the step loop, and the run dies with no metrics rather than loudly.
+# Outbound internet for W&B.
 ALCF_PROXY=${ALCF_PROXY:-http://proxy.alcf.anl.gov:3128}
 export HTTP_PROXY=${HTTP_PROXY:-$ALCF_PROXY}
 export HTTPS_PROXY=${HTTPS_PROXY:-$ALCF_PROXY}
@@ -129,8 +96,7 @@ export no_proxy=${no_proxy:-admin,localhost,*.cm.aurora.alcf.anl.gov,aurora-*,*.
 export no_proxy="$no_proxy,127.0.0.1"
 export NO_PROXY="${NO_PROXY:-$no_proxy},127.0.0.1"
 
-# Credentials at runtime, never through `qsub -v`: a job's variable list is world-readable
-# through `qstat -f <jobid>`.
+# Credentials at runtime, never through `qsub -v` (visible in `qstat -f`).
 source "$REPO_DIR/pbs/load_keys.sh"
 
 export WANDB_DIR=${WANDB_DIR:-$LOG_DIR}
@@ -145,9 +111,7 @@ echo "  run dir    : $RUN_DIR"
 echo "  wandb run  : $WANDB_RUN_ID"
 sed 's/^/  node: /' "$PBS_NODEFILE"
 
-# Preflight. Each of these has cost a job before: a missing W&B key fails only at the
-# first log call, and a proxy that cannot reach the outside world looks identical to a
-# hung step loop.
+# Preflight: tile count, W&B key, and outbound route.
 "$VENV_DIR/bin/python" -c "
 import torch, sys
 n = torch.xpu.device_count()
@@ -156,17 +120,14 @@ if n != $XPUS_PER_HOST:
     sys.exit(f'  visible tiles {n} != XPUS_PER_HOST $XPUS_PER_HOST; set_device(LOCAL_RANK) would go out of range')
 "
 [[ -n ${WANDB_API_KEY:-} ]] || { echo "WANDB_API_KEY not loaded -- see pbs/load_keys.sh" >&2; exit 2; }
-# Any HTTP response proves the proxy routed us; api.wandb.ai/ answers a bare GET with
-# 404, so --fail would reject a working route (it did, on job 8839139).
+# Any HTTP response means the proxy works; api.wandb.ai returns 404 to a bare GET.
 wandb_code=$(curl --silent --show-error --max-time 30 -o /dev/null -w '%{http_code}' https://api.wandb.ai || echo 000)
 [[ $wandb_code != 000 ]] \
     || { echo "no outbound route to api.wandb.ai through $ALCF_PROXY" >&2; exit 2; }
 echo "  wandb      : reachable (HTTP $wandb_code)"
 echo "  preflight  : ok"
 
-# Optional first phase: build the target cache in its own SINGLE-PROCESS run, before the
-# distributed launch. The training ranks then load targets from disk and never construct
-# a teacher. Skipped if the cache already exists, so a rerun costs nothing.
+# Optional: build the teacher-embedding cache in one process before training.
 if [[ -n ${PRECOMPUTE_CACHE:-} ]]; then
     EXTRA_PRE=()
     [[ -n ${MAX_SAMPLES:-} ]] && EXTRA_PRE+=(--max_samples "$MAX_SAMPLES")
@@ -182,14 +143,8 @@ EXTRA=()
 [[ -n ${WANDB_PROJECT:-} ]] && EXTRA+=(--wandb_project "$WANDB_PROJECT")
 [[ -n ${WANDB_ENTITY:-} ]] && EXTRA+=(--wandb_entity "$WANDB_ENTITY")
 [[ -n ${PRECOMPUTE_CACHE:-} ]] && EXTRA+=(--target_cache "$PRECOMPUTE_CACHE")
-# Independent of the smoke modes below: a full run may still want a different evaluation
-# cadence from the config's. At 28,630 steps the config's eval_steps=200 is 143
-# evaluations, which is a sixth of a debug hour spent not training.
 [[ -n ${EVAL_STEPS:-} ]] && EXTRA+=(--eval_steps "$EVAL_STEPS" --save_steps "$EVAL_STEPS")
-# MAX_SAMPLES caps ROWS, so the run finishes real epochs and every end-of-training path
-# executes: evaluation, checkpoint writes, save_total_limit rotation,
-# load_best_model_at_end, the test pass, the final save. MAX_STEPS stops before all of
-# that and is only good for measuring throughput.
+# MAX_SAMPLES runs real epochs on a small subset; MAX_STEPS only measures throughput.
 if [[ -n ${MAX_SAMPLES:-} ]]; then
     EXTRA+=(--max_samples "$MAX_SAMPLES"
             --eval_steps "${SMOKE_EVAL_STEPS:-25}" --save_steps "${SMOKE_EVAL_STEPS:-25}"
@@ -197,10 +152,6 @@ if [[ -n ${MAX_SAMPLES:-} ]]; then
 elif [[ -n ${MAX_STEPS:-} ]]; then
     EXTRA+=(--max_steps "$MAX_STEPS" --save_strategy no --load_best_model_at_end false)
 fi
-# SEED drives head initialisation, dropout masks and batch composition. data_seed is set
-# alongside it so batch composition actually changes -- Trainer falls back to `seed` only
-# when data_seed is unset, and leaving it pinned would make a "seed sweep" vary the head
-# init while every run saw identical batches.
 [[ -n ${SEED:-} ]] && EXTRA+=(--seed "$SEED" --data_seed "$SEED")
 
 exec mpiexec \

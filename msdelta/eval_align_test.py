@@ -3,16 +3,7 @@
     python -m msdelta.eval_align_test --run RUN_DIR --cache CACHE_DIR \
         --args_file configs/finetune-align-100k-50m/training.args --data EVAL_DATA --out OUT.json
 
-The in-training check (finetune_align.evaluate_alignment) ranks the first 2,000
-VALIDATION spectra against the few hundred peptides that happen to occur in them. This
-ranks every experimental test spectrum (replicate-corpus peptides excluded, as prepared by
-eval_grouped_retrieval) against EVERY test analyte (peptide + charge, the student's input),
-~9,950 candidates -- the realistic search space.
-
-Spectra are embedded by the teacher named in the cache MANIFEST (the exact embedding the
-student was trained to hit); candidates by the student in RUN/final. Reported: Hit@1,
-Hit@5, MRR over spectra (cross_modal_metrics), plus the teacher's own spectrum->spectrum
-MAP@R on the same rows as a reference point.
+Ranks every test spectrum against every test analyte (Hit@1, Hit@5, MRR).
 """
 
 from __future__ import annotations
@@ -35,8 +26,7 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--out", required=True)
     ap.add_argument("--batch-size", type=int, default=16)
     ap.add_argument("--save-embeddings", default="",
-                    help="also write spectrum/candidate embeddings + keys (.npz) for "
-                         "external comparisons (baselines_wip/yhydra_crossmodal.py)")
+                    help="also write embeddings + keys (.npz)")
     cli = ap.parse_args(argv)
 
     from datasets import load_from_disk
@@ -73,7 +63,7 @@ def main(argv: list[str] | None = None) -> int:
     model = SequenceAlignmentModel(teacher, student, pooling=manifest["pooling"])
     prefix = "sequence_encoder."
     student_state = {k[len(prefix):]: v for k, v in state.items() if k.startswith(prefix)}
-    student.load_state_dict(student_state, strict=True)   # every student weight, no extras
+    student.load_state_dict(student_state, strict=True)
     model = model.to(device).eval()
 
     rows = load_from_disk(cli.data)

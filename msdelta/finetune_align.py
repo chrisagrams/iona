@@ -1,22 +1,13 @@
 """Train a peptide encoder into the frozen spectrum encoder's embedding space.
 
-The first step of reranking: once spectra and sequences share a space, scoring a
-database-search candidate is a dot product.
-
-Only the peptide encoder learns. The spectrum encoder is frozen and in eval mode, so it
-emits a fixed target per spectrum -- see msdelta/reranking.py for why that matters.
-
-**Watch `crossmodal/hit@1`, not the loss.** L2 falls whenever predictions move toward the
-mean target, and collapsing every sequence onto the centroid does exactly that while
-destroying every ordering. The ranking metric is evaluated separately and is the number
-that says whether the alignment is useful.
+Only the peptide encoder learns. Watch `crossmodal/hit@1`, not the loss.
 """
 
 from __future__ import annotations
 
 import os
 import sys
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass
 from pathlib import Path
 
 import numpy as np
@@ -44,31 +35,22 @@ from msdelta.wandb_distributed import init_wandb_run
 
 @dataclass
 class AlignModelArguments:
-    pretrained_path: str = field(
-        metadata={"help": "Pretrained MSDelta checkpoint; its encoder becomes the frozen teacher."}
-    )
-    pooling: str = field(
-        default="mean+max",
-        metadata={"help": f"How token embeddings are reduced. One of {POOLING_MODES}. "
-                          "Both towers must agree; the teacher's choice defines the space."},
-    )
+    pretrained_path: str
+    pooling: str = "mean+max"
     sequence_hidden_size: int = 256
     sequence_num_layers: int = 4
     sequence_num_heads: int = 8
     sequence_dropout: float = 0.1
     max_peptide_length: int = 64
-    # PeptideEncoder readout: pool (the `pooling` op, default), cls or attn. PLAN.md A3.
+    # pool, cls or attn.
     sequence_readout: str = "pool"
-    # A4. align_loss "mse" (A1 default) or "lit": LiT-style cross-modal SupCon against
-    # the frozen teacher, + mse_weight x MSE, + hard_negatives distinguishable
-    # rearrangements per peptide (never reversals; see reranking.hard_negatives).
+    # "mse" or "lit" (cross-modal SupCon against the teacher, + mse_weight x MSE).
     align_loss: str = "mse"
     align_temperature: float = 0.05
     mse_weight: float = 0.0
     hard_negatives: int = 0
     neg_min_delta: float = 0.05
-    # A8 (mass-aware): batches of mass NEIGHBOURS (in-batch negatives ~ same-mass
-    # competitors) and/or hard negatives drawn from training peptides within +-neg_ppm.
+    # Mass-aware batches and/or hard negatives within +-neg_ppm.
     mass_batches: bool = False
     mass_batch_jitter: float = 0.5
     neg_source: str = "swap"
@@ -79,28 +61,16 @@ class AlignModelArguments:
 class AlignDataArguments:
     processor_name_or_path: str | None = None
     dataset_repo: str = REPLICATE_REPO
-    # See ContrastiveDataArguments / grouped_retrieval.load_spectrum_datasets: `grouped`
-    # reads ms-contrastive-100k with its own splits. Same defaults as contrastive so a
-    # teacher and its student see the same rows.
     dataset_format: str = "replicate"
     include_consensus: bool = False
     exclude_replicate_peptides: bool = True
     preprocessing_num_workers: int = 24
     max_peaks: int = 512
     validation_fraction: float = 0.1
-    # See subset_splits in finetune_denoise: caps ROWS, not steps, so a smoke test still
-    # runs real epochs and therefore still exercises saving, load_best_model_at_end, the
-    # cross-modal evaluation and the final save.
     max_samples: int = 0
-    # Precompute the frozen teacher's embeddings and drop it from the training graph.
-    # Default ON: it is both faster and the only configuration that has any prospect of
-    # running on twelve tiles (FT9). --precompute_targets false keeps the old behaviour
-    # for comparison.
+    # Precompute the teacher's embeddings and drop it from the training graph.
     precompute_targets: bool = True
-    # Path written by `python -m msdelta.precompute_align`. When set, training loads the
-    # targets from disk and NEVER constructs a teacher -- no 49.8M model is loaded onto
-    # the device and abandoned, which is the last difference between an alignment job
-    # that faults on twelve tiles and a bisect that does not.
+    # Output of `python -m msdelta.precompute_align`; when set, no teacher is loaded.
     target_cache: str | None = None
 
 
@@ -108,17 +78,13 @@ class AlignDataArguments:
 class AlignTrainingArguments(TrainingArguments):
     wandb_project: str | None = None
     wandb_entity: str | None = None
-    eval_alignment_rows: int = field(
-        default=2000,
-        metadata={"help": "Spectra scored by the cross-modal evaluation. Candidates are "
-                          "deduplicated by peptide first, so this counts spectra."},
-    )
+    eval_alignment_rows: int = 2000
 
 
 class SequenceAlignmentTrainer(Trainer):
     """Optimise the student alone, and score ranking rather than the loss."""
 
-    mass_sampler = None          # A8: a reranking.MassBatchSampler, or None (random batches)
+    mass_sampler = None          # a reranking.MassBatchSampler, or None
 
     def get_train_dataloader(self):
         if self.mass_sampler is None:
@@ -130,19 +96,7 @@ class SequenceAlignmentTrainer(Trainer):
                           pin_memory=self.args.dataloader_pin_memory)
 
     def create_optimizer(self):
-        """Defer to the Trainer unless a teacher is actually present to exclude.
-
-        This used to always build a flat parameter list over the student. That was
-        needed when the frozen teacher was in the module -- optimiser state for tens of
-        millions of weights that carry no gradient is memory bought for nothing -- but
-        it had a cost that was not noticed: a flat list loses the Trainer's weight-decay
-        grouping, so `weight_decay 0.01` was being applied to biases and LayerNorm gains
-        as well, which the default deliberately exempts.
-
-        With precomputed targets `spectrum_model` is None and the student IS the whole
-        model, so there is nothing to exclude and the stock path is both correct and the
-        one the denoise fine-tune uses successfully on twelve tiles.
-        """
+        """Stock optimizer, unless a frozen teacher is in the module and must be excluded."""
         if self.optimizer is not None:
             return self.optimizer
         if getattr(self.model, "spectrum_model", None) is None:
@@ -159,11 +113,7 @@ class SequenceAlignmentTrainer(Trainer):
 
     @torch.no_grad()
     def evaluate_alignment(self, dataset, max_rows: int = 2000) -> dict[str, float]:
-        """Rank candidate sequences against each spectrum.
-
-        Duplicate peptides collapse to one candidate, so Hit@1 answers "is the right
-        SEQUENCE first" rather than "is one of this peptide's replicates first".
-        """
+        """Rank candidate sequences against each spectrum, one candidate per peptide."""
         model = self.model
         was_training = model.training
         model.eval()
@@ -194,10 +144,7 @@ class SequenceAlignmentTrainer(Trainer):
             sequence_embeddings[keep], spectrum_embeddings,
             np.array([slot[p] for p in peptides]), np.arange(len(keep)),
         )
-        # Geometry, on BOTH towers. hit@1 says whether ranking works; this says why.
-        # Replicates of one peptide at one charge should sit closer to each other than to
-        # anything else -- if the TEACHER's space does not have that property, no student
-        # trained to imitate it can, and the objective is not the thing to fix.
+        # Replicate separation in both towers.
         groups = np.array([peptide_key(p, c) for p, c in zip(peptides, charges)])
         codes = np.unique(groups, return_inverse=True)[1]
         metrics.update(group_separation_metrics(spectrum_embeddings, codes, "sep_spectrum"))
@@ -225,9 +172,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     cached = Path(data_args.target_cache) if data_args.target_cache else None
     if cached and cached.exists():
-        # The teacher is never constructed. Its output width comes from the manifest the
-        # precompute wrote, so nothing here needs the checkpoint -- not to size the
-        # student, not to derive the split, not at all.
+        # The teacher is never constructed; its width comes from the manifest.
         manifest = dict(
             line.split(": ", 1)
             for line in (cached / "MANIFEST.txt").read_text().splitlines() if ": " in line)
@@ -277,10 +222,6 @@ def main(argv: list[str] | None = None) -> int:
                   flush=True)
 
         if cached and cached.exists():
-            # Targets were written by `python -m msdelta.precompute_align`. Nothing in
-            # this process loads or touches a teacher: the split came from the cache,
-            # the student's width came from the manifest, and there is no 49.8M model to
-            # put on the device and abandon.
             from datasets import load_from_disk
             datasets = {name: load_from_disk(str(cached / name))
                         for name in ("train", "validation") if (cached / name).exists()}
@@ -302,9 +243,7 @@ def main(argv: list[str] | None = None) -> int:
             datasets = subset_splits(datasets, data_args.max_samples,
                                      training_args.process_index)
             if data_args.precompute_targets:
-                # In-process fallback, kept for the single-tile path. Under
-                # main_process_first: datasets.map writes a cache file and twelve ranks
-                # writing it at once is a race, as well as twelve times the work.
+                # In-process fallback; main_process_first avoids a datasets.map cache race.
                 with training_args.main_process_first(local=False,
                                                       desc="teacher embeddings"):
                     datasets = attach_teacher_embeddings(

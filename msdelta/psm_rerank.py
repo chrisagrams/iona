@@ -11,18 +11,8 @@
     # (train a global model yourself)
     python -m msdelta.psm_rerank train --rows rows/ --labfeat features/ --out model_dir/
 
-Inputs: stage-1 tables (msdelta.rerank_psm_embed: every candidate with MSFragger's scores and
-`cosine` = peptide embedding . spectrum embedding) and the lab's per-candidate feature tables
-(`features/<dataset>/<run>.parquet` of Gaolaboratory/psm-rerank-hek-hct116, keyed on
-`candidate_id`). Features: the lab's (all-empty and constant columns dropped) + the cosine and
-its within-spectrum versions (rerank_psm_fdr.WS_FEATURES).
-
-Output: one row per spectrum -- its top-scored candidate, score, target/decoy, q-value (target-
-decoy competition, +1 correction) -- and a printed summary of PSMs and peptides at 1% FDR.
-
-Measured on 8 runs of psm-rerank-hek-hct116 (notes/OBSERVATIONS.md, R4): per-run lab 129,041
-PSMs at 1% FDR (MSFragger 89,693; MS2Rescore full 128,211); the embedding features add
-+0.53% over a random-spectrum control (3 seeds). Global (plug-and-play) 105.7k.
+Inputs are stage-1 tables from msdelta.rerank_psm_embed and the lab's per-candidate feature
+tables. Output is the top candidate per spectrum with its score and q-value.
 """
 
 from __future__ import annotations
@@ -46,7 +36,7 @@ def load_table(rows: str, labfeat: str, lab_columns=None):
     files = sorted(glob.glob(str(Path(rows) / "*.parquet"))) if Path(rows).is_dir() else [rows]
     df = pd.concat([pq.read_table(f).to_pandas() for f in files], ignore_index=True)
     lf, lab = load_lab_features(labfeat, df["run_id"].unique())
-    if lab_columns is not None:                   # applying a trained model: its columns
+    if lab_columns is not None:                   # applying a trained model
         for c in lab_columns:
             if c not in lf.columns:
                 lf[c] = 0.0 if "mod_count_" in c else np.nan

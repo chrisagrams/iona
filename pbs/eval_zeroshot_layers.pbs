@@ -4,11 +4,7 @@
 #   qsub -q debug-scaling -l select=1 -l walltime=01:00:00 \
 #        -v MODELS=sweeps/arms/zeroshot_layers_models.txt pbs/eval_zeroshot_layers.pbs
 #
-# One model per tile (up to 12). Per-model JSONs are skipped when present.
-# All-but-the-top (see msdelta/eval_zeroshot_layers.py):
-#   -v MODELS=...,ABTT=1:2:4:8:16:32     (':' -- qsub -v splits on commas)
-# fits on FIT_DATA (default: the prepared 10k-analyte train sample) and writes to
-# zeroshot-layers-abtt/, so the plain per-layer results are never skipped or mixed.
+# One model per tile (up to 12). For all-but-the-top: -v MODELS=...,ABTT=1:2:4:8:16:32
 
 #PBS -N msdelta-zeroshot
 #PBS -A UIC-HPC

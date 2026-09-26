@@ -2,51 +2,11 @@
 
     python -m msdelta.rerank_psm_fdr --rows DIR_OF_STAGE1_PARQUETS --out OUT.json
 
-Target-decoy competition (TDC), the field's standard:
-  1. each method picks ONE candidate per spectrum (its top score) -- target or decoy;
-  2. spectra are sorted by that score, best first;
-  3. at every cut-off FDR = (decoys + 1) / targets above it (Kall et al. 2008's +1
-     correction); the q-value of a spectrum is the lowest FDR at which it is accepted;
-  4. PSMs at 1% FDR = targets with q <= 0.01. Peptide level: keep each peptide's best
-     PSM (sequence + mods), then the same procedure.
-More accepted targets at the same 1% is a better reranker.
-
-Methods:
-  msfragger    MSFragger's rank-1 candidate, scored by -log10 e-value (the dataset's own
-               baseline: 16.5% of HEK spectra at 1% FDR on its tuning run)
-  embedding    the candidate with the highest student-encoder cosine, scored by it
-  embedding:delta   the same pick, scored ACROSS spectra by its lead over the best other
-               candidate of its own spectrum (deltaCn-style) instead of the raw level
-  <model>:<features>[+emb|+embws]   a rescorer, model in {linear, mlp}, features in
-               {ms (MSFragger's scores), hand (our 22 fragment features, stage 1b),
-                ms+hand}; `+emb` adds the embedding cosine, `+embws` adds it with its
-               within-spectrum versions (WS_FEATURES; Percolator's deltaCn/rank idea
-               applied to our score). `linear:ms` is the Percolator-style baseline; each
-               +emb pair isolates the embedding's effect.
-
-Feature sets: `ms` (MSFragger), `hand` / `ms+hand` (stage 1b), `lab` (--labfeat: the
-dataset's own published features/ tables, 380 columns of which the all-NaN and constant
-ones are dropped over the loaded runs; mod_count_* columns are per-run dynamic, absent ->
-0). `+embvec` (--vectors, R5) adds WS_FEATURES plus the element-wise product
-spectrum * peptide projected by PCA fitted on the TRAINING rows of each fold (cosine is
-the product's sum, so a linear model on it learns a weighted cosine); `+nullvec` is its
-leakage control -- the product with a RANDOM other spectrum; it must add nothing.
-
-Regimes (--regime):
-  global   one model over runs, CV by run/series, fixed labels (below). The plug-and-play
-           model: it scores a new run without training on it.
-  perrun   Percolator's protocol, comparable to MS2Rescore/Percolator/mokapot numbers:
-           each run separately, 3-fold CV by SPECTRUM within the run, labels re-derived
-           from the current model for `--iters` rounds (positives = targets at q <= 1%
-           among each spectrum's current top candidate; negatives = the fold's decoys),
-           linear model only; fold scores calibrated as in mokapot,
-           (s - s@1%) / (s@1% - median decoy s), so folds and runs pool into one list.
-
-Global rescorers are CROSS-VALIDATED BY RUN (a spectrum is never scored by a model trained on
-its own run; HEK runs are correlated MudPIT steps, so rows are not independent). Training
-data, as in mokapot/Percolator: positives = targets that MSFragger ranks first AND that
-pass 1% FDR on its e-value within the training folds; negatives = every decoy candidate.
-Standardisation is fitted on training folds only.
+Target-decoy competition with the +1 correction: each method picks one candidate per
+spectrum, and accepted targets at q <= 0.01 are counted. Methods are MSFragger's e-value,
+the embedding cosine, and linear/MLP rescorers over feature sets with and without the
+embedding. `--regime global` cross-validates one model by run; `--regime perrun` is
+Percolator's per-run protocol.
 """
 
 from __future__ import annotations
@@ -67,14 +27,7 @@ WS_FEATURES = ("cosine", "cos_delta", "cos_rank", "cos_z", "cos_gap12")
 
 
 def within_spectrum(spectrum, cosine) -> dict[str, np.ndarray]:
-    """The cosine relative to the other candidates of the SAME spectrum (the raw level
-    depends on the spectrum, so it ranks badly across spectra):
-      cos_delta  minus the best OTHER candidate (the top one: minus the second best)
-      cos_rank   1 = highest cosine in the pool
-      cos_z      standardised within the pool (0 when the pool has no spread)
-      cos_gap12  best - second best, the same for the whole pool
-    A single-candidate pool gets delta 0, rank 1, z 0, gap 0. Same definitions as the
-    MS2Rescore converter (baselines_wip/ms2rescore/convert.py)."""
+    """Cosine relative to the other candidates of the same spectrum: delta, rank, z, top-2 gap."""
     import pandas as pd
     s = pd.Series(np.asarray(cosine, dtype=np.float64))
     g = s.groupby(np.asarray(spectrum))
@@ -102,7 +55,7 @@ def qvalues(scores: np.ndarray, is_decoy: np.ndarray) -> np.ndarray:
 def accepted(scores, is_decoy, peptides, level=0.01) -> dict:
     q = qvalues(scores, is_decoy)
     psms = int(((q <= level) & ~is_decoy).sum())
-    # peptide level: best-scoring PSM per peptide, then TDC again
+    # Peptide level: best PSM per peptide, then TDC again.
     best: dict = {}
     for i, p in enumerate(peptides):
         if p not in best or scores[i] > scores[best[p]]:
@@ -121,10 +74,7 @@ def top_per_spectrum(spectrum_codes, score):
 
 
 def series_of(run_id: str) -> str:
-    """Acquisition series of a run: HEK293 MudPIT runs share a prefix and differ in a
-    trailing salt-step index (0718-5 -> 0718, HEK-U100ug-V2-3_10 -> HEK-U100ug-V2-3,
-    HEK-U100ug-exp33-500c-h10 -> HEK-U100ug-exp33-500c, 0310-9a -> 0310). HCT116 runs are
-    fractions of one sample and stay individual groups."""
+    """Acquisition series of a run: HEK293 salt steps share one; HCT116 runs stay separate."""
     import re
     if "HCT116" in run_id:
         return run_id
@@ -135,8 +85,7 @@ LAB_REVISION = "a6df7948d4500a1f303b0dcf4b6a6a040784d0c6"   # features/ first pu
 
 
 def load_lab_features(lab_dir: str, run_ids) -> "tuple":
-    """The dataset's features/<dataset>/<run>.parquet for these runs, one frame keyed on
-    `candidate`. Returns (frame, usable feature columns)."""
+    """The lab's feature tables for these runs, keyed on `candidate`: (frame, usable columns)."""
     import pandas as pd
     import pyarrow.parquet as pq
     frames = []
@@ -158,13 +107,7 @@ def load_lab_features(lab_dir: str, run_ids) -> "tuple":
 
 
 def load_ms2r_features(root: str, run_ids) -> "tuple":
-    """MS2Rescore's per-candidate features for these runs, keyed on `candidate`.
-
-    Expects an all-ranks MS2Rescore run (run_ms2rescore.pbs arm `fullall`):
-    ROOT/in/<run>/candidates.tsv (candidate_id, spectrum_id, peptidoform) and
-    ROOT/fullall/<run>.tsv (every candidate with its rescoring:* features). Joined on
-    (spectrum_id, peptidoform), which is unique per candidate. Returns (frame, columns)
-    with columns prefixed `ms2r_`; MS2Rescore's own score/q-value are NOT used."""
+    """All-ranks MS2Rescore features for these runs, keyed on `candidate` and prefixed `ms2r_`."""
     import pandas as pd
     frames = []
     for run in sorted(set(run_ids)):
@@ -191,8 +134,7 @@ def load_ms2r_features(root: str, run_ids) -> "tuple":
 
 
 def fit_linear(Xtr, y, w0=None, l2: float = 1e-4, steps: int = 60):
-    """Class-balanced L2 logistic regression by full-batch L-BFGS (torch, CPU); returns
-    (weights incl. bias). Warm-starts from w0, so Percolator's iterations stay cheap."""
+    """Class-balanced L2 logistic regression by L-BFGS, warm-started from w0; returns weights + bias."""
     import torch
     X = torch.tensor(Xtr, dtype=torch.float32)
     Y = torch.tensor(y, dtype=torch.float32)
@@ -214,8 +156,7 @@ def fit_linear(Xtr, y, w0=None, l2: float = 1e-4, steps: int = 60):
 
 
 def calibrate(train_scores, train_decoy, train_spec, test_scores):
-    """mokapot's cross-fold calibration: 0 at the training fold's 1% FDR threshold, -1 at
-    its median decoy (top-per-spectrum)."""
+    """mokapot calibration: 0 at the training fold's 1% FDR threshold, -1 at its median decoy."""
     top = top_per_spectrum(train_spec, train_scores)
     s, d = train_scores[top], train_decoy[top]
     q = qvalues(s, d)
@@ -226,9 +167,7 @@ def calibrate(train_scores, train_decoy, train_spec, test_scores):
 
 
 class ProductPCA:
-    """Element-wise product spectrum * peptide for rows, projected on the top-k principal
-    directions of the product over `fit_rows` (a training sample). Vectors: unit-norm
-    fp16 arrays, spectrum[owner[i]] and peptide[i] for candidate row i."""
+    """Element-wise spectrum * peptide product, projected onto its top-k principal directions."""
 
     def __init__(self, spectrum, peptide, owner, k: int):
         self.s, self.p, self.owner, self.k = spectrum, peptide, owner, k
@@ -256,8 +195,7 @@ class ProductPCA:
 
 
 def load_vectors(vec_dir: str, candidates) -> "tuple":
-    """Stage-1 vectors (rerank_psm_embed --vectors-out) for these candidate rows, in their
-    order: (spectrum matrix, peptide matrix, owner, null owner) with global indices."""
+    """Stage-1 vectors for these candidates: (spectrum, peptide, owner, null owner)."""
     import pyarrow.parquet as pq
     specs, peps, owners, nulls, cands = [], [], [], [], []
     offset = 0
@@ -309,27 +247,21 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--handfeat", default="", help="dir of stage-1b hand-feature tables")
     ap.add_argument("--models", default="linear,mlp")
     ap.add_argument("--group", default="run", choices=["run", "series"],
-                    help="CV unit: single runs, or whole acquisition series (HEK293 MudPIT "
-                         "series; each HCT116 fraction is its own group)")
+                    help="CV unit")
     ap.add_argument("--max-neg", type=int, default=3_000_000,
-                    help="decoy candidates subsampled per training fold (0 = all)")
-    ap.add_argument("--sets", default="", help="comma list of feature sets to fit "
-                    "(default all: ms,hand,ms+hand[,lab])")
-    ap.add_argument("--variants", default="", help="comma list of embedding variants "
-                    "(default all available: none,emb,embws[,embvec,nullvec])")
-    ap.add_argument("--runs", default="", help="only these run ids (comma list); default "
-                    "every table under --rows")
+                    help="decoys per training fold (0 = all)")
+    ap.add_argument("--sets", default="", help="comma list of feature sets")
+    ap.add_argument("--variants", default="", help="comma list of embedding variants")
+    ap.add_argument("--runs", default="", help="comma list of run ids")
     ap.add_argument("--labfeat", default="", help="dir holding the dataset's features/ tables")
-    ap.add_argument("--ms2r", default="", help="all-ranks MS2Rescore output root (in/, fullall/): "
-                    "adds sets ms+ms2r and (with --labfeat) lab+ms2r")
+    ap.add_argument("--ms2r", default="", help="MS2Rescore output root")
     ap.add_argument("--regime", default="global", help="global, perrun, or global,perrun")
     ap.add_argument("--iters", type=int, default=10, help="perrun: label-refinement rounds")
-    ap.add_argument("--vectors", default="", help="stage-1 vectors dir (R5 product features)")
+    ap.add_argument("--vectors", default="", help="stage-1 vectors dir")
     ap.add_argument("--pca-k", type=int, default=64)
     ap.add_argument("--seed", type=int, default=0, help="fold assignment and subsampling")
     ap.add_argument("--shuffle-labels", action="store_true",
-                    help="CONTROL: permute the training labels every fit; any real "
-                         "acceptance left over is leakage or an FDR bug")
+                    help="control: permute training labels")
     cli = ap.parse_args(argv)
 
     import pyarrow.parquet as pq
@@ -378,9 +310,7 @@ def main(argv: list[str] | None = None) -> int:
     spec = df["spectrum_id"].astype("category").cat.codes.to_numpy()
     for k, v in within_spectrum(spec, df["cosine"].to_numpy(float)).items():
         df[k] = v
-    # NULL embedding (the control for every +embws arm): the same five features built from
-    # cosine_null -- each candidate against a RANDOM other spectrum. Identical column count
-    # and preprocessing, no spectrum information. A real gain must beat this arm too.
+    # Null control: the same features from each candidate's cosine to a random spectrum.
     has_null = "cosine_null" in df.columns and pd.to_numeric(
         df["cosine_null"], errors="coerce").notna().all()
     if has_null:
@@ -407,13 +337,12 @@ def main(argv: list[str] | None = None) -> int:
             print(f"  [{sub:6s}] {name:11s} PSMs@1% {r['psms_1pct']:>8,} ({100 * r['rate']:5.2f}% "
                   f"of {n:,})  peptides@1% {r['peptides_1pct']:>7,}", flush=True)
 
-    # Leakage check (A4): can a candidate's cosine to a RANDOM spectrum tell targets from
-    # decoys? It must not (~0.5); the real cosine is reported beside it for scale.
+    # Leakage check: target-vs-decoy AUROC on the null cosine should be ~0.5.
     from sklearn.metrics import roc_auc_score
     for col in ("cosine", "cosine_null"):
         if col in df.columns:
             v = pd.to_numeric(df[col], errors="coerce").to_numpy()
-            ok = np.isfinite(v)          # tables made before cosine_null existed lack it
+            ok = np.isfinite(v)
             if ok.sum() == 0:
                 continue
             report.setdefault("leakage_auroc_target_vs_decoy", {})[col] = float(
@@ -421,15 +350,14 @@ def main(argv: list[str] | None = None) -> int:
             print(f"  [leak] AUROC target-vs-decoy on {col}: "
                   f"{report['leakage_auroc_target_vs_decoy'][col]:.4f}", flush=True)
 
-    # 1. MSFragger rank-1 by e-value (rank-1 wins ties by construction).
+    # MSFragger rank-1 by e-value.
     ms = df["search_neglog10_evalue"].to_numpy(float) - 1e-6 * df["search_rank"].to_numpy(float)
     evaluate("msfragger", ms)
-    # 2. embedding alone: the candidate with the highest cosine
+    # Embedding alone.
     evaluate("embedding", df["cosine"].to_numpy(float))
-    # the same pick (delta > 0 exactly for the top cosine), ranked across spectra by lead
     evaluate("embedding:delta", df["cos_delta"].to_numpy(float))
 
-    # 3/4. Percolator-style linear rescorer, cross-validated by run
+    # Rescorers, cross-validated by run.
     units = df["run_id"].map(series_of).to_numpy() if cli.group == "series" \
         else df["run_id"].to_numpy()
     uniq = np.array(sorted(set(units)))
@@ -450,7 +378,7 @@ def main(argv: list[str] | None = None) -> int:
             sets |= {"lab+ms2r": lab + ms2r}
     if cli.sets:
         sets = {k: v for k, v in sets.items() if k in cli.sets.split(",")}
-    # variant -> (extra scalar columns, product vectors: None | "real" | "null")
+    # variant -> (extra columns, product vectors: None | "real" | "null")
     variants = {"": ((), None), "+emb": (("cosine",), None), "+embws": (WS_FEATURES, None)}
     if has_null:
         variants["+nullws"] = (tuple("null_" + c for c in WS_FEATURES), None)
@@ -466,7 +394,7 @@ def main(argv: list[str] | None = None) -> int:
         variants = {k: v for k, v in variants.items() if k in keep}
 
     def design(cols, vec, fit_rows, rows):
-        """Feature matrix for `rows`; product PCA (if any) fitted on `fit_rows` only."""
+        """Feature matrix for `rows`; product PCA fitted on `fit_rows` only."""
         X = df[list(cols)].to_numpy(float)[rows]
         if vec is None:
             return X
@@ -547,7 +475,7 @@ def main(argv: list[str] | None = None) -> int:
                                 yy = np.random.default_rng(cli.seed + f).permutation(yy)
                             w = fit_linear(Xtr[sel], yy, w0=w)
                             cur = Xtr @ w[:-1] + w[-1]
-                        if w is None:      # no confident targets at all: fall back to the engine
+                        if w is None:      # no confident targets: fall back to the engine
                             score[te] = calibrate(ms[tr], decoy[tr], spec[tr], ms[te])
                             continue
                         score[te] = calibrate(cur, decoy[tr], spec[tr], Xte @ w[:-1] + w[-1])

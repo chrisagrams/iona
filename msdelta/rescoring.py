@@ -1,23 +1,6 @@
 """Percolator-style rescoring: features + a small classifier, ranked by the logit.
 
-Why this and not embedding retrieval. The alignment tower ranks candidates by the cosine
-between a spectrum embedding and a sequence embedding, and that single number reaches
-AUROC 0.846 on true-vs-decoy pairs -- real signal, but it compresses a whole spectrum to
-1280 numbers and asks whether two vectors are close. Fragment matching asks the physical
-question instead: do the b and y ions this peptide would produce actually appear in this
-scan. Rescoring on hand-built features has worked for two decades, so the embedding has
-to EARN its place against that baseline rather than be assumed to replace it. Keeping
-both in one feature vector makes the comparison a flag (`drop_embedding`) rather than a
-separate experiment.
-
-Three feature groups:
-
-  spectrum   the scan alone -- is it even interpretable? A sparse or low-TIC scan should
-             not yield a confident identification whatever the sequence.
-  candidate  the peptide alone, plus precursor mass error, which is the strongest and
-             cheapest classical feature: a candidate 50 ppm off the precursor is wrong
-             however good its fragments look.
-  match      the peptide against the scan. This carries most of the signal.
+Features cover the spectrum alone, the candidate alone, and the candidate matched to the spectrum.
 """
 
 from __future__ import annotations
@@ -43,8 +26,7 @@ FEATURE_NAMES = (
     "embedding_cosine",
 )
 
-# Kyte-Doolittle, for the hydrophobicity average. Retention time correlates with it, and
-# a candidate whose hydrophobicity disagrees with when it eluted is suspect.
+# Kyte-Doolittle hydrophobicity.
 _GRAVY = {"A": 1.8, "R": -4.5, "N": -3.5, "D": -3.5, "C": 2.5, "Q": -3.5, "E": -3.5,
           "G": -0.4, "H": -3.2, "I": 4.5, "L": 3.8, "K": -3.9, "M": 1.9, "F": 2.8,
           "P": -1.6, "S": -0.8, "T": -0.7, "W": -0.9, "Y": -1.3, "V": 4.2}
@@ -74,11 +56,7 @@ def peptide_mass(residues: list[str], mods: list[float]) -> float:
 
 
 def theoretical_fragments(residues: list[str], mods: list[float]) -> tuple[np.ndarray, np.ndarray]:
-    """Singly-charged b and y ions. Returns (b_ions, y_ions).
-
-    Only b/y: they dominate HCD spectra, and adding a/c/x/z series would raise the
-    match rate for TRUE and DECOY candidates alike, which costs discrimination.
-    """
+    """Singly-charged b and y ions. Returns (b_ions, y_ions)."""
     masses = [RESIDUE_MASSES.get(r, 0.0) + m for r, m in zip(residues, mods)]
     prefix = np.cumsum(masses[:-1]) + PROTON_MASS if len(masses) > 1 else np.array([])
     suffix = (np.cumsum(masses[::-1][:-1]) + WATER_MASS + PROTON_MASS
@@ -88,10 +66,7 @@ def theoretical_fragments(residues: list[str], mods: list[float]) -> tuple[np.nd
 
 def _match(observed: np.ndarray, theoretical: np.ndarray, tolerance_ppm: float,
            da_floor: float = 0.0) -> np.ndarray:
-    """Which theoretical ions appear in the scan, within max(ppm window, da_floor Da).
-
-    da_floor 0 (default) is the original ppm-only behaviour. Low-resolution ion-trap MS2
-    needs a Da floor: the psm-rerank dataset card specifies max(250 ppm, 0.05 Da)."""
+    """Which theoretical ions appear in the scan, within max(ppm window, da_floor Da)."""
     if theoretical.size == 0 or observed.size == 0:
         return np.zeros(theoretical.size, dtype=bool)
     index = np.searchsorted(observed, theoretical)
@@ -104,11 +79,7 @@ def _match(observed: np.ndarray, theoretical: np.ndarray, tolerance_ppm: float,
 
 
 def _longest_run(found: np.ndarray) -> int:
-    """The longest consecutive ion series. A real identification produces runs.
-
-    Six scattered matches across a 20-residue peptide is what a wrong candidate looks
-    like; six consecutive ones is evidence, and a plain count cannot tell them apart.
-    """
+    """The longest consecutive run of matched ions."""
     best = current = 0
     for hit in found:
         current = current + 1 if hit else 0
@@ -122,8 +93,6 @@ def spectrum_features(mz: np.ndarray, intensity: np.ndarray) -> dict[str, float]
         return {"n_peaks": 0.0, "log_tic": 0.0, "spectrum_entropy": 0.0,
                 "base_peak_fraction": 0.0, "mz_range": 0.0}
     share = intensity / total
-    # Shannon entropy: a proxy for how many peaks carry real signal, which a raw count
-    # misses when one peak dominates.
     entropy = float(-(share * np.log(np.maximum(share, 1e-12))).sum())
     return {"n_peaks": float(mz.size), "log_tic": math.log1p(total),
             "spectrum_entropy": entropy,
@@ -198,12 +167,7 @@ def extract_features(peptide: str, mz: np.ndarray, intensity: np.ndarray,
 # ------------------------------------------------------------------ decoys
 
 def pseudo_reverse(peptide: str) -> str:
-    """Reverse the sequence, keeping the C-terminal residue fixed.
-
-    The standard proteomics decoy. Holding the last residue preserves the tryptic K/R
-    terminus and the precursor mass exactly, so the decoy is wrong in its FRAGMENTS and
-    nowhere else -- which is the only thing we want the classifier to learn to see.
-    """
+    """Reverse the sequence, keeping the C-terminal residue fixed (preserves mass)."""
     residues, mods = split_peptide(peptide)
     if len(residues) < 3:
         return peptide
@@ -213,11 +177,7 @@ def pseudo_reverse(peptide: str) -> str:
 
 
 def near_miss(peptide: str, rng: np.random.Generator) -> str:
-    """Swap two adjacent residues: same mass, nearly the same fragments.
-
-    Much harder than a reversal. It is also the realistic confusion -- a search engine's
-    runner-up is usually a near-anagram of the truth, not a random sequence.
-    """
+    """Swap two adjacent residues: same mass, nearly the same fragments."""
     residues, mods = split_peptide(peptide)
     if len(residues) < 4:
         return peptide
@@ -229,11 +189,7 @@ def near_miss(peptide: str, rng: np.random.Generator) -> str:
 
 
 def il_equivalent(peptide: str) -> str | None:
-    """Swap I and L. Identical mass, identical fragments -- undecidable by MS alone.
-
-    Included as a control: a classifier that claims to separate these is overfitting,
-    since no feature here can distinguish them even in principle.
-    """
+    """Swap I and L: identical mass and fragments, so indistinguishable by MS."""
     residues, mods = split_peptide(peptide)
     if not any(r in "IL" for r in residues):
         return None
@@ -254,13 +210,7 @@ class CandidateSet:
 def build_candidates(peptide: str, rng: np.random.Generator,
                      mass_matched: list[str] | None = None,
                      n_near_miss: int = 2) -> CandidateSet:
-    """Truth plus decoys. Order of difficulty: mass-matched > near-miss > reversal.
-
-    Mass-matched decoys -- real peptides from the corpus within a few ppm of this
-    precursor -- are the hard case and the realistic one: they are exactly the
-    candidates a search engine would return, and the ones a reranker must separate.
-    Random peptides of the wrong mass are free to reject and teach nothing.
-    """
+    """Truth plus near-miss, reversed and mass-matched decoys."""
     out = CandidateSet([peptide], [1], ["true"])
     for _ in range(n_near_miss):
         alternative = near_miss(peptide, rng)
@@ -285,13 +235,7 @@ from torch import Tensor, nn  # noqa: E402
 
 
 class RescoringClassifier(nn.Module):
-    """A small MLP over the feature vector. The logit IS the score to rank by.
-
-    Standardisation is inside the module, not a preprocessing step, so it travels with
-    the weights. Without it the first epochs are spent undoing scale: `precursor_mz`
-    runs to ~2000 while `frag_coverage_b` lives in [0, 1], and weight decay would then
-    penalise the small-scale features for being small rather than for being useless.
-    """
+    """A small MLP over the feature vector, with standardisation stored in the module."""
 
     def __init__(self, n_features: int, hidden_size: int = 128, layers: int = 2,
                  dropout: float = 0.1):
@@ -318,22 +262,14 @@ def train_rescorer(features: np.ndarray, labels: np.ndarray, groups: np.ndarray,
                    hidden_size: int = 128, lr: float = 1e-3, seed: int = 0,
                    validation_fraction: float = 0.2,
                    split_keys: np.ndarray | None = None) -> dict:
-    """Train on (spectrum, candidate) pairs and report ranking quality.
-
-    Splits by SPECTRUM, not by pair. Decoys are generated from the true peptide, so a
-    pair-level split would put a spectrum's truth in train and its own decoy in
-    validation, and the classifier would be scored on candidates it had already seen.
-    """
+    """Train on (spectrum, candidate) pairs and report ranking quality."""
     torch.manual_seed(seed)
     columns = [i for i, name in enumerate(FEATURE_NAMES)
                if not (drop_embedding and name == "embedding_cosine")]
     x = torch.tensor(features[:, columns], dtype=torch.float32)
     y = torch.tensor(labels, dtype=torch.float32)
 
-    # Hold out by PEPTIDE when split_keys (the true peptide of each row's spectrum) is
-    # given. A spectrum-level split put 100% of test spectra's peptides in training (audit
-    # 8859654: each peptide has ~13 replicate spectra), and the peptide-level features
-    # (length, charge, GRAVY, modifications, ...) let the classifier memorise them.
+    # Hold out by peptide when split_keys is given, otherwise by spectrum.
     keys = split_keys if split_keys is not None else groups
     unique = np.unique(keys)
     rng = np.random.default_rng(seed)
@@ -346,8 +282,7 @@ def train_rescorer(features: np.ndarray, labels: np.ndarray, groups: np.ndarray,
     model = RescoringClassifier(len(columns), hidden_size=hidden_size)
     model.fit_standardizer(x[train_idx])
     optimizer = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=1e-2)
-    # Positives are outnumbered roughly 1:4 by decoys; without the weight the model can
-    # score 80% by calling everything wrong.
+    # Weight positives to offset the decoy imbalance.
     positive_weight = ((y[train_idx] == 0).sum() / (y[train_idx] == 1).sum().clamp_min(1))
     loss_fn = nn.BCEWithLogitsLoss(pos_weight=positive_weight)
 

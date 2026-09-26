@@ -4,11 +4,7 @@
 #   qsub -q debug -l select=1 -l walltime=01:00:00 \
 #        -v MODELS=sweeps/arms/grouped100k_models.txt pbs/eval_grouped_retrieval.pbs
 #
-# 1. the unit tests for the chunked metric and the flattening -- abort if they fail;
-# 2. prepare the flattened, preprocessed split ONCE (skipped if DATA already exists);
-# 3. one scoring process per tile, each taking every 12th model;
-# 4. a table of every model scored so far.
-# Per-model JSONs are skipped when present, so a timed-out job is resumed by resubmitting.
+# Prepares the split once, then scores one shard of models per tile. Resubmit to resume.
 
 #PBS -N msdelta-evalgrp
 #PBS -A UIC-HPC
@@ -37,7 +33,6 @@ set -u
 
 export ONEAPI_DEVICE_SELECTOR=level_zero:gpu
 export ZE_FLAT_DEVICE_HIERARCHY=FLAT
-# Default for the single-process steps; each scoring shard overrides it with its own tile.
 export ZE_AFFINITY_MASK=0
 export OMP_NUM_THREADS=${OMP_NUM_THREADS:-8}
 export PYTHONPATH=$REPO_DIR${PYTHONPATH:+:$PYTHONPATH}

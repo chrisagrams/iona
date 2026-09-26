@@ -1,8 +1,6 @@
 #!/bin/bash
-# One node's share of the full-dataset PSM stage 1 (see pbs/rerank_psm_full.pbs).
-# Launched once per node by mpiexec; each of its 12 tiles walks a disjoint list of runs:
-# embeddings (msdelta.rerank_psm_embed) then hand features (msdelta.rerank_psm_handfeat).
-# Existing outputs are skipped, so reruns resume.
+# One node's share of pbs/rerank_psm_full.pbs: each tile embeds and featurizes its runs.
+# Existing outputs are skipped.
 set -uo pipefail
 RANK=${PMIX_RANK:-${PMI_RANK:-${PALS_RANKID:-0}}}
 NNODES=${NNODES:?}; TILES=${TILES:-12}

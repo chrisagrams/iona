@@ -1,29 +1,7 @@
 """Map a peptide sequence into the spectrum encoder's embedding space.
 
-A database search hands you a spectrum and a list of candidate sequences. To rerank that
-list by the model, spectra and sequences have to live in ONE space where distance means
-something. This trains that: the spectrum encoder is frozen and acts as a teacher, and a
-fresh peptide encoder learns to reproduce its embedding for the sequence that produced
-the spectrum.
-
-**Why freeze the spectrum side.** Training both would let them drift into a shared space
-of their own invention -- a legitimate objective, but a different one. The spectrum
-embedding would stop meaning what pretraining made it mean, and every measurement taken
-against it would stop applying. Freezing holds the space fixed and asks only whether
-sequences can be mapped into it.
-
-**Why L2 on normalized vectors.** Retrieval is cosine, and for unit vectors
-`||a-b||^2 = 2 - 2 cos(a,b)`, so L2 here IS cosine alignment -- the requested loss and the
-geometry the space is actually read with, at once. Left unnormalized the encoder can lower
-the loss by shrinking every output toward the mean target, which improves no ranking.
-
-**Why watch the ranking, not the loss.** That collapse is exactly what L2 rewards, so the
-loss can fall while every ordering is destroyed. `cross_modal_metrics` is the number that
-says whether the alignment is useful.
-
-**Why modification mass goes through Fourier features.** The spectrum side encodes m/z
-that way. A modification is a mass; giving both sides the same representation avoids
-asking them to invent separate notions of the same physical quantity.
+A peptide encoder is trained against a frozen spectrum encoder (the teacher), with L2 on
+unit vectors so the loss matches cosine retrieval.
 """
 
 from __future__ import annotations
@@ -52,20 +30,10 @@ _MOD = re.compile(r"\[([+-]?[0-9.]+)\]")
 
 # ---------------------------------------------------------------------------- probes
 
-# Off unless MSDELTA_PROBES is set, so a real training run pays one boolean per call site.
-# Turn them on for debug-queue runs: MSDELTA_PROBES=1.
+# Debug checks, enabled with MSDELTA_PROBES=1.
 PROBES = os.environ.get("MSDELTA_PROBES", "") not in ("", "0", "false", "False")
 
-# Force scaled_dot_product_attention onto the unfused MATH backend when set.
-#
-# oneDNN's fused SDPA kernel is a documented source of GPU page faults on Intel GPUs --
-# pytorch/pytorch#195319 reports exactly this fault class from an out-of-bounds access in
-# the fused kernel's second-tile handling, triggered by a rank-4 attention mask, with
-# "force the MATH backend" as the first workaround. nn.TransformerEncoder builds a rank-4
-# mask internally whenever a key_padding_mask is supplied, which this model always does.
-#
-# Not on by default: MATH materialises the full attention matrix and is slower. This is
-# a diagnostic switch, and a fallback if it turns out to be the fix.
+# Force SDPA onto the unfused MATH backend (workaround for fused-kernel page faults on XPU).
 SDPA_MATH = os.environ.get("MSDELTA_SDPA_MATH", "") not in ("", "0", "false", "False")
 
 
@@ -78,18 +46,7 @@ def _sdpa_context():
 
 
 def probe(where: str, *, sync: Tensor | None = None, **tensors) -> None:
-    """Check tensors at a named point, and optionally make the device catch up first.
-
-    `sync` is the important argument. XPU kernels are asynchronous, so a GPU page fault
-    is reported wherever the host happens to be when the driver notices, which can be
-    dozens of steps past whatever caused it -- job 8840356 faulted "at step 56" and job
-    8840238 "at step 73", and neither number means anything without a synchronise. Pass
-    any tensor on the device and this blocks until the queue drains, so the fault is
-    attributed to the stage that actually caused it.
-
-    Everything else checked here is cheap and has already bitten once: dtype mismatches
-    (8840257, 8840336), indices past the end of an embedding table, and non-finite values.
-    """
+    """Check tensors for non-finite values; `sync` blocks until the device queue drains."""
     if not PROBES:
         return
     if sync is not None and sync.device.type == "xpu":
@@ -103,13 +60,7 @@ def probe(where: str, *, sync: Tensor | None = None, **tensors) -> None:
 
 
 def probe_index(where: str, name: str, index: Tensor, limit: int) -> None:
-    """An out-of-range embedding index reads unmapped memory on GPU rather than raising.
-
-    On CPU nn.Embedding raises IndexError. On GPU the gather is unchecked, so the read
-    lands wherever the arithmetic points and surfaces as `type: 0 (NotPresent),
-    access: 0 (Read)` -- which is exactly the signature of FT9. Checking explicitly turns
-    a page fault into a sentence naming the tensor and the offending value.
-    """
+    """Raise on out-of-range embedding indices, which fault on GPU instead of raising."""
     if not PROBES or index.numel() == 0:
         return
     low, high = int(index.min()), int(index.max())
@@ -120,37 +71,20 @@ def probe_index(where: str, name: str, index: Tensor, limit: int) -> None:
         )
 
 
-# "weighted" variants scale each peak's contribution before averaging. A mass spectrum
-# is mostly noise -- the denoise corpus is 53% noise by peak count -- so an unweighted
-# mean over 512 peaks is dominated by peaks that carry no identity, and the max is taken
-# over those same dimensions. Weights can be intensity (free, and intense fragments are
-# what identify a peptide) or a denoiser's P(signal), which is the same information
-# learned rather than assumed.
+# "weighted" variants weight each token (e.g. by intensity) before averaging.
 POOLING_MODES = ("mean", "mean+max", "weighted_mean", "weighted_mean+max")
 
 
 def pool_sequence(tokens: Tensor, mask: Tensor, mode: str = "mean+max",
                   weights: Tensor | None = None) -> Tensor:
-    """Reduce variable-length token embeddings to one vector.
-
-    `mean` is the field's default -- sentence_transformers uses it for every encoder
-    model, and SBERT's comparison of CLS/mean/max put mean ahead. `mean+max` is what this
-    repo's SpectrumRetrievalHead and embedding.pool_tokens already do, so it is kept as
-    the default here to stay consistent with numbers measured against that space; it also
-    doubles the width, which is a real cost on the peptide side where a sequence is ~15
-    residues and a max over 15 tokens is closer to noise than to a feature.
-
-    Both towers must use the same mode. The alignment target is whatever the teacher
-    emits, so a mismatch is not a modelling choice, it is a shape error waiting to happen.
-    """
+    """Reduce variable-length token embeddings to one vector. Both towers must use the same mode."""
     if mode not in POOLING_MODES:
         raise ValueError(f"pooling must be one of {POOLING_MODES}, got {mode!r}")
     mask = mask.bool().unsqueeze(-1)
     if mode.startswith("weighted"):
         if weights is None:
             raise ValueError(f"pooling {mode!r} needs per-peak weights")
-        # Normalised so the result stays on the same scale as the unweighted mean;
-        # otherwise every downstream threshold and the L2 target space shift with it.
+        # Normalised to stay on the same scale as the unweighted mean.
         w = (weights.unsqueeze(-1) * mask).clamp_min(0)
         mean = (tokens * w).sum(1) / w.sum(1).clamp_min(1e-9)
     else:
@@ -164,19 +98,13 @@ def pool_sequence(tokens: Tensor, mask: Tensor, mode: str = "mean+max",
 
 def pooled_width(hidden_size: int, mode: str) -> int:
     """Width `pool_sequence` produces, so the projection can be sized without a forward."""
-    # Keyed on whether a max is concatenated, not on an exact name, so the weighted
-    # variants size correctly too.
     return 2 * hidden_size if mode.endswith("mean+max") else hidden_size
 
 
 def parse_peptide(peptide: str) -> tuple[list[int], list[float]]:
     """Split a modified peptide into residue ids and per-residue modification masses.
 
-    Peptides arrive as `SAC[57.0215]GVC[57.0215]PGR`. A bracket binds to the residue
-    before it, which is this corpus's convention. The mass is kept as a continuous
-    per-residue feature rather than folded into a token: a mass is a number, two
-    different masses on one residue are two different chemical species, and a token
-    vocabulary would either collapse them or explode.
+    A bracketed mass binds to the preceding residue, e.g. `SAC[57.0215]GVC[57.0215]PGR`.
     """
     ids: list[int] = []
     masses: list[float] = []
@@ -194,8 +122,7 @@ def parse_peptide(peptide: str) -> tuple[list[int], list[float]]:
             if masses:
                 masses[-1] += mass
             else:
-                # A leading bracket has no preceding residue; attach it to an N-terminal
-                # marker rather than discarding it.
+                # A leading bracket attaches to the N-terminal marker.
                 ids.append(RESIDUE_TO_ID["n"])
                 masses.append(mass)
             index = end + 1
@@ -207,12 +134,7 @@ def parse_peptide(peptide: str) -> tuple[list[int], list[float]]:
 
 
 def peptide_key(peptide: str, charge: int, by_charge: bool = True) -> str:
-    """Identity used to decide whether two spectra are "the same sequence".
-
-    Charge-aware by default: one peptide at charge 2 and the same peptide at charge 3
-    fragment differently enough that their spectra are not really replicates, and merging
-    them would make the task look easier than it is.
-    """
+    """Identity used to decide whether two spectra are the same sequence (charge-aware by default)."""
     return f"{peptide}_{charge}" if by_charge else peptide
 
 
@@ -221,9 +143,7 @@ class PeptideCollator:
     """Pad parsed peptides into a batch."""
 
     max_length: int = 64
-    # Pad every batch to max_length instead of to the longest peptide in it, so the shape
-    # is identical on every step. See AlignmentCollator for why that is worth the few
-    # wasted positions.
+    # Pad to max_length rather than the longest peptide, for fixed shapes.
     pad_to_max: bool = False
 
     def __call__(self, peptides: list[str], charges: list[int]) -> dict[str, Tensor]:
@@ -267,12 +187,8 @@ class PeptideEncoder(nn.Module):
     ):
         super().__init__()
         self.pooling = pooling
-        # How the residue tokens become ONE vector. "pool" (default, every model before
-        # A3): `pooling` over the tokens -- mean+max is nearly order-blind, which is why
-        # the A1 student ranks an adjacent-residue swap above the truth 30% of the time.
-        # "cls": a learned token prepended to the sequence, its output is the embedding.
-        # "attn": a learned query attending over the tokens. Both keep order information
-        # the transformer already computed (positions are embedded). PLAN.md A3.
+        # "pool": `pooling` over tokens; "cls": a learned prepended token; "attn": a learned
+        # query attending over tokens.
         if readout not in ("pool", "cls", "attn"):
             raise ValueError(f"readout must be pool, cls or attn, not {readout!r}")
         self.readout = readout
@@ -293,9 +209,6 @@ class PeptideEncoder(nn.Module):
             d_model=hidden_size, nhead=num_heads, dim_feedforward=4 * hidden_size,
             dropout=dropout, batch_first=True, norm_first=True, activation="gelu",
         )
-        # Skip the NestedTensor conversion. The padding here is a few residues out of 64,
-        # so it buys nothing, and it is a second fast path to reason about. See forward()
-        # for the one that actually bites.
         self.encoder = nn.TransformerEncoder(layer, num_layers=num_layers,
                                              enable_nested_tensor=False)
         self.norm = nn.LayerNorm(hidden_size)
@@ -315,8 +228,7 @@ class PeptideEncoder(nn.Module):
         )
         probe_index("student.pos", "position", position, self.position.num_embeddings)
         hidden = self.residue(residues) + self.position(position)[None]
-        # Only modified residues get a mass contribution; an unmodified residue must not
-        # be handed the Fourier encoding of zero as though it were a real modification.
+        # Only modified residues get a mass contribution.
         modified = (modifications.abs() > 1e-6).unsqueeze(-1)
         mod = self.mod_projection(self.mod_features(modifications).to(hidden.dtype))
         hidden = hidden + mod * modified
@@ -326,27 +238,8 @@ class PeptideEncoder(nn.Module):
                                 hidden], dim=1)
             sequence_mask = torch.cat([torch.ones_like(sequence_mask[:, :1]),
                                        sequence_mask], dim=1)
-        # Run the stack with autocast off, in whatever dtype the weights are.
-        #
-        # torch's TransformerEncoderLayer has a fused fast path
-        # (torch._transformer_encoder_layer_fwd) that it takes only when grad is disabled
-        # -- eval, never training -- and that kernel does not honour autocast. It is meant
-        # to be guarded by
-        #
-        #     elif torch.is_autocast_enabled():   # transformer.py:869
-        #
-        # but the no-argument form of that call reports CUDA's autocast state, so under
-        # torch.autocast("xpu") it returns False and the guard never fires. Job 8840257
-        # trained 200 steps and died on its first evaluation: "expected scalar type
-        # BFloat16 but found Float".
-        #
-        # What the kernel cannot tolerate is a MISMATCH, not bf16. Forcing fp32 fixed the
-        # single-tile case and then broke DeepSpeed, which holds the parameters in bf16 --
-        # job 8840336 died at step 0 with the same error inverted, "expected scalar type
-        # Float but found BFloat16". Matching the activations to the parameters is right
-        # in both: fp32 against fp32 weights on one tile, bf16 against bf16 under ZeRO-2.
-        # It also keeps training and evaluation numerically identical, which is the other
-        # reason not to leave this to autocast.
+        # Autocast off, activations cast to the weights' dtype: the fused eval fast path
+        # ignores autocast on XPU and fails on a dtype mismatch.
         param_dtype = next(self.encoder.parameters()).dtype
         with torch.autocast(device_type=hidden.device.type, enabled=False):
             hidden = hidden.to(param_dtype)
@@ -372,9 +265,7 @@ class PeptideEncoder(nn.Module):
 
 def lit_contrastive_loss(target, predicted, group, negatives=None, neg_valid=None,
                          temperature: float = 0.05) -> Tensor:
-    """Cross-modal SupCon against frozen targets. Anchor = spectrum target (row i);
-    candidates = every peptide embedding in the batch (positives: same `group`) plus
-    that row's hard negatives. Unit vectors in, mean over anchors and positives out."""
+    """Cross-modal SupCon: spectrum targets as anchors, in-batch peptides plus hard negatives as candidates."""
     t = F.normalize(target.float(), dim=-1)
     p = F.normalize(predicted.float(), dim=-1)
     logits = t @ p.T / temperature                                  # (B, B)
@@ -391,8 +282,7 @@ def lit_contrastive_loss(target, predicted, group, negatives=None, neg_valid=Non
 
 
 def student_readout(state: dict, prefix: str = "sequence_encoder.") -> str:
-    """Which PeptideEncoder readout a saved student used, read off its weight names, so
-    loaders need no extra config (every pre-A3 student has neither key -> "pool")."""
+    """Which PeptideEncoder readout a saved student used, inferred from its weight names."""
     keys = {k[len(prefix):] if k.startswith(prefix) else k for k in state}
     return "cls" if "cls" in keys else "attn" if "attn_query" in keys else "pool"
 
@@ -403,35 +293,21 @@ class SequenceAlignmentModel(nn.Module):
     def __init__(self, spectrum_model: nn.Module | None, sequence_encoder: PeptideEncoder,
                  pooling: str = "mean+max", loss: str = "mse", temperature: float = 0.05,
                  mse_weight: float = 0.0):
-        """`spectrum_model=None` trains against PRECOMPUTED targets.
-
-        The teacher is frozen, so its embedding for a given spectrum is identical in every
-        epoch. Running it inside the training step spends ~92% of the parameters and all
-        of the 512-peak attention regenerating a constant -- and it is the one structural
-        difference between this model and the denoise model, which is the only one that
-        survives twelve tiles (FT9). Precomputing the targets removes it from the graph
-        entirely, so the wrapped module is the 4.11M student alone.
-        """
+        """`spectrum_model=None` trains against precomputed targets."""
         super().__init__()
         self.spectrum_model = spectrum_model
         self.sequence_encoder = sequence_encoder
-        # The teacher's pooling defines the target space, so it must match the student's.
         if pooling != sequence_encoder.pooling:
             raise ValueError(
                 f"teacher pooling {pooling!r} != student pooling {sequence_encoder.pooling!r}"
             )
         self.pooling = pooling
-        # "mse" (A1): regress onto the teacher embedding. "lit" (A4): LiT-style
-        # cross-modal contrastive against the FROZEN teacher (Zhai et al., CVPR 2022),
-        # SupCon-style multi-positive (every spectrum of the batch's same peptide is a
-        # positive), negatives = the batch's other peptides + synthetic hard negatives;
-        # plus mse_weight x the A1 term to stay in the teacher's space.
+        # "mse": regress onto the teacher embedding. "lit": cross-modal contrastive against
+        # the frozen teacher, plus mse_weight x the MSE term.
         if loss not in ("mse", "lit"):
             raise ValueError(f"loss must be mse or lit, not {loss!r}")
         self.loss, self.temperature, self.mse_weight = loss, temperature, mse_weight
-        # Frozen AND in eval mode. requires_grad_(False) alone leaves dropout active, so
-        # the teacher would emit a different target for the same spectrum every epoch and
-        # the student would be chasing noise.
+        # Frozen and in eval mode, so dropout does not vary the targets.
         if self.spectrum_model is not None:
             self.spectrum_model.requires_grad_(False)
             self.spectrum_model.eval()
@@ -466,27 +342,17 @@ class SequenceAlignmentModel(nn.Module):
                 return_dict: bool = True, return_loss: bool = True,
                 neg_residues=None, neg_modifications=None, neg_sequence_mask=None,
                 neg_charge=None, neg_valid=None, peptide_group=None):
-        # return_loss is not read here; it exists so transformers' can_return_loss() finds
-        # it in the signature (utils/generic.py looks for exactly this name defaulting to
-        # True). This task is self-supervised against a frozen teacher, so there is no
-        # `labels` argument for find_labels() to latch onto either, and without one of the
-        # two the Trainer decides evaluation cannot produce a loss: job 8840277 evaluated
-        # fine and then died on `metric_for_best_model='eval_loss'` not existing, with only
-        # eval_runtime and friends in the metrics.
+        # return_loss is unused; its presence lets Trainer's can_return_loss() report an eval loss.
         if target is None:
             if self.spectrum_model is None:
                 raise ValueError("no teacher and no precomputed target in the batch")
             target = self.embed_spectrum(mz, log_intensity, attention_mask)
             probe("teacher.out", sync=target, target=target)
         else:
-            # Cached targets are stored normalised; renormalise anyway, since the loss
-            # below is only equal to 2-2cos on unit vectors and a silent drift there
-            # would change what is being optimised without changing anything visible.
             target = F.normalize(target.float(), dim=-1)
         predicted = self.sequence_encoder(residues, modifications, sequence_mask, charge)
         probe("loss.in", sync=predicted, predicted=predicted, target=target)
-        # Mean squared L2. On unit vectors this equals 2 - 2*cos, so it is simultaneously
-        # the requested L2 loss and alignment in the geometry the space is searched with.
+        # Mean squared L2; equals 2 - 2cos on unit vectors.
         mse = ((predicted - target) ** 2).sum(dim=-1).mean()
         if self.loss == "mse":
             loss = mse
@@ -507,24 +373,14 @@ def attach_teacher_embeddings(datasets: dict, spectrum_model: nn.Module, pooling
                               pad_spectra_to: int = 0) -> dict:
     """Run the frozen teacher once and store its embedding as a `target` column.
 
-    The teacher never learns, so its output for a spectrum is the same in epoch 10 as in
-    epoch 1. Computing it inside the training step therefore spends ~92% of the model's
-    parameters, and all of the 512-peak attention, reproducing a constant -- and it is
-    the only structural difference between this model and the denoise model, which is the
-    one that survives twelve tiles (FT9).
-
-    Call this on ONE process before the Trainer is built, and let the other ranks pick the
-    result up from the datasets cache. The teacher is then not part of the wrapped module
-    at all, so neither DDP nor ZeRO-2 ever sees it.
+    Call on one process before the Trainer is built; the teacher then stays out of the wrapped module.
     """
     model = SequenceAlignmentModel(spectrum_model, PeptideEncoder(
         embedding_size=1, hidden_size=8, num_layers=1, num_heads=1, pooling=pooling),
         pooling=pooling)
     device = device or ("xpu" if torch.xpu.is_available() else "cpu")
     model.spectrum_model.to(device).eval()
-    # pad_spectra_to=max_peaks makes every batch the same width. Twelve of these on one
-    # node with batch-max padding took GPU page faults (8861039: 5 of 12 tiles, a Write
-    # at 0xff00....) -- the FT16 mechanism, where memory moves with the widest spectrum.
+    # pad_spectra_to=max_peaks gives fixed-width batches and deterministic memory.
     collator = AlignmentCollator(max_peptide_length=max_peptide_length,
                                  pad_spectra_to=pad_spectra_to)
 
@@ -536,9 +392,6 @@ def attach_teacher_embeddings(datasets: dict, spectrum_model: nn.Module, pooling
         target = model.embed_spectrum(
             inputs["mz"].to(device), inputs["log_intensity"].to(device),
             inputs["attention_mask"].to(device))
-        # Probed like any other stage. This path had none, and job 8840378 faulted inside
-        # it with nothing to say where -- the teacher forward is as capable of faulting as
-        # the training step, and running it outside the Trainer does not make it safe.
         probe("precompute.target", sync=target, target=target)
         return {"target": target.float().cpu().tolist()}
 
@@ -553,19 +406,7 @@ def group_separation_metrics(embeddings: Tensor, groups: np.ndarray,
                              prefix: str = "sep") -> dict[str, float]:
     """Do replicates of one peptide sit closer together than to other peptides?
 
-    hit@1 answers "is the right candidate first", which is what retrieval needs, but it
-    says nothing about WHY a space fails. This asks the underlying geometric question:
-    for every group of spectra sharing a peptide and charge, how far apart are they, and
-    how far from everything else.
-
-    The one number to read first is `clean`, the fraction of groups whose farthest
-    in-group neighbour is nearer than its closest out-group one. That is separation with
-    no overlap at all, and it is the property a distance-ranked reranker actually needs.
-    `margin` is the softer version: mean out-group distance minus mean in-group distance,
-    which stays positive long after `clean` has collapsed to zero.
-
-    Distances are squared euclidean on unit vectors, so d = 2 - 2cos and the scale is
-    [0, 4] regardless of dimension.
+    Squared euclidean on unit vectors (range [0, 4]). `clean` is the fraction of groups fully separated.
     """
     embeddings = F.normalize(embeddings.float(), dim=-1)
     distances = torch.cdist(embeddings, embeddings).pow(2)
@@ -579,9 +420,6 @@ def group_separation_metrics(embeddings: Tensor, groups: np.ndarray,
         return {f"{prefix}/groups": float(len(set(groups.tolist())))}
 
     inside, outside = distances[in_pairs], distances[out_pairs]
-    # Per-group extremes, then averaged, rather than the global extremes: one pathological
-    # group should not be able to hide behind 1,000 well-behaved ones, and the global min
-    # over all pairs is dominated by whichever two spectra happen to be near-duplicates.
     clean, worst_in, best_out = 0, [], []
     for group in np.unique(groups):
         rows = torch.as_tensor(groups == group)
@@ -601,15 +439,9 @@ def group_separation_metrics(embeddings: Tensor, groups: np.ndarray,
         f"{prefix}/out_mean": float(outside.mean()),
         f"{prefix}/out_min": float(outside.min()),
         f"{prefix}/out_max": float(outside.max()),
-        # Positive means replicates are closer to each other than to other peptides.
         f"{prefix}/margin": float(outside.mean() - inside.mean()),
-        # Rank arms by THIS, not by margin. Margin is a difference, so it rises when a
-        # model simply inflates the whole space, and the contrastive sweep produced
-        # exactly that trap: lr1e4_kl0_t02 took the best margin (+0.278) with a ratio of
-        # 2.01 while lr1e4_kl0_t007 clustered far better at 2.95 for a margin 0.0008
-        # lower. The ratio is scale-invariant and cannot be bought by expansion.
+        # Scale-invariant, unlike margin.
         f"{prefix}/ratio": float(outside.mean() / inside.mean().clamp_min(1e-9)),
-        # 1.0 would mean every group is perfectly separated from every other.
         f"{prefix}/clean": clean / max(len(worst_in), 1),
         f"{prefix}/worst_in_mean": float(np.mean(worst_in)) if worst_in else 0.0,
         f"{prefix}/best_out_mean": float(np.mean(best_out)) if best_out else 0.0,
@@ -620,13 +452,9 @@ def group_separation_metrics(embeddings: Tensor, groups: np.ndarray,
 @torch.no_grad()
 def cross_modal_metrics(sequence_embeddings, spectrum_embeddings, spectrum_groups,
                         sequence_groups=None) -> dict[str, float]:
-    """Rank candidate sequences against each spectrum -- the reranking use case.
+    """Rank candidate sequences against each spectrum.
 
-    The two sides are indexed independently. `spectrum_groups` says which candidate is
-    correct for each spectrum; `sequence_groups` says what each candidate IS. They differ
-    whenever duplicate peptides are collapsed to one candidate, which is the realistic
-    case for a replicate corpus -- sharing one array between them silently indexes spectra
-    by candidate position as soon as the counts diverge.
+    `spectrum_groups` gives each spectrum's correct candidate; `sequence_groups` gives each candidate's identity.
     """
     sequence = F.normalize(torch.as_tensor(sequence_embeddings).float(), dim=-1)
     spectrum = F.normalize(torch.as_tensor(spectrum_embeddings).float(), dim=-1)
@@ -662,27 +490,13 @@ REPLICATE_REPO = "chrisagrams/ms2-peptide-replicate-retrieval"
 
 def build_alignment_datasets(repo_id, processor, num_proc=None, validation_fraction=0.1,
                              seed=0):
-    """Spectrum/sequence pairs, split BY PEPTIDE.
-
-    The replicate corpus ships one split, so it is divided here. Splitting by row would
-    put replicates of one peptide on both sides, letting the encoder memorise a sequence
-    it is then evaluated on -- the validation number would measure recall rather than
-    generalisation. Peptides are held out whole.
-    """
+    """Spectrum/sequence pairs, split by peptide."""
     from datasets import load_dataset
 
     raw = load_dataset(repo_id)
     split = "train" if "train" in raw else list(raw)[0]
 
-    # Spectra above max_peaks are DROPPED, not truncated, matching build_denoising_datasets.
-    # Truncating would hand the teacher a spectrum it never saw in pretraining -- the same
-    # label attached to a different object -- so the alignment target would be an embedding
-    # of something that does not exist, and the student would learn to predict it.
-    #
-    # Dropping is not free either: 3,030 of 15,649 (19.4%) go, and not at random, because
-    # peak count tracks precursor charge and peptide length. That is a real limit on what
-    # this corpus can say, so it is COUNTED AND PRINTED rather than silently swallowed by
-    # the except below, which is how it went unnoticed in the first place.
+    # Spectra above max_peaks are dropped, not truncated, and the count is printed.
     max_peaks = getattr(processor, "max_peaks", None)
 
     def prepare(example):
@@ -705,9 +519,7 @@ def build_alignment_datasets(repo_id, processor, num_proc=None, validation_fract
                               else values["log_intensity"]),
             "peptide": example.get("peptide") or "",
             "charge": int(example.get("charge") or 0),
-            # The MEASURED precursor m/z. The rescorer compares each candidate's mass to
-            # it; without it the rescorer rebuilt the precursor from the true peptide,
-            # which set the truth's mass error to exactly 0 and leaked the label.
+            # Measured precursor m/z, used by the rescorer.
             "precursor": float(example.get("precursor") or 0.0),
         }
 
@@ -738,15 +550,9 @@ def build_alignment_datasets(repo_id, processor, num_proc=None, validation_fract
 
 def hard_negatives(peptide: str, rng, k: int, min_delta: float = 0.05,
                    windows=(3, 4)) -> list[str]:
-    """Up to k spectrally DISTINGUISHABLE rearrangements of a peptide (PLAN.md A4).
+    """Up to k spectrally distinguishable rearrangements of a peptide.
 
-    Adjacent swaps and local shuffles only -- never reversals, which is how the FDR
-    decoys are made, so a student trained on these cannot learn "decoy-looking".
-    A rearrangement changes the masses of the b-ions (and matching y-ions) that end
-    inside it; it is kept only if at least one of those shifts by more than min_delta Da
-    (the fragment tolerance: 0.05 Da for ion-trap MS2), so I<->L, K<->Q (0.036 Da) and
-    identical residues never become negatives. The C-terminal residue never moves;
-    modifications stay attached to their residue.
+    Adjacent swaps and local shuffles (never reversals); the C-terminal residue stays fixed.
     """
     from msdelta.chemistry import RESIDUE_MASSES
     from msdelta.rescoring import split_peptide
@@ -790,9 +596,7 @@ def hard_negatives(peptide: str, rng, k: int, min_delta: float = 0.05,
     return cands
 
 
-# ------------------------------------------------------------------ A8: mass-aware training
-# Deployed pipelines filter candidates by precursor mass first, so the student is used to
-# separate peptides of (nearly) the SAME mass. Random batch negatives are almost never that.
+# ------------------------------------------------------------------ mass-aware training
 
 def peptide_neutral_mass(peptide: str) -> float:
     """Monoisotopic neutral mass of a peptide in our notation (`C[57.0215]`, `[42.0106]P`)."""
@@ -803,8 +607,7 @@ def peptide_neutral_mass(peptide: str) -> float:
 
 
 def _il(peptide: str) -> str:
-    """I/L-collapsed, modification-stripped sequence: peptides equal here give the same
-    fragment masses up to their modifications, so they are never negatives of each other."""
+    """I/L-collapsed, modification-stripped sequence."""
     return re.sub(r"\[[^\]]*\]", "", peptide).replace("I", "L")
 
 
@@ -832,11 +635,10 @@ class MassNegativePool:
 
 
 class MassBatchSampler(Sampler):
-    """Batches of rows that are NEIGHBOURS IN MASS: each epoch, masses + uniform jitter
-    (+-jitter Da) are sorted and cut into consecutive batches, whose order is shuffled. So
-    in-batch negatives are near-same-mass competitors, like the candidates left after a
-    precursor window. Reshuffles itself every epoch (the epoch counter advances inside
-    __iter__; HF Trainer never calls set_epoch on a custom batch_sampler -- FT14)."""
+    """Batches of rows that are neighbours in mass (with jitter), reshuffled every epoch.
+
+    The epoch advances inside __iter__, since the Trainer never calls set_epoch on a custom batch_sampler.
+    """
 
     def __init__(self, masses, batch_size: int, jitter: float = 0.5, seed: int = 0,
                  drop_last: bool = False):
@@ -867,23 +669,19 @@ class AlignmentCollator:
     """Pad spectra and their peptides into one batch."""
 
     max_peptide_length: int = 64
-    # A4: per row, this many distinguishable rearrangements of its peptide (0 = none,
-    # the A1 behaviour), plus a within-batch peptide group id for multi-positive loss.
+    # Hard negatives per row (0 = none).
     hard_negatives: int = 0
     neg_min_delta: float = 0.05
     neg_seed: int = 0
-    # A8: "swap" = distinguishable rearrangements (A4); "mass" = other TRAINING peptides
-    # within +-neg_ppm of the peptide's mass (needs neg_pool, a MassNegativePool).
+    # "swap": rearrangements; "mass": training peptides within neg_ppm (needs neg_pool).
     neg_source: str = "swap"
     neg_ppm: float = 20.0
     neg_pool: object = None
 
-    # Only meaningful on the cached-target path, where it makes every batch the same
-    # shape; with a live teacher the spectra dominate and vary anyway.
+    # Fixed peptide shapes on the cached-target path.
     fixed_shapes: bool = True
 
-    # 0 keeps the historical behaviour of padding to the batch maximum. Set it to
-    # max_peaks to make activation memory deterministic; see __call__.
+    # 0 pads spectra to the batch maximum; max_peaks gives a fixed width.
     pad_spectra_to: int = 0
 
     def __post_init__(self):
@@ -913,18 +711,6 @@ class AlignmentCollator:
         if not features:
             raise ValueError("features must not be empty")
         lengths = [len(f["mz"]) for f in features]
-        # Fixed width when asked for, otherwise the longest spectrum in the batch.
-        #
-        # Padding to the batch maximum makes MEMORY DATA-DEPENDENT, and DeltaMZBias is
-        # O(batch * width^2), so one wide spectrum quadruples a batch's cost against a
-        # narrow one. Which spectra land together is decided by the sampler's seed, so
-        # the same model and config reserved 38.75 GB at seed 0 and 67.14 GB at seed 3
-        # -- and at 200m and 400m the wide draws exceeded the tile and took a GPU page
-        # fault. Every seed-0 arm survived and every other seed died, at every scale.
-        #
-        # A fixed width costs the padding on narrow batches and buys a memory figure
-        # that can be measured once and trusted. FT9 saw the same effect from the other
-        # side: fixed-shape batches moved its fault from step 22 to step 120.
         width = self.pad_spectra_to or max(max(lengths), 1)
         batch = len(features)
         mz = torch.zeros(batch, width, dtype=torch.float32)
@@ -940,22 +726,7 @@ class AlignmentCollator:
         peptide_batch = self.peptides([f["peptide"] for f in features],
                                       [int(f.get("charge", 0)) for f in features])
         if features[0].get("target") is not None:
-            # Precomputed target: the spectrum columns are DROPPED, not merely unused.
-            #
-            # The model does not read them once a target is supplied, but the Trainer
-            # moves every tensor in the batch to the device regardless, so leaving them
-            # in ships a (batch x up-to-512) float tensor per step that nothing touches.
-            # Worse than the waste, it is padded to the widest spectrum in the batch, so
-            # the shape changes from step to step -- and variable-shape device
-            # allocations are exactly the churn that made the denoise runs unstable
-            # before fixed batching. Evaluation does not need them either: it reads the
-            # target from the model's own output, which comes from this cached column.
-            # Fixed width too, so EVERY tensor in the batch has the same shape on every
-            # step. The bisect (job 8840444) ran the full student on twelve tiles for 20
-            # steps without a fault using fixed-shape input, while the real job faults at
-            # step 0 with variable-shape input -- so shape variation is the difference
-            # worth removing, and padding to 64 costs a few unused positions on a tensor
-            # that is already tiny.
+            # Precomputed target: drop the spectrum columns.
             padded = (self.padded if self.fixed_shapes else self.peptides)(
                 [f["peptide"] for f in features],
                 [int(f.get("charge", 0)) for f in features])
@@ -970,11 +741,7 @@ class AlignmentCollator:
 
 @torch.no_grad()
 def teacher_embedding_size(spectrum_model, pooling: str, collator=None) -> int:
-    """Width of the frozen teacher's output, measured rather than assumed.
-
-    The student's projection has to match it exactly, and the width depends on both the
-    encoder's hidden size and the pooling mode, so guessing is easy to get wrong.
-    """
+    """Width of the frozen teacher's output, measured with a dummy forward."""
     collator = collator or AlignmentCollator()
     was_training = spectrum_model.training
     spectrum_model.eval()

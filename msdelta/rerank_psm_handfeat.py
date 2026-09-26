@@ -2,13 +2,8 @@
 
     python -m msdelta.rerank_psm_handfeat --run HEK293/0718-1.parquet --out OUT.parquet
 
-The 22 spectrum/candidate/match features of msdelta.rescoring (everything but
-embedding_cosine), computed from the RAW centroided peaks and raw intensities in the
-dataset -- so FT32 (the old pipeline rebuilding intensity from a normalised log) does not
-apply here. Fragment tolerance is the dataset card's ion-trap setting, max(250 ppm,
-0.05 Da); the package default of 20 ppm would match almost nothing on this MS2.
-
-Keyed by `candidate` (the dataset's candidate_id) to join stage 1's rows. CPU only.
+The msdelta.rescoring features (minus embedding_cosine) from the raw peaks, at an ion-trap
+tolerance of max(250 ppm, 0.05 Da). Keyed by `candidate` to join stage 1's rows. CPU only.
 """
 
 from __future__ import annotations
@@ -20,8 +15,7 @@ from pathlib import Path
 import numpy as np
 
 REPO_ID = "Gaolaboratory/psm-rerank-hek-hct116"
-# Pinned: the 2026-09-25 00:34 update moved <dataset>/<run>.parquet to spectra/ and added
-# features/. Every table so far was built from this revision; keep them all on it.
+# Pinned: later revisions moved the run tables.
 REVISION = "87f5c2756f5de8da8a664ef7e1a4dac8de067a88"
 
 

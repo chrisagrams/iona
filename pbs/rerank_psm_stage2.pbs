@@ -4,8 +4,7 @@
 #   qsub -q debug -l select=1 -l walltime=01:00:00 -v TAG=a1-050m-c7s600,RUNS="..." \
 #        pbs/rerank_psm_stage2.pbs
 #
-# Reads stage 1's rows ($SCRATCH/rerank-psm/$TAG/rows) and the dataset files it cached.
-# Hand-feature tables that exist are reused.
+# Reads stage 1's rows from $SCRATCH/rerank-psm/$TAG/rows; existing tables are reused.
 
 #PBS -N msdelta-rerank-psm2
 #PBS -A UIC-HPC

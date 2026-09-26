@@ -2,21 +2,8 @@
 #
 #     source "$REPO_DIR/pbs/load_keys.sh"
 #
-# Exports HF_TOKEN and WANDB_API_KEY from the first key store that has them, and prints
-# only whether each was found -- never the value.
-#
-# Search order, first hit wins:
-#     $REPO_DIR/.keys/{hf,wandb}      repo-local store (gitignored)
-#     ~/.keys/{hf,wandb}              per-user store
-#     ~/.hf_token                     single-file fallback
-#
-# Two rules this exists to enforce:
-#
-#  1. Secrets are never passed through `qsub -v`. Everything in a job's variable list is
-#     visible to anyone who can run `qstat -f <jobid>`. Jobs read the files at runtime
-#     instead -- $HOME is mounted on Aurora compute nodes, so this works from inside a job.
-#  2. Secrets are never passed on a command line. Process arguments are readable via `ps`
-#     on a shared login node. Everything here goes through the environment or a file.
+# Exports HF_TOKEN and WANDB_API_KEY from $REPO_DIR/.keys/, ~/.keys/, or ~/.hf_token.
+# Never pass secrets via `qsub -v` or the command line.
 
 _msdelta_read_key() {
     local name=$1 path

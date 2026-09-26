@@ -3,21 +3,9 @@
     python -m msdelta.rerank_psm_embed --run HEK293/0718-1.parquet --encoder ENC \
         --student RUN/final --cache CACHE --out OUT.parquet
 
-Dataset: Gaolaboratory/psm-rerank-hek-hct116 -- one row per MS2 spectrum with MSFragger's
-complete top-10 candidate pool (targets and reversed decoys, unfiltered). See its
-README/SPECTRA.md. For every candidate this writes MSFragger's own scores plus
-`cosine`: the student's embedding of the candidate peptide against the spectrum encoder's
-embedding of the spectrum (the same encoder the student was trained to imitate).
-Stage 2 (msdelta.rerank_psm_fdr) turns these rows into PSMs at 1% FDR.
-
-Choices, each forced by the data:
-  * peptides are written in our corpus notation, residue then `[mass]` (`C[57.0215]`,
-    `M[15.9949]`), a leading `[mass]` for N-terminal mods. Fixed carbamidomethyl is
-    explicit in this dataset and in our training data alike.
-  * spectra above the encoder's max_peaks (512) keep their 512 most intense peaks. The
-    training pipeline DROPS such spectra; a reranker cannot skip a spectrum, so this is
-    the least-bad reading, and the row records n_peaks so its effect can be split out.
-  * `label` / `is_decoy` are carried for scoring only, never used by anything here.
+For every candidate, writes MSFragger's scores plus `cosine`, the student's peptide
+embedding against the spectrum embedding. Spectra above max_peaks keep their most intense
+peaks. Stage 2 (msdelta.rerank_psm_fdr) turns these rows into PSMs at 1% FDR.
 """
 
 from __future__ import annotations
@@ -30,8 +18,7 @@ import numpy as np
 import torch
 
 REPO_ID = "Gaolaboratory/psm-rerank-hek-hct116"
-# Pinned: the 2026-09-25 00:34 update moved <dataset>/<run>.parquet to spectra/ and added
-# features/. Every table so far was built from this revision; keep them all on it.
+# Pinned: later revisions moved the run tables.
 REVISION = "87f5c2756f5de8da8a664ef7e1a4dac8de067a88"
 KEEP = ("msfragger_hyperscore", "search_rank", "search_delta_score",
         "search_neglog10_evalue", "num_matched_ions", "tot_num_ions", "massdiff",
@@ -54,25 +41,19 @@ def to_notation(sequence: str, modifications) -> str:
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--run", required=True, help="a local parquet in the psm-rerank-hek-hct116 "
-                    "schema, or a path inside that Hub dataset")
+    ap.add_argument("--run", required=True, help="local parquet or path in the Hub dataset")
     ap.add_argument("--encoder", required=True,
-                    help="spectrum encoder: a local dir or a Hub repo id "
-                         "(e.g. Gaolaboratory/iona-contrastive-400m)")
+                    help="spectrum encoder dir or Hub repo id")
     ap.add_argument("--student", required=True,
-                    help="peptide embedder: an alignment run's final/ dir or a Hub repo id "
-                         "(e.g. Gaolaboratory/iona-peptide-embedder-400m)")
+                    help="peptide embedder dir or Hub repo id")
     ap.add_argument("--cache", default="",
-                    help="teacher cache (MANIFEST: pooling, width); optional -- without it "
-                         "--pooling is used and the width is read from the student's weights")
+                    help="optional teacher cache dir")
     ap.add_argument("--pooling", default="mean+max")
     ap.add_argument("--out", required=True)
     ap.add_argument("--max-peaks", type=int, default=512)
     ap.add_argument("--max-spectra", type=int, default=0)
     ap.add_argument("--batch-size", type=int, default=16)
-    ap.add_argument("--vectors-out", default="", help="also save the unit vectors (R5): "
-                    "spectrum.npy (spectra x D), peptide.npy (candidates x D), fp16, and "
-                    "index.parquet (candidate, owner, null_owner), rows in --out order")
+    ap.add_argument("--vectors-out", default="", help="also save the unit vectors here")
     cli = ap.parse_args(argv)
 
     import pyarrow as pa
@@ -87,8 +68,6 @@ def main(argv: list[str] | None = None) -> int:
 
     device = torch.device("xpu" if torch.xpu.is_available() else "cpu")
     t0 = time.time()
-    # a local parquet in the dataset's schema (a user's own run), or a path inside the Hub
-    # dataset (pinned revision)
     path = cli.run if Path(cli.run).exists() else hf_hub_download(
         REPO_ID, cli.run, repo_type="dataset", revision=REVISION)
     table = pq.read_table(path, columns=["spectrum_id", "run_id", "dataset", "charge",
@@ -184,9 +163,7 @@ def main(argv: list[str] | None = None) -> int:
                 pep_vecs.append(emb.half().numpy())
             null.append((emb * spec[torch.tensor(perm[owner[s:s + 512]])]).sum(-1))
     out["cosine"] = torch.cat(cos).tolist()
-    # LEAKAGE CHECK: the same candidate against a RANDOM other spectrum of the run. A
-    # student that learned sequence-only "decoy-ness" would still separate targets from
-    # decoys on this column; a clean one gives AUROC ~0.5 (rerank_psm_fdr reports it).
+    # Leakage control: each candidate against a random other spectrum; should give AUROC ~0.5.
     out["cosine_null"] = torch.cat(null).tolist()
     Path(cli.out).parent.mkdir(parents=True, exist_ok=True)
     pq.write_table(pa.table(out), cli.out)

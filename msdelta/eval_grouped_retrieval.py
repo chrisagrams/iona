@@ -6,18 +6,7 @@
     python -m msdelta.eval_grouped_retrieval score --data DIR --models FILE \
         --shard I --num-shards N --out-dir DIR
 
-THE QUESTION. Every contrastive number so far comes from ms2-peptide-replicate-retrieval's
-99-group held-out split, too small to separate 0.86 from 0.87. This corpus holds out
-~9,000 peptides the models never saw, so it measures (a) whether embeddings trained on
-~855 peptides generalise, and (b) scale and recipe differences with real power.
-
-The split is prepared WITH consensus spectra; every model is embedded once and scored
-twice from that pass, `all` (consensus + 3 replicates, R=3) and `experimental` (the three
-replicates only, R=2), so the two variants are over identical embeddings. Peptides in the
-replicate corpus (what the models trained on) are excluded -- see grouped_retrieval.
-
---models is a text file, one `name path [pooling]` per line; pooling defaults to mean+max,
-which every contrastive run in this project used (RUN.md records it).
+--models is a text file, one `name path [pooling]` per line (pooling defaults to mean+max).
 """
 
 from __future__ import annotations
@@ -42,7 +31,7 @@ def prepare(cli) -> int:
     exclude = replicate_corpus_peptides() if cli.exclude_replicate else set()
     print(f"[prepare] excluding {len(exclude):,} replicate-corpus peptides", flush=True)
     raw = load_dataset(cli.repo)[cli.split]
-    if cli.max_analytes and len(raw) > cli.max_analytes:     # e.g. a train sample for PCA
+    if cli.max_analytes and len(raw) > cli.max_analytes:
         raw = raw.shuffle(seed=0).select(range(cli.max_analytes))
     rows = build_grouped_split(raw, processor, include_consensus=True,
                                exclude_peptides=exclude, num_proc=cli.num_proc)
@@ -58,13 +47,7 @@ def prepare(cli) -> int:
 
 
 def binned_embeddings(rows, width: float, max_mz: float = 2000.0) -> torch.Tensor:
-    """The classic spectral-library dot product as an 'embedding': peak weights summed
-    into fixed m/z bins, L2-normalised by the metric. No learning, no precursor filter.
-
-    Rows carry PROCESSED spectra: raw m/z, but log_intensity = log1p(I) / max log1p(I)
-    (MSDeltaProcessor._process_one) -- raw intensity is not recoverable from it. The
-    weight is therefore log1p(I); cosine ignores the per-spectrum scale. Log (like the
-    more usual sqrt) damps the base peak so a few ions do not decide the match."""
+    """Binned-spectrum baseline: log1p(I) summed into fixed m/z bins. No learning."""
     n_bins = int(np.ceil(max_mz / width))
     out = torch.zeros(len(rows), n_bins)
     for i, (mz, li) in enumerate(zip(rows["mz"], rows["log_intensity"])):
@@ -86,8 +69,7 @@ def score_model(path, pooling, rows, groups, experimental, collator, device,
         emb = binned_embeddings(rows, float(path.split(":", 1)[1]))
         return _variants(emb, groups, experimental, device, retrieval_metrics_topk)
     if path.startswith("pca:"):
-        # pca:<bin width>:<dims>:<prepared TRAIN sample dir> -- PCA fitted on train
-        # spectra only, test spectra projected; cosine retrieval in the PCA space.
+        # pca:<bin width>:<dims>:<train sample dir>, fitted on train, test projected.
         from datasets import load_from_disk
         _, width, dims, fit_dir = path.split(":", 3)
         fit = binned_embeddings(load_from_disk(fit_dir), float(width))
@@ -98,9 +80,7 @@ def score_model(path, pooling, rows, groups, experimental, collator, device,
         emb = (x - mean) @ v[:, :int(dims)]
         return _variants(emb, groups, experimental, device, retrieval_metrics_topk)
     encoder = MSDeltaForPreTraining.from_pretrained(path)
-    # A projection head saved by finetune_contrastive (--projection_dim) is scored both
-    # ways: `all/...` from the head output (the loss space) and `pooled_all/...` from the
-    # pre-head features. Without a head the two are the same vector, scored once.
+    # With a projection head, score both the head output and the pre-head features.
     head_file = Path(path) / "projection_head.pt"
     head = torch.load(head_file, map_location="cpu") if head_file.exists() else None
     model = MSDeltaForContrastive(

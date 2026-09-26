@@ -2,27 +2,9 @@
 
     python -m msdelta.eval_zeroshot_layers --models FILE --out-dir DIR [--shard I --num-shards N]
 
-Redoes the "frozen embedding is no better than random at any layer" finding (OBSERVATIONS,
-"The pretrained encoder learns a real representation, but a NON-LINEAR one") with the
-metric and eval that replaced its two weaknesses: it was scored on the separation ratio,
-which C0 showed does not predict retrieval, over the 99-group replicate eval. Here:
-MAP@R / Hit@1 on ms-contrastive-100k's test split (the rows eval_grouped_retrieval
-prepared), mean+max pooling of every block's output plus the final normalised state
-(`final`, the readout every other zero-shot number uses). No training, no head.
-
---models: one `name path` per line, path = a pretrained MSDeltaForPreTraining checkpoint.
-
---abtt 1,2,4,8,16,32 --fit-data TRAIN_DIR additionally scores every layer after
-"all-but-the-top" post-processing (Mu & Viswanath, ICLR 2018, arXiv:1702.01417): subtract
-the mean, then remove the D leading principal directions, which in anisotropic embeddings
-carry common, non-discriminative variance that dominates cosine similarity. Applied to the
-RAW pooled vectors (as in the paper), then cosine as usual. Two fits, reported separately:
-  train  mean + directions from the experimental spectra of a prepared TRAIN sample (the
-         headline: nothing is estimated on the spectra being scored)
-  test   fitted on the scored test spectra themselves, as the paper does (unsupervised
-         and label-free, but transductive; a check that the train fit loses nothing)
-`center` (D = 0 with the mean removed) is always included: centering alone changes cosine.
-Results go under "abtt" -> fit -> "center" | "D" -> layer, beside the unchanged "layers".
+Mean+max pooling of every block's output plus the final state; no training, no head.
+--models: one `name path` per line. --abtt D,... --fit-data TRAIN_DIR also scores each layer
+after all-but-the-top post-processing (Mu & Viswanath, 2018), fitted on train and on test.
 """
 
 from __future__ import annotations
@@ -55,17 +37,16 @@ def all_but_top(embeddings: np.ndarray, components: int) -> np.ndarray:
 
 
 def fit_abtt(fit: torch.Tensor, max_components: int) -> tuple[torch.Tensor, torch.Tensor]:
-    """Mean and the `max_components` leading principal directions of `fit` (rows = samples).
-    One decomposition serves every D <= max_components: the directions are nested."""
+    """Mean and the `max_components` leading principal directions of `fit` (rows = samples)."""
     if max_components >= min(fit.shape):
         raise ValueError(f"all-but-top components ({max_components}) must be smaller than "
                          f"min(n_spectra, embedding_size) ({min(fit.shape)})")
     device = fit.device
-    fit = fit.double().cpu()                      # float64 on CPU: a stable, exact decomposition
+    fit = fit.double().cpu()
     mean = fit.mean(dim=0, keepdim=True)
     centered = fit - mean
     _, vectors = torch.linalg.eigh(centered.T @ centered)   # ascending eigenvalues
-    top = vectors[:, -max_components:].flip(-1).T          # = SVD's leading right vectors
+    top = vectors[:, -max_components:].flip(-1).T
     return mean.float().to(device), top.float().contiguous().to(device)
 
 
@@ -156,7 +137,7 @@ def main(argv: list[str] | None = None) -> int:
                     retrieval_metrics_topk(emb, g, device=device).items()}
 
         for key, emb in per_layer.items():
-            result["layers"][key] = score(emb[mask])   # retrieval L2-normalises: raw is fine
+            result["layers"][key] = score(emb[mask])
         if abtt:
             result["abtt"] = {"components": abtt, "fit_spectra": {"train": len(fit_features),
                               "test": int(mask.sum())}, "train": {}, "test": {}}
