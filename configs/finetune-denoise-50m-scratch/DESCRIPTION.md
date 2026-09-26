@@ -1,1 +1,0 @@
-CONTROL for the whole denoise programme: identical to the 50m baseline but the encoder is randomly initialised. Answers whether pretraining contributes anything, or whether the head alone is doing the work. If this matches the pretrained run, the pretraining is not earning its keep on this task.

@@ -1,3 +1,0 @@
-configs/finetune-denoise-100m-ds/training.args
-configs/finetune-denoise-200m-ds/training.args
-denoise-seeds
