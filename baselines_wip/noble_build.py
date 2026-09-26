@@ -20,6 +20,7 @@ their combination) -> a leading [m]. Anything else stops the build.
 Same two output formats as c11_build.py / nine_build.py.
 """
 import json
+import os
 import re
 import sys
 import zipfile
@@ -34,8 +35,10 @@ ZIP = "/lus/flare/projects/UIC-HPC/khuss/msdelta/eval-data/nine-species-noble/ni
 PROCESSOR = "/flare/UIC-HPC/khuss/msdelta/pretrained/msdelta-50m-production-01-checkpoint-220000"
 MAX_PEAKS = 512
 MAX_PER_GROUP = 20
-PER_SPECIES = 5000
+PER_SPECIES = int(os.environ.get("NOBLE_PER_SPECIES", "5000"))
 EXCLUDE = {"H.-sapiens"}
+# NOBLE_SPECIES=Mus-musculus[,...]: build only these (e.g. the mouse 20k transfer set).
+ONLY = {s for s in os.environ.get("NOBLE_SPECIES", "").split(",") if s}
 RESIDUE_MODS = {"C+57.021": "C[57.0215]", "M+15.995": "M[15.9949]",
                 "N+0.984": "N[0.9840]", "Q+0.984": "Q[0.9840]"}
 NTERM = {"+42.011": 42.0106, "+43.006": 43.0058, "-17.027": -17.0265}
@@ -87,7 +90,7 @@ def main(out_dir, *_ignored):
         if not name.endswith(".mgf"):
             continue
         species = name.split("/")[1]
-        if species in EXCLUDE:
+        if species in EXCLUDE or (ONLY and species not in ONLY):
             continue
         run = Path(name).stem
         for i, s in enumerate(read_mgf(zf.read(name).decode())):
@@ -139,7 +142,8 @@ def main(out_dir, *_ignored):
         prep["analyte_id"].append(f"{r['peptide']}_{r['charge']}")
     Dataset.from_dict(prep).save_to_disk(str(out / "prepared"))
     info = {"source": "zenodo 10.5281/zenodo.12819175 nine-species-balanced.zip",
-            "excluded_species": sorted(EXCLUDE), "per_species": stats,
+            "excluded_species": sorted(EXCLUDE), "only_species": sorted(ONLY),
+            "per_species": stats,
             "spectra": len(recs), "max_per_group": MAX_PER_GROUP,
             "per_species_target": PER_SPECIES, "trimmed_to_top512": True,
             "labels": "Tide + Percolator, 1% PSM FDR (Noble lab)"}

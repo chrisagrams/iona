@@ -1,0 +1,14 @@
+# nine-species MOUSE 20k (Noble, unseen high-res HCD): ours, binned cosine, PCA
+c7b_cont400m_final_seed0 /lus/flare/projects/UIC-HPC/khuss/msdelta/runs/sweep-cont400m_ep01_seed0-8860522/final
+c7b_cont400m_final_seed1 /lus/flare/projects/UIC-HPC/khuss/msdelta/runs/sweep-cont400m_ep01_seed1-8860522/final
+c7b_cont400m_final_seed2 /lus/flare/projects/UIC-HPC/khuss/msdelta/runs/sweep-cont400m_ep01_seed2-8860522/final
+s400m_t0002_pk256_ep12_seed0 /lus/flare/projects/UIC-HPC/khuss/msdelta/runs/sweep-s400m_t0002_pk256_ep12_seed0-8857593/final
+s400m_t0002_pk256_ep12_seed1 /lus/flare/projects/UIC-HPC/khuss/msdelta/runs/sweep-s400m_t0002_pk256_ep12_seed1-8857593/final
+s400m_t0002_pk256_ep12_seed2 /lus/flare/projects/UIC-HPC/khuss/msdelta/runs/sweep-s400m_t0002_pk256_ep12_seed2-8857593/final
+binned_w0.1 binned:0.1
+binned_w1.0005 binned:1.0005
+pca_w1.0005_d128 pca:1.0005:128:/lus/flare/projects/UIC-HPC/khuss/msdelta/eval-data/ms-contrastive-100k-train10k-mp512
+pca_w1.0005_d256 pca:1.0005:256:/lus/flare/projects/UIC-HPC/khuss/msdelta/eval-data/ms-contrastive-100k-train10k-mp512
+pca_w1.0005_d1024 pca:1.0005:1024:/lus/flare/projects/UIC-HPC/khuss/msdelta/eval-data/ms-contrastive-100k-train10k-mp512
+pca_w0.1_d256 pca:0.1:256:/lus/flare/projects/UIC-HPC/khuss/msdelta/eval-data/ms-contrastive-100k-train10k-mp512
+pca_w0.1_d1280 pca:0.1:1280:/lus/flare/projects/UIC-HPC/khuss/msdelta/eval-data/ms-contrastive-100k-train10k-mp512

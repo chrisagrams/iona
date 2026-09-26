@@ -28,7 +28,7 @@ OUT=${SCORE_OUT:-results/finetune/contrastive/c11_cap20}; mkdir -p $OUT
 pids=()
 for i in $(seq 0 7); do
   ZE_AFFINITY_MASK=$i $PY -m msdelta.eval_grouped_retrieval score --data $C/prepared \
-    --models sweeps/arms/c11_models.txt --out-dir $OUT --shard $i --num-shards 8 > $OUT/.shard$i.log 2>&1 &
+    --models ${MODELS:-sweeps/arms/c11_models.txt} --out-dir $OUT --shard $i --num-shards 8 > $OUT/.shard$i.log 2>&1 &
   pids+=($!)
 done
 for p in "${pids[@]}"; do wait $p || echo "a scoring shard failed"; done

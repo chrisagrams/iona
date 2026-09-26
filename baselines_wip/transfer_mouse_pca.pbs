@@ -1,0 +1,67 @@
+#!/bin/bash -l
+# Spectrum-embedding transfer, nine-species MOUSE 20k (Noble balanced, unseen high-res HCD):
+# ours (C7 400M final x3, replicate-only 400M x3) + binned cosine + PCA on tiles 0-7, GLEAMS
+# on CPU in the background; meanwhile the PCA baselines on the existing benchmarks on tiles
+# 8-11 (PCA fitted on the ms-contrastive-100k train10k sample; finished JSONs are skipped).
+#   qsub -q debug -l select=1 -l walltime=01:00:00 baselines_wip/transfer_mouse_pca.pbs
+#PBS -N mouse-pca
+#PBS -A UIC-HPC
+#PBS -l filesystems=home:flare
+#PBS -j oe
+#PBS -o /home/khuss/code/msdelta/pbs/logs/
+set -uo pipefail
+cd /home/khuss/code/msdelta
+S=/lus/flare/projects/UIC-HPC/khuss/msdelta; B=$S/baselines
+C=${MOUSE_DIR:-$B/noble_mouse20k}; G=$B/gleams
+set +u; source /usr/share/lmod/lmod/init/bash; module load frameworks/2025.3.1; set -u
+export ONEAPI_DEVICE_SELECTOR=level_zero:gpu ZE_FLAT_DEVICE_HIERARCHY=FLAT PYTHONPATH=$PWD OMP_NUM_THREADS=8
+export HF_HOME=$S/huggingface HF_HUB_OFFLINE=1 HF_DATASETS_OFFLINE=1
+PY=.venv/bin/python
+R=results/finetune/contrastive
+
+echo "=== $(date -Is) PCA on the existing benchmarks (tiles 8-11, background)"
+pca() {  # tile, then data:outdir pairs run in sequence on that tile
+  local t=$1; shift
+  for pair in "$@"; do
+    ZE_AFFINITY_MASK=$t $PY -m msdelta.eval_grouped_retrieval score --data ${pair%%:*} \
+      --models sweeps/arms/transfer_pca.txt --out-dir ${pair#*:} > ${pair#*:}/.pca.log 2>&1 \
+      || echo "PCA failed on ${pair#*:}"
+  done
+}
+pca 8  $S/eval-data/ms-contrastive-100k-test-mp512:$R/grouped100k-test &  p1=$!
+pca 9  $B/c11_cap20/prepared:$R/c11_cap20 &                              p2=$!
+pca 10 $B/nine_yeast/prepared:$R/nine_yeast &                            p3=$!
+pca 11 $B/nine_yeast20k/prepared:$R/nine20k $B/c14_hct116_20k/prepared:$R/c14_hct116_20k & p4=$!
+
+if [ ! -d $C/prepared ]; then
+  echo "=== $(date -Is) build mouse 20k"
+  ZE_AFFINITY_MASK=0 NOBLE_SPECIES=Mus-musculus NOBLE_PER_SPECIES=20000 \
+    $PY baselines_wip/noble_build.py $C || { echo "mouse build failed"; exit 1; }
+fi
+head -c 600 $C/prepared/PREPARED.json; echo
+echo "=== $(date -Is) GLEAMS embed (CPU, background)"
+( cd $G && env -u PYTHONPATH CUDA_VISIBLE_DEVICES="" TF_CPP_MIN_LOG_LEVEL=2 $G/env/bin/python \
+    /home/khuss/code/msdelta/baselines_wip/gleams/embed_gleams.py $C/export 96 > $C/gleams_embed.log 2>&1 ) &
+gpid=$!
+echo "=== $(date -Is) mouse: ours + binned + PCA on tiles 0-7"
+OUT=$R/mouse20k; mkdir -p $OUT
+pids=()
+for i in $(seq 0 7); do
+  ZE_AFFINITY_MASK=$i $PY -m msdelta.eval_grouped_retrieval score --data $C/prepared \
+    --models sweeps/arms/mouse20k_models.txt --out-dir $OUT --shard $i --num-shards 8 > $OUT/.shard$i.log 2>&1 &
+  pids+=($!)
+done
+for p in "${pids[@]}"; do wait $p || echo "a mouse scoring shard failed"; done
+grep -h "MAP@R\|Error" $OUT/.shard*.log | cut -c1-160
+for p in $p1 $p2 $p3 $p4; do wait $p; done
+echo "=== $(date -Is) PCA on the existing benchmarks"
+for d in grouped100k-test c11_cap20 nine_yeast nine20k c14_hct116_20k; do
+  echo "--- $d"; grep -h "MAP@R\|Error\|skipping" $R/$d/.pca.log | cut -c1-140; done
+wait $gpid; tail -2 $C/gleams_embed.log
+echo "=== $(date -Is) GLEAMS score"
+$PY baselines_wip/gleams/score_retrieval.py $C/export $C/export/gleams_embed.npy $C/gleams_metrics.json 2>&1 | tail -3
+python3 -c "
+import json;d=json.load(open('$C/gleams_metrics.json'))
+for k in ('mp512/experimental','mp512_strictvalid/experimental'):
+    v=d.get(k); print('GLEAMS',k, v and {a:round(b,4) for a,b in v.items() if isinstance(b,float)})"
+echo "=== $(date -Is) done"
