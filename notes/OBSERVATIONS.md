@@ -1749,3 +1749,10 @@ MS2Rescore peak RSS 37 GB on HILIC14 (240k PSMs, 8-run set); the 18-run set's ru
 Far stronger than on yeast (DeepNovo nine-species test: open 0.39, 20 ppm 0.76 vs yHydra 0.89). CAVEAT before claiming:
 mouse was NOT used to select this model, but the training corpus (ms-contrastive-100k) may overlap public mouse data
 (the MassIVE-KB overlap question from C11 is still open) -- check provenance / peptide overlap before calling it unseen.
+
+## 20 ppm ceilings are precursor isotope mis-assignment (verified on all spectra, 2026-09-26 ~01:15 UTC)
+
+Recorded precursor mass vs the peptide's computed mass (the window test's own peptide_mass): HEK 27,637 spectra,
+24.9% outside 20 ppm = +1 isotope 18.8% / +2 4.3% / -1 1.7%; mouse 25,490 spectra, 11.9% outside = all +1.
+EVERY out-of-window case is within 20 ppm of an exact isotope offset (k x 1.00336 Da): no residue from our mass
+calculation or modification mapping. The earlier "mostly" for mouse was unverified; now measured.

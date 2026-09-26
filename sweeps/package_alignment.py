@@ -143,7 +143,7 @@ def fig_windows(rows, fixed=None, out="A_windows.png"):
         fig.legend(handles=[Line2D([], [], color=c, marker=mk, ls=ls, lw=2, ms=7, mec="white", mew=1.2)
                             for _, c, mk, ls in leg], labels=[l for l, *_ in leg], frameon=False,
                    fontsize=9, ncol=3, loc="upper center", bbox_to_anchor=(0.5, -0.07))
-        fig.text(0.07, -0.2, "Ceilings (20 ppm): for 24% of HEK and 10% of mouse spectra the true peptide is more than 20 ppm from the recorded precursor, mostly because a heavier\nisotope peak was recorded as the precursor (about 1 Da above the monoisotopic mass); these fall outside a 20 ppm window, so no method can recover them.", fontsize=8, color=MUTED)
+        fig.text(0.07, -0.2, "Ceilings (20 ppm): for 24% of HEK and 10% of mouse queries the recorded precursor mass is that of a heavier isotope peak (M+1 or M+2; every such case lies\nwithin 20 ppm of an exact isotope offset), so the true peptide is ~1 Da outside a 20 ppm window and no method can recover it.", fontsize=8, color=MUTED)
         fig.savefig(FIG / out); plt.close(fig)
     return plotted
 
