@@ -7,7 +7,7 @@ charge) embed close together; evaluated by spectrum-to-spectrum retrieval.
 
 | file | content |
 |---|---|
-| `C_transfer.png`, `C_transfer.csv` | our models vs GLEAMS and binned cosine, in-distribution and on an unseen dataset |
+| `C_transfer.png`, `C_transfer.csv` | our models vs GLEAMS and binned cosine, in-distribution and on three unseen nine-species subsets |
 | `C_transfer_ours.png`, `C_transfer_ours.csv` | our models on the in-distribution test set vs an unseen dataset |
 | `C_pretraining_scaling.png`, `C_pretraining_scaling.csv` | retrieval vs pretraining checkpoint and model size |
 | `C_pretraining_ablation.png`, `C_pretraining_ablation.csv` | same contrastive training from a random vs the pretrained encoder |
@@ -46,8 +46,9 @@ charge) embed close together; evaluated by spectrum-to-spectrum retrieval.
 
 ## C_transfer
 
-The `C_transfer_ours` models (same runs, same seed selection, same frozen + ABTT bars) next to the two
-baselines, in-distribution and on two unseen nine-species subsets.
+The `C_transfer_ours` models (same runs, same seed selection) next to the two baselines, in-distribution
+and on three unseen nine-species subsets (yeast, mouse, human). The frozen + ABTT bars are not in this
+figure (they were not scored on every benchmark); see `C_transfer_ours` and `0_shot/`.
 
 - **GLEAMS**: the published pretrained model, cosine similarity, no retraining.
 - **binned cosine**: 1 Da and 0.1 Da bins are both in the CSV; the bar is the better of the two on that
@@ -56,24 +57,25 @@ baselines, in-distribution and on two unseen nine-species subsets.
   (released as `Gaolaboratory/iona-contrastive-400m` and `-50m`); "(replicate corpus only)" marks the models called
   "replicate corpus only" elsewhere: the first contrastive stage alone, without the ms-contrastive-100k epoch.
 
-| model | ms-contrastive-100k | yeast 20k | mouse 20k |
-|---|---|---|---|
-| Iona spectrum encoder 400M | **0.868** | 0.596 | 0.846 |
-| Iona spectrum encoder 50M | 0.839 | 0.523 | 0.820 |
-| Iona spectrum encoder 400M (replicate corpus only) | 0.713 | 0.520 | 0.787 |
-| Iona spectrum encoder 50M (replicate corpus only) | 0.656 | 0.499 | 0.757 |
-| frozen + ABTT (best encoder) | 0.660 | 0.709 | 0.703 |
-| GLEAMS | 0.646 | 0.770 | 0.834 |
-| binned cosine (best width) | 0.729 | **0.916** | **0.916** |
+| model | ms-contrastive-100k | yeast 20k | mouse 20k | human 20k |
+|---|---|---|---|---|
+| Iona spectrum encoder 400M | **0.868** | 0.596 | 0.846 | **0.876** |
+| Iona spectrum encoder 50M | 0.839 | 0.523 | 0.820 | 0.874 |
+| Iona spectrum encoder 400M (replicate corpus only) | 0.713 | 0.520 | 0.787 | 0.816 |
+| Iona spectrum encoder 50M (replicate corpus only) | 0.656 | 0.499 | 0.757 | 0.822 |
+| GLEAMS | 0.646 | 0.770 | 0.834 | 0.841 |
+| binned cosine (best width) | 0.729 | **0.916** | **0.916** | 0.809 |
 
-- **Mouse 20k**: the Mus musculus spectra of the Noble lab nine-species benchmark (Zenodo
-  10.5281/zenodo.12819175, `nine-species-balanced.zip`; Tide + Percolator labels at 1% FDR), groups of
-  peptide + charge with >= 2 spectra capped at 20, whole groups sampled (seed 0) to 20,003 spectra in
-  4,026 groups; no spectrum exceeds 512 peaks. Frozen + ABTT on mouse is the better of the two encoders
-  tried there (400M@330k and 400M@220k, the best in-distribution and on yeast), not of all 24.
+- **Mouse 20k and human 20k**: the Mus musculus and H. sapiens spectra of the Noble lab nine-species
+  benchmark (Zenodo 10.5281/zenodo.12819175, `nine-species-balanced.zip`; Tide + Percolator labels at 1%
+  FDR), groups of peptide + charge with >= 2 spectra capped at 20, whole groups sampled (seed 0) to 20,000
+  spectra (mouse: 20,003 in 4,026 groups, no spectrum above 512 peaks; human: 20,000 in 4,792 groups,
+  240 spectra trimmed to their 512 most intense peaks). Neither overlaps our pretraining or fine-tuning
+  data.
 - Reading: in-distribution the Iona encoders lead every baseline. On unseen yeast both baselines are
   ahead of every model of ours; on unseen mouse the Iona 400M encoder is level with GLEAMS (0.846 vs
-  0.834) and binned cosine leads (0.916).
+  0.834) and binned cosine leads (0.916); on unseen human both Iona encoders lead (0.876 / 0.874 vs GLEAMS
+  0.841 and binned cosine 0.809).
 
 ## C_pretraining_scaling
 

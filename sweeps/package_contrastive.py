@@ -38,6 +38,7 @@ BENCH = {
     "yeast-full": ("nine_yeast", "nine_yeast", "nine-species yeast\n(unseen, high-res)"),
     "yeast-20k": ("nine20k", "nine_yeast20k", "yeast 20k subset\n(unseen, high-res)"),
     "mouse-20k": ("mouse20k", "noble_mouse20k", "nine-species mouse 20k\n(unseen, high-res)"),
+    "human-20k": ("human20k", "noble_human20k", "nine-species human 20k\n(unseen, high-res)"),
     "oodval-8species": ("oodval20k", None, "8 other species\n(OOD validation)"),
 }
 INK, MUTED, GRIDC = "#1f2937", "#6b7280", "#e5e7eb"
@@ -221,7 +222,8 @@ def fig_zeroshot(zs):
 
 
 def fig_transfer(rows, zs, panels=None, baselines=True, out="C_transfer.png",
-                 title="Our models vs baselines, in-distribution and on unseen data", labels=None):
+                 title="Our models vs baselines, in-distribution and on unseen data", labels=None,
+                 include_frozen=True):
     """Per benchmark: every model of ours scored there (optionally vs GLEAMS and binned cosine)."""
     c7 = "C7 (replicate corpus -> ms-contrastive-100k)"
     def rep(b, sc):
@@ -246,6 +248,8 @@ def fig_transfer(rows, zs, panels=None, baselines=True, out="C_transfer.png",
                         ("yeast-20k", "yeast 20k subset\n(unseen, test)", 8)]
     if not baselines:
         series = [t for t in series if t[0] not in ("GLEAMS", "binned cosine")]
+    if not include_frozen:        # C_transfer: frozen + ABTT dropped (not scored on every panel); see 0_shot/
+        series = [t for t in series if not t[0].startswith("frozen")]
     if labels:
         series = [(labels.get(n, n), c, g) for n, c, g in series]
     with plt.rc_context(STYLE):
@@ -279,7 +283,7 @@ def fig_transfer(rows, zs, panels=None, baselines=True, out="C_transfer.png",
 
 REP_LABEL = {"400m": "Iona spectrum encoder 400M (replicate corpus only)",
              "50m": "Iona spectrum encoder 50M (replicate corpus only)"}
-TRANSFER_BENCH = ["ms-contrastive-100k", "yeast-20k", "mouse-20k"]
+TRANSFER_BENCH = ["ms-contrastive-100k", "yeast-20k", "mouse-20k", "human-20k"]
 # C_transfer names our fine-tuned models as released (Iona); the other figures keep "fine-tuned".
 TRANSFER_LABELS = {"fine-tuned 400M": "Iona spectrum encoder 400M", "fine-tuned 50M": "Iona spectrum encoder 50M",
                    "replicate corpus only 400M": REP_LABEL["400m"], "replicate corpus only 50M": REP_LABEL["50m"]}
@@ -378,7 +382,8 @@ def export_plot_data(rows, zs, ab):
     out = ours("ms-contrastive-100k") + ours("yeast-20k")
     write_plot_csv("C_transfer_ours.csv", out)
     # C_transfer: the same rows (relabelled) + mouse, and GLEAMS and binned cosine (both widths)
-    tr = [dict(r, model=TRANSFER_LABELS.get(r["model"], r["model"])) for r in out + ours("mouse-20k")]
+    tr = [dict(r, model=TRANSFER_LABELS.get(r["model"], r["model"]))
+          for r in out + [x for b in TRANSFER_BENCH[2:] for x in ours(b)] if not r["model"].startswith("frozen")]
     tr.sort(key=lambda r: TRANSFER_BENCH.index(r["benchmark"]))
     for b in TRANSFER_BENCH:
         tr += [as_plot_row(r, "GLEAMS") for r in sel(rows, b, "GLEAMS (pretrained)")]
@@ -431,8 +436,9 @@ def main():
     # C_transfer: only the benchmarks every method was scored on (the 8-species OOD validation had no GLEAMS/frozen)
     fig_transfer(rows, zs, panels=[("ms-contrastive-100k", "ms-contrastive-100k test\n(in-distribution)", 8),
                                    ("yeast-20k", "yeast 20k subset\n(unseen)", 8),
-                                   ("mouse-20k", "mouse 20k subset\n(unseen)", 8)],
-                 labels=TRANSFER_LABELS)
+                                   ("mouse-20k", "mouse 20k subset\n(unseen)", 8),
+                                   ("human-20k", "human 20k subset\n(unseen)", 8)],
+                 labels=TRANSFER_LABELS, include_frozen=False)
     fig_transfer(rows, zs, panels=[("ms-contrastive-100k", "ms-contrastive-100k test\n(in-distribution)", 1),
                                    ("yeast-20k", "yeast 20k subset\n(unseen)", 1)],
                  baselines=False, out="C_transfer_ours.png", title="Our models in-distribution vs unseen")

@@ -7,12 +7,10 @@ ms-contrastive-100k,Iona spectrum encoder 400M (replicate corpus only),400m,220k
 ms-contrastive-100k,Iona spectrum encoder 50M (replicate corpus only),50m,220k,final,0,0.65684,0.76584,replicate corpus only (24 ep)
 ms-contrastive-100k,Iona spectrum encoder 50M (replicate corpus only),50m,220k,final,1,0.65448,0.76393,replicate corpus only (24 ep)
 ms-contrastive-100k,Iona spectrum encoder 50M (replicate corpus only),50m,220k,final,2,0.65640,0.76680,replicate corpus only (24 ep)
-ms-contrastive-100k,frozen + ABTT (best encoder),400m,330k,,,0.65990,,"frozen encoder, layer block16, ABTT D=128 (fit: ms-contrastive-100k train); best of 24 frozen encoders, encoder/layer/D chosen on this benchmark"
 yeast-20k,Iona spectrum encoder 400M,400m,220k,final,0,0.59562,0.77916,C7 (replicate corpus -> ms-contrastive-100k)
 yeast-20k,Iona spectrum encoder 50M,50m,220k,final,1,0.52273,0.73420,C7 (replicate corpus -> ms-contrastive-100k)
 yeast-20k,Iona spectrum encoder 400M (replicate corpus only),400m,220k,final,0,0.52046,0.74085,replicate corpus only (12 ep)
 yeast-20k,Iona spectrum encoder 50M (replicate corpus only),50m,220k,final,1,0.49906,0.72496,replicate corpus only (24 ep)
-yeast-20k,frozen + ABTT (best encoder),400m,220k,,,0.70887,,"frozen encoder, layer block14, ABTT D=128 (fit: 8 other species (train split)); best of 6 frozen encoders, encoder/layer/D chosen on this benchmark"
 mouse-20k,Iona spectrum encoder 400M,400m,220k,final,0,0.84601,0.93211,C7 (replicate corpus -> ms-contrastive-100k)
 mouse-20k,Iona spectrum encoder 50M,50m,220k,final,1,0.81956,0.91596,C7 (replicate corpus -> ms-contrastive-100k)
 mouse-20k,Iona spectrum encoder 400M (replicate corpus only),400m,220k,final,0,0.78677,0.91091,replicate corpus only (12 ep)
@@ -21,7 +19,14 @@ mouse-20k,Iona spectrum encoder 400M (replicate corpus only),400m,220k,final,2,0
 mouse-20k,Iona spectrum encoder 50M (replicate corpus only),50m,220k,final,0,0.75405,0.89242,replicate corpus only (24 ep)
 mouse-20k,Iona spectrum encoder 50M (replicate corpus only),50m,220k,final,1,0.75469,0.89202,replicate corpus only (24 ep)
 mouse-20k,Iona spectrum encoder 50M (replicate corpus only),50m,220k,final,2,0.76117,0.89577,replicate corpus only (24 ep)
-mouse-20k,frozen + ABTT (best encoder),400m,330k,,,0.70275,,"frozen encoder, layer block14, ABTT D=128 (fit: ms-contrastive-100k train); best of 2 frozen encoders, encoder/layer/D chosen on this benchmark"
+human-20k,Iona spectrum encoder 400M,400m,220k,final,0,0.87649,0.92985,C7 (replicate corpus -> ms-contrastive-100k)
+human-20k,Iona spectrum encoder 50M,50m,220k,final,1,0.87426,0.92915,C7 (replicate corpus -> ms-contrastive-100k)
+human-20k,Iona spectrum encoder 400M (replicate corpus only),400m,220k,final,0,0.81497,0.90595,replicate corpus only (12 ep)
+human-20k,Iona spectrum encoder 400M (replicate corpus only),400m,220k,final,1,0.81563,0.90655,replicate corpus only (12 ep)
+human-20k,Iona spectrum encoder 400M (replicate corpus only),400m,220k,final,2,0.81751,0.90630,replicate corpus only (12 ep)
+human-20k,Iona spectrum encoder 50M (replicate corpus only),50m,220k,final,0,0.82426,0.90555,replicate corpus only (24 ep)
+human-20k,Iona spectrum encoder 50M (replicate corpus only),50m,220k,final,1,0.81920,0.90345,replicate corpus only (24 ep)
+human-20k,Iona spectrum encoder 50M (replicate corpus only),50m,220k,final,2,0.82299,0.90495,replicate corpus only (24 ep)
 ms-contrastive-100k,GLEAMS,,,,,0.64648,0.74615,
 ms-contrastive-100k,binned cosine,,,,,0.67114,0.77062,binned cosine (1 Da bins)
 ms-contrastive-100k,binned cosine,,,,,0.72947,0.81923,binned cosine (0.1 Da bins) [plotted: best width]
@@ -31,3 +36,6 @@ yeast-20k,binned cosine,,,,,0.91593,0.96538,binned cosine (0.1 Da bins) [plotted
 mouse-20k,GLEAMS,,,,,0.83389,0.93066,
 mouse-20k,binned cosine,,,,,0.90911,0.96775,binned cosine (1 Da bins)
 mouse-20k,binned cosine,,,,,0.91576,0.97110,binned cosine (0.1 Da bins) [plotted: best width]
+human-20k,GLEAMS,,,,,0.84110,0.91150,
+human-20k,binned cosine,,,,,0.78654,0.91700,binned cosine (1 Da bins)
+human-20k,binned cosine,,,,,0.80941,0.92655,binned cosine (0.1 Da bins) [plotted: best width]

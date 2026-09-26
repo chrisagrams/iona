@@ -70,9 +70,10 @@ def transfer():
     series = [("Iona spectrum encoder 400M", "#1e3a8a"), ("Iona spectrum encoder 50M", "#93c5fd"),
               ("Iona spectrum encoder 400M (replicate corpus only)", "#0d9488"),
               ("Iona spectrum encoder 50M (replicate corpus only)", "#5eead4"),
-              ("frozen + ABTT (best encoder)", "#7c3aed"), ("GLEAMS", "#f59e0b"), ("binned cosine", "#9ca3af")]
+              ("GLEAMS", "#f59e0b"), ("binned cosine", "#9ca3af")]
     panels = [("ms-contrastive-100k", "ms-contrastive-100k test\n(in-distribution)"),
-              ("yeast-20k", "yeast 20k subset\n(unseen)"), ("mouse-20k", "mouse 20k subset\n(unseen)")]
+              ("yeast-20k", "yeast 20k subset\n(unseen)"), ("mouse-20k", "mouse 20k subset\n(unseen)"),
+              ("human-20k", "human 20k subset\n(unseen)")]
     with plt.rc_context(STYLE):
         fig, axes = plt.subplots(1, len(panels), figsize=(4.7 * len(panels), 4.8), sharey=True)
         for ax, (b, title) in zip(axes, panels):
