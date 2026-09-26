@@ -1,0 +1,1 @@
+CHECKPOINT ARM (denoise): 25m (Chris's msdelta-25m-production-01, copied to pretrained/) from pretrained checkpoint 540,423 -- the final step every scale targets -- seed 1. Identical to the 50m/100m/200m/400m ladder arms (sweep-ckpt-denoise-ends/*_ck540k_seed1) except the encoder; recipe lr 2e-4, encoder 0.5x, 4 epochs, head 512, effective batch 12.
