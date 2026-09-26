@@ -1,0 +1,9 @@
+# pretraining ablation (old short recipe, T 0.07), seed 0: pretrained vs random init, scored with MAP@R on ms-contrastive-100k test
+abl_pre_050m_seed0 /lus/flare/projects/UIC-HPC/khuss/msdelta/runs/sweep-s050m_seed0-8853557/final mean+max
+abl_rand_050m_seed0 /lus/flare/projects/UIC-HPC/khuss/msdelta/runs/sweep-s050m_seed0-8853558/final mean+max
+abl_pre_100m_seed0 /lus/flare/projects/UIC-HPC/khuss/msdelta/runs/sweep-s100m_seed0-8853557/final mean+max
+abl_rand_100m_seed0 /lus/flare/projects/UIC-HPC/khuss/msdelta/runs/sweep-s100m_seed0-8853558/final mean+max
+abl_pre_200m_seed0 /lus/flare/projects/UIC-HPC/khuss/msdelta/runs/sweep-s200m_seed0-8853557/final mean+max
+abl_rand_200m_seed0 /lus/flare/projects/UIC-HPC/khuss/msdelta/runs/sweep-s200m_seed0-8854760/final mean+max
+abl_pre_400m_seed0 /lus/flare/projects/UIC-HPC/khuss/msdelta/runs/sweep-s400m_seed0-8854412/final mean+max
+abl_rand_400m_seed0 /lus/flare/projects/UIC-HPC/khuss/msdelta/runs/sweep-s400m_seed0-8854760/final mean+max
