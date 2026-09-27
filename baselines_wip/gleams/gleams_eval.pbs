@@ -1,0 +1,34 @@
+#!/bin/bash
+#PBS -A UIC-HPC
+#PBS -q debug
+#PBS -l select=1
+#PBS -l walltime=01:00:00
+#PBS -l filesystems=home:flare
+#PBS -N gleams_eval
+#PBS -j oe
+#PBS -o /lus/flare/projects/UIC-HPC/khuss/msdelta/baselines/gleams/logs/
+set -euo pipefail
+B=/lus/flare/projects/UIC-HPC/khuss/msdelta/baselines/gleams
+S=/home/khuss/code/msdelta/baselines_wip/gleams
+D=$B/data
+VPY=/home/khuss/code/msdelta/.venv/bin/python
+export HF_HOME=/lus/flare/projects/UIC-HPC/khuss/msdelta/huggingface HF_HUB_OFFLINE=1 HF_DATASETS_OFFLINE=1
+cd $B
+if [ ! -f $D/EXPORT.json ]; then
+  echo "== export $(date)"; $VPY $S/export_mgf.py $D
+fi
+set +e
+if [ ! -f $D/gleams_embed.npy ]; then
+  echo "== embed $(date)"
+  export CUDA_VISIBLE_DEVICES="" TF_CPP_MIN_LOG_LEVEL=2
+  $B/env/bin/python $S/embed_gleams.py $D 96
+fi
+echo "== score $(date)"
+PYTHONPATH=/home/khuss/code/msdelta $VPY $S/score_retrieval.py $D $D/gleams_embed.npy $B/gleams_metrics.json
+echo "== yhydra (optional) $(date)"
+set +e
+if [ ! -f $D/yhydra_embed.npy ]; then
+  CUDA_VISIBLE_DEVICES="" TF_CPP_MIN_LOG_LEVEL=2 /lus/flare/projects/UIC-HPC/khuss/msdelta/baselines/yhydra/env/bin/python $S/embed_yhydra.py $D
+fi
+[ -f $D/yhydra_embed.npy ] && PYTHONPATH=/home/khuss/code/msdelta $VPY $S/score_retrieval.py $D $D/yhydra_embed.npy /lus/flare/projects/UIC-HPC/khuss/msdelta/baselines/yhydra/yhydra_metrics.json
+echo "== done $(date)"

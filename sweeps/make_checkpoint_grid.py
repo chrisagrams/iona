@@ -63,7 +63,7 @@ AVAILABLE = {"50m":  ("10000", "120000", "220000", "330000", "430000", "540423")
 # Kept OUT of AVAILABLE on purpose: every existing grid's --check derives its cells from
 # AVAILABLE, so adding rungs there made the finished middle grid and the RUNNING ends-big
 # grid (8860472) report themselves stale. Only the late400 wave reads this.
-AVAILABLE_LATE = {"400m": ("330000", "430000")}   # + "540423" once it exists
+AVAILABLE_LATE = {"400m": ("330000", "430000", "540423")}   # 540423 backed up when it appeared
 WAVES = {"middle": ("220000", "330000"),
          "ends":   ("10000", "120000", "430000", "540423"),
          # The same rungs for 200m/400m, which were still pretraining when "ends" ran.

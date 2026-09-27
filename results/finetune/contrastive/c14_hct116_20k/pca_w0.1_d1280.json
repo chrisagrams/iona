@@ -1,0 +1,22 @@
+{
+ "name": "pca_w0.1_d1280",
+ "path": "pca:0.1:1280:/lus/flare/projects/UIC-HPC/khuss/msdelta/eval-data/ms-contrastive-100k-train10k-mp512",
+ "pooling": "mean+max",
+ "data": "/lus/flare/projects/UIC-HPC/khuss/msdelta/baselines/c14_hct116_20k/prepared",
+ "metrics": {
+  "all/Hit@1": 0.638936106389361,
+  "all/Precision@1": 0.638936106389361,
+  "all/R-Precision": 0.41198028939781806,
+  "all/MAP@R": 0.3802277761725781,
+  "all/R@5": 0.37393419166384145,
+  "all/MAP@100": 0.4363055912426336,
+  "all/queries": 20002.0,
+  "experimental/Hit@1": 0.638936106389361,
+  "experimental/Precision@1": 0.638936106389361,
+  "experimental/R-Precision": 0.41198028939781806,
+  "experimental/MAP@R": 0.3802277761725781,
+  "experimental/R@5": 0.37393419166384145,
+  "experimental/MAP@100": 0.4363055912426336,
+  "experimental/queries": 20002.0
+ }
+}

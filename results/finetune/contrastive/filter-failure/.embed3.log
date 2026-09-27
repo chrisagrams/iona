@@ -1,0 +1,3 @@
+[embed] shard 3/12: 1 of 15 on xpu
+Loading weights:   0%|          | 0/170 [00:00<?, ?it/s]Loading weights:  79%|███████▉  | 134/170 [00:00<00:00, 1147.78it/s]Loading weights: 100%|██████████| 170/170 [00:00<00:00, 787.48it/s] 
+  mouse/iona50m: (20003, 1280) (396s)

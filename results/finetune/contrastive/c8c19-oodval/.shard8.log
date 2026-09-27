@@ -1,0 +1,5 @@
+[score] shard 8/12: 2 of 24 models on xpu
+Loading weights:   0%|          | 0/170 [00:00<?, ?it/s]Loading weights:  35%|███▌      | 60/170 [00:00<00:00, 503.23it/s]Loading weights:  65%|██████▌   | 111/170 [00:00<00:00, 315.06it/s]Loading weights:  86%|████████▌ | 146/170 [00:00<00:00, 220.23it/s]Loading weights: 100%|██████████| 170/170 [00:00<00:00, 261.84it/s]
+  c8c19_supcon_mass_seed1_step2655: all MAP@R 0.7220  experimental MAP@R 0.7220  (410s)
+Loading weights:   0%|          | 0/170 [00:00<?, ?it/s]Loading weights:  30%|███       | 51/170 [00:00<00:00, 415.31it/s]Loading weights:  55%|█████▍    | 93/170 [00:00<00:00, 238.97it/s]Loading weights:  71%|███████   | 121/170 [00:00<00:00, 219.18it/s]Loading weights:  88%|████████▊ | 150/170 [00:00<00:00, 207.04it/s]Loading weights: 100%|██████████| 170/170 [00:00<00:00, 249.11it/s]
+  c8c19_sigmoid_mass_seed1_step2655: all MAP@R 0.6431  experimental MAP@R 0.6431  (408s)

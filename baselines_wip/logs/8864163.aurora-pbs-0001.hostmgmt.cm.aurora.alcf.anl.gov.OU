@@ -1,0 +1,57 @@
+=== 2026-09-24T22:01:07+00:00 host=x4117c1s3b0n0 percolator=/lus/flare/projects/UIC-HPC/khuss/msdelta/baselines/percolator/env/bin/percolator
+smoke rc=0
+Could not find any targets below 0.05 out of 1572 targets in total. Retrying with higher FDR cutoff...
+Could not find any targets below 0.060000000000000005 out of 1572 targets in total. Retrying with higher FDR cutoff...
+Could not find any targets below 0.060000000000000005 out of 1572 targets in total. Retrying with higher FDR cutoff...
+Could not find any targets below 0.07 out of 1572 targets in total. Retrying with higher FDR cutoff...
+Could not find any targets below 0.07 out of 1572 targets in total. Retrying with higher FDR cutoff...
+Could not find any targets below 0.08 out of 1572 targets in total. Retrying with higher FDR cutoff...
+Could not find any targets below 0.08 out of 1572 targets in total. Retrying with higher FDR cutoff...
+Could not find any targets below 0.09 out of 1572 targets in total. Retrying with higher FDR cutoff...
+Could not find any targets below 0.09 out of 1572 targets in total. Retrying with higher FDR cutoff...
+Could not find any targets below 0.09999999999999999 out of 1572 targets in total. Retrying with higher FDR cutoff...
+Could not find any targets below 0.09999999999999999 out of 1572 targets in total. Retrying with higher FDR cutoff...
+Could not find any targets below 0.10999999999999999 out of 1572 targets in total. Retrying with higher FDR cutoff...
+Could not find any targets below 0.10999999999999999 out of 1572 targets in total. Retrying with higher FDR cutoff...
+/lus/flare/projects/UIC-HPC/khuss/msdelta/baselines/oktoberfest/lib/python3.11/site-packages/spectrum_fundamentals/metrics/percolator.py:134: SettingWithCopyWarning: 
+A value is trying to be set on a copy of a slice from a DataFrame.
+Try using .loc[row_indexer,col_indexer] = value instead
+
+See the caveats in the documentation: https://pandas.pydata.org/pandas-docs/stable/user_guide/indexing.html#returning-a-view-versus-a-copy
+  retention_time_df["rt_bin_index"] = np.digitize(retention_time_df["RETENTION_TIME"], break_points)
+/lus/flare/projects/UIC-HPC/khuss/msdelta/baselines/oktoberfest/lib/python3.11/site-packages/spectrum_fundamentals/metrics/percolator.py:139: FutureWarning: DataFrameGroupBy.apply operated on the grouping columns. This behavior is deprecated, and in a future version of pandas the grouping columns will be excluded from the operation. Either pass `include_groups=False` to exclude the groupings or explicitly select the grouping columns after groupby to silence this warning.
+  retention_time_df = retention_time_df.groupby("rt_bin_index", group_keys=False).apply(
+2026-09-24 22:02:29,484 - INFO - oktoberfest.runner::run_rescoring Merging input tab files for rescoring without peptide property prediction
+2026-09-24 22:02:29,543 - INFO - oktoberfest.runner::run_rescoring Merging input tab files for rescoring with peptide property prediction
+2026-09-24 22:02:29,719 - INFO - oktoberfest.rescore.rescore::rescore_with_percolator Starting percolator with command percolator --weights /lus/flare/projects/UIC-HPC/khuss/msdelta/baselines/okt_out/smoke500/results/percolator/original.percolator.weights.csv                         --num-threads 3                         --subset-max-train 500000                         --post-processing-tdc                         --testFDR 0.01                         --trainFDR 0.01                         --results-psms /lus/flare/projects/UIC-HPC/khuss/msdelta/baselines/okt_out/smoke500/results/percolator/original.percolator.psms.txt                         --decoy-results-psms /lus/flare/projects/UIC-HPC/khuss/msdelta/baselines/okt_out/smoke500/results/percolator/original.percolator.decoy.psms.txt                         --results-peptides /lus/flare/projects/UIC-HPC/khuss/msdelta/baselines/okt_out/smoke500/results/percolator/original.percolator.peptides.txt                         --decoy-results-peptides /lus/flare/projects/UIC-HPC/khuss/msdelta/baselines/okt_out/smoke500/results/percolator/original.percolator.decoy.peptides.txt                         /lus/flare/projects/UIC-HPC/khuss/msdelta/baselines/okt_out/smoke500/results/percolator/original.tab 2> /lus/flare/projects/UIC-HPC/khuss/msdelta/baselines/okt_out/smoke500/results/percolator/original.log
+2026-09-24 22:02:30,425 - INFO - oktoberfest.rescore.rescore::rescore_with_percolator Finished rescoring using percolator.
+2026-09-24 22:02:30,430 - INFO - oktoberfest.runner::_rescore False
+2026-09-24 22:02:30,430 - INFO - oktoberfest.rescore.rescore::rescore_with_percolator Starting percolator with command percolator --weights /lus/flare/projects/UIC-HPC/khuss/msdelta/baselines/okt_out/smoke500/results/percolator/rescore.percolator.weights.csv                         --num-threads 3                         --subset-max-train 500000                         --post-processing-tdc                         --testFDR 0.01                         --trainFDR 0.01                         --results-psms /lus/flare/projects/UIC-HPC/khuss/msdelta/baselines/okt_out/smoke500/results/percolator/rescore.percolator.psms.txt                         --decoy-results-psms /lus/flare/projects/UIC-HPC/khuss/msdelta/baselines/okt_out/smoke500/results/percolator/rescore.percolator.decoy.psms.txt                         --results-peptides /lus/flare/projects/UIC-HPC/khuss/msdelta/baselines/okt_out/smoke500/results/percolator/rescore.percolator.peptides.txt                         --decoy-results-peptides /lus/flare/projects/UIC-HPC/khuss/msdelta/baselines/okt_out/smoke500/results/percolator/rescore.percolator.decoy.peptides.txt                         /lus/flare/projects/UIC-HPC/khuss/msdelta/baselines/okt_out/smoke500/results/percolator/rescore.tab 2> /lus/flare/projects/UIC-HPC/khuss/msdelta/baselines/okt_out/smoke500/results/percolator/rescore.log
+2026-09-24 22:02:31,565 - INFO - oktoberfest.rescore.rescore::rescore_with_percolator Finished rescoring using percolator.
+2026-09-24 22:02:31,569 - INFO - oktoberfest.runner::run_rescoring Generating summary plots...
+2026-09-24 22:02:33,176 - INFO - oktoberfest.runner::run_rescoring Finished rescoring.
+original.log
+original.percolator.decoy.peptides.txt
+original.percolator.decoy.psms.txt
+original.percolator.peptides.txt
+original.percolator.psms.txt
+original.percolator.weights.csv
+original.tab
+original_target_vs_decoys_peptide_bins.svg
+original_target_vs_decoys_psm_bins.svg
+peptide_1%_FDR.svg
+psm_1%_FDR.svg
+rescore.log
+rescore_original_joint_plot_peptide.svg
+rescore_original_joint_plot_psm.svg
+rescore.percolator.decoy.peptides.txt
+rescore.percolator.decoy.psms.txt
+rescore.percolator.peptides.txt
+rescore.percolator.psms.txt
+rescore.percolator.weights.csv
+rescore.tab
+rescore_target_vs_decoys_peptide_bins.svg
+rescore_target_vs_decoys_psm_bins.svg
+target_vs_decoys_sa_distribution.svg
+2026-09-24T22:21:13+00:00 0718-5 rc=0
+=== 2026-09-24T22:21:13+00:00 end

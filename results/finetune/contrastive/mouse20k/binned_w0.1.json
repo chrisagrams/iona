@@ -1,0 +1,22 @@
+{
+ "name": "binned_w0.1",
+ "path": "binned:0.1",
+ "pooling": "mean+max",
+ "data": "/lus/flare/projects/UIC-HPC/khuss/msdelta/baselines/noble_mouse20k/prepared",
+ "metrics": {
+  "all/Hit@1": 0.9711043343498476,
+  "all/Precision@1": 0.9711043343498476,
+  "all/R-Precision": 0.9260908104995188,
+  "all/MAP@R": 0.9157640697157146,
+  "all/R@5": 0.7708522676676623,
+  "all/MAP@100": 0.9513633684927729,
+  "all/queries": 20003.0,
+  "experimental/Hit@1": 0.9711043343498476,
+  "experimental/Precision@1": 0.9711043343498476,
+  "experimental/R-Precision": 0.9260908104995188,
+  "experimental/MAP@R": 0.9157640697157146,
+  "experimental/R@5": 0.7708522676676623,
+  "experimental/MAP@100": 0.9513633684927729,
+  "experimental/queries": 20003.0
+ }
+}

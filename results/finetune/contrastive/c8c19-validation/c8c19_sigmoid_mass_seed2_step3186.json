@@ -1,0 +1,22 @@
+{
+ "name": "c8c19_sigmoid_mass_seed2_step3186",
+ "path": "/lus/flare/projects/UIC-HPC/khuss/msdelta/runs/sweep-s050m_ck540k_sigmoid_mass_seed2-8872141/final",
+ "pooling": "mean+max",
+ "data": "/lus/flare/projects/UIC-HPC/khuss/msdelta/eval-data/ms-contrastive-100k-validation-mp512",
+ "metrics": {
+  "all/Hit@1": 0.8526431655894555,
+  "all/Precision@1": 0.8526431655894555,
+  "all/R-Precision": 0.7335149229863149,
+  "all/MAP@R": 0.7267380688819025,
+  "all/R@5": 0.7703141489190698,
+  "all/MAP@100": 0.7639119570653171,
+  "all/queries": 35431.0,
+  "experimental/Hit@1": 0.8540128507004031,
+  "experimental/Precision@1": 0.8540128507004031,
+  "experimental/R-Precision": 0.7888414415133496,
+  "experimental/MAP@R": 0.7860577882428064,
+  "experimental/R@5": 0.827253861196472,
+  "experimental/MAP@100": 0.810955318748254,
+  "experimental/queries": 25057.0
+ }
+}

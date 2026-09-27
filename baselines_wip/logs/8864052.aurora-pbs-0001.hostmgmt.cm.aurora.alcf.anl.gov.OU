@@ -1,0 +1,32 @@
+=== 2026-09-24T21:31:26+00:00 host=x4311c3s0b0n0 percolator=/lus/flare/projects/UIC-HPC/khuss/msdelta/baselines/percolator/env/bin/percolator
+smoke rc=1
+Traceback (most recent call last):
+  File "/home/khuss/code/msdelta/baselines_wip/oktoberfest/okt_run.py", line 119, in <module>
+    main()
+  File "/home/khuss/code/msdelta/baselines_wip/oktoberfest/okt_run.py", line 115, in main
+    runner.run_rescoring(out / "config.json")
+  File "/lus/flare/projects/UIC-HPC/khuss/msdelta/baselines/oktoberfest/lib/python3.11/site-packages/oktoberfest/runner.py", line 1247, in run_rescoring
+    _calculate_features(spectra_file, config)
+  File "/lus/flare/projects/UIC-HPC/khuss/msdelta/baselines/oktoberfest/lib/python3.11/site-packages/oktoberfest/runner.py", line 579, in _calculate_features
+    intensity_predictor.predict_intensities(
+  File "/lus/flare/projects/UIC-HPC/khuss/msdelta/baselines/oktoberfest/lib/python3.11/site-packages/oktoberfest/predict/predictor.py", line 120, in predict_intensities
+    intensities = self._predictor.predict(data=data, **self._filter_kwargs(**kwargs))
+                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/lus/flare/projects/UIC-HPC/khuss/msdelta/baselines/oktoberfest/lib/python3.11/site-packages/oktoberfest/predict/koina.py", line 85, in predict
+    return super().predict(inputs=data, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/lus/flare/projects/UIC-HPC/khuss/msdelta/baselines/oktoberfest/lib/python3.11/site-packages/koinapy/grpc.py", line 534, in predict
+    predictions = self.__predict_semi_async(
+                  ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/lus/flare/projects/UIC-HPC/khuss/msdelta/baselines/oktoberfest/lib/python3.11/site-packages/koinapy/grpc.py", line 650, in __predict_semi_async
+    self.__predict_async(data_batch, debug=debug, pbar_input=pbar)
+  File "/lus/flare/projects/UIC-HPC/khuss/msdelta/baselines/oktoberfest/lib/python3.11/site-packages/koinapy/grpc.py", line 731, in __predict_async
+    return self.__handle_results(infer_results, debug)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/lus/flare/projects/UIC-HPC/khuss/msdelta/baselines/oktoberfest/lib/python3.11/site-packages/koinapy/grpc.py", line 764, in __handle_results
+    raise InferenceServerException(
+tritonclient.utils.InferenceServerException: 
+                    At least one request failed. Check the error message above and try again.
+                    To get a list of responses run koina.predict(..., debug = True), then call koina.response_dict
+                    
+Prosit_2020_intensity_CID:: 100%|██████████| 3/3 [00:01<00:00,  2.74it/s]

@@ -1,0 +1,38 @@
+[probe] xpu available True, devices 1, threads 8
+abtt D=[8, 32, 64, 128]: fit on 25,859 experimental train spectra
+Loading weights:   0%|          | 0/170 [00:00<?, ?it/s]Loading weights:  35%|███▍      | 59/170 [00:00<00:00, 589.93it/s]Loading weights:  69%|██████▉   | 118/170 [00:00<00:00, 271.48it/s]Loading weights:  91%|█████████ | 154/170 [00:00<00:00, 252.37it/s]Loading weights: 100%|██████████| 170/170 [00:00<00:00, 294.72it/s]
+[probe] score #1: emb (25775, 1280) torch.float32 on cpu, device arg xpu, 0.62s
+[probe] score #2: emb (25775, 1280) torch.float32 on cpu, device arg xpu, 0.20s
+[probe] score #3: emb (25775, 1280) torch.float32 on cpu, device arg xpu, 0.19s
+[probe] score #4: emb (25775, 1280) torch.float32 on cpu, device arg xpu, 0.19s
+[probe] score #5: emb (25775, 1280) torch.float32 on cpu, device arg xpu, 0.19s
+[probe] score #6: emb (25775, 1280) torch.float32 on cpu, device arg xpu, 0.19s
+[probe] score #7: emb (25775, 1280) torch.float32 on cpu, device arg xpu, 0.19s
+[probe] score #8: emb (25775, 1280) torch.float32 on cpu, device arg xpu, 0.18s
+[probe] score #9: emb (25775, 1280) torch.float32 on cpu, device arg xpu, 0.18s
+[probe] score #10: emb (25775, 1280) torch.float32 on cpu, device arg xpu, 0.18s
+[probe] score #11: emb (25775, 1280) torch.float32 on cpu, device arg xpu, 0.18s
+[probe] score #12: emb (25775, 1280) torch.float32 on cpu, device arg xpu, 0.18s
+[probe] abtt fit #1: (25859, 1280) on xpu:0, 0.82s (torch threads 8)
+[probe] abtt fit #2: (25775, 1280) on xpu:0, 0.32s (torch threads 8)
+    block00: raw 0.0003  D8 0.0018  D32 0.0005  D64 0.0002  D128 0.0002  (1294s)
+[probe] abtt fit #3: (25859, 1280) on xpu:0, 0.34s (torch threads 8)
+[probe] abtt fit #4: (25775, 1280) on xpu:0, 0.35s (torch threads 8)
+    block01: raw 0.0258  D8 0.0832  D32 0.0998  D64 0.1089  D128 0.1067  (1296s)
+[probe] abtt fit #5: (25859, 1280) on xpu:0, 0.34s (torch threads 8)
+[probe] abtt fit #6: (25775, 1280) on xpu:0, 0.34s (torch threads 8)
+[probe] score #40: emb (25775, 1280) torch.float32 on xpu:0, device arg xpu, 0.15s
+    block02: raw 0.0458  D8 0.1024  D32 0.1303  D64 0.1395  D128 0.1457  (1298s)
+    block03: raw 0.0580  D8 0.1048  D32 0.1421  D64 0.1520  D128 0.1583  (1301s)
+    block04: raw 0.0735  D8 0.1253  D32 0.1562  D64 0.1679  D128 0.1715  (1303s)
+    block05: raw 0.1004  D8 0.1701  D32 0.2062  D64 0.2125  D128 0.2080  (1305s)
+[probe] score #80: emb (25775, 1280) torch.float32 on xpu:0, device arg xpu, 0.16s
+    block06: raw 0.1332  D8 0.2385  D32 0.2790  D64 0.2866  D128 0.2774  (1307s)
+    block07: raw 0.1695  D8 0.3021  D32 0.3463  D64 0.3536  D128 0.3386  (1309s)
+    block08: raw 0.1804  D8 0.3131  D32 0.3596  D64 0.3657  D128 0.3517  (1311s)
+[probe] abtt fit #20: (25775, 1280) on xpu:0, 0.28s (torch threads 8)
+    block09: raw 0.1557  D8 0.2780  D32 0.3252  D64 0.3321  D128 0.3168  (1314s)
+[probe] score #120: emb (25775, 1280) torch.float32 on xpu:0, device arg xpu, 0.16s
+    block10: raw 0.1159  D8 0.2348  D32 0.2973  D64 0.3078  D128 0.2952  (1316s)
+    final: raw 0.1026  D8 0.2129  D32 0.2603  D64 0.2529  D128 0.2233  (1318s)
+  zs_050m_ck540k (1318s): final 0.1026  best block08 0.1804

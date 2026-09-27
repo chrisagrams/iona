@@ -1,0 +1,101 @@
+{
+ "ms2rescore:searchonly": {
+  "all": {
+   "spectra": 332822,
+   "pooled": 100974,
+   "sum_per_run": 100561,
+   "tool_own_q<=0.01": 100561,
+   "pooled_by_q": 100669
+  },
+  "HCT116": {
+   "spectra": 86826,
+   "pooled": 2950,
+   "sum_per_run": 2922,
+   "tool_own_q<=0.01": 2922,
+   "pooled_by_q": 2954
+  },
+  "HEK293": {
+   "spectra": 245996,
+   "pooled": 97722,
+   "sum_per_run": 97639,
+   "tool_own_q<=0.01": 97639,
+   "pooled_by_q": 97728
+  },
+  "runs": [
+   "05032011-7",
+   "0718-5",
+   "09122011-5",
+   "HEK-0628-5",
+   "HEK-U100ug-0408-5",
+   "HEK-U100ug-V2-5",
+   "Xiaomu_HCT116WholeCell_HILIC14_120min_10ul",
+   "Xiaomu_HCT116WholeCell_HILIC15_120min_10ul"
+  ]
+ },
+ "ms2rescore:searchonly+embedding(400M teacher, cosws)": {
+  "all": {
+   "spectra": 332822,
+   "pooled": 102751,
+   "sum_per_run": 102354,
+   "tool_own_q<=0.01": 102354,
+   "pooled_by_q": 102443
+  },
+  "HCT116": {
+   "spectra": 86826,
+   "pooled": 3119,
+   "sum_per_run": 3129,
+   "tool_own_q<=0.01": 3129,
+   "pooled_by_q": 3133
+  },
+  "HEK293": {
+   "spectra": 245996,
+   "pooled": 99445,
+   "sum_per_run": 99225,
+   "tool_own_q<=0.01": 99225,
+   "pooled_by_q": 99289
+  },
+  "runs": [
+   "05032011-7",
+   "0718-5",
+   "09122011-5",
+   "HEK-0628-5",
+   "HEK-U100ug-0408-5",
+   "HEK-U100ug-V2-5",
+   "Xiaomu_HCT116WholeCell_HILIC14_120min_10ul",
+   "Xiaomu_HCT116WholeCell_HILIC15_120min_10ul"
+  ]
+ },
+ "ms2rescore:searchonly+null control": {
+  "all": {
+   "spectra": 332822,
+   "pooled": 101007,
+   "sum_per_run": 100548,
+   "tool_own_q<=0.01": 100548,
+   "pooled_by_q": 100610
+  },
+  "HCT116": {
+   "spectra": 86826,
+   "pooled": 2976,
+   "sum_per_run": 2966,
+   "tool_own_q<=0.01": 2966,
+   "pooled_by_q": 2992
+  },
+  "HEK293": {
+   "spectra": 245996,
+   "pooled": 97652,
+   "sum_per_run": 97582,
+   "tool_own_q<=0.01": 97582,
+   "pooled_by_q": 97627
+  },
+  "runs": [
+   "05032011-7",
+   "0718-5",
+   "09122011-5",
+   "HEK-0628-5",
+   "HEK-U100ug-0408-5",
+   "HEK-U100ug-V2-5",
+   "Xiaomu_HCT116WholeCell_HILIC14_120min_10ul",
+   "Xiaomu_HCT116WholeCell_HILIC15_120min_10ul"
+  ]
+ }
+}

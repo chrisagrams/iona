@@ -1,0 +1,10 @@
+=== 2026-09-25T23:11:20+00:00 start OUT=/lus/flare/projects/UIC-HPC/khuss/msdelta/baselines/ms2rescore_out/hct18_a2 LIMIT=0 ARMS=full host=x4406c2s5b0n0 nproc=4
+2026-09-25T23:11:20+00:00 converted cosws Xiaomu_HCT116WholeCell_HILIC6_120min_2ul
+2026-09-25T23:11:20+00:00 converted cosws Xiaomu_HCT116WholeCell_HILIC4_120min_2ul
+2026-09-25T23:11:20+00:00 converted cosws Xiaomu_HCT116WholeCell_HILIC5_120min_2ul
+2026-09-25T23:11:20+00:00 converted cosws Xiaomu_HCT116WholeCell_HILIC8_120min_4ul
+2026-09-25T23:11:20+00:00 converted cosws Xiaomu_HCT116WholeCell_HILIC7_120min_2ul
+2026-09-25T23:11:20+00:00 converted cosws Xiaomu_HCT116WholeCell_HILIC3_120min_4ul
+2026-09-25T23:11:20+00:00 converted cosws Xiaomu_HCT116WholeCell_HILIC2_120min_5ul
+2026-09-25T23:11:20+00:00 converted cosws Xiaomu_HCT116WholeCell_HILIC9_120min_4ul
+2026-09-25T23:11:20+00:00 converted cosws Xiaomu_HCT116WholeCell_HILIC1_120min_8ul

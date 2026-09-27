@@ -1,0 +1,5 @@
+[embed] shard 2/12: 2 of 15 on xpu
+Loading weights:   0%|          | 0/330 [00:00<?, ?it/s]Loading weights:  29%|██▉       | 95/330 [00:00<00:00, 463.81it/s]Loading weights:  43%|████▎     | 142/330 [00:01<00:02, 79.87it/s]Loading weights:  50%|████▉     | 164/330 [00:01<00:02, 78.40it/s]Loading weights:  54%|█████▍    | 179/330 [00:01<00:01, 83.20it/s]Loading weights:  58%|█████▊    | 193/330 [00:02<00:01, 87.26it/s]Loading weights:  62%|██████▏   | 206/330 [00:02<00:01, 88.45it/s]Loading weights:  68%|██████▊   | 224/330 [00:02<00:01, 102.33it/s]Loading weights:  72%|███████▏  | 238/330 [00:02<00:00, 107.09it/s]Loading weights:  78%|███████▊  | 258/330 [00:02<00:00, 83.50it/s] Loading weights:  82%|████████▏ | 269/330 [00:02<00:00, 83.23it/s]Loading weights:  88%|████████▊ | 291/330 [00:02<00:00, 107.25it/s]Loading weights: 100%|██████████| 330/330 [00:03<00:00, 108.63it/s]
+  hek/iona400m: (27637, 2560) (1528s)
+Loading weights:   0%|          | 0/170 [00:00<?, ?it/s]Loading weights: 100%|██████████| 170/170 [00:00<00:00, 9732.10it/s]
+  hek/frozen50m: (27637, 1280) (502s)

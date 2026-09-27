@@ -1,0 +1,22 @@
+{
+ "name": "s400m_t0002_pk256_ep12_seed2",
+ "path": "/lus/flare/projects/UIC-HPC/khuss/msdelta/runs/sweep-s400m_t0002_pk256_ep12_seed2-8857593/final",
+ "pooling": "mean+max",
+ "data": "/lus/flare/projects/UIC-HPC/khuss/msdelta/baselines/noble_mouse20k/prepared",
+ "metrics": {
+  "all/Hit@1": 0.9135629655551667,
+  "all/Precision@1": 0.9135629655551667,
+  "all/R-Precision": 0.8026747037749025,
+  "all/MAP@R": 0.787804265883555,
+  "all/R@5": 0.6867634039464393,
+  "all/MAP@100": 0.8377900724559285,
+  "all/queries": 20003.0,
+  "experimental/Hit@1": 0.9135629655551667,
+  "experimental/Precision@1": 0.9135629655551667,
+  "experimental/R-Precision": 0.8026747037749025,
+  "experimental/MAP@R": 0.787804265883555,
+  "experimental/R@5": 0.6867634039464393,
+  "experimental/MAP@100": 0.8377900724559285,
+  "experimental/queries": 20003.0
+ }
+}

@@ -1,0 +1,3 @@
+WARNING:tensorflow:No training configuration found in save file, so the model was *not* compiled. Compile it manually.
+[yhydra] input (None, 500, 2) output (None, 64)
+[yhydra] wrote (25490, 64)

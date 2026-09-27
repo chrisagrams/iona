@@ -1,0 +1,296 @@
+{
+ "files": [
+  "05032011-7.parquet",
+  "0718-5.parquet",
+  "09122011-5.parquet",
+  "HEK-0628-5.parquet",
+  "HEK-U100ug-0408-5.parquet",
+  "HEK-U100ug-V2-5.parquet",
+  "Xiaomu_HCT116WholeCell_HILIC14_120min_10ul.parquet",
+  "Xiaomu_HCT116WholeCell_HILIC15_120min_10ul.parquet"
+ ],
+ "spectra": 332822,
+ "candidates": 2818394,
+ "methods": {
+  "all": {
+   "msfragger": {
+    "psms_1pct": 89693,
+    "peptides_1pct": 21858,
+    "rate": 0.2694924013436612,
+    "spectra": 332822
+   },
+   "embedding": {
+    "psms_1pct": 0,
+    "peptides_1pct": 0,
+    "rate": 0.0,
+    "spectra": 332822
+   },
+   "embedding:delta": {
+    "psms_1pct": 0,
+    "peptides_1pct": 0,
+    "rate": 0.0,
+    "spectra": 332822
+   },
+   "linear:ms": {
+    "psms_1pct": 91780,
+    "peptides_1pct": 22635,
+    "rate": 0.27576302047340623,
+    "spectra": 332822
+   },
+   "linear:ms+emb": {
+    "psms_1pct": 92165,
+    "peptides_1pct": 22716,
+    "rate": 0.27691979496547703,
+    "spectra": 332822
+   },
+   "linear:ms+embws": {
+    "psms_1pct": 92306,
+    "peptides_1pct": 22811,
+    "rate": 0.2773434448443913,
+    "spectra": 332822
+   },
+   "linear:ms+nullws": {
+    "psms_1pct": 91713,
+    "peptides_1pct": 22640,
+    "rate": 0.27556171166569515,
+    "spectra": 332822
+   },
+   "mlp:ms": {
+    "psms_1pct": 93206,
+    "peptides_1pct": 23719,
+    "rate": 0.2800475930076738,
+    "spectra": 332822
+   },
+   "mlp:ms+emb": {
+    "psms_1pct": 93712,
+    "peptides_1pct": 23688,
+    "rate": 0.2815679251972526,
+    "spectra": 332822
+   },
+   "mlp:ms+embws": {
+    "psms_1pct": 94224,
+    "peptides_1pct": 23920,
+    "rate": 0.2831062850412533,
+    "spectra": 332822
+   },
+   "mlp:ms+nullws": {
+    "psms_1pct": 93557,
+    "peptides_1pct": 23748,
+    "rate": 0.28110221079135395,
+    "spectra": 332822
+   }
+  },
+  "HCT116": {
+   "msfragger": {
+    "psms_1pct": 1518,
+    "peptides_1pct": 827,
+    "rate": 0.01748324234676249,
+    "spectra": 86826
+   },
+   "embedding": {
+    "psms_1pct": 0,
+    "peptides_1pct": 0,
+    "rate": 0.0,
+    "spectra": 86826
+   },
+   "embedding:delta": {
+    "psms_1pct": 0,
+    "peptides_1pct": 0,
+    "rate": 0.0,
+    "spectra": 86826
+   },
+   "linear:ms": {
+    "psms_1pct": 1681,
+    "peptides_1pct": 931,
+    "rate": 0.019360560200861493,
+    "spectra": 86826
+   },
+   "linear:ms+emb": {
+    "psms_1pct": 1645,
+    "peptides_1pct": 915,
+    "rate": 0.018945937852716928,
+    "spectra": 86826
+   },
+   "linear:ms+embws": {
+    "psms_1pct": 1783,
+    "peptides_1pct": 950,
+    "rate": 0.02053532352060443,
+    "spectra": 86826
+   },
+   "linear:ms+nullws": {
+    "psms_1pct": 1768,
+    "peptides_1pct": 943,
+    "rate": 0.020362564208877526,
+    "spectra": 86826
+   },
+   "mlp:ms": {
+    "psms_1pct": 2424,
+    "peptides_1pct": 1216,
+    "rate": 0.027917904775067375,
+    "spectra": 86826
+   },
+   "mlp:ms+emb": {
+    "psms_1pct": 2239,
+    "peptides_1pct": 1141,
+    "rate": 0.02578720659710225,
+    "spectra": 86826
+   },
+   "mlp:ms+embws": {
+    "psms_1pct": 2293,
+    "peptides_1pct": 1202,
+    "rate": 0.026409140119319097,
+    "spectra": 86826
+   },
+   "mlp:ms+nullws": {
+    "psms_1pct": 2481,
+    "peptides_1pct": 1263,
+    "rate": 0.028574390159629603,
+    "spectra": 86826
+   }
+  },
+  "HEK293": {
+   "msfragger": {
+    "psms_1pct": 88543,
+    "peptides_1pct": 21517,
+    "rate": 0.3599367469389746,
+    "spectra": 245996
+   },
+   "embedding": {
+    "psms_1pct": 0,
+    "peptides_1pct": 0,
+    "rate": 0.0,
+    "spectra": 245996
+   },
+   "embedding:delta": {
+    "psms_1pct": 0,
+    "peptides_1pct": 0,
+    "rate": 0.0,
+    "spectra": 245996
+   },
+   "linear:ms": {
+    "psms_1pct": 90544,
+    "peptides_1pct": 21884,
+    "rate": 0.3680710255451308,
+    "spectra": 245996
+   },
+   "linear:ms+emb": {
+    "psms_1pct": 90795,
+    "peptides_1pct": 22113,
+    "rate": 0.3690913673393063,
+    "spectra": 245996
+   },
+   "linear:ms+embws": {
+    "psms_1pct": 90820,
+    "peptides_1pct": 22053,
+    "rate": 0.3691929950080489,
+    "spectra": 245996
+   },
+   "linear:ms+nullws": {
+    "psms_1pct": 90174,
+    "peptides_1pct": 21856,
+    "rate": 0.3665669360477406,
+    "spectra": 245996
+   },
+   "mlp:ms": {
+    "psms_1pct": 91475,
+    "peptides_1pct": 22606,
+    "rate": 0.37185563992910453,
+    "spectra": 245996
+   },
+   "mlp:ms+emb": {
+    "psms_1pct": 91879,
+    "peptides_1pct": 22642,
+    "rate": 0.37349794305598466,
+    "spectra": 245996
+   },
+   "mlp:ms+embws": {
+    "psms_1pct": 92243,
+    "peptides_1pct": 22815,
+    "rate": 0.37497764191287664,
+    "spectra": 245996
+   },
+   "mlp:ms+nullws": {
+    "psms_1pct": 91604,
+    "peptides_1pct": 22637,
+    "rate": 0.3723800386998163,
+    "spectra": 245996
+   }
+  }
+ },
+ "leakage_auroc_target_vs_decoy": {
+  "cosine": 0.5130886775400556,
+  "cosine_null": 0.5023429164313028
+ },
+ "cv": {
+  "group": "run",
+  "folds": 3,
+  "units": 8
+ },
+ "weights_fold0": {
+  "linear:ms": {
+   "msfragger_hyperscore": 0.6994,
+   "search_delta_score": 0.3648,
+   "search_neglog10_evalue": 11.8833,
+   "matched_fraction": 0.1919,
+   "num_matched_ions": 0.0259,
+   "abs_massdiff": -0.3243,
+   "num_tol_term": 0.0,
+   "num_missed_cleavages": -0.97,
+   "length": -0.2826,
+   "charge": 0.2186,
+   "search_rank": -23.7013
+  },
+  "linear:ms+emb": {
+   "msfragger_hyperscore": 0.412,
+   "search_delta_score": 0.0725,
+   "search_neglog10_evalue": 11.1455,
+   "matched_fraction": 0.2517,
+   "num_matched_ions": 0.1888,
+   "abs_massdiff": -0.311,
+   "num_tol_term": 0.0,
+   "num_missed_cleavages": -0.9686,
+   "length": -0.3119,
+   "charge": 0.4108,
+   "search_rank": -21.7178,
+   "cosine": 0.2596
+  },
+  "linear:ms+embws": {
+   "msfragger_hyperscore": 0.1594,
+   "search_delta_score": 0.1998,
+   "search_neglog10_evalue": 12.1291,
+   "matched_fraction": 0.2641,
+   "num_matched_ions": 0.3122,
+   "abs_massdiff": -0.2376,
+   "num_tol_term": 0.0,
+   "num_missed_cleavages": -0.9185,
+   "length": -0.1862,
+   "charge": 0.2921,
+   "search_rank": -23.2785,
+   "cosine": 0.1131,
+   "cos_delta": -0.035,
+   "cos_rank": 0.3758,
+   "cos_z": 0.5754,
+   "cos_gap12": 0.0265
+  },
+  "linear:ms+nullws": {
+   "msfragger_hyperscore": 0.5664,
+   "search_delta_score": 0.2884,
+   "search_neglog10_evalue": 12.2392,
+   "matched_fraction": 0.296,
+   "num_matched_ions": -0.0646,
+   "abs_massdiff": -0.3127,
+   "num_tol_term": 0.0,
+   "num_missed_cleavages": -0.8976,
+   "length": -0.1168,
+   "charge": 0.1922,
+   "search_rank": -23.6588,
+   "null_cosine": 0.0166,
+   "null_cos_delta": 0.0731,
+   "null_cos_rank": 0.2906,
+   "null_cos_z": 0.18,
+   "null_cos_gap12": 0.1135
+  }
+ },
+ "seed": 0,
+ "shuffle_labels": false
+}

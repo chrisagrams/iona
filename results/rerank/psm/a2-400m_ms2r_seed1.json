@@ -1,0 +1,146 @@
+{
+ "files": [
+  "05032011-7.parquet",
+  "0718-5.parquet",
+  "09122011-5.parquet",
+  "HEK-0628-5.parquet",
+  "HEK-U100ug-0408-5.parquet",
+  "HEK-U100ug-V2-5.parquet",
+  "Xiaomu_HCT116WholeCell_HILIC14_120min_10ul.parquet",
+  "Xiaomu_HCT116WholeCell_HILIC15_120min_10ul.parquet"
+ ],
+ "spectra": 332822,
+ "candidates": 2818394,
+ "methods": {
+  "all": {
+   "msfragger": {
+    "psms_1pct": 89693,
+    "peptides_1pct": 21858,
+    "rate": 0.2694924013436612,
+    "spectra": 332822
+   },
+   "embedding": {
+    "psms_1pct": 0,
+    "peptides_1pct": 0,
+    "rate": 0.0,
+    "spectra": 332822
+   },
+   "embedding:delta": {
+    "psms_1pct": 0,
+    "peptides_1pct": 0,
+    "rate": 0.0,
+    "spectra": 332822
+   },
+   "perrun/linear:ms+ms2r": {
+    "psms_1pct": 124863,
+    "peptides_1pct": 29296,
+    "rate": 0.3751645023465997,
+    "spectra": 332822
+   },
+   "perrun/linear:ms+ms2r+embws": {
+    "psms_1pct": 124970,
+    "peptides_1pct": 29175,
+    "rate": 0.37548599551712325,
+    "spectra": 332822
+   },
+   "perrun/linear:ms+ms2r+nullws": {
+    "psms_1pct": 124843,
+    "peptides_1pct": 29248,
+    "rate": 0.3751044101651934,
+    "spectra": 332822
+   }
+  },
+  "HCT116": {
+   "msfragger": {
+    "psms_1pct": 1518,
+    "peptides_1pct": 827,
+    "rate": 0.01748324234676249,
+    "spectra": 86826
+   },
+   "embedding": {
+    "psms_1pct": 0,
+    "peptides_1pct": 0,
+    "rate": 0.0,
+    "spectra": 86826
+   },
+   "embedding:delta": {
+    "psms_1pct": 0,
+    "peptides_1pct": 0,
+    "rate": 0.0,
+    "spectra": 86826
+   },
+   "perrun/linear:ms+ms2r": {
+    "psms_1pct": 6736,
+    "peptides_1pct": 3155,
+    "rate": 0.07758044825282749,
+    "spectra": 86826
+   },
+   "perrun/linear:ms+ms2r+embws": {
+    "psms_1pct": 6750,
+    "peptides_1pct": 3108,
+    "rate": 0.07774169027710594,
+    "spectra": 86826
+   },
+   "perrun/linear:ms+ms2r+nullws": {
+    "psms_1pct": 6755,
+    "peptides_1pct": 3136,
+    "rate": 0.07779927671434823,
+    "spectra": 86826
+   }
+  },
+  "HEK293": {
+   "msfragger": {
+    "psms_1pct": 88543,
+    "peptides_1pct": 21517,
+    "rate": 0.3599367469389746,
+    "spectra": 245996
+   },
+   "embedding": {
+    "psms_1pct": 0,
+    "peptides_1pct": 0,
+    "rate": 0.0,
+    "spectra": 245996
+   },
+   "embedding:delta": {
+    "psms_1pct": 0,
+    "peptides_1pct": 0,
+    "rate": 0.0,
+    "spectra": 245996
+   },
+   "perrun/linear:ms+ms2r": {
+    "psms_1pct": 117925,
+    "peptides_1pct": 26893,
+    "rate": 0.4793777134587554,
+    "spectra": 245996
+   },
+   "perrun/linear:ms+ms2r+embws": {
+    "psms_1pct": 118020,
+    "peptides_1pct": 26843,
+    "rate": 0.47976389859997726,
+    "spectra": 245996
+   },
+   "perrun/linear:ms+ms2r+nullws": {
+    "psms_1pct": 117936,
+    "peptides_1pct": 26856,
+    "rate": 0.4794224296330022,
+    "spectra": 245996
+   }
+  }
+ },
+ "leakage_auroc_target_vs_decoy": {
+  "cosine": 0.5258771524518355,
+  "cosine_null": 0.5016301650431028
+ },
+ "cv": {
+  "group": "run",
+  "folds": 3,
+  "units": 8
+ },
+ "perrun": {
+  "folds": 3,
+  "iters": 10,
+  "model": "linear"
+ },
+ "seed": 1,
+ "shuffle_labels": false
+}

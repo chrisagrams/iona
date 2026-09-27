@@ -1,0 +1,33 @@
+#!/bin/bash -l
+# Oktoberfest/Prosit rescoring on one or more runs (Koina predictions go off-site via ALCF proxy).
+#   qsub -q debug -l select=1 -l walltime=01:00:00 -v RUNS="HEK293/0718-5",SMOKE=1 run_okt.pbs
+#PBS -N okt-base
+#PBS -A UIC-HPC
+#PBS -l filesystems=home:flare
+#PBS -j oe
+#PBS -o /home/khuss/code/msdelta/baselines_wip/logs/
+set -uo pipefail
+B=/lus/flare/projects/UIC-HPC/khuss/msdelta/baselines
+W=/home/khuss/code/msdelta/baselines_wip/oktoberfest
+PY=$B/oktoberfest/bin/python
+OUT=${OUT:-$B/okt_out}
+RUNS=${RUNS:-"HEK293/0718-5"}
+S=/lus/flare/projects/UIC-HPC/khuss/msdelta/huggingface/hub/datasets--Gaolaboratory--psm-rerank-hek-hct116/snapshots/87f5c2756f5de8da8a664ef7e1a4dac8de067a88
+export PATH=$B/percolator/env/bin:$PATH
+P=http://proxy.alcf.anl.gov:3128
+export HTTP_PROXY=$P HTTPS_PROXY=$P http_proxy=$P https_proxy=$P
+export MPLCONFIGDIR=$B/.mpl XDG_CACHE_HOME=$B/.cache
+echo "=== $(date -Is) host=$(hostname) percolator=$(which percolator)"
+if [[ ${SMOKE:-1} == 1 ]]; then
+  rm -rf $OUT/smoke500
+  $PY $W/okt_run.py --parquet $S/HEK293/0718-5.parquet --out $OUT/smoke500 --limit 500 > $OUT/smoke500.log 2>&1
+  echo "smoke rc=$?"; tail -30 $OUT/smoke500.log
+  ls $OUT/smoke500/results/percolator 2>/dev/null
+fi
+for r in $RUNS; do
+  ds=${r%%/*}; name=${r##*/}
+  if [[ $ds == HEK293 ]]; then m=${HEK_MODEL:-Prosit_2020_intensity_CID}; f=CID; else m=${HCT_MODEL:-Prosit_2020_intensity_HCD}; f=HCD; fi
+  ( $PY $W/okt_run.py --parquet $S/$r.parquet --out $OUT/$name --model $m --frag $f --threads 1 > $OUT/$name.log 2>&1; echo "$(date -Is) $name rc=$?" ) &
+done
+wait
+echo "=== $(date -Is) end"

@@ -1,0 +1,1 @@
+CONTRASTIVE FROZEN-RECIPE ARM for C4 (checkpoint): 200m at pretraining checkpoint 430000, seed 0 of 1. Recipe is C1's best cell (lr 1e-4, KL 10, t 0.002, P64xK4, 24 epochs, GradCache 4), identical across every arm of this grid; only the pretrained checkpoint varies.

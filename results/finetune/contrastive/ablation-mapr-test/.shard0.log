@@ -1,0 +1,3 @@
+[score] shard 0/8: 1 of 8 models on xpu
+Loading weights:   0%|          | 0/170 [00:00<?, ?it/s]Loading weights:  31%|███       | 52/170 [00:00<00:00, 449.69it/s]Loading weights:  57%|█████▋    | 97/170 [00:00<00:00, 256.46it/s]Loading weights:  75%|███████▍  | 127/170 [00:00<00:00, 255.76it/s]Loading weights:  91%|█████████ | 155/170 [00:00<00:00, 224.87it/s]Loading weights: 100%|██████████| 170/170 [00:00<00:00, 269.52it/s]
+  abl_pre_050m_seed0: all MAP@R 0.1011  experimental MAP@R 0.1476  (748s)

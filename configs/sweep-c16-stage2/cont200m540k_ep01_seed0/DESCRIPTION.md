@@ -1,0 +1,1 @@
+C16 STAGE 2: C7 recipe from the FINAL 200m checkpoint (540,423). Start: /lus/flare/projects/UIC-HPC/khuss/msdelta/runs/sweep-s200m540k_t0002_pk256_ep12_seed0-8868879/final. Otherwise identical to cont400m_ep01_seed0 (sweep-con100k-best). PLAN.md C16.

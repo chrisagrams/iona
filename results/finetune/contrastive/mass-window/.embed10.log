@@ -1,0 +1,5 @@
+[embed] shard 10/12: 2 of 26 on xpu
+Loading weights:   0%|          | 0/170 [00:00<?, ?it/s]Loading weights: 100%|██████████| 170/170 [00:00<00:00, 12498.58it/s]
+  validation/supcon_random_seed1: (25775, 1280) (526s)
+Loading weights:   0%|          | 0/170 [00:00<?, ?it/s]Loading weights: 100%|██████████| 170/170 [00:00<00:00, 12638.82it/s]
+  validation/sigmoid_random_seed1: (25775, 1280) (492s)

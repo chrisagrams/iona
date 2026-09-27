@@ -1,0 +1,50 @@
+{
+ "oktoberfest:original": {
+  "all": {
+   "spectra": 224099,
+   "pooled": 87128,
+   "sum_per_run": 86900,
+   "tool_own_q<=0.01": 86900,
+   "pooled_by_q": 86987
+  },
+  "HEK293": {
+   "spectra": 224099,
+   "pooled": 87128,
+   "sum_per_run": 86900,
+   "tool_own_q<=0.01": 86900,
+   "pooled_by_q": 86987
+  },
+  "runs": [
+   "05032011-7",
+   "0718-5",
+   "09122011-5",
+   "HEK-0628-5",
+   "HEK-U100ug-0408-5",
+   "HEK-U100ug-V2-5"
+  ]
+ },
+ "oktoberfest:rescore": {
+  "all": {
+   "spectra": 224099,
+   "pooled": 102810,
+   "sum_per_run": 102602,
+   "tool_own_q<=0.01": 102602,
+   "pooled_by_q": 102627
+  },
+  "HEK293": {
+   "spectra": 224099,
+   "pooled": 102810,
+   "sum_per_run": 102602,
+   "tool_own_q<=0.01": 102602,
+   "pooled_by_q": 102627
+  },
+  "runs": [
+   "05032011-7",
+   "0718-5",
+   "09122011-5",
+   "HEK-0628-5",
+   "HEK-U100ug-0408-5",
+   "HEK-U100ug-V2-5"
+  ]
+ }
+}

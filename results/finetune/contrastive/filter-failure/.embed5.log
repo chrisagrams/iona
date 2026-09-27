@@ -1,0 +1,3 @@
+[embed] shard 5/12: 1 of 15 on xpu
+Loading weights:   0%|          | 0/170 [00:00<?, ?it/s]Loading weights: 100%|██████████| 170/170 [00:00<00:00, 9503.92it/s]
+  hek/iona50m: (27637, 1280) (560s)

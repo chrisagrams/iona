@@ -1,0 +1,3 @@
+[score] shard 9/12: 1 of 12 models on xpu
+Loading weights:   0%|          | 0/170 [00:00<?, ?it/s]Loading weights:  28%|██▊       | 48/170 [00:00<00:00, 352.48it/s]Loading weights:  49%|████▉     | 84/170 [00:00<00:00, 214.94it/s]Loading weights:  64%|██████▎   | 108/170 [00:00<00:00, 196.79it/s]Loading weights:  76%|███████▋  | 130/170 [00:00<00:00, 194.38it/s]Loading weights: 100%|██████████| 170/170 [00:00<00:00, 240.46it/s]
+  s050m_t0002_pk256_ep24_seed0: all MAP@R 0.8243  experimental MAP@R 0.8243  (410s)

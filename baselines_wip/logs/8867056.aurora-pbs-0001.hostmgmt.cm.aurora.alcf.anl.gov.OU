@@ -1,0 +1,18 @@
+=== 2026-09-25T11:39:37+00:00 start OUT=/lus/flare/projects/UIC-HPC/khuss/msdelta/baselines/ms2rescore_out/full8_repeat LIMIT=0 ARMS=full host=x4619c3s5b0n0 nproc=4
+2026-09-25T11:39:51+00:00 converted none HEK-0628-5
+2026-09-25T11:39:53+00:00 converted none 0718-5
+2026-09-25T11:39:53+00:00 converted none 05032011-7
+2026-09-25T11:39:54+00:00 converted none HEK-U100ug-V2-5
+2026-09-25T11:39:55+00:00 converted none 09122011-5
+2026-09-25T11:39:55+00:00 converted none HEK-U100ug-0408-5
+2026-09-25T11:39:56+00:00 converted none Xiaomu_HCT116WholeCell_HILIC15_120min_10ul
+2026-09-25T11:40:00+00:00 converted none Xiaomu_HCT116WholeCell_HILIC14_120min_10ul
+2026-09-25T11:48:42+00:00 DONE none full HEK-0628-5
+2026-09-25T11:49:15+00:00 DONE none full 05032011-7
+2026-09-25T11:50:06+00:00 DONE none full HEK-U100ug-0408-5
+2026-09-25T11:50:26+00:00 DONE none full 09122011-5
+2026-09-25T11:52:04+00:00 DONE none full HEK-U100ug-V2-5
+2026-09-25T11:52:48+00:00 DONE none full Xiaomu_HCT116WholeCell_HILIC14_120min_10ul
+2026-09-25T11:52:52+00:00 DONE none full 0718-5
+2026-09-25T11:53:48+00:00 DONE none full Xiaomu_HCT116WholeCell_HILIC15_120min_10ul
+=== 2026-09-25T11:53:48+00:00 end

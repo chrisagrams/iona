@@ -1,0 +1,13 @@
+Fetching 9 files:   0%|          | 0/9 [00:00<?, ?it/s]Fetching 9 files:  11%|█         | 1/9 [00:00<00:04,  1.99it/s]Fetching 9 files:  89%|████████▉ | 8/9 [00:01<00:00,  8.75it/s]Fetching 9 files: 100%|██████████| 9/9 [00:14<00:00,  2.23s/it]Fetching 9 files: 100%|██████████| 9/9 [00:14<00:00,  1.63s/it]
+Fetching 5 files:   0%|          | 0/5 [00:00<?, ?it/s]Fetching 5 files:  20%|██        | 1/5 [00:00<00:02,  1.54it/s]Fetching 5 files: 100%|██████████| 5/5 [00:01<00:00,  4.23it/s]Fetching 5 files: 100%|██████████| 5/5 [00:01<00:00,  3.83it/s]
+Loading weights:   0%|          | 0/330 [00:00<?, ?it/s]Loading weights: 100%|██████████| 330/330 [00:00<00:00, 13941.44it/s]
+[ours] 25,490 spectra on xpu; models loaded (18s)
+[ours] spectra 32/25,490 (22s)
+[ours] spectra 3,232/25,490 (180s)
+[ours] spectra 6,432/25,490 (337s)
+[ours] spectra 9,632/25,490 (495s)
+[ours] spectra 12,832/25,490 (652s)
+[ours] spectra 16,032/25,490 (809s)
+[ours] spectra 19,232/25,490 (966s)
+[ours] spectra 22,432/25,490 (1122s)
+[ours] wrote /lus/flare/projects/UIC-HPC/khuss/msdelta/baselines/mouse_noble/ours.npz: 25,490 spectra, 7,177 candidates (1274s)

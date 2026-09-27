@@ -1,0 +1,3 @@
+[embed] shard 4/12: 1 of 15 on xpu
+Loading weights:   0%|          | 0/170 [00:00<?, ?it/s]Loading weights:  31%|███       | 53/170 [00:00<00:00, 529.17it/s]Loading weights:  62%|██████▏   | 106/170 [00:00<00:00, 238.38it/s]Loading weights:  81%|████████  | 138/170 [00:00<00:00, 216.82it/s]Loading weights:  96%|█████████▋| 164/170 [00:00<00:00, 216.83it/s]Loading weights: 100%|██████████| 170/170 [00:00<00:00, 242.11it/s]
+  human/iona50m: (20000, 1280) (415s)

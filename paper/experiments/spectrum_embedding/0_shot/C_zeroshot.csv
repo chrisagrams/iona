@@ -23,6 +23,8 @@ ms-contrastive-100k,400m@220k,0.16450,0.43230,0.65310,128,block16,ms-contrastive
 ms-contrastive-100k,400m@330k,0.16650,0.42900,0.65990,128,block16,ms-contrastive-100k train
 ms-contrastive-100k,400m@430k,0.12460,0.29330,0.53530,128,block15,ms-contrastive-100k train
 ms-contrastive-100k,400m@540k,0.14500,0.36640,0.61560,128,block15,ms-contrastive-100k train
+human-20k,400m@220k,0.31239,0.53375,0.71675,128,block15,ms-contrastive-100k train
+human-20k,400m@330k,0.32515,0.54583,0.73081,128,block15,ms-contrastive-100k train
 mouse-20k,400m@220k,0.38018,0.53810,0.68770,128,block15,ms-contrastive-100k train
 mouse-20k,400m@330k,0.38997,0.55460,0.70275,128,block14,ms-contrastive-100k train
 yeast-20k,50m@220k,0.31600,0.38473,0.60197,128,block07,8 other species (train split)

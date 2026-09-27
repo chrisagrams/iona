@@ -1,0 +1,22 @@
+{
+ "name": "binned_w0.1",
+ "path": "binned:0.1",
+ "pooling": "mean+max",
+ "data": "/lus/flare/projects/UIC-HPC/khuss/msdelta/baselines/c14_hct116_20k/prepared",
+ "metrics": {
+  "all/Hit@1": 0.6698330166983302,
+  "all/Precision@1": 0.6698330166983302,
+  "all/R-Precision": 0.39476720052604114,
+  "all/MAP@R": 0.36674350448255955,
+  "all/R@5": 0.368180146707009,
+  "all/MAP@100": 0.4107764760633312,
+  "all/queries": 20002.0,
+  "experimental/Hit@1": 0.6698330166983302,
+  "experimental/Precision@1": 0.6698330166983302,
+  "experimental/R-Precision": 0.39476720052604114,
+  "experimental/MAP@R": 0.36674350448255955,
+  "experimental/R@5": 0.368180146707009,
+  "experimental/MAP@100": 0.4107764760633312,
+  "experimental/queries": 20002.0
+ }
+}

@@ -1,0 +1,7 @@
+[embed] shard 0/12: 3 of 26 on xpu
+Loading weights:   0%|          | 0/170 [00:00<?, ?it/s]Loading weights: 100%|██████████| 170/170 [00:00<00:00, 9475.13it/s]
+  validation/pretrained_50m_540k: (25775, 1280) (532s)
+Loading weights:   0%|          | 0/170 [00:00<?, ?it/s]Loading weights: 100%|██████████| 170/170 [00:00<00:00, 13333.18it/s]
+  validation/supcon_random_seed2: (25775, 1280) (529s)
+Loading weights:   0%|          | 0/170 [00:00<?, ?it/s]Loading weights:  33%|███▎      | 56/170 [00:00<00:00, 497.84it/s]Loading weights:  62%|██████▏   | 106/170 [00:00<00:00, 242.31it/s]Loading weights:  81%|████████  | 137/170 [00:00<00:00, 218.17it/s]Loading weights: 100%|██████████| 170/170 [00:00<00:00, 256.17it/s]
+  validation/sigmoid_random_seed2: (25775, 1280) (489s)

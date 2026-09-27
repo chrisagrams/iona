@@ -1,0 +1,3 @@
+[embed] shard 6/12: 1 of 15 on xpu
+Loading weights:   0%|          | 0/170 [00:00<?, ?it/s]Loading weights:  34%|███▍      | 58/170 [00:00<00:00, 475.96it/s]Loading weights:  62%|██████▏   | 106/170 [00:00<00:00, 242.52it/s]Loading weights:  81%|████████  | 137/170 [00:00<00:00, 237.68it/s]Loading weights:  96%|█████████▋| 164/170 [00:00<00:00, 219.95it/s]Loading weights: 100%|██████████| 170/170 [00:00<00:00, 248.95it/s]
+  mouse/c19_mass_50m: (20003, 1280) (396s)

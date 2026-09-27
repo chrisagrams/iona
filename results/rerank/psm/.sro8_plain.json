@@ -1,0 +1,35 @@
+{
+ "ms2rescore:searchonly": {
+  "all": {
+   "spectra": 332822,
+   "pooled": 100974,
+   "sum_per_run": 100561,
+   "tool_own_q<=0.01": 100561,
+   "pooled_by_q": 100669
+  },
+  "HCT116": {
+   "spectra": 86826,
+   "pooled": 2950,
+   "sum_per_run": 2922,
+   "tool_own_q<=0.01": 2922,
+   "pooled_by_q": 2954
+  },
+  "HEK293": {
+   "spectra": 245996,
+   "pooled": 97722,
+   "sum_per_run": 97639,
+   "tool_own_q<=0.01": 97639,
+   "pooled_by_q": 97728
+  },
+  "runs": [
+   "05032011-7",
+   "0718-5",
+   "09122011-5",
+   "HEK-0628-5",
+   "HEK-U100ug-0408-5",
+   "HEK-U100ug-V2-5",
+   "Xiaomu_HCT116WholeCell_HILIC14_120min_10ul",
+   "Xiaomu_HCT116WholeCell_HILIC15_120min_10ul"
+  ]
+ }
+}

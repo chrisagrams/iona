@@ -1,0 +1,4 @@
+abtt D=[8, 32, 64, 128]: fit on 25,859 experimental train spectra
+Loading weights:   0%|          | 0/330 [00:00<?, ?it/s]Loading weights:  25%|██▌       | 83/330 [00:00<00:00, 786.80it/s]Loading weights:  49%|████▉     | 162/330 [00:00<00:00, 210.37it/s]Loading weights:  62%|██████▏   | 203/330 [00:00<00:00, 181.89it/s]Loading weights:  70%|███████   | 232/330 [00:01<00:00, 163.88it/s]Loading weights:  77%|███████▋  | 254/330 [00:01<00:00, 159.19it/s]Loading weights:  83%|████████▎ | 274/330 [00:01<00:00, 148.71it/s]Loading weights:  89%|████████▉ | 294/330 [00:01<00:00, 156.00it/s]Loading weights:  95%|█████████▍| 312/330 [00:01<00:00, 148.78it/s]Loading weights: 100%|██████████| 330/330 [00:01<00:00, 182.34it/s]
+    block00: raw 0.0003  D8 0.0008  D32 0.0001  D64 0.0001  D128 0.0002  (7426s)
+    block01: raw 0.0141  D8 0.0609  D32 0.0867  D64 0.0958  D128 0.0984  (8187s)

@@ -1,0 +1,63 @@
+{
+ "n_queries_all": 25490,
+ "n_queries_shared": 19710,
+ "n_candidates_all": 7177,
+ "n_sequences_shared": 5206,
+ "yhydra/shared/cos": {
+  "hit@1": 0.2027904616945713,
+  "hit@5": 0.4287163876204972,
+  "mrr": 0.3130426998596703,
+  "queries": 19710,
+  "candidates": 5206
+ },
+ "yhydra/shared/l2": {
+  "hit@1": 0.23759512937595129,
+  "hit@5": 0.4754946727549467,
+  "mrr": 0.3515919539225902,
+  "queries": 19710,
+  "candidates": 5206
+ },
+ "ours/shared/peptide+charge": {
+  "hit@1": 0.9250126839167935,
+  "hit@5": 0.961085743277524,
+  "mrr": 0.9415369253722066,
+  "queries": 19710,
+  "candidates": 5448
+ },
+ "ours/shared/sequence": {
+  "hit@1": 0.9251141552511416,
+  "queries": 19710,
+  "candidates": 5448
+ },
+ "yhydra/shared/l2/window_20ppm": {
+  "hit@1": 0.8512430238457636,
+  "true_outside": 0.10324708269913749,
+  "median_candidates": 2.0,
+  "queries": 19710
+ },
+ "ours/shared/peptide+charge/window_20ppm": {
+  "hit@1": 0.8943683409436834,
+  "true_outside": 0.10324708269913749,
+  "median_candidates": 2.0,
+  "queries": 19710
+ },
+ "yhydra/shared/l2/window_1.1Da": {
+  "hit@1": 0.7686960933536277,
+  "true_outside": 0.0,
+  "median_candidates": 18.0,
+  "queries": 19710
+ },
+ "ours/shared/peptide+charge/window_1.1Da": {
+  "hit@1": 0.9864028411973618,
+  "true_outside": 0.0,
+  "median_candidates": 18.0,
+  "queries": 19710
+ },
+ "ours/full/peptide+charge": {
+  "hit@1": 0.763318948607297,
+  "hit@5": 0.8790113770105924,
+  "mrr": 0.8168776053118757,
+  "queries": 25490,
+  "candidates": 7177
+ }
+}

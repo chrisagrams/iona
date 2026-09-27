@@ -1,0 +1,22 @@
+{
+ "name": "c8c19_sigmoid_random_seed0_step1062",
+ "path": "/lus/flare/projects/UIC-HPC/khuss/msdelta/runs/sweep-s050m_ck540k_sigmoid_random_seed0-8872141/checkpoint-1062/encoder",
+ "pooling": "mean+max",
+ "data": "/lus/flare/projects/UIC-HPC/khuss/msdelta/eval-data/ms-contrastive-100k-validation-mp512",
+ "metrics": {
+  "all/Hit@1": 0.7765233834777455,
+  "all/Precision@1": 0.7765233834777455,
+  "all/R-Precision": 0.6279106022781294,
+  "all/MAP@R": 0.6150734400164448,
+  "all/R@5": 0.6825990652385976,
+  "all/MAP@100": 0.6695037331031618,
+  "all/queries": 35431.0,
+  "experimental/Hit@1": 0.782575727341661,
+  "experimental/Precision@1": 0.782575727341661,
+  "experimental/R-Precision": 0.6992058107514866,
+  "experimental/MAP@R": 0.6935487089436085,
+  "experimental/R@5": 0.764856128028096,
+  "experimental/MAP@100": 0.7364681158793888,
+  "experimental/queries": 25057.0
+ }
+}

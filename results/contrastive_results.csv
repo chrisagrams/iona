@@ -47,6 +47,16 @@ ms-contrastive-100k,"replicate corpus only (24 ep, C2/C4)",100m,430k,final,2,0.6
 ms-contrastive-100k,"replicate corpus only (24 ep, C2/C4)",100m,540k,final,0,0.67343,0.77670,25137.0,results/finetune/contrastive/grouped100k-test/c4_s100m_ck540k_seed0.json
 ms-contrastive-100k,"replicate corpus only (24 ep, C2/C4)",100m,540k,final,1,0.67476,0.77829,25137.0,results/finetune/contrastive/grouped100k-test/c4_s100m_ck540k_seed1.json
 ms-contrastive-100k,"replicate corpus only (24 ep, C2/C4)",100m,540k,final,2,0.66490,0.77070,25137.0,results/finetune/contrastive/grouped100k-test/c4_s100m_ck540k_seed2.json
+ms-contrastive-100k,"replicate corpus only (24 ep, C2/C4)",200m,10k,final,0,0.53067,0.65577,25137.0,results/finetune/contrastive/grouped100k-test/c4_s200m_ck010k_seed0.json
+ms-contrastive-100k,"replicate corpus only (24 ep, C2/C4)",200m,120k,final,0,0.64322,0.75184,25137.0,results/finetune/contrastive/grouped100k-test/c4_s200m_ck120k_seed0.json
+ms-contrastive-100k,"replicate corpus only (24 ep, C2/C4)",200m,330k,final,0,0.61415,0.72857,25137.0,results/finetune/contrastive/grouped100k-test/c4_s200m_ck330k_seed0.json
+ms-contrastive-100k,"replicate corpus only (24 ep, C2/C4)",200m,430k,final,0,0.66735,0.77010,25137.0,results/finetune/contrastive/grouped100k-test/c4_s200m_ck430k_seed0.json
+ms-contrastive-100k,"replicate corpus only (24 ep, C2/C4)",200m,540k,final,0,0.66593,0.76895,25137.0,results/finetune/contrastive/grouped100k-test/c4_s200m_ck540k_seed0.json
+ms-contrastive-100k,"replicate corpus only (24 ep, C2/C4)",400m,10k,final,0,0.55204,0.67383,25137.0,results/finetune/contrastive/grouped100k-test/c4_s400m_ck010k_seed0.json
+ms-contrastive-100k,"replicate corpus only (24 ep, C2/C4)",400m,120k,final,0,0.69759,0.79373,25137.0,results/finetune/contrastive/grouped100k-test/c4_s400m_ck120k_seed0.json
+ms-contrastive-100k,"replicate corpus only (24 ep, C2/C4)",400m,330k,final,0,0.70883,0.80149,25137.0,results/finetune/contrastive/grouped100k-test/c4_s400m_ck330k_seed0.json
+ms-contrastive-100k,"replicate corpus only (24 ep, C2/C4)",400m,430k,final,0,0.70614,0.79950,25137.0,results/finetune/contrastive/grouped100k-test/c4_s400m_ck430k_seed0.json
+ms-contrastive-100k,"replicate corpus only (24 ep, C2/C4)",400m,540k,final,0,0.71511,0.80702,25137.0,results/finetune/contrastive/grouped100k-test/c4_s400m_ck540k_seed0.json
 ms-contrastive-100k,C7 (replicate corpus -> ms-contrastive-100k),50m,220k,final,0,0.83816,0.89263,25137.0,results/finetune/contrastive/grouped100k-test/c7b_cont050m_final_seed0.json
 ms-contrastive-100k,C7 (replicate corpus -> ms-contrastive-100k),50m,220k,final,1,0.83867,0.89338,25137.0,results/finetune/contrastive/grouped100k-test/c7b_cont050m_final_seed1.json
 ms-contrastive-100k,C7 (replicate corpus -> ms-contrastive-100k),50m,220k,final,2,0.84014,0.89446,25137.0,results/finetune/contrastive/grouped100k-test/c7b_cont050m_final_seed2.json
@@ -76,6 +86,8 @@ ms-contrastive-100k,"replicate corpus + projection head (C9, 3 ep)",50m,220k,fin
 ms-contrastive-100k,"replicate corpus + projection head (C9, 3 ep)",50m,220k,final,2,0.14076,0.21395,25137.0,results/finetune/contrastive/grouped100k-test/c9q_s050m_head256_ep03_seed2.json
 ms-contrastive-100k,"binned + PCA (0.1 Da, d=1280)",,,,,0.72326,0.81406,25137.0,results/finetune/contrastive/grouped100k-test/pca_w0.1_d1280.json
 ms-contrastive-100k,"binned + PCA (0.1 Da, d=256)",,,,,0.48792,0.61121,25137.0,results/finetune/contrastive/grouped100k-test/pca_w0.1_d256.json
+ms-contrastive-100k,"binned + PCA (1 Da, d=1024)",,,,,0.72602,0.81489,25137.0,results/finetune/contrastive/grouped100k-test/pca_w1.0005_d1024.json
+ms-contrastive-100k,"binned + PCA (1 Da, d=128)",,,,,0.40407,0.52659,25137.0,results/finetune/contrastive/grouped100k-test/pca_w1.0005_d128.json
 ms-contrastive-100k,"binned + PCA (1 Da, d=256)",,,,,0.55330,0.67156,25137.0,results/finetune/contrastive/grouped100k-test/pca_w1.0005_d256.json
 ms-contrastive-100k,replicate corpus only (3 ep),50m,220k,final,0,0.37865,0.50961,25137.0,results/finetune/contrastive/grouped100k-test/s050m_t0002_pk256_ep03_seed0.json
 ms-contrastive-100k,replicate corpus only (3 ep),50m,220k,final,1,0.37699,0.50845,25137.0,results/finetune/contrastive/grouped100k-test/s050m_t0002_pk256_ep03_seed1.json
@@ -110,6 +122,11 @@ hek-lowres,binned cosine (1 Da bins),,,,,0.55413,0.74570,27637.0,results/finetun
 hek-lowres,C7 (replicate corpus -> ms-contrastive-100k),400m,220k,final,0,0.17304,0.28820,27637.0,results/finetune/contrastive/c11_cap20/c7b_cont400m_final_seed0.json
 hek-lowres,C7 (replicate corpus -> ms-contrastive-100k),400m,220k,final,1,0.16930,0.28693,27637.0,results/finetune/contrastive/c11_cap20/c7b_cont400m_final_seed1.json
 hek-lowres,C7 (replicate corpus -> ms-contrastive-100k),400m,220k,final,2,0.16667,0.27847,27637.0,results/finetune/contrastive/c11_cap20/c7b_cont400m_final_seed2.json
+hek-lowres,"binned + PCA (0.1 Da, d=1280)",,,,,0.01081,0.02489,27637.0,results/finetune/contrastive/c11_cap20/pca_w0.1_d1280.json
+hek-lowres,"binned + PCA (0.1 Da, d=256)",,,,,0.00709,0.01827,27637.0,results/finetune/contrastive/c11_cap20/pca_w0.1_d256.json
+hek-lowres,"binned + PCA (1 Da, d=1024)",,,,,0.52955,0.72537,27637.0,results/finetune/contrastive/c11_cap20/pca_w1.0005_d1024.json
+hek-lowres,"binned + PCA (1 Da, d=128)",,,,,0.23394,0.38065,27637.0,results/finetune/contrastive/c11_cap20/pca_w1.0005_d128.json
+hek-lowres,"binned + PCA (1 Da, d=256)",,,,,0.33178,0.49919,27637.0,results/finetune/contrastive/c11_cap20/pca_w1.0005_d256.json
 hek-lowres,replicate corpus only (12 ep),400m,220k,final,0,0.01702,0.04432,27637.0,results/finetune/contrastive/c11_cap20/s400m_t0002_pk256_ep12_seed0.json
 hek-lowres,replicate corpus only (12 ep),400m,220k,final,1,0.01776,0.04534,27637.0,results/finetune/contrastive/c11_cap20/s400m_t0002_pk256_ep12_seed1.json
 hek-lowres,replicate corpus only (12 ep),400m,220k,final,2,0.01558,0.04165,27637.0,results/finetune/contrastive/c11_cap20/s400m_t0002_pk256_ep12_seed2.json
@@ -119,6 +136,11 @@ yeast-full,binned cosine (1 Da bins),,,,,0.78997,0.89195,86184.0,results/finetun
 yeast-full,C7 (replicate corpus -> ms-contrastive-100k),400m,220k,final,0,0.51373,0.70682,86184.0,results/finetune/contrastive/nine_yeast/c7b_cont400m_final_seed0.json
 yeast-full,C7 (replicate corpus -> ms-contrastive-100k),400m,220k,final,1,0.56458,0.74004,86184.0,results/finetune/contrastive/nine_yeast/c7b_cont400m_final_seed1.json
 yeast-full,C7 (replicate corpus -> ms-contrastive-100k),400m,220k,final,2,0.47447,0.67878,86184.0,results/finetune/contrastive/nine_yeast/c7b_cont400m_final_seed2.json
+yeast-full,"binned + PCA (0.1 Da, d=1280)",,,,,0.76501,0.87777,86184.0,results/finetune/contrastive/nine_yeast/pca_w0.1_d1280.json
+yeast-full,"binned + PCA (0.1 Da, d=256)",,,,,0.71116,0.84950,86184.0,results/finetune/contrastive/nine_yeast/pca_w0.1_d256.json
+yeast-full,"binned + PCA (1 Da, d=1024)",,,,,0.77459,0.88375,86184.0,results/finetune/contrastive/nine_yeast/pca_w1.0005_d1024.json
+yeast-full,"binned + PCA (1 Da, d=128)",,,,,0.67478,0.83331,86184.0,results/finetune/contrastive/nine_yeast/pca_w1.0005_d128.json
+yeast-full,"binned + PCA (1 Da, d=256)",,,,,0.72938,0.86132,86184.0,results/finetune/contrastive/nine_yeast/pca_w1.0005_d256.json
 yeast-full,replicate corpus only (12 ep),400m,220k,final,0,0.44441,0.66543,86184.0,results/finetune/contrastive/nine_yeast/s400m_t0002_pk256_ep12_seed0.json
 yeast-full,replicate corpus only (12 ep),400m,220k,final,1,0.47389,0.68485,86184.0,results/finetune/contrastive/nine_yeast/s400m_t0002_pk256_ep12_seed1.json
 yeast-full,replicate corpus only (12 ep),400m,220k,final,2,0.50323,0.70327,86184.0,results/finetune/contrastive/nine_yeast/s400m_t0002_pk256_ep12_seed2.json
@@ -133,9 +155,45 @@ yeast-20k,C7 (replicate corpus -> ms-contrastive-100k),400m,220k,final,2,0.55011
 yeast-20k,C7 (replicate corpus -> ms-contrastive-100k),400m,220k,s300,0,0.60619,0.79105,20019.0,results/finetune/contrastive/nine20k/c7b_cont400m_s300_seed0.json
 yeast-20k,C7 (replicate corpus -> ms-contrastive-100k),400m,220k,s600,0,0.65451,0.81592,20019.0,results/finetune/contrastive/nine20k/c7b_cont400m_s600_seed0.json
 yeast-20k,C7 (replicate corpus -> ms-contrastive-100k),400m,220k,s900,0,0.59586,0.77986,20019.0,results/finetune/contrastive/nine20k/c7b_cont400m_s900_seed0.json
+yeast-20k,"binned + PCA (0.1 Da, d=1280)",,,,,0.90259,0.96124,20019.0,results/finetune/contrastive/nine20k/pca_w0.1_d1280.json
+yeast-20k,"binned + PCA (0.1 Da, d=256)",,,,,0.85645,0.94365,20019.0,results/finetune/contrastive/nine20k/pca_w0.1_d256.json
+yeast-20k,"binned + PCA (1 Da, d=1024)",,,,,0.90725,0.96348,20019.0,results/finetune/contrastive/nine20k/pca_w1.0005_d1024.json
+yeast-20k,"binned + PCA (1 Da, d=128)",,,,,0.81213,0.92842,20019.0,results/finetune/contrastive/nine20k/pca_w1.0005_d128.json
+yeast-20k,"binned + PCA (1 Da, d=256)",,,,,0.86941,0.95075,20019.0,results/finetune/contrastive/nine20k/pca_w1.0005_d256.json
 yeast-20k,replicate corpus only (24 ep),50m,220k,final,1,0.49906,0.72496,20019.0,results/finetune/contrastive/nine20k/s050m_t0002_pk256_ep24_seed1.json
 yeast-20k,replicate corpus only (12 ep),400m,220k,final,0,0.52046,0.74085,20019.0,results/finetune/contrastive/nine20k/s400m_t0002_pk256_ep12_seed0.json
 yeast-20k,GLEAMS (pretrained),,,,,0.76989,0.88566,20019.0,/lus/flare/projects/UIC-HPC/khuss/msdelta/baselines/nine_yeast20k/gleams_metrics.json
+mouse-20k,binned cosine (0.1 Da bins),,,,,0.91576,0.97110,20003.0,results/finetune/contrastive/mouse20k/binned_w0.1.json
+mouse-20k,binned cosine (1 Da bins),,,,,0.90911,0.96775,20003.0,results/finetune/contrastive/mouse20k/binned_w1.0005.json
+mouse-20k,C7 (replicate corpus -> ms-contrastive-100k),50m,220k,final,1,0.81956,0.91596,20003.0,results/finetune/contrastive/mouse20k/c7b_cont050m_final_seed1.json
+mouse-20k,C7 (replicate corpus -> ms-contrastive-100k),400m,220k,final,0,0.84601,0.93211,20003.0,results/finetune/contrastive/mouse20k/c7b_cont400m_final_seed0.json
+mouse-20k,C7 (replicate corpus -> ms-contrastive-100k),400m,220k,final,1,0.84644,0.93271,20003.0,results/finetune/contrastive/mouse20k/c7b_cont400m_final_seed1.json
+mouse-20k,C7 (replicate corpus -> ms-contrastive-100k),400m,220k,final,2,0.84551,0.93136,20003.0,results/finetune/contrastive/mouse20k/c7b_cont400m_final_seed2.json
+mouse-20k,"binned + PCA (0.1 Da, d=1280)",,,,,0.90199,0.96715,20003.0,results/finetune/contrastive/mouse20k/pca_w0.1_d1280.json
+mouse-20k,"binned + PCA (0.1 Da, d=256)",,,,,0.79193,0.91741,20003.0,results/finetune/contrastive/mouse20k/pca_w0.1_d256.json
+mouse-20k,"binned + PCA (1 Da, d=1024)",,,,,0.91043,0.96730,20003.0,results/finetune/contrastive/mouse20k/pca_w1.0005_d1024.json
+mouse-20k,"binned + PCA (1 Da, d=128)",,,,,0.74772,0.89772,20003.0,results/finetune/contrastive/mouse20k/pca_w1.0005_d128.json
+mouse-20k,"binned + PCA (1 Da, d=256)",,,,,0.84275,0.94021,20003.0,results/finetune/contrastive/mouse20k/pca_w1.0005_d256.json
+mouse-20k,replicate corpus only (24 ep),50m,220k,final,0,0.75405,0.89242,20003.0,results/finetune/contrastive/mouse20k/s050m_t0002_pk256_ep24_seed0.json
+mouse-20k,replicate corpus only (24 ep),50m,220k,final,1,0.75469,0.89202,20003.0,results/finetune/contrastive/mouse20k/s050m_t0002_pk256_ep24_seed1.json
+mouse-20k,replicate corpus only (24 ep),50m,220k,final,2,0.76117,0.89577,20003.0,results/finetune/contrastive/mouse20k/s050m_t0002_pk256_ep24_seed2.json
+mouse-20k,replicate corpus only (12 ep),400m,220k,final,0,0.78677,0.91091,20003.0,results/finetune/contrastive/mouse20k/s400m_t0002_pk256_ep12_seed0.json
+mouse-20k,replicate corpus only (12 ep),400m,220k,final,1,0.78683,0.91281,20003.0,results/finetune/contrastive/mouse20k/s400m_t0002_pk256_ep12_seed1.json
+mouse-20k,replicate corpus only (12 ep),400m,220k,final,2,0.78780,0.91356,20003.0,results/finetune/contrastive/mouse20k/s400m_t0002_pk256_ep12_seed2.json
+mouse-20k,GLEAMS (pretrained),,,,,0.83389,0.93066,20003.0,/lus/flare/projects/UIC-HPC/khuss/msdelta/baselines/noble_mouse20k/gleams_metrics.json
+human-20k,binned cosine (0.1 Da bins),,,,,0.80941,0.92655,20000.0,results/finetune/contrastive/human20k/binned_w0.1.json
+human-20k,binned cosine (1 Da bins),,,,,0.78654,0.91700,20000.0,results/finetune/contrastive/human20k/binned_w1.0005.json
+human-20k,C7 (replicate corpus -> ms-contrastive-100k),50m,220k,final,1,0.87426,0.92915,20000.0,results/finetune/contrastive/human20k/c7b_cont050m_final_seed1.json
+human-20k,C7 (replicate corpus -> ms-contrastive-100k),400m,220k,final,0,0.87649,0.92985,20000.0,results/finetune/contrastive/human20k/c7b_cont400m_final_seed0.json
+human-20k,C7 (replicate corpus -> ms-contrastive-100k),400m,220k,final,1,0.87889,0.93070,20000.0,results/finetune/contrastive/human20k/c7b_cont400m_final_seed1.json
+human-20k,C7 (replicate corpus -> ms-contrastive-100k),400m,220k,final,2,0.87690,0.92940,20000.0,results/finetune/contrastive/human20k/c7b_cont400m_final_seed2.json
+human-20k,replicate corpus only (24 ep),50m,220k,final,0,0.82426,0.90555,20000.0,results/finetune/contrastive/human20k/s050m_t0002_pk256_ep24_seed0.json
+human-20k,replicate corpus only (24 ep),50m,220k,final,1,0.81920,0.90345,20000.0,results/finetune/contrastive/human20k/s050m_t0002_pk256_ep24_seed1.json
+human-20k,replicate corpus only (24 ep),50m,220k,final,2,0.82299,0.90495,20000.0,results/finetune/contrastive/human20k/s050m_t0002_pk256_ep24_seed2.json
+human-20k,replicate corpus only (12 ep),400m,220k,final,0,0.81497,0.90595,20000.0,results/finetune/contrastive/human20k/s400m_t0002_pk256_ep12_seed0.json
+human-20k,replicate corpus only (12 ep),400m,220k,final,1,0.81563,0.90655,20000.0,results/finetune/contrastive/human20k/s400m_t0002_pk256_ep12_seed1.json
+human-20k,replicate corpus only (12 ep),400m,220k,final,2,0.81751,0.90630,20000.0,results/finetune/contrastive/human20k/s400m_t0002_pk256_ep12_seed2.json
+human-20k,GLEAMS (pretrained),,,,,0.84110,0.91150,20000.0,/lus/flare/projects/UIC-HPC/khuss/msdelta/baselines/noble_human20k/gleams_metrics.json
 oodval-8species,binned cosine (0.1 Da bins),,,,,0.90556,0.97530,20004.0,results/finetune/contrastive/oodval20k/binned_w0.1.json
 oodval-8species,C7 (replicate corpus -> ms-contrastive-100k),400m,220k,final,0,0.66542,0.83298,20004.0,results/finetune/contrastive/oodval20k/c7b_cont400m_final_seed0.json
 oodval-8species,C7 (replicate corpus -> ms-contrastive-100k),400m,220k,final,1,0.68189,0.84673,20004.0,results/finetune/contrastive/oodval20k/c7b_cont400m_final_seed1.json

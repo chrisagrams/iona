@@ -1,0 +1,6 @@
+[score] shard 0/1: 5 of 5 models on xpu
+  pca_w1.0005_d128: all MAP@R 0.2339  experimental MAP@R 0.2339  (16s)
+  pca_w1.0005_d256: all MAP@R 0.3318  experimental MAP@R 0.3318  (13s)
+  pca_w1.0005_d1024: all MAP@R 0.5295  experimental MAP@R 0.5295  (15s)
+  pca_w0.1_d256: all MAP@R 0.0071  experimental MAP@R 0.0071  (15s)
+  pca_w0.1_d1280: all MAP@R 0.0108  experimental MAP@R 0.0108  (35s)

@@ -1,0 +1,22 @@
+{
+ "name": "c4_s200m_ck540k_seed0",
+ "path": "/lus/flare/projects/UIC-HPC/khuss/msdelta/runs/sweep-s200m_ck540k_seed0-8870949/final",
+ "pooling": "mean+max",
+ "data": "/lus/flare/projects/UIC-HPC/khuss/msdelta/eval-data/ms-contrastive-100k-test-mp512",
+ "metrics": {
+  "all/Hit@1": 0.6741057608420342,
+  "all/Precision@1": 0.6741057608420342,
+  "all/R-Precision": 0.4767727803959853,
+  "all/MAP@R": 0.4681438688348463,
+  "all/R@5": 0.5048781154399498,
+  "all/MAP@100": 0.4937165772700509,
+  "all/queries": 35533.0,
+  "experimental/Hit@1": 0.7689461749612125,
+  "experimental/Precision@1": 0.7689461749612125,
+  "experimental/R-Precision": 0.6709830130882762,
+  "experimental/MAP@R": 0.6659306997652862,
+  "experimental/R@5": 0.724509686915702,
+  "experimental/MAP@100": 0.7016877637499627,
+  "experimental/queries": 25137.0
+ }
+}

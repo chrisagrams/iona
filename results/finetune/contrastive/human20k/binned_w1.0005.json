@@ -1,0 +1,22 @@
+{
+ "name": "binned_w1.0005",
+ "path": "binned:1.0005",
+ "pooling": "mean+max",
+ "data": "/lus/flare/projects/UIC-HPC/khuss/msdelta/baselines/noble_human20k/prepared",
+ "metrics": {
+  "all/Hit@1": 0.917,
+  "all/Precision@1": 0.917,
+  "all/R-Precision": 0.801342236328125,
+  "all/MAP@R": 0.7865384643554687,
+  "all/R@5": 0.7120170288085937,
+  "all/MAP@100": 0.8379684265136719,
+  "all/queries": 20000.0,
+  "experimental/Hit@1": 0.917,
+  "experimental/Precision@1": 0.917,
+  "experimental/R-Precision": 0.801342236328125,
+  "experimental/MAP@R": 0.7865384643554687,
+  "experimental/R@5": 0.7120170288085937,
+  "experimental/MAP@100": 0.8379684265136719,
+  "experimental/queries": 20000.0
+ }
+}

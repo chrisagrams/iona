@@ -1,0 +1,22 @@
+[score] shard 6/8: 1 of 8 models on xpu
+Traceback (most recent call last):
+  File "<frozen runpy>", line 198, in _run_module_as_main
+  File "<frozen runpy>", line 88, in _run_code
+  File "/home/khuss/code/msdelta/msdelta/eval_grouped_retrieval.py", line 208, in <module>
+    raise SystemExit(main())
+                     ^^^^^^
+  File "/home/khuss/code/msdelta/msdelta/eval_grouped_retrieval.py", line 204, in main
+    return prepare(cli) if cli.cmd == "prepare" else score(cli)
+                                                     ^^^^^^^^^^
+  File "/home/khuss/code/msdelta/msdelta/eval_grouped_retrieval.py", line 170, in score
+    metrics = score_model(path, pooling, rows, groups, experimental, collator,
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/khuss/code/msdelta/msdelta/eval_grouped_retrieval.py", line 87, in score_model
+    return _variants(emb, groups, experimental, device, retrieval_metrics_topk)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/khuss/code/msdelta/msdelta/eval_grouped_retrieval.py", line 137, in _variants
+    metrics = metric(emb[torch.from_numpy(mask)], groups[mask], device=device)
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/khuss/code/msdelta/msdelta/contrastive.py", line 710, in retrieval_metrics_topk
+    raise ValueError(f"a query has R={int(n_rel_all.max())} relevant items > k={k}; "
+ValueError: a query has R=466 relevant items > k=100; use retrieval_metrics_exact or raise k

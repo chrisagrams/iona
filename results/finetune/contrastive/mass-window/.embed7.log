@@ -1,0 +1,5 @@
+[embed] shard 7/12: 2 of 26 on xpu
+Loading weights:   0%|          | 0/170 [00:00<?, ?it/s]Loading weights:  35%|███▍      | 59/170 [00:00<00:00, 386.98it/s]Loading weights:  58%|█████▊    | 98/170 [00:00<00:00, 226.68it/s]Loading weights:  73%|███████▎  | 124/170 [00:00<00:00, 223.81it/s]Loading weights:  87%|████████▋ | 148/170 [00:00<00:00, 207.75it/s]Loading weights: 100%|██████████| 170/170 [00:00<00:00, 247.48it/s]
+  oodval/supcon_mass_seed2: (20004, 1280) (425s)
+Loading weights:   0%|          | 0/170 [00:00<?, ?it/s]Loading weights:  31%|███       | 53/170 [00:00<00:00, 475.23it/s]Loading weights:  59%|█████▉    | 101/170 [00:00<00:00, 263.68it/s]Loading weights:  78%|███████▊  | 133/170 [00:00<00:00, 271.89it/s]Loading weights:  96%|█████████▋| 164/170 [00:00<00:00, 237.57it/s]Loading weights: 100%|██████████| 170/170 [00:00<00:00, 268.94it/s]
+  oodval/sigmoid_mass_seed2: (20004, 1280) (426s)

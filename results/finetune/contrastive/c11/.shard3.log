@@ -1,0 +1,22 @@
+[score] shard 3/8: 1 of 8 models on xpu
+Loading weights:   0%|          | 0/330 [00:00<?, ?it/s]Loading weights:  25%|██▌       | 84/330 [00:00<00:00, 538.31it/s]Loading weights:  42%|████▏     | 138/330 [00:00<00:00, 265.48it/s]Loading weights:  52%|█████▏    | 171/330 [00:00<00:00, 231.21it/s]Loading weights:  60%|█████▉    | 197/330 [00:00<00:00, 208.61it/s]Loading weights:  66%|██████▋   | 219/330 [00:01<00:00, 164.74it/s]Loading weights:  72%|███████▏  | 238/330 [00:01<00:00, 166.40it/s]Loading weights:  78%|███████▊  | 256/330 [00:01<00:00, 140.53it/s]Loading weights:  86%|████████▌ | 284/330 [00:01<00:00, 162.91it/s]Loading weights:  93%|█████████▎| 308/330 [00:01<00:00, 153.08it/s]Loading weights: 100%|██████████| 330/330 [00:01<00:00, 197.97it/s]
+Traceback (most recent call last):
+  File "<frozen runpy>", line 198, in _run_module_as_main
+  File "<frozen runpy>", line 88, in _run_code
+  File "/home/khuss/code/msdelta/msdelta/eval_grouped_retrieval.py", line 208, in <module>
+    raise SystemExit(main())
+                     ^^^^^^
+  File "/home/khuss/code/msdelta/msdelta/eval_grouped_retrieval.py", line 204, in main
+    return prepare(cli) if cli.cmd == "prepare" else score(cli)
+                                                     ^^^^^^^^^^
+  File "/home/khuss/code/msdelta/msdelta/eval_grouped_retrieval.py", line 170, in score
+    metrics = score_model(path, pooling, rows, groups, experimental, collator,
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/khuss/code/msdelta/msdelta/eval_grouped_retrieval.py", line 123, in score_model
+    _variants(emb, groups, experimental, device,
+  File "/home/khuss/code/msdelta/msdelta/eval_grouped_retrieval.py", line 137, in _variants
+    metrics = metric(emb[torch.from_numpy(mask)], groups[mask], device=device)
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/khuss/code/msdelta/msdelta/contrastive.py", line 710, in retrieval_metrics_topk
+    raise ValueError(f"a query has R={int(n_rel_all.max())} relevant items > k={k}; "
+ValueError: a query has R=466 relevant items > k=100; use retrieval_metrics_exact or raise k

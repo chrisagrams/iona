@@ -1,0 +1,3 @@
+[embed] shard 7/12: 1 of 15 on xpu
+Loading weights:   0%|          | 0/170 [00:00<?, ?it/s]Loading weights:  25%|██▍       | 42/170 [00:00<00:00, 319.26it/s]Loading weights:  44%|████▎     | 74/170 [00:00<00:00, 279.64it/s]Loading weights:  60%|██████    | 102/170 [00:00<00:00, 246.91it/s]Loading weights:  75%|███████▍  | 127/170 [00:00<00:00, 239.93it/s]Loading weights:  89%|████████▉ | 151/170 [00:00<00:00, 208.81it/s]Loading weights: 100%|██████████| 170/170 [00:00<00:00, 245.41it/s]
+  human/c19_mass_50m: (20000, 1280) (400s)

@@ -1,0 +1,3 @@
+[score] shard 4/8: 1 of 8 models on xpu
+Loading weights:   0%|          | 0/330 [00:00<?, ?it/s]Loading weights:  27%|██▋       | 88/330 [00:00<00:00, 810.14it/s]Loading weights:  52%|█████▏    | 170/330 [00:00<00:00, 208.46it/s]Loading weights:  64%|██████▍   | 212/330 [00:01<00:00, 173.99it/s]Loading weights:  73%|███████▎  | 241/330 [00:01<00:00, 175.37it/s]Loading weights:  81%|████████  | 266/330 [00:01<00:00, 160.67it/s]Loading weights:  89%|████████▉ | 294/330 [00:01<00:00, 180.08it/s]Loading weights:  96%|█████████▌| 317/330 [00:01<00:00, 180.52it/s]Loading weights: 100%|██████████| 330/330 [00:01<00:00, 199.45it/s]
+  s400m_t0002_pk256_ep12_seed1: all MAP@R 0.0314  experimental MAP@R 0.0314  (1254s)

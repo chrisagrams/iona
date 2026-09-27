@@ -1,0 +1,6 @@
+=== 2026-09-24T22:51:03+00:00 start OUT=/lus/flare/projects/UIC-HPC/khuss/msdelta/baselines/ms2rescore_out/full8 LIMIT=0 ARMS=fullcid host=x4514c2s2b0n0 nproc=4
+2026-09-24T22:51:03+00:00 converted Xiaomu_HCT116WholeCell_HILIC15_120min_10ul
+2026-09-24T22:51:03+00:00 converted Xiaomu_HCT116WholeCell_HILIC14_120min_10ul
+2026-09-24T22:58:57+00:00 DONE fullcid Xiaomu_HCT116WholeCell_HILIC14_120min_10ul
+2026-09-24T22:59:01+00:00 DONE fullcid Xiaomu_HCT116WholeCell_HILIC15_120min_10ul
+=== 2026-09-24T22:59:01+00:00 end

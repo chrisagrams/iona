@@ -7,9 +7,9 @@ ms-contrastive-100k,replicate corpus only 400M,400m,220k,final,2,0.71395,0.81028
 ms-contrastive-100k,replicate corpus only 50M,50m,220k,final,0,0.65684,0.76584,replicate corpus only (24 ep)
 ms-contrastive-100k,replicate corpus only 50M,50m,220k,final,1,0.65448,0.76393,replicate corpus only (24 ep)
 ms-contrastive-100k,replicate corpus only 50M,50m,220k,final,2,0.65640,0.76680,replicate corpus only (24 ep)
-ms-contrastive-100k,frozen + ABTT (best encoder),200m,540k,,,0.43210,,"frozen encoder, layer block12, ABTT D=128 (fit: ms-contrastive-100k train); encoder/layer/D chosen on this benchmark"
+ms-contrastive-100k,frozen + ABTT (best encoder),400m,330k,,,0.65990,,"frozen encoder, layer block16, ABTT D=128 (fit: ms-contrastive-100k train); best of 24 frozen encoders, encoder/layer/D chosen on this benchmark"
 yeast-20k,fine-tuned 400M,400m,220k,final,0,0.59562,0.77916,C7 (replicate corpus -> ms-contrastive-100k)
 yeast-20k,fine-tuned 50M,50m,220k,final,1,0.52273,0.73420,C7 (replicate corpus -> ms-contrastive-100k)
 yeast-20k,replicate corpus only 400M,400m,220k,final,0,0.52046,0.74085,replicate corpus only (12 ep)
 yeast-20k,replicate corpus only 50M,50m,220k,final,1,0.49906,0.72496,replicate corpus only (24 ep)
-yeast-20k,frozen + ABTT (best encoder),400m,220k,,,0.70887,,"frozen encoder, layer block14, ABTT D=128 (fit: 8 other species (train split)); encoder/layer/D chosen on this benchmark"
+yeast-20k,frozen + ABTT (best encoder),400m,220k,,,0.70887,,"frozen encoder, layer block14, ABTT D=128 (fit: 8 other species (train split)); best of 6 frozen encoders, encoder/layer/D chosen on this benchmark"

@@ -1,0 +1,104 @@
+[
+ {
+  "size": "200m",
+  "chunk": 4,
+  "trim_padding": false,
+  "grad_ckpt": true,
+  "kl_weight": 10.0,
+  "error": "torch.utils.checkpoint: Recomputed values for the following tensors have different metadata than during the forward pass.\ntensor at position 5:\nsaved metadata: {'shape': torch.Size([1024, 3072]), 'dty"
+ },
+ {
+  "size": "200m",
+  "chunk": 4,
+  "trim_padding": false,
+  "grad_ckpt": false,
+  "kl_weight": 10.0,
+  "step_s": 32.95904564857483,
+  "peak_gb": 11.003063808
+ },
+ {
+  "size": "200m",
+  "chunk": 4,
+  "trim_padding": true,
+  "grad_ckpt": true,
+  "kl_weight": 10.0,
+  "error": "torch.utils.checkpoint: Recomputed values for the following tensors have different metadata than during the forward pass.\ntensor at position 5:\nsaved metadata: {'shape': torch.Size([1024, 3072]), 'dty"
+ },
+ {
+  "size": "200m",
+  "chunk": 4,
+  "trim_padding": true,
+  "grad_ckpt": false,
+  "kl_weight": 10.0,
+  "step_s": 9.118313312530518,
+  "peak_gb": 10.899491328
+ },
+ {
+  "size": "200m",
+  "chunk": 8,
+  "trim_padding": false,
+  "grad_ckpt": true,
+  "kl_weight": 10.0,
+  "error": "torch.utils.checkpoint: Recomputed values for the following tensors have different metadata than during the forward pass.\ntensor at position 5:\nsaved metadata: {'shape': torch.Size([1024, 3072]), 'dty"
+ },
+ {
+  "size": "200m",
+  "chunk": 8,
+  "trim_padding": false,
+  "grad_ckpt": false,
+  "kl_weight": 10.0,
+  "step_s": 33.257124185562134,
+  "peak_gb": 19.970868736
+ },
+ {
+  "size": "200m",
+  "chunk": 8,
+  "trim_padding": true,
+  "grad_ckpt": true,
+  "kl_weight": 10.0,
+  "error": "torch.utils.checkpoint: Recomputed values for the following tensors have different metadata than during the forward pass.\ntensor at position 5:\nsaved metadata: {'shape': torch.Size([1024, 3072]), 'dty"
+ },
+ {
+  "size": "200m",
+  "chunk": 8,
+  "trim_padding": true,
+  "grad_ckpt": false,
+  "kl_weight": 10.0,
+  "step_s": 9.565842628479004,
+  "peak_gb": 19.761193984
+ },
+ {
+  "size": "200m",
+  "chunk": 16,
+  "trim_padding": false,
+  "grad_ckpt": true,
+  "kl_weight": 10.0,
+  "error": "torch.utils.checkpoint: Recomputed values for the following tensors have different metadata than during the forward pass.\ntensor at position 5:\nsaved metadata: {'shape': torch.Size([1024, 3072]), 'dty"
+ },
+ {
+  "size": "200m",
+  "chunk": 16,
+  "trim_padding": false,
+  "grad_ckpt": false,
+  "kl_weight": 10.0,
+  "step_s": 29.82521629333496,
+  "peak_gb": 37.90704384
+ },
+ {
+  "size": "200m",
+  "chunk": 16,
+  "trim_padding": true,
+  "grad_ckpt": true,
+  "kl_weight": 10.0,
+  "error": "torch.utils.checkpoint: Recomputed values for the following tensors have different metadata than during the forward pass.\ntensor at position 5:\nsaved metadata: {'shape': torch.Size([1024, 3072]), 'dty"
+ },
+ {
+  "size": "200m",
+  "chunk": 16,
+  "trim_padding": true,
+  "grad_ckpt": false,
+  "kl_weight": 10.0,
+  "step_s": 8.354671716690063,
+  "peak_gb": 37.484262912
+ }
+]

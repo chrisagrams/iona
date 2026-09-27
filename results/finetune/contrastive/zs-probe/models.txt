@@ -1,0 +1,1 @@
+zs_050m_ck540k /flare/UIC-HPC/khuss/msdelta/pretrained/msdelta-50m-production-01-checkpoint-540423
