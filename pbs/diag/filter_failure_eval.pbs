@@ -1,0 +1,60 @@
+#!/bin/bash -l
+# Retrieval when the measured-precursor 20 ppm filter drops correct matches (pbs/diag/filter_failure_eval.py).
+#
+#   qsub -q debug-scaling -l select=1 -l walltime=01:00:00 pbs/diag/filter_failure_eval.pbs
+#
+# 12 embedding shards (one per tile; cached .npy, so a timed-out job resumes), then the analysis
+# on tile 0. Embeddings: $SCRATCH_ROOT/embeddings/filter-failure/<dataset>/<model>.npy
+
+#PBS -N msdelta-filtfail
+#PBS -A UIC-HPC
+#PBS -l place=scatter
+#PBS -l filesystems=home:flare
+#PBS -j oe
+#PBS -o pbs/logs/
+
+set -uo pipefail
+REPO_DIR=${REPO_DIR:-${PBS_O_WORKDIR:-$PWD}}
+cd "$REPO_DIR"
+MODELS=${MODELS:-sweeps/arms/filter_failure_models.txt}
+SCRATCH_ROOT=${SCRATCH_ROOT:-/lus/flare/projects/UIC-HPC/$USER/msdelta}
+EMB_DIR=${EMB_DIR:-$SCRATCH_ROOT/embeddings/filter-failure}
+OUT=${OUT:-results/finetune/contrastive/filter-failure/summary.json}
+SHARDS=${SHARDS:-12}
+DATA=("mouse=$SCRATCH_ROOT/baselines/noble_mouse20k/prepared"
+      "human=$SCRATCH_ROOT/baselines/noble_human20k/prepared"
+      "hek=$SCRATCH_ROOT/baselines/c11_cap20/prepared")
+
+set +u
+source /usr/share/lmod/lmod/init/bash
+module load "${FRAMEWORKS_MODULE:-frameworks/2025.3.1}"
+set -u
+export ONEAPI_DEVICE_SELECTOR=level_zero:gpu
+export ZE_FLAT_DEVICE_HIERARCHY=FLAT
+export ZE_AFFINITY_MASK=0
+export OMP_NUM_THREADS=${OMP_NUM_THREADS:-8}
+export PYTHONPATH=$REPO_DIR${PYTHONPATH:+:$PYTHONPATH}
+export HF_HOME=${HF_HOME:-$SCRATCH_ROOT/huggingface}
+export HF_HUB_OFFLINE=1 HF_DATASETS_OFFLINE=1
+PY="$REPO_DIR/.venv/bin/python"
+LOGS=$(dirname "$OUT"); mkdir -p "$LOGS" "$EMB_DIR"
+
+echo "=== $(date -Is) embed on $SHARDS tiles"
+pids=()
+for (( i = 0; i < SHARDS; i++ )); do
+    ZE_AFFINITY_MASK=$i "$PY" pbs/diag/filter_failure_eval.py embed --models "$MODELS" \
+        --data "${DATA[@]}" --emb-dir "$EMB_DIR" --shard "$i" --num-shards "$SHARDS" \
+        > "$LOGS/.embed$i.log" 2>&1 &
+    pids+=($!)
+done
+failed=0
+for i in "${!pids[@]}"; do
+    wait "${pids[$i]}" || { echo "  shard $i failed:"; tail -5 "$LOGS/.embed$i.log"; failed=1; }
+done
+grep -h "s)$\|cached" "$LOGS"/.embed*.log
+
+echo "=== $(date -Is) analyse"
+"$PY" pbs/diag/filter_failure_eval.py analyse --models "$MODELS" --data "${DATA[@]}" \
+    --emb-dir "$EMB_DIR" --out "$OUT" || failed=1
+echo "=== $(date -Is) done (failed=$failed)"
+exit $failed

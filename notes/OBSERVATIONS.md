@@ -1790,3 +1790,27 @@ masses; experimental spectra; `results/finetune/contrastive/mass-window/summary.
 
 Would overturn: a mixed-batch or jitter ablation where near-mass errors, not far ones, move;
 or the same pattern failing at another scale.
+
+---
+
+## Filter failures (isotope-offset precursors): open retrieval rescues ~80%, the isotope-tolerant filter beats both (job 8873366, 2026-09-27 03:04 UTC)
+
+`pbs/diag/filter_failure_eval.py`, MEASURED precursor m/z of query and gallery, same charge. F = queries
+with >= 1 positive outside 20 ppm (mouse 39.6%, human 34.8%, HEK 53.0%); F_all = all positives outside
+(5.8% / 7.1% / 13.0%). Recorded precursors are never monoisotope-corrected: off-window cases are whole
+isotope steps (mouse 10.8% / human 11.6% of spectra, all +1; HEK 24.9%). iso = |dmz - k*1.00336/z| <= 20 ppm,
+k in -2..2. MAP@R open / 20ppm / iso, one seed:
+
+    mouse     iona400m full .846/.822/.946   F .796/.571/.920   Fbar .879/.985/.964   rescue(F_all open Hit@1) .83
+              c19_mass full .847/.823/.952   F .800/.573/.928                          rescue .84(human) .83(mouse)
+              binned0.1 full .916/.825/.963 (beats our models on mouse; not on human: .809 vs .891 open)
+    HEK       every encoder near-useless open (.09-.21); binned 1.0 Da .654 open / .889 iso beats all models
+
+1. The 20 ppm filter loses: 5-6% of queries go right -> wrong at Hit@1 (mouse, human); F MAP@R drops ~.25.
+2. Our encoders DO recover most of what it drops: open Hit@1 on F_all 0.79-0.84 (mouse, human).
+3. The isotope-tolerant window removes that loss (net loss 0.0000) and is the best full-set filter for every
+   trained model; on Fbar it is slightly below 20 ppm (~5x more candidates).
+4. C19 same-mass vs random: +0.02-0.03 on F, similar on Fbar -- no F-specific effect.
+5. HEK (low-res MS2) is out of domain for the encoders; the question can't be answered there.
+
+Would overturn: more seeds reversing (4); a dataset where the isotope window's extra candidates cost more than it recovers.
