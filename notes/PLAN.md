@@ -108,6 +108,13 @@ peptide among each spectrum's candidates, paired seeds (arms share split and ini
 | P1 (user 2026-09-27) | Port the Pairformer (AlphaFold-style single + pair representations, cubic triangle update on the pair representation) from branch `sweep/pairformer-aurora` into the model package as a selectable architecture | ⬜ | planned after the cutover (K8/K12/K17). Requirements: Hugging Face Transformers-compliant like the rest (PretrainedConfig with its own model_type, PreTrainedModel classes, save/load round trip, Auto* registration, same processor and task heads so the fine-tuning entry points work unchanged). Validation: (a) unit tests (config/save/load, shapes, masking); (b) a short debug pretraining comparison vs the transformer at similar size (loss curves, step time). Runs use `/lus/flare/projects/UIC-HPC/khuss/`, never `kelhus2` |
 | P2 | Does the Pairformer beat the transformer encoder at matched size / compute, in pretraining loss and downstream (denoise AUROC, contrastive MAP@R)? | ⬜ | after P1; design the comparison (sizes, steps, checkpoints) once P1's debug comparison shows it trains |
 
+### Infrastructure
+
+| id | question | status | evidence / job |
+|---|---|---|---|
+| I1 | Jobs must not be affected by branch switches or edits in the checkout | ✅ | per-job code snapshots (`pbs/lib/code_snapshot.sh`), validated on compute nodes (8873562, 8873825); see Rules |
+| I2 (user 2026-09-27) | A job DAG: jobs queue automatically when their prerequisites succeed; every job reports success and publishes consumable outputs; every job has an expected runtime (unknown -> a debug calibration run estimates it); the expected runtime picks the queue; an automated scheduler submits ready jobs | ⬜ | design + failure modes proposed 2026-09-27 (K58-K63); first decision: build a thin layer on PBS (`-W depend`, our runner) vs adopt an existing workflow system (ALCF Balsam, Parsl, Snakemake) |
+
 ### Cross-cutting
 
 | id | question | status | evidence / job |
