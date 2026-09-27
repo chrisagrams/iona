@@ -176,6 +176,8 @@ declare -A GRID_CHECK=(
     [configs/sweep-hp-single]="sweeps/make_hp_single.py --check"
     [configs/sweep-mix]="sweeps/make_mix.py --check"
     [configs/sweep-regions]="sweeps/make_regions.py --check"
+    [configs/sweep-hp50b]="sweeps/make_hp50b.py --check"
+    [configs/sweep-c20]="sweeps/make_c20.py --check"
 )
 if [[ -z ${SKIP_GRID_CHECK:-} ]]; then
     check=${GRID_CHECK[${SWEEP_ROOT%/}]:-}

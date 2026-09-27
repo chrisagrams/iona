@@ -1,0 +1,12 @@
+s050m_ck540k_lr1.6e-3_seed0
+s050m_ck540k_lr1.6e-3_seed1
+s050m_ck540k_lr1.6e-3_seed2
+s050m_ck540k_lr4e-4_kl1_seed0
+s050m_ck540k_lr4e-4_kl1_seed1
+s050m_ck540k_lr4e-4_kl1_seed2
+s050m_ck540k_lr4e-4_p128k2_seed0
+s050m_ck540k_lr4e-4_p128k2_seed1
+s050m_ck540k_lr4e-4_p128k2_seed2
+s050m_ck540k_lr8e-4_seed0
+s050m_ck540k_lr8e-4_seed1
+s050m_ck540k_lr8e-4_seed2
