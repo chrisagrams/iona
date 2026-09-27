@@ -60,7 +60,7 @@ def main(argv: list[str] | None = None) -> int:
                     help="spectrum encoder: a local dir or a Hub repo id "
                          "(e.g. Gaolaboratory/iona-contrastive-400m)")
     ap.add_argument("--student", required=True,
-                    help="peptide embedder: an alignment run's final/ dir or a Hub repo id "
+                    help="peptide encoder: an alignment run's final/ dir or a Hub repo id "
                          "(e.g. Gaolaboratory/iona-peptide-embedder-400m)")
     ap.add_argument("--cache", default="",
                     help="teacher cache (MANIFEST: pooling, width); optional -- without it "

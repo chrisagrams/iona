@@ -1,1 +1,1 @@
-"""msdelta.finetuning: task fine-tuning: denoise, contrastive (spectrum embeddings), alignment (peptide embedder)."""
+"""msdelta.finetuning: task fine-tuning: denoise, contrastive (spectrum embeddings), alignment (peptide encoder)."""

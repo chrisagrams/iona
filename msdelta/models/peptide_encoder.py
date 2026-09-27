@@ -1,17 +1,23 @@
-"""The peptide embedder: a (modified) peptide plus its precursor charge -> the spectrum-embedding
+"""The peptide encoder: a (modified) peptide plus its precursor charge -> the spectrum-embedding
 space of a frozen msdelta spectrum encoder (trained by msdelta.finetuning.alignment).
 
 A standard Hugging Face model, like the spectrum encoder:
 
-    from msdelta.models.peptide_embedder import PeptideEmbedderModel
-    model = PeptideEmbedderModel.from_pretrained("Gaolaboratory/iona-peptide-embedder-400m").eval()
+    from msdelta.models.peptide_encoder import PeptideEncoderModel
+    model = PeptideEncoderModel.from_pretrained("Gaolaboratory/iona-peptide-embedder-400m").eval()
     emb = model.embed(["PEPTIDEK", "AC[57.0215]M[15.9949]K"], charges=[2, 2])   # (2, D), unit norm
 
-`from_pretrained` also reads the two older layouts: an alignment training run's `final/`
-(raw weights, keys `sequence_encoder.*`, no config) and the first Hub release (config with
-model_type "iona-peptide-embedder"). Peptide notation: residues, each modification as
-`[mass delta]` right after its residue (`C[57.0215]`); an N-terminal modification is a leading
-`[mass]`.
+(The Hub repo keeps its original name.) `from_pretrained` reads every layout saved so far:
+the standard layout (model_type "msdelta-peptide-encoder", or "msdelta-peptide-embedder" as
+saved before the rename), an alignment training run's `final/` (raw weights, keys
+`sequence_encoder.*`, no config) and the first Hub release (config with model_type
+"iona-peptide-embedder"). Peptide notation: residues, each modification as `[mass delta]`
+right after its residue (`C[57.0215]`); an N-terminal modification is a leading `[mass]`.
+
+Until 2026-09-27 this was the "peptide embedder" (msdelta.models.peptide_embedder,
+PeptideEmbedderConfig / PeptideEmbedderModel). The old module is an alias of this one and the
+old class names are aliases at the end of this file, so old imports, scripts and pickles keep
+working. `PeptideEncoder` (no suffix) is the inner sequence tower, as before.
 
 PeptideEncoder, PeptideCollator and parse_peptide moved here from msdelta.rescoring.reranking,
 which re-exports them.
@@ -372,10 +378,10 @@ def student_readout(state: dict, prefix: str = "sequence_encoder.") -> str:
 
 
 
-class PeptideEmbedderConfig(PretrainedConfig):
+class PeptideEncoderConfig(PretrainedConfig):
     """Architecture of a PeptideEncoder, plus which spectrum encoder's space it maps into."""
 
-    model_type = "msdelta-peptide-embedder"
+    model_type = "msdelta-peptide-encoder"
 
     def __init__(self, embedding_size: int = 2560, hidden_size: int = 256, num_layers: int = 4,
                  num_heads: int = 8, max_length: int = 64, n_charges: int = 8,
@@ -389,19 +395,22 @@ class PeptideEmbedderConfig(PretrainedConfig):
         self.spectrum_model, self.spectrum_pooling = spectrum_model, spectrum_pooling
 
 
+# model_type of the standard layout as saved before the rename (2026-09-27); still loaded as is.
+LEGACY_MODEL_TYPE = "msdelta-peptide-embedder"
+
 _ARCH = ("embedding_size", "hidden_size", "num_layers", "num_heads", "max_length", "n_charges",
          "mod_n_freqs")
 
 
-class PeptideEmbedderModel(PreTrainedModel):
+class PeptideEncoderModel(PreTrainedModel):
     """PeptideEncoder as a PreTrainedModel. The encoder sits at `sequence_encoder`, so the
     weight names are exactly those of an alignment checkpoint and of the first Hub release."""
 
-    config_class = PeptideEmbedderConfig
+    config_class = PeptideEncoderConfig
     base_model_prefix = "sequence_encoder"
     main_input_name = "residues"
 
-    def __init__(self, config: PeptideEmbedderConfig):
+    def __init__(self, config: PeptideEncoderConfig):
         super().__init__(config)
         self.sequence_encoder = PeptideEncoder(
             embedding_size=config.embedding_size, hidden_size=config.hidden_size,
@@ -442,28 +451,36 @@ class PeptideEmbedderModel(PreTrainedModel):
         config_file = path / "config.json"
         model_type = (json.loads(config_file.read_text()).get("model_type")
                       if config_file.exists() else None)
-        if model_type == PeptideEmbedderConfig.model_type:
+        if model_type == PeptideEncoderConfig.model_type:
+            return super().from_pretrained(str(path), *args, **kwargs)
+        if model_type == LEGACY_MODEL_TYPE:
+            # Same layout, older name: build the config ourselves (transformers would warn about
+            # the model_type mismatch) and let the standard loader read the weights.
+            if kwargs.get("config") is None:
+                raw = json.loads(config_file.read_text())
+                raw["model_type"] = PeptideEncoderConfig.model_type
+                kwargs["config"] = PeptideEncoderConfig.from_dict(raw)
             return super().from_pretrained(str(path), *args, **kwargs)
         return cls._from_legacy(path, json.loads(config_file.read_text()) if model_type else None,
                                 num_heads=kwargs.get("num_heads", 8))
 
     @classmethod
-    def _from_legacy(cls, path: Path, hub_config: dict | None, num_heads: int = 8) -> "PeptideEmbedderModel":
+    def _from_legacy(cls, path: Path, hub_config: dict | None, num_heads: int = 8) -> "PeptideEncoderModel":
         """An alignment run's final/ does not record the attention head count (not in the weights);
         every trained student used 8. Pass num_heads= to from_pretrained if one did not."""
         from safetensors.torch import load_file
         state = load_file(str(path / "model.safetensors"))
         state = {k: v for k, v in state.items() if k.startswith("sequence_encoder.")}
         if not state:
-            raise ValueError(f"{path}: no sequence_encoder.* weights -- not a peptide embedder")
+            raise ValueError(f"{path}: no sequence_encoder.* weights -- not a peptide encoder")
         if hub_config is not None:                         # first Hub release
-            config = PeptideEmbedderConfig(**{k: hub_config[k] for k in _ARCH if k in hub_config},
-                                           pooling=hub_config.get("pooling", "mean+max"),
-                                           readout=hub_config.get("readout", "pool"),
-                                           spectrum_model=hub_config.get("spectrum_model"))
+            config = PeptideEncoderConfig(**{k: hub_config[k] for k in _ARCH if k in hub_config},
+                                          pooling=hub_config.get("pooling", "mean+max"),
+                                          readout=hub_config.get("readout", "pool"),
+                                          spectrum_model=hub_config.get("spectrum_model"))
         else:                                              # an alignment run's final/: read the shapes
             layers = {int(k.split(".")[3]) for k in state if k.startswith("sequence_encoder.encoder.layers.")}
-            config = PeptideEmbedderConfig(
+            config = PeptideEncoderConfig(
                 embedding_size=int(state["sequence_encoder.projection.3.weight"].shape[0]),
                 hidden_size=int(state["sequence_encoder.residue.weight"].shape[1]),
                 num_layers=len(layers),
@@ -478,3 +495,9 @@ class PeptideEmbedderModel(PreTrainedModel):
         if missing or unexpected:
             raise ValueError(f"{path}: weights do not match (missing {missing[:5]}, unexpected {unexpected[:5]})")
         return model
+
+
+# Names before the 2026-09-27 rename ("peptide embedder" -> "peptide encoder"); kept so old code,
+# scripts and pickles keep working. New code should use the Encoder names.
+PeptideEmbedderConfig = PeptideEncoderConfig
+PeptideEmbedderModel = PeptideEncoderModel

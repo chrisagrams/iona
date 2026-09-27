@@ -40,9 +40,9 @@ from torch import Tensor, nn
 from torch.utils.data import Sampler
 
 
-# The peptide embedder's building blocks live in msdelta.models.peptide_embedder; re-exported
+# The peptide encoder's building blocks live in msdelta.models.peptide_encoder; re-exported
 # here so every existing `from msdelta.rescoring.reranking import ...` keeps working.
-from msdelta.models.peptide_embedder import (  # noqa: F401
+from msdelta.models.peptide_encoder import (  # noqa: F401
     PAD,
     POOLING_MODES,
     PROBES,

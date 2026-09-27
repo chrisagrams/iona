@@ -234,11 +234,12 @@ def test_denoise_and_resume(work, data, pretrained):
 
 def test_alignment_precompute_sharded_and_train(work, data, pretrained):
     """(d) precompute_align in 2 shards (== unsharded), finetune_align 10 steps,
-    final/peptide_embedder loads with PeptideEmbedderModel."""
+    final/peptide_encoder (the standard layout) loads with PeptideEncoderModel."""
     import torch
     from datasets import load_from_disk
 
-    from msdelta.models.peptide_embedder import PeptideEmbedderModel
+    from msdelta.finetuning.alignment.finetune_align import peptide_encoder_dir
+    from msdelta.models.peptide_encoder import PeptideEncoderModel
     common = ["--pretrained_path", pretrained / "final", "--dataset_repo", data["grouped"],
               *GROUPED_DATA, "--pooling", "mean+max", "--batch_size", 8]
     sharded, whole = work / "align-cache", work / "align-cache-whole"
@@ -272,9 +273,12 @@ def test_alignment_precompute_sharded_and_train(work, data, pretrained):
     ], log / "align.log")
     losses = [h["loss"] for h in train_log(out) if "loss" in h]
     assert len(losses) == 10 and all(math.isfinite(x) for x in losses)
-    embedder = PeptideEmbedderModel.from_pretrained(str(out / "final" / "peptide_embedder")).eval()
+    assert (out / "final" / "peptide_encoder" / "config.json").exists()
+    assert peptide_encoder_dir(out / "final") == out / "final" / "peptide_encoder"
+    peptide_encoder = PeptideEncoderModel.from_pretrained(str(out / "final" / "peptide_encoder")).eval()
+    assert peptide_encoder.config.model_type == "msdelta-peptide-encoder"
     with torch.no_grad():
-        emb = embedder.embed(["PEPTIDEK", "AC[57.0215]DEFGHIK"], [2, 3])
+        emb = peptide_encoder.embed(["PEPTIDEK", "AC[57.0215]DEFGHIK"], [2, 3])
     assert emb.shape == (2, 64) and torch.isfinite(emb).all()
     assert (out / "crossmodal_results.json").exists()
 

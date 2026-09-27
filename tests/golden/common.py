@@ -13,7 +13,7 @@ Frozen inputs
 Frozen models (read-only)
   pretrained25m    the 25M pretrained checkpoint at step 540,423
   contrastive50m   a 50M contrastive run's final/ (sweep-cont050m_ep01_seed1)
-  peptide400m      the Hub release Gaolaboratory/iona-peptide-embedder-400m, from the
+  peptide400m      the peptide encoder Hub release Gaolaboratory/iona-peptide-embedder-400m, from the
                    local HF cache (HF_HUB_OFFLINE=1)
 
 Outputs
@@ -111,7 +111,7 @@ def compute(device: str = "cpu", dtype: str = "fp32", log=print) -> dict[str, np
                                                             retrieval_metrics_topk)
     from msdelta.finetuning.contrastive.finetune_contrastive import ContrastiveCollator
     from msdelta.models.modeling_msdelta import MSDeltaForPreTraining
-    from msdelta.models.peptide_embedder import PeptideEmbedderModel
+    from msdelta.models.peptide_encoder import PeptideEncoderModel
 
     torch.manual_seed(0)
     rows, peptides, charges = inputs()
@@ -151,8 +151,8 @@ def compute(device: str = "cpu", dtype: str = "fp32", log=print) -> dict[str, np
             out[f"{name}/head_lengths"] = np.array(lengths)
         del model, encoder
     log(f"[golden] peptide400m on {device}/{dtype}")
-    embedder = PeptideEmbedderModel.from_pretrained(str(peptide_model_dir())).to(dev).eval()
+    peptide_encoder = PeptideEncoderModel.from_pretrained(str(peptide_model_dir())).to(dev).eval()
     with _autocast(device, dtype):
-        pep = embedder.embed(peptides, charges, batch_size=16)
+        pep = peptide_encoder.embed(peptides, charges, batch_size=16)
     out["peptide400m/embeddings"] = pep.float().numpy()
     return out

@@ -1,5 +1,5 @@
 """student_readout(): the loaders (run_rescoring, rerank_psm_embed, eval_align_test,
-PeptideEmbedderModel) detect a saved student's readout from its weights.
+PeptideEncoderModel) detect a saved student's readout from its weights.
 
 Training with cls/attn readouts was rejected (PLAN.md A3: keep mean+max pooling); their
 forward-pass tests are opt-in (marker `legacy`, run with --legacy; see tests/README.md).

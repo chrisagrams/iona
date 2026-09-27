@@ -1,4 +1,4 @@
-"""Package the A (peptide embedder) results: figures + one CSV per figure with exactly the plotted rows.
+"""Package the A (peptide encoder) results: figures + one CSV per figure with exactly the plotted rows.
 
     .venv/bin/python sweeps/package_alignment.py
 

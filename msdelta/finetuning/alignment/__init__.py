@@ -1,1 +1,1 @@
-"""msdelta.finetuning.alignment: peptide embedder aligned to the frozen spectrum encoder."""
+"""msdelta.finetuning.alignment: peptide encoder aligned to the frozen spectrum encoder."""

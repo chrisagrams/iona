@@ -207,23 +207,42 @@ class SequenceAlignmentTrainer(Trainer):
         return metrics
 
 
-def save_peptide_embedder(model, model_args, path) -> None:
-    """Also write the student as a standard PeptideEmbedderModel (config.json + weights), next to
-    the raw final/ weights, so it loads with PeptideEmbedderModel.from_pretrained like the
+def save_peptide_encoder(model, model_args, path) -> None:
+    """Also write the student as a standard PeptideEncoderModel (config.json + weights), next to
+    the raw final/ weights, so it loads with PeptideEncoderModel.from_pretrained like the
     spectrum encoder does. The raw final/ layout is unchanged for every existing loader."""
-    from msdelta.models.peptide_embedder import PeptideEmbedderConfig, PeptideEmbedderModel
+    from msdelta.models.peptide_encoder import PeptideEncoderConfig, PeptideEncoderModel
     encoder = getattr(model, "module", model).sequence_encoder
-    config = PeptideEmbedderConfig(
+    config = PeptideEncoderConfig(
         embedding_size=encoder.projection[-1].out_features, hidden_size=model_args.sequence_hidden_size,
         num_layers=model_args.sequence_num_layers, num_heads=model_args.sequence_num_heads,
         max_length=model_args.max_peptide_length, n_charges=encoder.charge.num_embeddings,
         mod_n_freqs=encoder.mod_features.freqs.numel(), dropout=model_args.sequence_dropout,
         pooling=model_args.pooling, readout=model_args.sequence_readout,
         spectrum_model=model_args.pretrained_path, spectrum_pooling=model_args.pooling)
-    embedder = PeptideEmbedderModel(config)
-    embedder.sequence_encoder.load_state_dict(encoder.state_dict())
-    embedder.save_pretrained(str(path))
-    print(f"[align] peptide embedder (standard layout) saved to {path}", flush=True)
+    peptide_encoder = PeptideEncoderModel(config)
+    peptide_encoder.sequence_encoder.load_state_dict(encoder.state_dict())
+    peptide_encoder.save_pretrained(str(path))
+    print(f"[align] peptide encoder (standard layout) saved to {path}", flush=True)
+
+
+# Name before the 2026-09-27 rename ("peptide embedder" -> "peptide encoder").
+save_peptide_embedder = save_peptide_encoder
+
+# Subdirectory of an alignment run's final/ holding the standard-layout peptide encoder. Runs
+# before 2026-09-27 wrote it as final/peptide_embedder; peptide_encoder_dir() finds either.
+PEPTIDE_ENCODER_SUBDIR = "peptide_encoder"
+LEGACY_PEPTIDE_ENCODER_SUBDIR = "peptide_embedder"
+
+
+def peptide_encoder_dir(final_dir) -> Path:
+    """final/peptide_encoder of an alignment run, or final/peptide_embedder for a run saved
+    before the rename; final/peptide_encoder (the new name) when neither exists yet."""
+    final_dir = Path(final_dir)
+    for name in (PEPTIDE_ENCODER_SUBDIR, LEGACY_PEPTIDE_ENCODER_SUBDIR):
+        if (final_dir / name).is_dir():
+            return final_dir / name
+    return final_dir / PEPTIDE_ENCODER_SUBDIR
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -387,7 +406,7 @@ def main(argv: list[str] | None = None) -> int:
         if trainer.is_world_process_zero():
             trainer.save_model(str(out_dir / "final"))
             print(f"[align] saved to {out_dir / 'final'}", flush=True)
-            save_peptide_embedder(trainer.model, model_args, out_dir / "final" / "peptide_embedder")
+            save_peptide_encoder(trainer.model, model_args, out_dir / "final" / PEPTIDE_ENCODER_SUBDIR)
         return 0
     except BaseException:
         if wandb_run is not None:

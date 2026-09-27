@@ -1,13 +1,13 @@
-"""Backward compatibility of the msdelta reorganisation and the standard PeptideEmbedderModel, on real
+"""Backward compatibility of the msdelta reorganisation and the standard PeptideEncoderModel, on real
 models (run from the NEW tree; the OLD tree's path is given for the spectrum comparison).
 
     python pbs/diag/backcompat_check.py --old-repo /home/khuss/code/msdelta --out results/raw/diag/backcompat.json
 
-1. Peptide embedder, released Hub model (Gaolaboratory/iona-peptide-embedder-400m, local HF cache):
-   new PeptideEmbedderModel.from_pretrained  vs  the old loading path (PeptideEncoder built by hand,
+1. Peptide encoder, released Hub model (Gaolaboratory/iona-peptide-embedder-400m, local HF cache):
+   new PeptideEncoderModel.from_pretrained  vs  the old loading path (PeptideEncoder built by hand,
    student_readout, sequence_encoder. prefix stripped -- as portable_eval/mouse/embed_ours.py did)
    vs  the standalone module shipped on the Hub (peptide_embedder.py from the snapshot).
-2. Peptide embedder, an alignment run's raw final/ (the run behind the Hub release): new class vs old path,
+2. Peptide encoder, an alignment run's raw final/ (the run behind the Hub release): new class vs old path,
    plus a save_pretrained -> from_pretrained round trip.
 3. Spectrum encoder (iona-contrastive-400m, final/ of the released run): embeddings of validation
    spectra computed by the OLD tree (subprocess, old import paths) and the NEW tree must be identical.
@@ -83,13 +83,13 @@ def main():
     torch.manual_seed(0)
     from huggingface_hub import snapshot_download
 
-    from msdelta.models.peptide_embedder import PeptideEmbedderModel
+    from msdelta.models.peptide_encoder import PeptideEncoderModel
     report = {}
     peps, charges = peptides_for_test()
 
     # 1. released Hub model
     snap = Path(snapshot_download(HUB_REPO))
-    new = PeptideEmbedderModel.from_pretrained(str(snap)).eval().embed(peps, charges)
+    new = PeptideEncoderModel.from_pretrained(str(snap)).eval().embed(peps, charges)
     old = old_path_embed(snap, peps, charges)
     spec = importlib.util.spec_from_file_location("hub_peptide_embedder", snap / "peptide_embedder.py")
     hubmod = importlib.util.module_from_spec(spec); spec.loader.exec_module(hubmod)
@@ -98,11 +98,11 @@ def main():
                              "new_vs_hub_standalone_module": float((new - hub).abs().max())}
 
     # 2. an alignment run's raw final/
-    new2 = PeptideEmbedderModel.from_pretrained(ALIGN_RUN).eval()
+    new2 = PeptideEncoderModel.from_pretrained(ALIGN_RUN).eval()
     e_new = new2.embed(peps, charges); e_old = old_path_embed(ALIGN_RUN, peps, charges)
-    tmp = Path(cli.out).with_suffix("") / "peptide_embedder_roundtrip"
+    tmp = Path(cli.out).with_suffix("") / "peptide_encoder_roundtrip"
     new2.save_pretrained(str(tmp))
-    e_rt = PeptideEmbedderModel.from_pretrained(str(tmp)).eval().embed(peps, charges)
+    e_rt = PeptideEncoderModel.from_pretrained(str(tmp)).eval().embed(peps, charges)
     report["alignment_final_dir"] = {"new_vs_old_path": float((e_new - e_old).abs().max()),
                                      "save_load_round_trip": float((e_new - e_rt).abs().max()),
                                      "hub_release_vs_this_run": float((e_new - new).abs().max())}

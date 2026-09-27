@@ -1,5 +1,5 @@
 #!/bin/bash -l
-# Nine-species MOUSE (Noble nine-species-balanced, Mus-musculus): Iona peptide embedder vs yHydra,
+# Nine-species MOUSE (Noble nine-species-balanced, Mus-musculus): Iona peptide encoder vs yHydra,
 # open search / +-1.1 Da / 20 ppm. The scripts are the shelved CPU package
 # ($SC/shelf/portable_eval/mouse; no longer tracked in the repo).
 #   qsub -q debug -l select=1 -l walltime=01:00:00 pbs/mouse_vs_yhydra.pbs
@@ -31,7 +31,7 @@ echo "=== $(date -Is) yHydra spectrum tower (CPU, background)"
 ( [[ -f $D/yhydra_embed.npy ]] || env -u PYTHONPATH YHYDRA_MODEL=$YE/saved_27_06_2021 CUDA_VISIBLE_DEVICES="" TF_CPP_MIN_LOG_LEVEL=2 \
     $YE/env/bin/python $PE/embed_yhydra.py $D > $OUT/.yhydra_embed.log 2>&1 ) &
 ypid=$!
-echo "=== $(date -Is) Iona embeddings (encoder iona-contrastive-400m, student iona-peptide-embedder-400m)"
+echo "=== $(date -Is) Iona embeddings (spectrum encoder iona-contrastive-400m, peptide encoder iona-peptide-embedder-400m)"
 [[ -f $D/ours.npz ]] || $PY $PE/embed_ours.py $D $D/ours.npz --batch-size 32 > $OUT/.ours_embed.log 2>&1 \
   || { echo "Iona embedding failed"; tail -5 $OUT/.ours_embed.log; exit 1; }
 tail -1 $OUT/.ours_embed.log

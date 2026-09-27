@@ -1,5 +1,5 @@
 #!/bin/bash -l
-# Reorganisation + PeptideEmbedderModel backward compatibility: the full CPU test suite from REPO_DIR,
+# Reorganisation + PeptideEncoderModel backward compatibility: the full CPU test suite from REPO_DIR,
 # then pbs/diag/backcompat_check.py on the real models (old tree vs new tree, old vs new loaders).
 #PBS -N backcompat
 #PBS -A UIC-HPC
