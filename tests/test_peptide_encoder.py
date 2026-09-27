@@ -112,3 +112,54 @@ def test_alignment_training_saves_the_standard_layout(tmp_path):
     assert loaded.config.spectrum_model == "/spectrum/encoder"
     assert torch.equal(m.embed(PEPTIDES, CHARGES), loaded.embed(PEPTIDES, CHARGES))
 
+
+# ------------------------------------------------------------------ names before the rename
+
+def test_old_module_is_an_alias_of_the_new_one():
+    import msdelta.models.peptide_embedder as old
+    import msdelta.models.peptide_encoder as new
+    assert old is new
+    from msdelta.models.peptide_embedder import PeptideEmbedderConfig, PeptideEmbedderModel
+    assert PeptideEmbedderModel is new.PeptideEncoderModel
+    assert PeptideEmbedderConfig is new.PeptideEncoderConfig
+    # the inner sequence tower keeps its name and is not the PreTrainedModel
+    assert new.PeptideEncoder is not new.PeptideEncoderModel
+
+
+def test_old_save_function_name_is_the_new_one():
+    from msdelta.finetuning.alignment import finetune_align
+    assert finetune_align.save_peptide_embedder is finetune_align.save_peptide_encoder
+
+
+def test_reads_the_standard_layout_saved_before_the_rename(tmp_path):
+    """A directory saved by the pre-rename code: model_type msdelta-peptide-embedder."""
+    from msdelta.models.peptide_embedder import PeptideEmbedderModel
+    from msdelta.models.peptide_encoder import PeptideEncoderModel
+    m = _model()
+    m.save_pretrained(tmp_path)
+    config = json.loads((tmp_path / "config.json").read_text())
+    config["model_type"] = "msdelta-peptide-embedder"
+    (tmp_path / "config.json").write_text(json.dumps(config))
+    for cls in (PeptideEncoderModel, PeptideEmbedderModel):
+        loaded = cls.from_pretrained(tmp_path).eval()
+        assert isinstance(loaded, PeptideEncoderModel)
+        assert loaded.config.model_type == "msdelta-peptide-encoder"
+        assert torch.equal(m.embed(PEPTIDES, CHARGES), loaded.embed(PEPTIDES, CHARGES))
+
+
+def test_pickle_naming_the_old_module_loads():
+    """A pickle written before the rename names msdelta.models.peptide_embedder.PeptideEmbedderConfig."""
+    import pickle
+    from msdelta.models.peptide_encoder import PeptideEncoderConfig
+    # protocol-0 global reference to the old module + class name
+    data = b"cmsdelta.models.peptide_embedder\nPeptideEmbedderConfig\n."
+    assert pickle.loads(data) is PeptideEncoderConfig
+
+
+def test_peptide_encoder_dir_prefers_the_new_name(tmp_path):
+    from msdelta.finetuning.alignment.finetune_align import peptide_encoder_dir
+    assert peptide_encoder_dir(tmp_path) == tmp_path / "peptide_encoder"
+    (tmp_path / "peptide_embedder").mkdir()
+    assert peptide_encoder_dir(tmp_path) == tmp_path / "peptide_embedder"
+    (tmp_path / "peptide_encoder").mkdir()
+    assert peptide_encoder_dir(tmp_path) == tmp_path / "peptide_encoder"
