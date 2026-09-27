@@ -36,7 +36,7 @@ ENGINEERING
   [x] reorg (task subpackages + shims, results raw/processed) merged into dev_finetune_02
   [x] opt-in legacy / e2e / golden tests; FT26 fixed; K38 fixed; per-job code snapshots
   [ ] cutover of the main checkout to dev_finetune_02 (after 8873159)
-  [ ] rename peptide/spectrum "embedder" -> "encoder"
+  [x] rename "peptide embedder" -> "peptide encoder" (and "spectrum encoder"); old names aliased
   [ ] K4 data/synthetic -> /flare (deletion protocol)
   [ ] P1 Pairformer port (HF-compliant)
 

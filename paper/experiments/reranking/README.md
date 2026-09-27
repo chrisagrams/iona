@@ -41,7 +41,7 @@ the result file each number was read from.
   embedding, plus four features of that cosine relative to the spectrum's other candidates (rank,
   difference to the best other candidate, z-score within the spectrum, gap between the top two).
   Spectrum embeddings come from the fine-tuned spectrum encoder (the teacher); peptide embeddings from
-  the peptide embedder trained on it (the student).
+  the peptide encoder trained on it (the student).
   - **Iona embedding (50M)**: fine-tuned 50M spectrum encoder (step 600) and its peptide student.
   - **Iona embedding (400M)**: fine-tuned 400M spectrum encoder (end of epoch, seed 0) and its peptide student
     (released as `Gaolaboratory/iona-peptide-embedder-400m`).

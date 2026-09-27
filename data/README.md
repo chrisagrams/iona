@@ -14,7 +14,7 @@ Face Hub or on Aurora's `/flare` (`$S` = `/lus/flare/projects/UIC-HPC/khuss/msde
 | dataset | used for |
 |---|---|
 | `chrisagrams/ms-denoise-100k` | denoising fine-tuning and its test set (per-peak noise labels) |
-| `chrisagrams/ms-contrastive-100k` | contrastive fine-tuning, alignment (peptide embedder), in-distribution retrieval evaluation |
+| `chrisagrams/ms-contrastive-100k` | contrastive fine-tuning, alignment (peptide encoder), in-distribution retrieval evaluation |
 | `chrisagrams/ms2-peptide-replicate-retrieval` | the replicate corpus: stage 1 of the two-stage contrastive recipe |
 | `Gaolaboratory/psm-rerank-hek-hct116` | PSM rescoring (HEK / HCT116 search results, pinned revision in `msdelta.rescoring`) |
 
@@ -49,5 +49,5 @@ Built by the benchmark builders in `baselines_wip/` (kept there with the baselin
 |---|---|
 | `/flare/UIC-HPC/khuss/msdelta/pretrained/msdelta-<size>-production-01-checkpoint-<step>` | pretrained encoders (25M-400M, checkpoints 10k-540k) |
 | `$S/runs/sweep-<arm>-<job>/final` | fine-tuned models (every sweep arm); released ones are on the Hub as `Gaolaboratory/iona-*` |
-| `$S/shelf/` | code shelved from this repository (`portable_eval/`, the first Hub peptide-embedder module) |
+| `$S/shelf/` | code shelved from this repository (`portable_eval/`, the first Hub peptide-embedder module, i.e. the peptide encoder's standalone loader) |
 | `$S/data/synthetic/` | the synthetic parquet shards that used to sit in `data/synthetic/` |

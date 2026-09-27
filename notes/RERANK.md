@@ -9,7 +9,7 @@ best PSM per spectrum with a target-decoy q-value.
 | | where |
 |---|---|
 | Spectrum encoder | `Gaolaboratory/iona-contrastive-400m` (private Hub repo; ask for access) |
-| Peptide embedder | `Gaolaboratory/iona-peptide-embedder-400m` (private) |
+| Peptide encoder | `Gaolaboratory/iona-peptide-embedder-400m` (private) |
 | Global rescorer (optional, plug-and-play) | `Gaolaboratory/iona-rerank-400m` (private) |
 | Input data | one parquet per run in the `Gaolaboratory/psm-rerank-hek-hct116` schema (`spectra/<dataset>/<run>.parquet`: MS2 peaks + the candidate list with MSFragger's scores, `is_decoy`) **and** the lab's feature table for the run (`features/<dataset>/<run>.parquet`, keyed on `candidate_id`; produced by the lab's `psm_features.py`) |
 | Software | this repo (`msdelta`), Python 3.12, torch, transformers, pandas, pyarrow, scikit-learn, safetensors, huggingface_hub; a GPU for step 1 (CPU works, slowly) |

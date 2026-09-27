@@ -8,6 +8,8 @@ Things we believe and why, separate from `STATUS.md` (what is running) and `TODO
 > `results/figures` -> `results/processed/figures`, and the top-level `results/*.csv` and
 > `results/SUMMARY_TABLES.md` -> `results/processed/tables/`. See `results/README.md`.
 
+> Since 2026-09-27 the 'peptide embedder' is called the peptide encoder (and the contrastive model the spectrum encoder); entries below keep the names they were written with.
+
 ---
 
 ## READ THIS FIRST: the contrastive separation ratio has sd 0.75 at a fixed seed

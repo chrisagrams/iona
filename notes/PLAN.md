@@ -65,7 +65,7 @@ Status: ✅ answered · 🟡 partly · ⏳ running/queued · ⬜ not started
 | C23 (user 2026-09-26) | Single-dataset recipe HPs per scale: do the old recipe's HPs transfer? One factor at a time around lr 1e-4 / t 0.002 / KL 10 / P85×K3 (lr, temperature, KL, P/K; 12 arms), 3 epochs, every scale at 540k; then the winning setting on every pretraining checkpoint | ⏳ | 50m first (job 8872806, finishing 2026-09-27 ~04:15 UTC); then score every half-epoch snapshot on validation + OOD, decide, and run 25m/100m/200m/400m (`sweeps/make_hp_single.py`) |
 | C24 (user 2026-09-27) | What does precursor filtering cost? Evaluate with vs without the filter, and on the queries where the filter drops a correct match | ✅ | (a) filter width on theoretical masses (job 8872964): C19's gain is largest unfiltered (OOD +0.080) and shrinks to +0.011 at 20 ppm; 98-99% of open top-1 errors are far in mass. (b) measured precursors (job 8873366): 20 ppm loses ~0.25 MAP@R on the 35-40% of queries it breaks (isotope-offset precursors) and turns 5-6% of queries right -> wrong; our encoders recover 79-84% of the unanswerable ones unfiltered; an isotope-tolerant 20 ppm window removes the loss. OBSERVATIONS 2026-09-26/27 |
 
-### Alignment (peptide embedder)
+### Alignment (peptide encoder)
 
 A peptide encoder trained to land on the frozen spectrum encoder's embedding of that
 peptide's spectra (L2 on normalised vectors). It is the sequence side of reranking and of
@@ -238,7 +238,7 @@ Exact: the tests check the gradients equal the untrimmed ones. Step time, untrim
 Gradient checkpointing is redundant under GradCache (which already bounds memory) and costs about 4×.
 </details>
 
-### Alignment (peptide embedder), current recipe and caveats
+### Alignment (peptide encoder), current recipe and caveats
 
 A PeptideEncoder student regresses (L2 on unit vectors) onto the frozen C7 spectrum encoder's embeddings of that peptide's spectra. Readout is mean+max pooling, with 8 heads, 3 epochs, on ms-contrastive-100k, selected on validation loss. The released model is the A2 400m teacher: test Hit@1 0.923.
 
@@ -284,12 +284,12 @@ Test Hit@1: pool 0.899, cls 0.894, attn 0.893. Near-miss discrimination (adjacen
 
 External reference points, by track. Each is scored on the same split and metric as ours.
 
-CONTRASTIVE (spectrum embedder; ms-contrastive-100k test, MAP@R / Hit@1)
+CONTRASTIVE (spectrum encoder; ms-contrastive-100k test, MAP@R / Hit@1)
 - [x] **Binned cosine** (spectral-library dot product) — 0.730 exp MAP@R at 0.1 Da, 0.671 at 1 Da (8860250)
 - [x] **PCA** — fitted on 10k ms-contrastive-100k TRAIN analytes, test projected (job 8863968): 0.1 Da bins -> 1280 dims 0.723 exp MAP@R (Hit@1 0.814), -> 256 dims 0.488; 1 Da -> 256 dims 0.553. Our C7 400m 0.859, 50m 0.839
 - [x] **GLEAMS** (Bittremieux et al., Nat Methods 2022) — pretrained: 0.646 / 0.746 on the 100k test (ours never trained on it: 0.714 / 0.810; binned 0.730). Unseen-data version = C11
 
-ALIGNMENT (peptide embedder; peptide->spectrum Hit@1 / MRR on the test split)
+ALIGNMENT (peptide encoder; peptide->spectrum Hit@1 / MRR on the test split)
 - [x] **yHydra** (Altenburg et al. 2022) — cross-modal Hit@1 0.196 vs A1 0.901 on the 100k test (A5); unseen-data + mass-window versions queued
 
 RERANKING (on the incoming reranking dataset)
@@ -309,7 +309,7 @@ The paper was submitted 2026-09-26 on branch `dev_finetune` (frozen). Current wo
 **Next**
 3. C23 per-scale HP search (25m/100m/200m/400m), then the winning recipe on every pretraining checkpoint (the single-dataset scaling curve).
 4. C20 train with the consensus spectrum.
-5. Engineering on `dev_finetune_02`: cutover of the main checkout (after the mix job), rename to "peptide encoder" / "spectrum encoder", move `data/synthetic` to /flare (K4), P1 Pairformer port (see Questions → Architecture).
+5. Engineering on `dev_finetune_02`: cutover of the main checkout (after the mix job), move `data/synthetic` to /flare (K4), P1 Pairformer port (see Questions → Architecture).
 
 **Later / waiting on a decision**
 - Alignment caveats (Design decisions → Alignment → Caveats), incl. A8's open-retrieval collapse and a student for the single-stage encoder. User asked to be reminded.

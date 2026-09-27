@@ -149,7 +149,7 @@ node, XPU): 6 passed in 4 min 20 s.
 | `test_pretraining` | `pretraining.train`, 20 steps, 64 spectra, `--preprocessed_dataset_dir` | loss finite and falling, eval_loss, `final/` == `checkpoint-20`, processor saved | 91 s |
 | `test_contrastive_and_resume` | `finetuning.contrastive.finetune_contrastive`, current recipe (SupCon, same-mass batches, GradCache chunk 4 + trim, KL 10, no grad checkpointing), 30 analytes x 3, 10 steps; then `--resume_from_checkpoint checkpoint-5` | loadable `final/` and `checkpoint-5/encoder`, step sequence 1..10 once, resumed run did not restart | 36 s |
 | `test_denoise_and_resume` | `finetuning.denoise.finetune_denoise`, 10 steps + eval + test split; resume | eval/test AUROC, F1, AUPRC finite; resume as above | 30 s |
-| `test_alignment_precompute_sharded_and_train` | `precompute_align` prepare / 2 shards / merge, and unsharded; `finetune_align` 10 steps | sharded targets == unsharded, `final/peptide_embedder` loads with `PeptideEmbedderModel` and embeds | 57 s |
+| `test_alignment_precompute_sharded_and_train` | `precompute_align` prepare / 2 shards / merge, and unsharded; `finetune_align` 10 steps | sharded targets == unsharded, `final/peptide_encoder` loads with `PeptideEncoderModel` (model_type `msdelta-peptide-encoder`) and embeds | 57 s |
 | `test_grouped_retrieval_eval` | `eval.eval_grouped_retrieval prepare` + `score` (pretrained, contrastive, binned) | row count, MAP@R in [0, 1] for `all` and `experimental` | 17 s |
 | `test_psm_rerank_cli` | `rescoring.psm_rerank score` / `train` / `score --mode global`, `rescoring.rerank_psm_fdr` on `test_rerank_r4`'s synthetic runs | one PSM per spectrum, q in [0, 1], the strong synthetic signal survives | 28 s |
 
@@ -160,7 +160,7 @@ references were written. Catches the silent class of regression the other tests 
 the same weights and the same spectra now producing different numbers.
 
 - **Frozen:** the 25M pretrained checkpoint (step 540,423), a 50M contrastive `final/`
-  (sweep-cont050m_ep01_seed1), and the Hub release `Gaolaboratory/iona-peptide-embedder-400m`
+  (sweep-cont050m_ep01_seed1), and the peptide encoder Hub release `Gaolaboratory/iona-peptide-embedder-400m`
   from the local HF cache; rows 0-199 of the prepared ms-contrastive-100k validation split
   and the first 50 distinct (peptide, charge) pairs in them. All read-only.
 - **Compared:** pooled mean+max spectrum embeddings (both models), the pretraining head's
