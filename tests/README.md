@@ -132,6 +132,26 @@ were dropped (7ed4e19) stay where they were moved and are not duplicated here.
 | `tests/test_mass_aware.py` (whole file; `test_peptide_neutral_mass` is in the default `test_contrastive.py::TestSameMassBatches`, since it feeds C19's `group_masses`) | A8 (mass-aware student) | `MassNegativePool`, `MassBatchSampler`, `AlignmentCollator(neg_source="mass")` |
 | `test_student_readout.py::test_shapes_and_unit_norm`, `::test_padding_does_not_leak` | A3 (cls/attn readouts rejected, keep mean+max) | cls/attn forward shapes and padding. `student_readout()` detection is in the default run: the loaders use it on legacy A3 dirs |
 
+## End-to-end — `tests/e2e/` (opt-in `--e2e`, debug node)
+
+Each entry point runs as `python -m msdelta.<path>` in a subprocess, exactly as a PBS
+script launches it, on synthetic data generated deterministically by
+`tests/e2e/synth.py` (b/y ions of real peptides, jittered per replicate, plus noise
+peaks; ~300 KB, nothing stored in the repo). Entry points that load a Hub dataset by
+name take the synthetic directory of `<split>.parquet` files as the same argument
+(`datasets.load_dataset(<dir>)`), so no code change was needed. The model is 2 layers,
+hidden 32; `pbs/run_e2e.pbs` runs them on one tile. Measured on job 8873354 (one debug
+node, XPU): 6 passed in 4 min 20 s.
+
+| test | drives | checks | time |
+| --- | --- | --- | --- |
+| `test_pretraining` | `pretraining.train`, 20 steps, 64 spectra, `--preprocessed_dataset_dir` | loss finite and falling, eval_loss, `final/` == `checkpoint-20`, processor saved | 91 s |
+| `test_contrastive_and_resume` | `finetuning.contrastive.finetune_contrastive`, current recipe (SupCon, same-mass batches, GradCache chunk 4 + trim, KL 10, no grad checkpointing), 30 analytes x 3, 10 steps; then `--resume_from_checkpoint checkpoint-5` | loadable `final/` and `checkpoint-5/encoder`, step sequence 1..10 once, resumed run did not restart | 36 s |
+| `test_denoise_and_resume` | `finetuning.denoise.finetune_denoise`, 10 steps + eval + test split; resume | eval/test AUROC, F1, AUPRC finite; resume as above | 30 s |
+| `test_alignment_precompute_sharded_and_train` | `precompute_align` prepare / 2 shards / merge, and unsharded; `finetune_align` 10 steps | sharded targets == unsharded, `final/peptide_embedder` loads with `PeptideEmbedderModel` and embeds | 57 s |
+| `test_grouped_retrieval_eval` | `eval.eval_grouped_retrieval prepare` + `score` (pretrained, contrastive, binned) | row count, MAP@R in [0, 1] for `all` and `experimental` | 17 s |
+| `test_psm_rerank_cli` | `rescoring.psm_rerank score` / `train` / `score --mode global`, `rescoring.rerank_psm_fdr` on `test_rerank_r4`'s synthetic runs | one PSM per spectrum, q in [0, 1], the strong synthetic signal survives | 28 s |
+
 ## Imports and metric fixtures
 
 - `tests/test_imports.py` — every flat shim `msdelta/<old>.py` is the same module object as
