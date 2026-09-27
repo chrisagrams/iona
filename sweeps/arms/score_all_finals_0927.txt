@@ -1,0 +1,35 @@
+# C21 mix (8873159) + two-region (8873563) finals, c8c19 same-mass/random references (8872141)
+supcon_within75_seed0 /lus/flare/projects/UIC-HPC/khuss/msdelta/runs/sweep-s050m_ck540k_supcon_within75_seed0-8873159/final
+supcon_within75_seed1 /lus/flare/projects/UIC-HPC/khuss/msdelta/runs/sweep-s050m_ck540k_supcon_within75_seed1-8873159/final
+supcon_within75_seed2 /lus/flare/projects/UIC-HPC/khuss/msdelta/runs/sweep-s050m_ck540k_supcon_within75_seed2-8873159/final
+supcon_within50_seed0 /lus/flare/projects/UIC-HPC/khuss/msdelta/runs/sweep-s050m_ck540k_supcon_within50_seed0-8873159/final
+supcon_within50_seed1 /lus/flare/projects/UIC-HPC/khuss/msdelta/runs/sweep-s050m_ck540k_supcon_within50_seed1-8873159/final
+supcon_within50_seed2 /lus/flare/projects/UIC-HPC/khuss/msdelta/runs/sweep-s050m_ck540k_supcon_within50_seed2-8873159/final
+supcon_between75_seed0 /lus/flare/projects/UIC-HPC/khuss/msdelta/runs/sweep-s050m_ck540k_supcon_between75_seed0-8873159/final
+supcon_between75_seed1 /lus/flare/projects/UIC-HPC/khuss/msdelta/runs/sweep-s050m_ck540k_supcon_between75_seed1-8873159/final
+supcon_between75_seed2 /lus/flare/projects/UIC-HPC/khuss/msdelta/runs/sweep-s050m_ck540k_supcon_between75_seed2-8873159/final
+supcon_regions75_seed0 /lus/flare/projects/UIC-HPC/khuss/msdelta/runs/sweep-s050m_ck540k_supcon_regions75_seed0-8873563/final
+supcon_regions75_seed1 /lus/flare/projects/UIC-HPC/khuss/msdelta/runs/sweep-s050m_ck540k_supcon_regions75_seed1-8873563/final
+supcon_regions75_seed2 /lus/flare/projects/UIC-HPC/khuss/msdelta/runs/sweep-s050m_ck540k_supcon_regions75_seed2-8873563/final
+supcon_regions50_seed0 /lus/flare/projects/UIC-HPC/khuss/msdelta/runs/sweep-s050m_ck540k_supcon_regions50_seed0-8873563/final
+supcon_regions50_seed1 /lus/flare/projects/UIC-HPC/khuss/msdelta/runs/sweep-s050m_ck540k_supcon_regions50_seed1-8873563/final
+supcon_regions50_seed2 /lus/flare/projects/UIC-HPC/khuss/msdelta/runs/sweep-s050m_ck540k_supcon_regions50_seed2-8873563/final
+supcon_mass_seed0 /lus/flare/projects/UIC-HPC/khuss/msdelta/runs/sweep-s050m_ck540k_supcon_mass_seed0-8872141/final
+supcon_mass_seed1 /lus/flare/projects/UIC-HPC/khuss/msdelta/runs/sweep-s050m_ck540k_supcon_mass_seed1-8872141/final
+supcon_mass_seed2 /lus/flare/projects/UIC-HPC/khuss/msdelta/runs/sweep-s050m_ck540k_supcon_mass_seed2-8872141/final
+supcon_random_seed0 /lus/flare/projects/UIC-HPC/khuss/msdelta/runs/sweep-s050m_ck540k_supcon_random_seed0-8872141/final
+supcon_random_seed1 /lus/flare/projects/UIC-HPC/khuss/msdelta/runs/sweep-s050m_ck540k_supcon_random_seed1-8872141/final
+supcon_random_seed2 /lus/flare/projects/UIC-HPC/khuss/msdelta/runs/sweep-s050m_ck540k_supcon_random_seed2-8872141/final
+# C23 hp50b (8873825)
+hp50b_lr1.6e-3_seed0 /lus/flare/projects/UIC-HPC/khuss/msdelta/runs/sweep-s050m_ck540k_lr1.6e-3_seed0-8873825/final
+hp50b_lr1.6e-3_seed1 /lus/flare/projects/UIC-HPC/khuss/msdelta/runs/sweep-s050m_ck540k_lr1.6e-3_seed1-8873825/final
+hp50b_lr1.6e-3_seed2 /lus/flare/projects/UIC-HPC/khuss/msdelta/runs/sweep-s050m_ck540k_lr1.6e-3_seed2-8873825/final
+hp50b_lr4e-4_kl1_seed0 /lus/flare/projects/UIC-HPC/khuss/msdelta/runs/sweep-s050m_ck540k_lr4e-4_kl1_seed0-8873825/final
+hp50b_lr4e-4_kl1_seed1 /lus/flare/projects/UIC-HPC/khuss/msdelta/runs/sweep-s050m_ck540k_lr4e-4_kl1_seed1-8873825/final
+hp50b_lr4e-4_kl1_seed2 /lus/flare/projects/UIC-HPC/khuss/msdelta/runs/sweep-s050m_ck540k_lr4e-4_kl1_seed2-8873825/final
+hp50b_lr4e-4_p128k2_seed0 /lus/flare/projects/UIC-HPC/khuss/msdelta/runs/sweep-s050m_ck540k_lr4e-4_p128k2_seed0-8873825/final
+hp50b_lr4e-4_p128k2_seed1 /lus/flare/projects/UIC-HPC/khuss/msdelta/runs/sweep-s050m_ck540k_lr4e-4_p128k2_seed1-8873825/final
+hp50b_lr4e-4_p128k2_seed2 /lus/flare/projects/UIC-HPC/khuss/msdelta/runs/sweep-s050m_ck540k_lr4e-4_p128k2_seed2-8873825/final
+hp50b_lr8e-4_seed0 /lus/flare/projects/UIC-HPC/khuss/msdelta/runs/sweep-s050m_ck540k_lr8e-4_seed0-8873825/final
+hp50b_lr8e-4_seed1 /lus/flare/projects/UIC-HPC/khuss/msdelta/runs/sweep-s050m_ck540k_lr8e-4_seed1-8873825/final
+hp50b_lr8e-4_seed2 /lus/flare/projects/UIC-HPC/khuss/msdelta/runs/sweep-s050m_ck540k_lr8e-4_seed2-8873825/final

@@ -1,0 +1,13 @@
+# C20 consensus-in-training finals (8873850) + same-mass reference (8872141)
+cons_k3_kl0_seed0 /lus/flare/projects/UIC-HPC/khuss/msdelta/runs/sweep-s050m_ck540k_cons_k3_kl0_seed0-8873850/final
+cons_k3_kl0_seed1 /lus/flare/projects/UIC-HPC/khuss/msdelta/runs/sweep-s050m_ck540k_cons_k3_kl0_seed1-8873850/final
+cons_k3_kl0_seed2 /lus/flare/projects/UIC-HPC/khuss/msdelta/runs/sweep-s050m_ck540k_cons_k3_kl0_seed2-8873850/final
+cons_k3_seed0 /lus/flare/projects/UIC-HPC/khuss/msdelta/runs/sweep-s050m_ck540k_cons_k3_seed0-8873850/final
+cons_k3_seed1 /lus/flare/projects/UIC-HPC/khuss/msdelta/runs/sweep-s050m_ck540k_cons_k3_seed1-8873850/final
+cons_k3_seed2 /lus/flare/projects/UIC-HPC/khuss/msdelta/runs/sweep-s050m_ck540k_cons_k3_seed2-8873850/final
+cons_k4_seed0 /lus/flare/projects/UIC-HPC/khuss/msdelta/runs/sweep-s050m_ck540k_cons_k4_seed0-8873850/final
+cons_k4_seed1 /lus/flare/projects/UIC-HPC/khuss/msdelta/runs/sweep-s050m_ck540k_cons_k4_seed1-8873850/final
+cons_k4_seed2 /lus/flare/projects/UIC-HPC/khuss/msdelta/runs/sweep-s050m_ck540k_cons_k4_seed2-8873850/final
+supcon_mass_seed0 /lus/flare/projects/UIC-HPC/khuss/msdelta/runs/sweep-s050m_ck540k_supcon_mass_seed0-8872141/final
+supcon_mass_seed1 /lus/flare/projects/UIC-HPC/khuss/msdelta/runs/sweep-s050m_ck540k_supcon_mass_seed1-8872141/final
+supcon_mass_seed2 /lus/flare/projects/UIC-HPC/khuss/msdelta/runs/sweep-s050m_ck540k_supcon_mass_seed2-8872141/final

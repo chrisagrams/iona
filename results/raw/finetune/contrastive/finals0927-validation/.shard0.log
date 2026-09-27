@@ -1,0 +1,7 @@
+[score] shard 0/12: 3 of 33 models on xpu
+Loading weights:   0%|          | 0/170 [00:00<?, ?it/s]Loading weights:  54%|█████▍    | 92/170 [00:00<00:00, 864.85it/s]Loading weights: 100%|██████████| 170/170 [00:00<00:00, 1104.59it/s]
+  supcon_within75_seed0: all MAP@R 0.7375  experimental MAP@R 0.8685  20ppm 0.9897  iso20ppm 0.9731  F 0  (745s)
+Loading weights:   0%|          | 0/170 [00:00<?, ?it/s]Loading weights:  32%|███▏      | 55/170 [00:00<00:00, 431.17it/s]Loading weights:  58%|█████▊    | 99/170 [00:00<00:00, 258.50it/s]Loading weights:  76%|███████▌  | 129/170 [00:00<00:00, 196.09it/s]Loading weights: 100%|██████████| 170/170 [00:00<00:00, 250.04it/s]
+  supcon_regions50_seed0: all MAP@R 0.7449  experimental MAP@R 0.8704  20ppm 0.9908  iso20ppm 0.9735  F 0  (745s)
+Loading weights:   0%|          | 0/170 [00:00<?, ?it/s]Loading weights:  31%|███       | 52/170 [00:00<00:00, 436.72it/s]Loading weights:  56%|█████▋    | 96/170 [00:00<00:00, 202.15it/s]Loading weights:  72%|███████▏  | 123/170 [00:00<00:00, 212.33it/s]Loading weights:  88%|████████▊ | 149/170 [00:00<00:00, 210.69it/s]Loading weights: 100%|██████████| 170/170 [00:00<00:00, 231.32it/s]
+  hp50b_lr4e-4_kl1_seed0: all MAP@R 0.8645  experimental MAP@R 0.8804  20ppm 0.9926  iso20ppm 0.9785  F 0  (745s)

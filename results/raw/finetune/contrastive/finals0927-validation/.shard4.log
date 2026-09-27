@@ -1,0 +1,7 @@
+[score] shard 4/12: 3 of 33 models on xpu
+Loading weights:   0%|          | 0/170 [00:00<?, ?it/s]Loading weights:  44%|████▍     | 75/170 [00:00<00:00, 680.85it/s]Loading weights:  86%|████████▌ | 146/170 [00:00<00:00, 681.77it/s]Loading weights: 100%|██████████| 170/170 [00:00<00:00, 762.83it/s]
+  supcon_within50_seed1: all MAP@R 0.7460  experimental MAP@R 0.8680  20ppm 0.9898  iso20ppm 0.9712  F 0  (736s)
+Loading weights:   0%|          | 0/170 [00:00<?, ?it/s]Loading weights:  14%|█▎        | 23/170 [00:00<00:00, 176.77it/s]Loading weights:  36%|███▌      | 61/170 [00:00<00:00, 241.89it/s]Loading weights:  56%|█████▋    | 96/170 [00:00<00:00, 225.61it/s]Loading weights:  74%|███████▎  | 125/170 [00:00<00:00, 235.36it/s]Loading weights:  90%|█████████ | 153/170 [00:00<00:00, 233.03it/s]Loading weights: 100%|██████████| 170/170 [00:00<00:00, 246.86it/s]
+  supcon_mass_seed1: all MAP@R 0.7594  experimental MAP@R 0.8670  20ppm 0.9908  iso20ppm 0.9748  F 0  (737s)
+Loading weights:   0%|          | 0/170 [00:00<?, ?it/s]Loading weights:  30%|███       | 51/170 [00:00<00:00, 401.60it/s]Loading weights:  54%|█████▍    | 92/170 [00:00<00:00, 296.21it/s]Loading weights:  72%|███████▏  | 123/170 [00:00<00:00, 290.27it/s]Loading weights: 100%|██████████| 170/170 [00:00<00:00, 345.95it/s]
+  hp50b_lr4e-4_p128k2_seed1: all MAP@R 0.8474  experimental MAP@R 0.8874  20ppm 0.9944  iso20ppm 0.9835  F 0  (737s)

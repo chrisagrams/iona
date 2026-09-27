@@ -1845,3 +1845,28 @@ seed spread there ~±.001 validation, ~±.009 OOD.
    pretrained model sees consensus-style spectra. Tested next with consensus in training (C20).
 Next: sweep-hp50b (lr 8e-4, 1.6e-3, lr4e-4+p128k2, lr4e-4+kl1, x3 seeds; K53).
 
+
+---
+
+## C21 batch composition: no mix beats pure same-mass; C23/K53: lr 4e-4 + P128xK2 is the new best (jobs 8873159, 8873563, 8873825; scored 8874549/50/60/62, 2026-09-27 17:20 UTC)
+
+50m@540k, ms-contrastive-100k only, SupCon, 3 epochs, 3 seeds each (± = half range); exp MAP@R. Mouse/human
+are unseen species with MEASURED precursors (F = queries the 20 ppm filter fails, 40% / 35%).
+
+    batches                              val        OOD        mouse open/20ppm/iso   mouse F open/20ppm/iso   human open
+    random                               .858±.000  .645±.001  .828/.820/.942          .778/.571/.915           .879
+    same-mass (100%)                     .868±.000  .724±.009  .847/.823/.951          .800/.573/.927           .891
+    within75 (64 same-mass + 21 random)  .870±.002  .713±.006  .844/.823/.950          .797/.573/.925           .890
+    within50                             .867±.001  .680±.007  .839/.822/.947          .791/.572/.922           .887
+    between75                            .870±.000  .714±.004  .845/.823/.951          .799/.573/.926           .890
+    regions75 (two mass regions)         .870±.001  .714±.010  .844/.823/.950          .797/.573/.925           .890
+    regions50                            .870±.000  .715±.002  .843/.822/.949          .795/.572/.924           .890
+
+1. Pure same-mass is best or tied everywhere OOD and on unseen species; every mix loses ~0.01 OOD (within50 ~0.04)
+   while gaining only +0.002 in-distribution. Two-region = within75 = between75 within noise. Same-mass stays default.
+2. The filter columns barely move between batch designs: the design changes open retrieval, not filtered.
+
+K53 (lr follow-up, same-mass, 3 seeds):   lr1e-4 ref .868 / .724;  lr8e-4 .869 / .729;  lr1.6e-3 .821 / .549;
+    lr4e-4+KL1 .879 / .751;  **lr4e-4 + P128xK2 .886±.002 / .784±.009**  (val / OOD)
+3. The lr optimum is located (~4e-4: 8e-4 no better than 1e-4, 1.6e-3 degrades). P128xK2 (more peptides per batch,
+   2 spectra each) on top of lr 4e-4 adds +0.007 val / +0.033 OOD -- the largest OOD gain of any single-dataset change.

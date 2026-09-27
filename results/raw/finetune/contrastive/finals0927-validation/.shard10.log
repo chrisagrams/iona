@@ -1,0 +1,5 @@
+[score] shard 10/12: 2 of 33 models on xpu
+Loading weights:   0%|          | 0/170 [00:00<?, ?it/s]Loading weights:  46%|████▌     | 78/170 [00:00<00:00, 755.66it/s]Loading weights:  91%|█████████ | 154/170 [00:00<00:00, 616.64it/s]Loading weights: 100%|██████████| 170/170 [00:00<00:00, 685.83it/s]
+  supcon_regions75_seed1: all MAP@R 0.7583  experimental MAP@R 0.8709  20ppm 0.9906  iso20ppm 0.9741  F 0  (723s)
+Loading weights:   0%|          | 0/170 [00:00<?, ?it/s]Loading weights:  35%|███▍      | 59/170 [00:00<00:00, 524.18it/s]Loading weights:  66%|██████▌   | 112/170 [00:00<00:00, 336.03it/s]Loading weights:  88%|████████▊ | 150/170 [00:00<00:00, 254.81it/s]Loading weights: 100%|██████████| 170/170 [00:00<00:00, 313.50it/s]
+  hp50b_lr1.6e-3_seed1: all MAP@R 0.7651  experimental MAP@R 0.8266  20ppm 0.9895  iso20ppm 0.9704  F 0  (722s)
