@@ -20,7 +20,8 @@ qsub -q debug -l select=1 -l walltime=01:00:00 -A UIC-HPC -l filesystems=home:fl
 
 **It is not a seconds-long suite.** Measured 2026-09-27: the default CPU run is 647 tests
 (641 pass, 6 known environment failures -- 4 level-zero PBS checks, 2 paths absent in a fresh worktree -- and 29 skipped) and took **10 min 20 s** on a loaded
-login node (an earlier run on the same tree: ~6 min); `tests/test_imports.py` alone is
+login node (an earlier run on the same tree: ~6 min) and 4 min 49 s on a debug compute
+node through `pbs/run_tests.pbs` (job 8873488, where the device suite then took 19 s); `tests/test_imports.py` alone is
 ~40 s because it starts child interpreters. On a login node run only the files you
 touched; run the whole suite through `pbs/run_tests.pbs`.
 
@@ -151,6 +152,37 @@ node, XPU): 6 passed in 4 min 20 s.
 | `test_alignment_precompute_sharded_and_train` | `precompute_align` prepare / 2 shards / merge, and unsharded; `finetune_align` 10 steps | sharded targets == unsharded, `final/peptide_embedder` loads with `PeptideEmbedderModel` and embeds | 57 s |
 | `test_grouped_retrieval_eval` | `eval.eval_grouped_retrieval prepare` + `score` (pretrained, contrastive, binned) | row count, MAP@R in [0, 1] for `all` and `experimental` | 17 s |
 | `test_psm_rerank_cli` | `rescoring.psm_rerank score` / `train` / `score --mode global`, `rescoring.rerank_psm_fdr` on `test_rerank_r4`'s synthetic runs | one PSM per spectrum, q in [0, 1], the strong synthetic signal survives | 28 s |
+
+## Golden outputs — `tests/golden/` (opt-in `--golden`, debug node)
+
+Frozen checkpoints on frozen inputs, compared against what the code computed when the
+references were written. Catches the silent class of regression the other tests cannot:
+the same weights and the same spectra now producing different numbers.
+
+- **Frozen:** the 25M pretrained checkpoint (step 540,423), a 50M contrastive `final/`
+  (sweep-cont050m_ep01_seed1), and the Hub release `Gaolaboratory/iona-peptide-embedder-400m`
+  from the local HF cache; rows 0-199 of the prepared ms-contrastive-100k validation split
+  and the first 50 distinct (peptide, charge) pairs in them. All read-only.
+- **Compared:** pooled mean+max spectrum embeddings (both models), the pretraining head's
+  per-peak log-probabilities (32 spectra), grouped-retrieval metrics on the 200 rows
+  (`all` / `experimental`, the eval's own `_variants`), peptide embeddings.
+- **References:** `tests/golden/reference/golden.npz` (1.1 MB; unit-norm embeddings as
+  float16, with the float16 rounding added to the tolerance) and `MANIFEST.json` (paths,
+  sha256 of every weight file, row indices, peptides, code commit, torch version,
+  tolerances, the measured bf16 deviation). Generated on CPU in fp32 by debug job 8873406
+  at commit 1b8c0b4.
+- **Tolerances:** CPU fp32 recompute: 1e-4 absolute. XPU bf16 autocast against the fp32
+  reference: embeddings 1e-2, head log-probs 0.25, metrics 0.05 (measured max deviation
+  5.4e-3, 0.087 and 7.2e-3).
+- Checks that the checkpoints' sha256 still match first: a replaced checkpoint makes
+  every other failure meaningless. Skips with the list of missing paths where /flare or
+  the HF cache is not readable.
+
+**Regenerating is a deliberate act.** A failing golden test means the code now computes
+something different. If that is a bug, fix the code. Only when the change is intended and
+understood, regenerate (`qsub ... -v REPO_DIR=$PWD,SUITE=regenerate-golden
+pbs/run_e2e.pbs`, see `tests/golden/regenerate.py`) and commit the new references with the
+change that moved them, saying why in the message.
 
 ## Imports and metric fixtures
 

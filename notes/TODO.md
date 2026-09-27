@@ -773,15 +773,38 @@ The runner now walks down from the newest and takes the first checkpoint that ha
 trainer_state.json, logging each one it skips; the cost is one save interval (200
 steps). Retried as 8856558.
 
-## FT26. The device test suite (tests/gpu) segfaults — **Open**
+## FT26. The device test suite (tests/gpu) segfaults — **FIXED (root cause found)**
 
 First recorded run of pbs/run_tests.pbs (job 8856984): the CPU suite passed on the
-compute node (375 passed, 26 skipped, 3 min), then `pytest tests/gpu` died with a
-Segmentation fault. No earlier log of the device suite exists, so this is not a
-regression we can date -- the suite has simply never been seen to pass. A verbose rerun (8857034, `-v`,
-`-X faulthandler`) segfaults before pytest prints a single line, so the crash is at
-import/collection -- almost certainly native code loaded by tests/gpu or its conftest --
-not in any test body. Until it passes, commits are gated on the CPU suite only.
+compute node, then `pytest tests/gpu` died with a Segmentation fault at collection, before
+pytest printed a line (8857034). Never seen to pass until the fix below.
+
+ROOT CAUSE (debug jobs 8873344, 8873382, 8873433). A native-library ORDER problem between
+pyarrow and deepspeed, triggered by a pytest plugin:
+- pytest-randomly (installed in the frameworks env, active in every pytest run) reseeds
+  through every `pytest_randomly.random_seeder` entry point; deepspeed registers one
+  (`deepspeed.runtime.utils:set_random_seed`), so pytest imports deepspeed at startup.
+- On a compute node, bare `python -c "import deepspeed"` segfaults. gdb-oneapi: thread
+  `jemalloc_bg_thd`, `background_thread_entry () from pyarrow/libarrow.so.2300` --
+  pyarrow's bundled jemalloc background thread, with libarrow first loaded in the
+  middle of deepspeed's XPU accelerator initialisation.
+- Minimal orders: `import deepspeed`, `import torch; import deepspeed`, `import
+  transformers; import deepspeed` all crash; `import pyarrow; import deepspeed` and
+  `import datasets; import deepspeed` do not. Also clean: `DS_ACCELERATOR=cpu` (no XPU
+  init), `JE_ARROW_MALLOC_CONF=background_thread:false`, and importing
+  intel_extension_for_pytorch first. Not enough: `ARROW_DEFAULT_MEMORY_POOL=system`,
+  `DS_BUILD_OPS=0`, `torch.xpu.init()` first. Login nodes (no XPU) never crash.
+- tests/gpu collected with `-p no:randomly` or `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1` fine;
+  disabling any other plugin did not help.
+
+FIX: tests/conftest.py imports pyarrow as its very first import (commented), so libarrow
+is loaded before any plugin can pull in deepspeed. pbs/run_tests.pbs with the fix, job
+8873488: device suite 11 passed in 19 s, with pytest-randomly active (first ever pass);
+CPU suite 645 passed, 30 skipped, 5 known failures (4 PBS level-zero checks, 1 worktree
+path) in 4 min 49 s.
+Production entry points were never exposed: they import msdelta/datasets (hence pyarrow)
+before anything imports deepspeed. Anything new that imports deepspeed FIRST on a
+compute node (a bare script, a new plugin) will hit this again -- import pyarrow first.
 
 ## FT27. A job can hang in node startup, and a plain qdel does not remove it — **Hazard**
 
@@ -828,19 +851,21 @@ so far used the leaky split. Note the pool is small: 94 held-out peptides in tot
 | H10 | seed noise hides effects | **checked, small** | 3-seed spread: C1 50m ep24 0.877/0.880/0.874; ms-contrastive-100k 0.657/0.654/0.656 |
 | H11 | rescorer intensity reconstruction | **CONFIRMED, open (FT32)** | see FT32 |
 
-## FT33. Collecting ONE test file alone segfaults on a compute node — **worked around; root cause open (likely = FT26)**
+## FT33. Collecting ONE test file alone segfaults on a compute node — **FIXED (= FT26)**
 
-`pytest tests/<file>.py` exits 139 at COLLECTION with no traceback (faulthandler prints
-nothing) on Aurora compute nodes, for test_precompute_sharded.py and even for
-test_projection_head.py, which passes inside the full suite. The only single file that
-collects cleanly is test_grouped_retrieval.py -- the only one importing `msdelta` at
-module level. Plain `python -c "import msdelta.precompute_align"` is fine. Jobs 8860961
-(blocked A1), 8860988, 8860999, 8861019; fix verified 8861025.
+`pytest tests/<file>.py` exited 139 at COLLECTION with no traceback on Aurora compute nodes
+(test_precompute_sharded.py, test_projection_head.py), unless the file imported `msdelta`
+at module level. Jobs 8860961, 8860988, 8860999, 8861019; workaround verified 8861025.
 
-WORKAROUND: a file that must run alone imports msdelta at module level
-(test_precompute_sharded.py). The full suite is unaffected because an earlier module
-imports msdelta first. Worth checking whether the same one-line import fixes FT26
-(tests/gpu segfaults at collection).
+Same root cause as FT26: pytest-randomly imports deepspeed through its seeder entry point,
+and deepspeed's XPU init segfaults in pyarrow's jemalloc background thread unless pyarrow
+was loaded first; a test module importing msdelta (-> datasets -> pyarrow) at module level
+happened to load it first. Why it only hit some files depended on what conftest/test
+imports ran before the reseed. Fixed for every file by `import pyarrow` first in
+tests/conftest.py; the per-file `import msdelta.reranking  # see FT33` lines are now
+redundant but harmless. faulthandler prints nothing, even under `pytest -s`: the fault is
+in a native jemalloc thread. The backtrace came from
+`INTELGT_AUTO_ATTACH_DISABLE=1 gdb-oneapi -batch -ex run -ex bt --args python -c "import deepspeed"`.
 
 ## FT32. run_rescoring rebuilds intensity from a NORMALISED log — **Open, low (reranking on hold)**
 
