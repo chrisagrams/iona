@@ -1,7 +1,7 @@
 # Fine-tuning plan
 
 The one file that says **what we are trying to find out**. `STATUS.md` says where each
-thing stands, `OBSERVATIONS.md` records results, `TODO.md` lists defects. Every job must
+thing stands, `OBSERVATIONS.md` records results, `TODO.md` lists defects. `DECISIONS.md` logs every decision the user made (nothing is submitted without an approved experiment card). Every job must
 name the question below that it answers; a job that answers none should not be queued.
 
 Last reviewed: 2026-09-27 (after the paper deadline; working branch `dev_finetune_02`).
