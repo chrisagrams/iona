@@ -48,4 +48,4 @@ for p in "${pids[@]}"; do wait "$p"; done
 grep -h "handfeat\]\|Error" "$BASE"/handfeat/.*.log | cut -c1-200
 echo "=== $(date -Is) stage 2: FDR"
 "$PY" -m msdelta.rerank_psm_fdr --rows "$BASE/rows" --handfeat "$BASE/handfeat" \
-    --out "results/rerank/psm/${TAG}_full.json"
+    --out "results/raw/rerank/psm/${TAG}_full.json"

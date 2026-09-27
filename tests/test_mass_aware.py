@@ -7,11 +7,11 @@ import msdelta.reranking  # noqa: F401  -- module-level msdelta import, see FT33
 from msdelta.reranking import (AlignmentCollator, MassBatchSampler, MassNegativePool,
                                peptide_neutral_mass)
 
+# Opt-in (A8: mass-aware student, not in the recipe). Run with --legacy.
+# test_peptide_neutral_mass lives in test_contrastive.py::TestSameMassBatches.
+pytestmark = pytest.mark.legacy
 
-def test_peptide_neutral_mass():
-    assert peptide_neutral_mass("PEPTIDE") == pytest.approx(799.3600, abs=1e-3)
-    assert peptide_neutral_mass("AC[57.0215]M[15.9949]K") == pytest.approx(524.2087, abs=1e-3)
-    assert peptide_neutral_mass("[42.0106]PEPTIDE") == pytest.approx(841.3706, abs=1e-3)
+
 
 
 def test_mass_pool_negatives_within_ppm_and_never_self_or_il_twin():

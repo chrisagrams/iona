@@ -129,7 +129,7 @@ SupCon loss, t 0.002, KL 10 to the frozen pretrained intensity head, lr 1e-4 cos
 
 <details><summary><b>Loss: SupCon, not per-pair sigmoid (C8)</b></summary>
 
-50m@540k, ms-contrastive-100k only, 3 seeds, 3 epochs, encoder every half epoch (training job 8872141; results in `results/finetune/contrastive/c8c19-{validation,oodval}/`). Experimental MAP@R, mean of 3 seeds:
+50m@540k, ms-contrastive-100k only, 3 seeds, 3 epochs, encoder every half epoch (training job 8872141; results in `results/raw/finetune/contrastive/c8c19-{validation,oodval}/`). Experimental MAP@R, mean of 3 seeds:
 
 | arm | 0.5 ep | 1 | 1.5 | 2 | 2.5 | 3 ep | OOD at 3 ep |
 |---|---|---|---|---|---|---|---|
@@ -339,7 +339,7 @@ write-up in TODO.md under the same number.
 - **FT8** — is a warm-up freeze on the encoder worth anything?
 - **FT12** — the sign of the pooled-vs-within AUROC gap, measured rather than argued.
 - **ms-contrastive-100k only (lowest priority)** — C7's encoders are two-stage (replicate corpus, then ms-contrastive-100k). Training from the pretrained checkpoint on ms-contrastive-100k alone would show whether stage one adds anything. Not needed for the conclusions; two-stage is the recipe (decided 2026-09-24).
-- **Linear vs non-linear probe on frozen features (not pursued)** — the zero-shot per-layer redo (OBSERVATIONS 2026-09-24, `results/finetune/contrastive/zeroshot-layers/`) shows frozen encoders retrieve well at ~3/4 depth, which partly overturns the old "non-linear, unreachable by any readout" claim. That data is kept ONLY as the starting point for how much training improves the embeddings (figure c100k_scale); the theory itself is not being chased.
+- **Linear vs non-linear probe on frozen features (not pursued)** — the zero-shot per-layer redo (OBSERVATIONS 2026-09-24, `results/raw/finetune/contrastive/zeroshot-layers/`) shows frozen encoders retrieve well at ~3/4 depth, which partly overturns the old "non-linear, unreachable by any readout" claim. That data is kept ONLY as the starting point for how much training improves the embeddings (figure c100k_scale); the theory itself is not being chased.
 - **Layer mixing (retry candidate)** — `pooling=layer_mix` was dropped (OBSERVATIONS, "Blending encoder depths is worse", job 8842351) on the SEPARATION RATIO at the old recipe (t 0.07, 3 epochs, P2xK2). C0 later showed that ratio does not predict retrieval, so "last layer is best" was never tested on MAP@R. Retry: 50m at the frozen C1 recipe, layer_mix vs last layer, 3 seeds each, scored on the small eval and the ms-contrastive-100k test (~2.4 h/arm, one node). No write-up in TODO.md; this entry is it.
 
 ## Rules

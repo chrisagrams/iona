@@ -14,8 +14,11 @@ runs/
 wandb/
 pbs/logs/
 
-# Benchmark data (published to HF, not tracked in git)
-data/
+# data/ holds only preparation scripts and docs; the data itself lives on /flare (see data/README.md)
+data/*
+!data/*.py
+!data/*.sh
+!data/*.md
 
 # Credentials: loaded at runtime by pbs/load_keys.sh, never committed
 .keys/

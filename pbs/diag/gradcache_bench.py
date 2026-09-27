@@ -1,6 +1,6 @@
 """Throughput of one contrastive GradCache step, across the settings that could make it faster.
 
-    python pbs/diag/gradcache_bench.py --size 50m --out results/finetune/contrastive/gradcache_bench/50m.json
+    python pbs/diag/gradcache_bench.py --size 50m --out results/raw/finetune/contrastive/gradcache_bench/50m.json
 
 One real training batch: 85 peptide groups x their (<= 3) experimental spectra from the
 ms-contrastive-100k validation split, collated exactly as training does (padded to 512 peaks),

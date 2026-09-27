@@ -1,0 +1,64 @@
+#!/bin/bash -l
+# Opt-in end-to-end and golden-output tests, on ONE debug node, ONE tile.
+#
+#   qsub -q debug -l select=1 -l walltime=01:00:00 -A UIC-HPC -l filesystems=home:flare \
+#        -v REPO_DIR=$PWD,SUITE=e2e pbs/run_e2e.pbs   # SUITE = e2e | golden | all (default)
+#
+# SUITE=regenerate-golden rewrites tests/golden/reference/ instead of testing against it.
+# That is a deliberate act -- read tests/golden/regenerate.py first.
+#
+# tests/e2e    each real entry point (pretraining, contrastive + resume, denoise + resume,
+#              sharded precompute + alignment, grouped-retrieval eval, psm_rerank) as a
+#              subprocess on tiny synthetic data; see tests/e2e/test_entry_points.py.
+# tests/golden released checkpoints on fixed inputs against frozen reference outputs;
+#              skips cleanly when /flare is not mounted; see tests/golden/README.md.
+# Scratch goes to $SCRATCH_ROOT/<jobid> (pytest --basetemp) and is left for inspection.
+
+#PBS -N msdelta-e2e
+#PBS -A UIC-HPC
+#PBS -l place=scatter
+#PBS -l filesystems=home:flare
+#PBS -j oe
+#PBS -o pbs/logs/
+
+set -euo pipefail
+REPO_DIR=${REPO_DIR:-${PBS_O_WORKDIR:-$PWD}}
+cd "$REPO_DIR"
+VENV_DIR=${VENV_DIR:-$REPO_DIR/.venv}
+
+set +u
+source /usr/share/lmod/lmod/init/bash
+module load "${FRAMEWORKS_MODULE:-frameworks/2025.3.1}"
+set -u
+
+export ONEAPI_DEVICE_SELECTOR=level_zero:gpu
+export ZE_FLAT_DEVICE_HIERARCHY=FLAT
+export ZE_AFFINITY_MASK=${ZE_AFFINITY_MASK:-0}
+export PYTHONPATH=$REPO_DIR${PYTHONPATH:+:$PYTHONPATH}
+export HF_HOME=${HF_HOME:-/lus/flare/projects/${PROJECT:-UIC-HPC}/$USER/msdelta/huggingface}
+export HF_HUB_OFFLINE=${HF_HUB_OFFLINE:-1}
+export HF_DATASETS_OFFLINE=${HF_DATASETS_OFFLINE:-1}
+export WANDB_MODE=disabled
+
+SUITE=${SUITE:-all}
+SCRATCH_ROOT=${SCRATCH_ROOT:-/lus/flare/projects/${PROJECT:-UIC-HPC}/$USER/msdelta/test-scratch}
+BASETEMP=$SCRATCH_ROOT/${SUITE}-${PBS_JOBID:-local-$$}
+mkdir -p "$SCRATCH_ROOT"
+
+echo "=== msdelta $SUITE tests: $(date -Is) repo=$REPO_DIR commit=$(git -C "$REPO_DIR" rev-parse --short HEAD) ==="
+"$VENV_DIR/bin/python" -c "import torch; print(f'  torch={torch.__version__} xpus={torch.xpu.device_count()}')"
+
+if [[ $SUITE == regenerate-golden ]]; then
+    "$VENV_DIR/bin/python" -m tests.golden.regenerate --xpu && rc=0 || rc=$?
+    echo "=== rc=$rc $(date -Is) ==="
+    exit $rc
+fi
+
+paths=(); flags=()
+[[ $SUITE == e2e || $SUITE == all ]] && { paths+=(tests/e2e); flags+=(--e2e); }
+[[ $SUITE == golden || $SUITE == all ]] && { paths+=(tests/golden); flags+=(--golden); }
+
+"$VENV_DIR/bin/python" -m pytest "${paths[@]}" "${flags[@]}" -p no:cacheprovider -p no:randomly \
+    --basetemp="$BASETEMP" --durations=0 -rA && rc=0 || rc=$?
+echo "=== rc=$rc scratch=$BASETEMP $(date -Is) ==="
+exit $rc

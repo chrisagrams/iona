@@ -270,7 +270,7 @@ on identical rows and the spread measures training noise and nothing else.
 - [ ] Report mean +/- sd per scale, and say plainly whether the top group of each grid
       is tied rather than ranked.
 - [ ] Only then compare scales to each other, normalised by compute budget
-      (`results/finetune/checkpoint_provenance.txt` has the pretraining step each started from).
+      (`results/raw/finetune/checkpoint_provenance.txt` has the pretraining step each started from).
 
 ## FT2. Test metrics never reach W&B — **NOT A BUG (closed)**
 

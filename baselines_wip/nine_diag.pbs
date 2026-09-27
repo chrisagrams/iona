@@ -24,7 +24,7 @@ echo "=== $(date -Is) GLEAMS (CPU, background)"
 ( cd $G && env -u PYTHONPATH CUDA_VISIBLE_DEVICES="" TF_CPP_MIN_LOG_LEVEL=2 $G/env/bin/python \
     /home/khuss/code/msdelta/baselines_wip/gleams/embed_gleams.py $D/export 64 > $D/gleams_embed.log 2>&1 ) &
 gpid=$!
-OUT=results/finetune/contrastive/nine20k; ZOUT=results/finetune/contrastive/nine20k_zeroshot; mkdir -p $OUT $ZOUT
+OUT=results/raw/finetune/contrastive/nine20k; ZOUT=results/raw/finetune/contrastive/nine20k_zeroshot; mkdir -p $OUT $ZOUT
 echo "=== $(date -Is) frozen 400m + ABTT on tiles 0-1"
 pids=()
 for i in 0 1; do

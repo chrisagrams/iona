@@ -41,5 +41,5 @@ fraction of the head's; 0 = frozen encoder), `num_train_epochs`, `head_hidden_si
 - The grey lines' vertical positions carry a small fixed jitter so that overlapping configurations
   stay visible; the axis values are exact.
 
-Provenance: msdelta repository, `results/finetune/denoise/grid_denoise_50m.txt` (the committed grid table)
+Provenance: msdelta repository, `results/raw/finetune/denoise/grid_denoise_50m.txt` (the committed grid table)
 via `sweeps/plot_hp_parallel.py`.

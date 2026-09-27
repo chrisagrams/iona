@@ -135,7 +135,7 @@ def summarise(ap, hit, masks, open_hit=None):
 
 def isotope_breakdown(rows, prec, charge):
     """Measured vs theoretical precursor m/z (peptide_neutral_mass), as in OBSERVATIONS."""
-    from msdelta.reranking import peptide_neutral_mass
+    from msdelta.rescoring.reranking import peptide_neutral_mass
     m = torch.tensor([peptide_neutral_mass(p) for p in rows["peptide"]], dtype=torch.float64)
     z = charge.cpu().double()
     p = prec.cpu()
@@ -156,7 +156,7 @@ def isotope_breakdown(rows, prec, charge):
 
 def load_embeddings(name, dname, rows, emb_dir, device):
     if name.startswith("binned_"):
-        from msdelta.eval_grouped_retrieval import binned_embeddings
+        from msdelta.eval.eval_grouped_retrieval import binned_embeddings
         e = binned_embeddings(rows, float(name.split("_", 1)[1]))
     else:
         f = Path(emb_dir) / dname / f"{name}.npy"
@@ -167,7 +167,7 @@ def load_embeddings(name, dname, rows, emb_dir, device):
 
 
 def analyse(cli) -> int:
-    from msdelta.grouped_retrieval import group_ids
+    from msdelta.data.grouped_retrieval import group_ids
 
     device = torch.device("xpu" if torch.xpu.is_available() else "cpu")
     report = {"ppm": PPM, "iso_k": ISO_K, "isotope_da": ISOTOPE, "filters": FILTERS,
@@ -303,7 +303,7 @@ def main():
     ap.add_argument("--num-shards", type=int, default=1)
     ap.add_argument("--low-res", nargs="*", default=["hek"],
                     help="datasets that also get binned cosine at 1.0 Da")
-    ap.add_argument("--out", default="results/finetune/contrastive/filter-failure/summary.json")
+    ap.add_argument("--out", default="results/raw/finetune/contrastive/filter-failure/summary.json")
     cli = ap.parse_args()
     if cli.cmd == "selftest":
         return selftest()

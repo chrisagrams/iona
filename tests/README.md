@@ -1,7 +1,7 @@
 # Test suite
 
-What this exists for: to say, in under a minute on a login node, whether a change has
-broken something that would otherwise be discovered forty minutes into a capacity job.
+What this exists for: to say, in minutes rather than a capacity job's forty, whether a
+change has broken something that would otherwise be discovered forty minutes into one.
 
 Every test here traces to a capability we rely on, and the ones marked **(regression)**
 trace to a specific failure that has already cost real compute. Those are the ones not to
@@ -10,10 +10,30 @@ delete when they become inconvenient.
 ## Running
 
 ```bash
-PYTHONPATH=. .venv/bin/python -m pytest tests -q            # login: CPU only, seconds
+PYTHONPATH=. .venv/bin/python -m pytest tests -q            # CPU suite (see timings below)
 PYTHONPATH=. .venv/bin/python -m pytest tests -q -m ""      # include slow checkpoint tests
-qsub -q debug -l select=1 -l walltime=00:30:00 pbs/run_tests.pbs   # the device half
+PYTHONPATH=. .venv/bin/python -m pytest tests -q --legacy   # + opt-in legacy-approach tests
+qsub -q debug -l select=1 -l walltime=00:30:00 pbs/run_tests.pbs   # CPU + device suites
+qsub -q debug -l select=1 -l walltime=01:00:00 -A UIC-HPC -l filesystems=home:flare \
+     -v REPO_DIR=$PWD pbs/run_e2e.pbs                       # opt-in e2e + golden
 ```
+
+**It is not a seconds-long suite.** Measured 2026-09-27: the default CPU run is 647 tests
+(641 pass, 6 known environment failures -- 4 level-zero PBS checks, 2 paths absent in a fresh worktree -- and 29 skipped) and took **10 min 20 s** on a loaded
+login node (an earlier run on the same tree: ~6 min); `tests/test_imports.py` alone is
+~40 s because it starts child interpreters. On a login node run only the files you
+touched; run the whole suite through `pbs/run_tests.pbs`.
+
+### Opt-in markers
+
+Three markers are **deselected by default** (they neither run nor count as skipped) and
+selected by a flag or by any `-m` expression that names them (`tests/conftest.py`):
+
+| marker | flag | what | where it runs |
+| --- | --- | --- | --- |
+| `legacy` | `--legacy` or `-m legacy` | tests of approaches no longer in the recipe (table below) | login, CPU, ~30 s for the 48 |
+| `e2e` | `--e2e` | `tests/e2e/`: every entry point as a subprocess on tiny synthetic data | debug node, `pbs/run_e2e.pbs` |
+| `golden` | `--golden` | `tests/golden/`: frozen checkpoints on frozen inputs vs stored references | debug node, `pbs/run_e2e.pbs`; skips without /flare |
 
 The split is not arbitrary. A login node has no XPU, so anything about tile binding,
 collectives, bf16 kernels or ZeRO-2 sharding is **unprovable** there, and a suite that
@@ -85,6 +105,65 @@ cases that need a device, and `pbs/run_tests.pbs` runs them.
 | bf16 weights, as ZeRO-2 supplies them | **(regression)** |
 | a checkpoint save/load round trip | |
 | the distributed gather emits no stray labels | FT4 **(regression)** |
+
+## Opt-in (legacy approaches)
+
+The default run covers the recipe as it stands: contrastive = SupCon + KL anchor +
+same-mass batches, mean+max pooling, no projection head; alignment = MSE student onto
+frozen teacher embeddings, mean+max readout. Tests of rejected or superseded approaches
+are kept, marked `legacy`, and run only on request -- the library code they test still
+exists and a parked retry (layer mix) may come back:
+
+```bash
+PYTHONPATH=. .venv/bin/python -m pytest tests -q --legacy      # everything, legacy included
+PYTHONPATH=. .venv/bin/python -m pytest tests -q -m legacy     # only the legacy tests
+```
+
+48 tests; all pass (2026-09-27). Tests that were moved into the default suite when these
+were dropped (7ed4e19) stay where they were moved and are not duplicated here.
+
+| opt-in (`legacy`) | decision | what it tests |
+| --- | --- | --- |
+| `tests/test_projection_head.py` (whole file) | C9 (no projection head) | `--projection_dim` head: width, readout switch, head gradients, GradCache exact through the head |
+| `test_contrastive.py::TestSigmoidLoss` (`test_rejects_an_unknown_loss` is in the default `TestContrastiveModel`) | C8 (keep SupCon) | `sigmoid_contrastive_loss` hand value, learnable scale/bias, GradCache exactness with the sigmoid loss |
+| `test_contrastive.py::TestPairSamplerAndLoss` | FT17 (pair loss superseded) | `PairBatchSampler`, `pair_contrastive_loss` |
+| `test_contrastive.py::TestLayerMixPooler` | C9 design decision / FT11 (layer mix dropped; PLAN lists it as a *parked retry*) | `LayerMixPooler`, `encoder_layer_states`, `pooling=layer_mix` |
+| `tests/test_align_contrastive.py` (whole file; the plain-MSE default is checked by the default `test_models.py::TestAlignmentModel::test_default_loss_is_plain_mse`) | A4 / A6 (LiT student, hard negatives) | `hard_negatives`, `lit_contrastive_loss`, `AlignmentCollator(hard_negatives=...)`, `loss="lit"` gradient regression |
+| `tests/test_mass_aware.py` (whole file; `test_peptide_neutral_mass` is in the default `test_contrastive.py::TestSameMassBatches`, since it feeds C19's `group_masses`) | A8 (mass-aware student) | `MassNegativePool`, `MassBatchSampler`, `AlignmentCollator(neg_source="mass")` |
+| `test_student_readout.py::test_shapes_and_unit_norm`, `::test_padding_does_not_leak` | A3 (cls/attn readouts rejected, keep mean+max) | cls/attn forward shapes and padding. `student_readout()` detection is in the default run: the loaders use it on legacy A3 dirs |
+
+## End-to-end — `tests/e2e/` (opt-in `--e2e`, debug node)
+
+Each entry point runs as `python -m msdelta.<path>` in a subprocess, exactly as a PBS
+script launches it, on synthetic data generated deterministically by
+`tests/e2e/synth.py` (b/y ions of real peptides, jittered per replicate, plus noise
+peaks; ~300 KB, nothing stored in the repo). Entry points that load a Hub dataset by
+name take the synthetic directory of `<split>.parquet` files as the same argument
+(`datasets.load_dataset(<dir>)`), so no code change was needed. The model is 2 layers,
+hidden 32; `pbs/run_e2e.pbs` runs them on one tile. Measured on job 8873354 (one debug
+node, XPU): 6 passed in 4 min 20 s.
+
+| test | drives | checks | time |
+| --- | --- | --- | --- |
+| `test_pretraining` | `pretraining.train`, 20 steps, 64 spectra, `--preprocessed_dataset_dir` | loss finite and falling, eval_loss, `final/` == `checkpoint-20`, processor saved | 91 s |
+| `test_contrastive_and_resume` | `finetuning.contrastive.finetune_contrastive`, current recipe (SupCon, same-mass batches, GradCache chunk 4 + trim, KL 10, no grad checkpointing), 30 analytes x 3, 10 steps; then `--resume_from_checkpoint checkpoint-5` | loadable `final/` and `checkpoint-5/encoder`, step sequence 1..10 once, resumed run did not restart | 36 s |
+| `test_denoise_and_resume` | `finetuning.denoise.finetune_denoise`, 10 steps + eval + test split; resume | eval/test AUROC, F1, AUPRC finite; resume as above | 30 s |
+| `test_alignment_precompute_sharded_and_train` | `precompute_align` prepare / 2 shards / merge, and unsharded; `finetune_align` 10 steps | sharded targets == unsharded, `final/peptide_embedder` loads with `PeptideEmbedderModel` and embeds | 57 s |
+| `test_grouped_retrieval_eval` | `eval.eval_grouped_retrieval prepare` + `score` (pretrained, contrastive, binned) | row count, MAP@R in [0, 1] for `all` and `experimental` | 17 s |
+| `test_psm_rerank_cli` | `rescoring.psm_rerank score` / `train` / `score --mode global`, `rescoring.rerank_psm_fdr` on `test_rerank_r4`'s synthetic runs | one PSM per spectrum, q in [0, 1], the strong synthetic signal survives | 28 s |
+
+## Imports and metric fixtures
+
+- `tests/test_imports.py` — every flat shim `msdelta/<old>.py` is the same module object as
+  its new home, `from msdelta.<old> import X` works, `python -m msdelta.<old> --help`
+  reaches the new main for the entry points PBS uses, the `msdelta.data` /
+  `msdelta.rescoring` PEP 562 fall-through, and every module imports with faiss blocked
+  (`tests/_nofaiss/`). One child interpreter does the expensive part (~40 s).
+- `tests/test_metric_fixtures.py` — MAP@R, R-Precision, Hit@1, MAP@100, R@5 on hand-worked
+  cases (perfect, worst, R=1/R=2 mix with a singleton, MAP@R != R-Precision), topk vs
+  exact, the grouped eval's `all` / `experimental` variants, `denoise_metrics`
+  (F1, AUROC, per-spectrum AUROC), `cross_modal_metrics` (peptide -> spectrum Hit@1, MRR).
+  Each expected value is derived in the test's docstring.
 
 ## Deliberate gaps
 

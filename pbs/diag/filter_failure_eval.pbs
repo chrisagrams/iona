@@ -19,7 +19,7 @@ cd "$REPO_DIR"
 MODELS=${MODELS:-sweeps/arms/filter_failure_models.txt}
 SCRATCH_ROOT=${SCRATCH_ROOT:-/lus/flare/projects/UIC-HPC/$USER/msdelta}
 EMB_DIR=${EMB_DIR:-$SCRATCH_ROOT/embeddings/filter-failure}
-OUT=${OUT:-results/finetune/contrastive/filter-failure/summary.json}
+OUT=${OUT:-results/raw/finetune/contrastive/filter-failure/summary.json}
 SHARDS=${SHARDS:-12}
 DATA=("mouse=$SCRATCH_ROOT/baselines/noble_mouse20k/prepared"
       "human=$SCRATCH_ROOT/baselines/noble_human20k/prepared"

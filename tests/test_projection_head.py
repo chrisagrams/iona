@@ -4,6 +4,9 @@ puts the loss through the head, and GradCache stays exact through it."""
 import pytest
 import torch
 
+# Opt-in (C9: no projection head in the recipe). Run with --legacy.
+pytestmark = pytest.mark.legacy
+
 
 def _config():
     from msdelta.configuration_msdelta import MSDeltaConfig

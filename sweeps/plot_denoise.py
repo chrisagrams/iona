@@ -1,4 +1,4 @@
-"""Figures for the denoise results, written to results/finetune/denoise/figures/.
+"""Figures for the denoise results, written to results/processed/figures/D_denoise/superseded/.
 
     python sweeps/plot_denoise.py --runs /lus/flare/projects/UIC-HPC/$USER/msdelta/runs
 
@@ -30,7 +30,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 REPO = Path(__file__).resolve().parent.parent
-FIGS = REPO / "results" / "figures" / "D_denoise" / "superseded"
+FIGS = REPO / "results" / "processed" / "figures" / "D_denoise" / "superseded"
 # Supporting figures: the three that explain HOW the headline numbers were
 # reached rather than what they are.
 EXTRA = FIGS   # superseded figures are kept flat, no extra/ subfolder
@@ -71,7 +71,7 @@ def fig_scaling(runs: Path) -> None:
 
     One figure rather than two: AUROC and F1 answer the same question and agree on
     every step, so putting them side by side is the comparison. The per-step table that
-    used to occupy a third panel is in results/finetune/denoise/denoise_scale_seeds.txt -- a bar chart of
+    used to occupy a third panel is in results/raw/finetune/denoise/denoise_scale_seeds.txt -- a bar chart of
     three differences restated what the curve already shows.
     """
     recs = load(runs, "8845262")

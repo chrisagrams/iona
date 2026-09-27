@@ -5,7 +5,7 @@
 Writes paper/experiments/denoise/loss_scaling/D_denoise_loss_scaling.csv (one row per (size,
 pretraining checkpoint): mean / SE / per-seed test loss of the ladder recipe, from plot_ladder.collect)
 and runs the standalone plot script in that folder, which does the fit and the figure; the result is
-copied to results/figures/SUMMARY/. Plotting only (login node).
+copied to results/processed/figures/SUMMARY/. Plotting only (login node).
 """
 import runpy
 import shutil
@@ -32,7 +32,7 @@ def main():
     OUT.mkdir(parents=True, exist_ok=True)
     (OUT / "D_denoise_loss_scaling.csv").write_text("\n".join(rows) + "\n")
     runpy.run_path(str(OUT / "plot_denoise_loss_scaling.py"), run_name="__main__")
-    shutil.copy(OUT / "D_denoise_loss_scaling.png", REPO / "results" / "figures" / "SUMMARY")
+    shutil.copy(OUT / "D_denoise_loss_scaling.png", REPO / "results" / "processed" / "figures" / "SUMMARY")
     print("wrote", OUT / "D_denoise_loss_scaling.csv", "and the figure")
 
 

@@ -36,7 +36,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 REPO = Path(__file__).resolve().parent.parent
-FIGS = REPO / "results" / "figures" / "C_contrastive" / "superseded"
+FIGS = REPO / "results" / "processed" / "figures" / "C_contrastive" / "superseded"
 # Supporting figures: results that closed a question without changing what
 # we do. GradCache is here because more negatives measurably hurt, so the
 # lever is not one we will pull.

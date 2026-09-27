@@ -2,7 +2,7 @@
 
     .venv/bin/python sweeps/package_alignment.py
 
-Read from the per-run result JSONs: student test evals (results/finetune/align/test_*.json) and the
+Read from the per-run result JSONs: student test evals (results/raw/finetune/align/test_*.json) and the
 cross-modal comparisons vs yHydra (baselines/<dataset>/xmodal/xmodal_*.json on Lustre). Nothing typed in.
 Plotting only (login node).
 
@@ -25,9 +25,9 @@ import numpy as np
 from matplotlib.lines import Line2D
 
 REPO = Path(__file__).resolve().parent.parent
-ALIGN = REPO / "results" / "finetune" / "align"
+ALIGN = REPO / "results" / "raw" / "finetune" / "align"
 BASE = Path("/lus/flare/projects/UIC-HPC/khuss/msdelta/baselines")
-FIG = REPO / "results" / "figures" / "SUMMARY"
+FIG = REPO / "results" / "processed" / "figures" / "SUMMARY"
 INK, MUTED, GRIDC = "#1f2937", "#6b7280", "#e5e7eb"
 YHYDRA = "#f59e0b"
 STYLE = {"font.family": "DejaVu Sans", "font.size": 10, "axes.edgecolor": "#9ca3af",
@@ -44,7 +44,7 @@ DATASETS = [("yhydra", "ms-contrastive-100k test\n(in-distribution for ours)"),
             ("c11_cap20", "HEK\n(unseen, low-res MS2)"),
             ("nine_yeast", "nine-species yeast\n(unseen, high-res)"),
             ("mouse", "nine-species mouse\n(unseen, high-res)")]
-MOUSE = REPO / "results" / "finetune" / "align" / "mouse_yhydra" / "compare_mouse.json"   # job 8870879
+MOUSE = REPO / "results" / "raw" / "finetune" / "align" / "mouse_yhydra" / "compare_mouse.json"   # job 8870879
 WINDOWS = [("open", "", "open search"), ("1.1Da", "/window_1.1Da", "±1.1 Da"), ("20ppm", "/window_20ppm", "20 ppm")]
 
 

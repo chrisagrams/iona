@@ -1,4 +1,5 @@
-"""Rebuild results/finetune/contrastive/zeroshot-layers-abtt/summary.csv from every zs_*.json there
+"""Rebuild results/processed/tables/zeroshot-layers-abtt/summary.csv from every
+results/raw/finetune/contrastive/zeroshot-layers-abtt/zs_*.json
 (one row per frozen encoder; ABTT numbers from the TRAIN fit). Replaces the 8-encoder summary written
 before the 400M/200M reruns finished.
 
@@ -6,7 +7,8 @@ before the 400M/200M reruns finished.
 """
 import glob, json, os, re
 
-D = "results/finetune/contrastive/zeroshot-layers-abtt"
+D = "results/raw/finetune/contrastive/zeroshot-layers-abtt"
+OUT = "results/processed/tables/zeroshot-layers-abtt"
 rows = []
 for f in glob.glob(f"{D}/zs_*.json"):
     d = json.load(open(f))
@@ -20,7 +22,8 @@ for f in glob.glob(f"{D}/zs_*.json"):
     rows.append((int(sc[:-1]), int(ck[:-1]), f"{sc},{ck},{lay['final']:.4f},{lay[rb]:.4f},{rb},{abtt_final:.4f},"
                  f"{best[2]:.4f},{best[0]},{best[1]}"))
 rows.sort()
-with open(f"{D}/summary.csv", "w") as fh:
+os.makedirs(OUT, exist_ok=True)
+with open(f"{OUT}/summary.csv", "w") as fh:
     fh.write("scale,ckpt,raw_final,raw_best_block,best_block,abtt_final,abtt_best,abtt_best_D,abtt_best_layer\n")
     fh.write("\n".join(r[2] for r in rows) + "\n")
-print(len(rows), "encoders ->", f"{D}/summary.csv")
+print(len(rows), "encoders ->", f"{OUT}/summary.csv")

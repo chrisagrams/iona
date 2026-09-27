@@ -42,5 +42,5 @@ for a in arms:
                   flush=True)
         except Exception as e:
             print(f"  {name} {tag}: FAILED {type(e).__name__}: {e}", flush=True)
-json.dump(out, open("/home/khuss/code/msdelta/results/finetune/contrastive/ckpt_vs_final.json","w"), indent=2)
+json.dump(out, open("/home/khuss/code/msdelta/results/raw/finetune/contrastive/ckpt_vs_final.json","w"), indent=2)
 print("  wrote ckpt_vs_final.json")

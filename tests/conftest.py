@@ -1,4 +1,4 @@
-"""Shared fixtures. Everything here is CPU-sized: the suite has to finish in seconds.
+"""Shared fixtures. Everything here is CPU-sized; see tests/README.md for measured runtimes.
 
 The models built here are deliberately tiny -- hidden_size 32, two layers, a handful of
 peaks. Nothing in this suite is trying to measure quality; it is checking that shapes,
@@ -20,9 +20,40 @@ CHECKPOINT = Path(os.environ.get(
     "/flare/UIC-HPC/homes/cgrams/msdelta-runs/msdelta-50m-production-01/final"))
 
 
+# Opt-in markers: tests carrying one of these are DESELECTED by default (so they neither
+# run nor show up as skipped) and selected by the matching flag, or by any -m expression
+# that names the marker (e.g. `-m legacy`, `-m "legacy or not legacy"`).
+OPT_IN = {
+    "legacy": "tests of approaches no longer in the recipe (C8, C9, FT17, layer mix, A3, A4, A8)",
+    "e2e": "tiny end-to-end runs of real entry points (tests/e2e; pbs/run_e2e.pbs)",
+    "golden": "golden-output regression against frozen references (tests/golden)",
+}
+
+
+def pytest_addoption(parser):
+    for name, what in OPT_IN.items():
+        parser.addoption(f"--{name}", action="store_true", default=False,
+                         help=f"also run {what}")
+
+
 def pytest_configure(config):
     config.addinivalue_line("markers", "slow: needs the real checkpoint or the network")
     config.addinivalue_line("markers", "device: needs an XPU; run via pbs/run_tests.pbs")
+    for name, what in OPT_IN.items():
+        config.addinivalue_line("markers", f"{name}: opt-in, {what}")
+
+
+def pytest_collection_modifyitems(config, items):
+    markexpr = config.getoption("markexpr", default="") or ""
+    wanted = {name for name in OPT_IN
+              if config.getoption(name) or name in markexpr}
+    kept, dropped = [], []
+    for item in items:
+        opt = {m.name for m in item.iter_markers()} & OPT_IN.keys()
+        (dropped if opt - wanted else kept).append(item)
+    if dropped:
+        config.hook.pytest_deselected(items=dropped)
+        items[:] = kept
 
 
 @pytest.fixture(autouse=True)

@@ -19,8 +19,11 @@ import numpy as np
 import pandas as pd
 
 import importlib.util  # noqa: E402
+# Loaded by file (no package import); msdelta/rerank_psm_fdr.py is now a shim, so load the
+# module it points to, from this checkout.
 _spec = importlib.util.spec_from_file_location(
-    "rerank_psm_fdr", "/home/khuss/code/msdelta/msdelta/rerank_psm_fdr.py")
+    "rerank_psm_fdr",
+    Path(__file__).resolve().parents[1] / "msdelta" / "rescoring" / "rerank_psm_fdr.py")
 _m = importlib.util.module_from_spec(_spec); _spec.loader.exec_module(_m)
 qvalues = _m.qvalues
 

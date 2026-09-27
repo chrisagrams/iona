@@ -13,7 +13,7 @@ until it does.
 
 Reading order for someone new: `PLAN.md` → `STATUS.md` → `OBSERVATIONS.md`.
 
-Outside this directory: `results/finetune/README.md` indexes the result tables and
+Outside this directory: `results/raw/finetune/README.md` indexes the result tables and
 figures, and each sweep generator's docstring records why that grid exists.
 
 When the status diagram changes, copy the old block into `status-history/` before

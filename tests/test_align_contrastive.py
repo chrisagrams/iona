@@ -7,6 +7,10 @@ import torch
 import msdelta.reranking  # noqa: F401  -- module-level msdelta import, see FT33
 from msdelta.reranking import hard_negatives, lit_contrastive_loss
 
+# Opt-in (A4/A6: LiT student and hard negatives, not in the recipe). Run with --legacy.
+# test_default_model_loss_is_mse lives in test_models.py::TestAlignmentModel.
+pytestmark = pytest.mark.legacy
+
 
 def _negs(pep, k=50, seed=0):
     return hard_negatives(pep, np.random.default_rng(seed), k)
@@ -64,17 +68,6 @@ def test_multi_positive_groups():
     assert torch.isfinite(lit_contrastive_loss(t, p, same, temperature=0.1))
 
 
-def test_default_model_loss_is_mse():
-    from msdelta.reranking import PeptideCollator, PeptideEncoder, SequenceAlignmentModel
-    torch.manual_seed(0)
-    student = PeptideEncoder(embedding_size=8, hidden_size=16, num_layers=1, num_heads=2,
-                             dropout=0.0)
-    model = SequenceAlignmentModel(None, student).eval()
-    batch = PeptideCollator()(["PEPTIDEK", "ACDK"], [2, 2])
-    target = torch.nn.functional.normalize(torch.randn(2, 8), dim=-1)
-    out = model(**batch, target=target)
-    expected = ((out["embeddings"] - target) ** 2).sum(-1).mean()
-    assert float(out["loss"]) == pytest.approx(float(expected), abs=1e-6)
 
 
 def test_collator_emits_negatives_and_groups():

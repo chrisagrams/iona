@@ -2,16 +2,16 @@
 
     .venv/bin/python sweeps/package_contrastive.py
 
-Everything is read from the per-run result JSONs (results/finetune/contrastive/<benchmark>/)
+Everything is read from the per-run result JSONs (results/raw/finetune/contrastive/<benchmark>/)
 and GLEAMS's metrics (baselines/<benchmark>/gleams_metrics.json on Lustre); nothing is typed
 in. Metric: experimental-spectrum MAP@R (and Hit@1). Plotting only (login node).
 
-    results/contrastive_results.csv                      every run on every benchmark
-    results/contrastive_zeroshot.csv                     frozen encoders, raw vs ABTT
-    results/figures/SUMMARY/C_benchmarks.png             ours vs GLEAMS vs binned, 4 benchmarks
-    results/figures/SUMMARY/C_pretraining_scaling.png    replicate-corpus recipe x checkpoint x size
-    results/figures/SUMMARY/C_zeroshot.png               frozen encoders, raw vs ABTT
-    results/figures/SUMMARY/C_transfer.png               C7 fine-tuning trajectory, in-dist vs unseen
+    results/processed/tables/contrastive_results.csv                      every run on every benchmark
+    results/processed/tables/contrastive_zeroshot.csv                     frozen encoders, raw vs ABTT
+    results/processed/figures/SUMMARY/C_benchmarks.png             ours vs GLEAMS vs binned, 4 benchmarks
+    results/processed/figures/SUMMARY/C_pretraining_scaling.png    replicate-corpus recipe x checkpoint x size
+    results/processed/figures/SUMMARY/C_zeroshot.png               frozen encoders, raw vs ABTT
+    results/processed/figures/SUMMARY/C_transfer.png               C7 fine-tuning trajectory, in-dist vs unseen
 """
 from __future__ import annotations
 
@@ -28,9 +28,9 @@ import numpy as np
 from matplotlib.lines import Line2D
 
 REPO = Path(__file__).resolve().parent.parent
-RES = REPO / "results" / "finetune" / "contrastive"
+RES = REPO / "results" / "raw" / "finetune" / "contrastive"
 BASE = Path("/lus/flare/projects/UIC-HPC/khuss/msdelta/baselines")
-FIG = REPO / "results" / "figures" / "SUMMARY"
+FIG = REPO / "results" / "processed" / "figures" / "SUMMARY"
 # benchmark key -> (result dir, GLEAMS dir, label)
 BENCH = {
     "ms-contrastive-100k": ("grouped100k-test", "gleams", "ms-contrastive-100k test\n(in-distribution)"),
@@ -181,7 +181,7 @@ def fig_pretraining(rows):
 
 def zeroshot_rows():
     out = []
-    with open(RES / "zeroshot-layers-abtt" / "summary.csv") as fh:
+    with open(REPO / "results" / "processed" / "tables" / "zeroshot-layers-abtt" / "summary.csv") as fh:
         for r in csv.DictReader(fh):
             out.append(dict(benchmark="ms-contrastive-100k", encoder=f"{r['scale']}@{r['ckpt'].lstrip('0')}",
                             raw_final=float(r["raw_final"]), raw_best_layer=float(r["raw_best_block"]),
@@ -417,17 +417,17 @@ def main():
     FIG.mkdir(parents=True, exist_ok=True)
     rows = load_rows()
     keys = ["benchmark", "method", "scale", "pretrain_ckpt", "stage", "seed", "map_at_r", "hit_at_1", "queries", "source"]
-    with open(REPO / "results" / "contrastive_results.csv", "w", newline="") as fh:
+    with open(REPO / "results" / "processed" / "tables" / "contrastive_results.csv", "w", newline="") as fh:
         w = csv.DictWriter(fh, keys); w.writeheader()
         for r in rows:
             w.writerow({k: (f"{r[k]:.5f}" if k in ("map_at_r", "hit_at_1") and r[k] is not None else r[k]) for k in keys})
     zs = zeroshot_rows()
-    with open(REPO / "results" / "contrastive_zeroshot.csv", "w", newline="") as fh:
+    with open(REPO / "results" / "processed" / "tables" / "contrastive_zeroshot.csv", "w", newline="") as fh:
         w = csv.DictWriter(fh, list(zs[0])); w.writeheader()
         for r in zs:
             w.writerow({k: (f"{v:.5f}" if isinstance(v, float) else v) for k, v in r.items()})
     ab = ablation_rows()
-    with open(REPO / "results" / "contrastive_pretraining_ablation.csv", "w", newline="") as fh:
+    with open(REPO / "results" / "processed" / "tables" / "contrastive_pretraining_ablation.csv", "w", newline="") as fh:
         w = csv.DictWriter(fh, list(ab[0])); w.writeheader()
         for r in ab:
             w.writerow({k: (f"{v:.5f}" if isinstance(v, float) else v) for k, v in r.items()})

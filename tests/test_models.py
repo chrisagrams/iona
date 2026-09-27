@@ -131,6 +131,20 @@ class TestAlignmentModel:
                                num_heads=4, pooling="mean"),
                 pooling="mean+max")
 
+    def test_default_loss_is_plain_mse(self):
+        """The alignment recipe is squared L2 onto the frozen teacher's embedding (A1).
+        The LiT/hard-negative alternatives (A4, A8) are not in it; the default must not drift."""
+        from msdelta.reranking import PeptideCollator
+        torch.manual_seed(0)
+        student = PeptideEncoder(embedding_size=8, hidden_size=16, num_layers=1, num_heads=2,
+                                 dropout=0.0)
+        model = SequenceAlignmentModel(None, student).eval()
+        batch = PeptideCollator()(["PEPTIDEK", "ACDK"], [2, 2])
+        target = torch.nn.functional.normalize(torch.randn(2, 8), dim=-1)
+        out = model(**batch, target=target)
+        expected = ((out["embeddings"] - target) ** 2).sum(-1).mean()
+        assert float(out["loss"]) == pytest.approx(float(expected), abs=1e-6)
+
     def test_loss_is_finite_and_shapes_match(self, tiny_config):
         model = self._model(tiny_config).eval()
         with torch.no_grad():

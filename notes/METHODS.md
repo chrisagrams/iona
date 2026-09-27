@@ -8,7 +8,7 @@ WHY each choice was made (and what was rejected), see PLAN.md → Design decisio
 **Not our method.** Luyu Gao, Yunyi Zhang, Jiawei Han, Jamie Callan, *Scaling Deep
 Contrastive Learning Batch Size under Memory Limited Setup*, RepL4NLP @ ACL 2021
 (arXiv:2101.06983; reference code: github.com/luyug/GradCache). Our implementation is
-`gradcache_step` in `msdelta/contrastive.py` (a reimplementation, not their library). Our
+`gradcache_step` in `msdelta/finetuning/contrastive/contrastive.py` (a reimplementation, not their library). Our
 additions are length-trimmed chunks and the decision to turn gradient checkpointing off.
 
 **The problem.** Gradient accumulation (run a few samples, backprop, repeat, sum) only

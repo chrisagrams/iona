@@ -13,7 +13,7 @@ set +u; source /usr/share/lmod/lmod/init/bash; module load frameworks/2025.3.1; 
 export ONEAPI_DEVICE_SELECTOR=level_zero:gpu ZE_FLAT_DEVICE_HIERARCHY=FLAT PYTHONPATH=$PWD OMP_NUM_THREADS=8
 export HF_HOME=$S/huggingface HF_HUB_OFFLINE=1 HF_DATASETS_OFFLINE=1
 [ -d $D/prepared ] || { echo "subset missing: $D"; exit 1; }
-OUT=results/finetune/contrastive/nine20k; mkdir -p $OUT
+OUT=results/raw/finetune/contrastive/nine20k; mkdir -p $OUT
 n=$(grep -cv '^#' $MODELS); pids=()
 for i in $(seq 0 $((n - 1))); do
   ZE_AFFINITY_MASK=$i .venv/bin/python -m msdelta.eval_grouped_retrieval score --data $D/prepared \

@@ -1,4 +1,11 @@
-"""PeptideEncoder readouts (PLAN.md A3): pool is unchanged, cls/attn work and are detected."""
+"""student_readout(): the loaders (run_rescoring, rerank_psm_embed, eval_align_test,
+PeptideEmbedderModel) detect a saved student's readout from its weights.
+
+Training with cls/attn readouts was rejected (PLAN.md A3: keep mean+max pooling); their
+forward-pass tests are opt-in (marker `legacy`, run with --legacy; see tests/README.md).
+Detection stays in the default run: legacy A3 run directories must still load as what
+they are, and 'pool' must add no parameters so every pre-A3 checkpoint loads.
+"""
 
 import pytest
 import torch
@@ -24,6 +31,7 @@ def test_pool_is_the_old_encoder():
     assert not any(n.startswith(("cls", "attn")) for n in names)
 
 
+@pytest.mark.legacy  # A3: cls/attn readouts rejected
 @pytest.mark.parametrize("readout", ["pool", "cls", "attn"])
 def test_shapes_and_unit_norm(readout):
     out = _student(readout)(**_batch())
@@ -31,6 +39,7 @@ def test_shapes_and_unit_norm(readout):
     assert torch.allclose(out.norm(dim=-1), torch.ones(3), atol=1e-5)
 
 
+@pytest.mark.legacy  # A3: cls/attn readouts rejected
 @pytest.mark.parametrize("readout", ["cls", "attn"])
 def test_padding_does_not_leak(readout):
     """The same peptide alone and in a batch with a longer one must embed identically."""

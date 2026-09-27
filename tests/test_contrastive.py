@@ -9,6 +9,7 @@ to fix that, including the two NaN paths that would have made every real batch N
 from __future__ import annotations
 
 import numpy as np
+from pathlib import Path
 import pytest
 import torch
 
@@ -223,6 +224,12 @@ class TestContrastiveModel:
                                       kl_weight=1.0)
         with pytest.raises(ValueError, match="reference"):
             model(**spectra, group=torch.tensor([0, 0]))
+
+    def test_rejects_an_unknown_loss(self):
+        """Only supcon is in the recipe (sigmoid was rejected, C8); a typo must not train."""
+        from msdelta.contrastive import MSDeltaForContrastive
+        with pytest.raises(ValueError):
+            MSDeltaForContrastive(torch.nn.Linear(2, 2), None, kl_weight=0.0, loss="triplet")
 
 
 class TestTrainerIntegration:
@@ -508,6 +515,7 @@ class TestGradCacheEdges:
         self._assert_matches(self._batch(size=8), chunk_size=8)
 
 
+@pytest.mark.legacy  # C9 / FT11: layer mix dropped (parked retry)
 class TestLayerMixPooler:
     """A trained mixture over depth, instead of picking one layer by hand.
 
@@ -664,6 +672,7 @@ class TestSaveEncoderCallback:
         self._fire(SaveEncoderCallback(torch.nn.Linear(2, 2)), tmp_path)  # must not raise
 
 
+@pytest.mark.legacy  # FT17: pair loss superseded
 class TestPairSamplerAndLoss:
     """The pair formulation: independent per-pair terms instead of in-batch softmax.
 
@@ -758,6 +767,13 @@ class TestPairSamplerAndLoss:
         assert z.grad is not None and bool((z.grad != 0).any())
 
 
+
+def _module_source(module: str) -> str:
+    """Source of the module an import name resolves to (old flat names are shims)."""
+    import importlib
+    return Path(importlib.import_module(module).__file__).read_text()
+
+
 class TestRetrievalSummary:
     """The task, not the proxy.
 
@@ -827,7 +843,7 @@ class TestRetrievalSummary:
         The metric is computed after training and after the encoder is saved, so any
         exception there costs hours and returns nothing. The fine-tune wraps the call.
         """
-        source = (REPO / "msdelta" / "finetune_contrastive.py").read_text()
+        source = _module_source("msdelta.finetune_contrastive")
         block = source[source.index("retrieval_summary("):]
         assert "try:" in source[:source.index("retrieval_summary(")][-400:], \
             "the retrieval evaluation must be wrapped in try/except"
@@ -874,6 +890,7 @@ class TestRetrievalSummary:
         assert out == {}, "all-singleton split has nothing to retrieve"
 
 
+@pytest.mark.legacy  # C8: SupCon kept, sigmoid rejected
 class TestSigmoidLoss:
     """C8: SigLIP-style pairwise sigmoid loss as an alternative to SupCon."""
 
@@ -900,11 +917,6 @@ class TestSigmoidLoss:
         assert {"sigmoid_log_scale", "sigmoid_bias"} <= names
         assert float(m.sigmoid_log_scale.exp()) == pytest.approx(10.0)
         assert float(m.sigmoid_bias) == pytest.approx(-10.0)
-
-    def test_rejects_an_unknown_loss(self):
-        from msdelta.contrastive import MSDeltaForContrastive
-        with pytest.raises(ValueError):
-            MSDeltaForContrastive(torch.nn.Linear(2, 2), None, kl_weight=0.0, loss="triplet")
 
     @pytest.mark.parametrize("trim", [False, True])
     @pytest.mark.parametrize("chunk", [1, 3, 8])
@@ -941,6 +953,13 @@ class TestSigmoidLoss:
 
 class TestSameMassBatches:
     """C19: GroupBatchSampler with group_masses builds batches of mass-neighbouring groups."""
+
+    def test_peptide_neutral_mass(self):
+        """The mass finetune_contrastive assigns each group; a wrong mass mis-sorts every batch."""
+        from msdelta.reranking import peptide_neutral_mass
+        assert peptide_neutral_mass("PEPTIDE") == pytest.approx(799.3600, abs=1e-3)
+        assert peptide_neutral_mass("AC[57.0215]M[15.9949]K") == pytest.approx(524.2087, abs=1e-3)
+        assert peptide_neutral_mass("[42.0106]PEPTIDE") == pytest.approx(841.3706, abs=1e-3)
 
     def _sampler(self, masses, p=4, k=2, seed=0, jitter=0.0):
         from msdelta.contrastive import GroupBatchSampler

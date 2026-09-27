@@ -1,0 +1,17 @@
+{
+ "hub_release": {
+  "peptides": 2000,
+  "new_vs_old_path": 5.960464477539063e-08,
+  "new_vs_hub_standalone_module": 0.0
+ },
+ "alignment_final_dir": {
+  "new_vs_old_path": 5.960464477539063e-08,
+  "save_load_round_trip": 1.1920928955078125e-07,
+  "hub_release_vs_this_run": 0.0
+ },
+ "spectrum_encoder_old_vs_new_tree": {
+  "spectra": 500,
+  "max_abs_diff": 0.0
+ },
+ "ALL_IDENTICAL": false
+}

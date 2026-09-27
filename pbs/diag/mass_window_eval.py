@@ -58,9 +58,9 @@ def experimental_rows(path):
 
 
 def embed(cli) -> int:
-    from msdelta.contrastive import MSDeltaForContrastive, embed_dataset
-    from msdelta.finetune_contrastive import ContrastiveCollator
-    from msdelta.modeling_msdelta import MSDeltaForPreTraining
+    from msdelta.finetuning.contrastive.contrastive import MSDeltaForContrastive, embed_dataset
+    from msdelta.finetuning.contrastive.finetune_contrastive import ContrastiveCollator
+    from msdelta.models.modeling_msdelta import MSDeltaForPreTraining
 
     device = torch.device("xpu" if torch.xpu.is_available() else "cpu")
     collator = ContrastiveCollator(max_peptide_length=64, pad_spectra_to=512)
@@ -125,8 +125,8 @@ def windowed_metrics(e, g, allowed_fn, chunk=1024, k=100):
 
 
 def analyse(cli) -> int:
-    from msdelta.grouped_retrieval import group_ids
-    from msdelta.reranking import peptide_neutral_mass
+    from msdelta.data.grouped_retrieval import group_ids
+    from msdelta.rescoring.reranking import peptide_neutral_mass
 
     device = torch.device("xpu" if torch.xpu.is_available() else "cpu")
     report = {"mass_windows_da": MASS_WINDOWS_DA, "mz_windows_ppm": MZ_WINDOWS_PPM, "results": {}}
@@ -204,7 +204,7 @@ def main():
     ap.add_argument("--emb-dir", required=True)
     ap.add_argument("--shard", type=int, default=0)
     ap.add_argument("--num-shards", type=int, default=1)
-    ap.add_argument("--out", default="results/finetune/contrastive/mass-window/summary.json")
+    ap.add_argument("--out", default="results/raw/finetune/contrastive/mass-window/summary.json")
     cli = ap.parse_args()
     return embed(cli) if cli.cmd == "embed" else analyse(cli)
 
