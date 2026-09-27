@@ -104,6 +104,19 @@ removed; the LIBRARY CODE they tested was not. To restore any of them:
 | `tests/test_mass_aware.py` (whole file; `test_peptide_neutral_mass` moved to `test_contrastive.py::TestSameMassBatches`, since it feeds C19's `group_masses`) | A8 (mass-aware student) | `MassNegativePool`, `MassBatchSampler`, `AlignmentCollator(neg_source="mass")` |
 | `test_student_readout.py::test_shapes_and_unit_norm`, `::test_padding_does_not_leak` | A3 (cls/attn readouts rejected, keep mean+max) | cls/attn forward shapes and padding. `student_readout()` detection stays: the loaders use it on legacy A3 dirs |
 
+## Imports and metric fixtures
+
+- `tests/test_imports.py` — every flat shim `msdelta/<old>.py` is the same module object as
+  its new home, `from msdelta.<old> import X` works, `python -m msdelta.<old> --help`
+  reaches the new main for the entry points PBS uses, the `msdelta.data` /
+  `msdelta.rescoring` PEP 562 fall-through, and every module imports with faiss blocked
+  (`tests/_nofaiss/`). One child interpreter does the expensive part (~40 s).
+- `tests/test_metric_fixtures.py` — MAP@R, R-Precision, Hit@1, MAP@100, R@5 on hand-worked
+  cases (perfect, worst, R=1/R=2 mix with a singleton, MAP@R != R-Precision), topk vs
+  exact, the grouped eval's `all` / `experimental` variants, `denoise_metrics`
+  (F1, AUROC, per-spectrum AUROC), `cross_modal_metrics` (peptide -> spectrum Hit@1, MRR).
+  Each expected value is derived in the test's docstring.
+
 ## Deliberate gaps
 
 - **Multi-tile behaviour is not covered here.** FT7 and FT9 need 12 ranks; `pbs/run_tests.pbs`
