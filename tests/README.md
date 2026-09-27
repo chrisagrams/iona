@@ -1,7 +1,7 @@
 # Test suite
 
-What this exists for: to say, in under a minute on a login node, whether a change has
-broken something that would otherwise be discovered forty minutes into a capacity job.
+What this exists for: to say, in minutes rather than a capacity job's forty, whether a
+change has broken something that would otherwise be discovered forty minutes into one.
 
 Every test here traces to a capability we rely on, and the ones marked **(regression)**
 trace to a specific failure that has already cost real compute. Those are the ones not to
@@ -10,10 +10,30 @@ delete when they become inconvenient.
 ## Running
 
 ```bash
-PYTHONPATH=. .venv/bin/python -m pytest tests -q            # login: CPU only, seconds
+PYTHONPATH=. .venv/bin/python -m pytest tests -q            # CPU suite (see timings below)
 PYTHONPATH=. .venv/bin/python -m pytest tests -q -m ""      # include slow checkpoint tests
-qsub -q debug -l select=1 -l walltime=00:30:00 pbs/run_tests.pbs   # the device half
+PYTHONPATH=. .venv/bin/python -m pytest tests -q --legacy   # + opt-in legacy-approach tests
+qsub -q debug -l select=1 -l walltime=00:30:00 pbs/run_tests.pbs   # CPU + device suites
+qsub -q debug -l select=1 -l walltime=01:00:00 -A UIC-HPC -l filesystems=home:flare \
+     -v REPO_DIR=$PWD pbs/run_e2e.pbs                       # opt-in e2e + golden
 ```
+
+**It is not a seconds-long suite.** Measured 2026-09-27: the default CPU run is 647 tests
+(641 pass, 6 known environment failures -- 4 level-zero PBS checks, 2 paths absent in a fresh worktree -- and 29 skipped) and took **10 min 20 s** on a loaded
+login node (an earlier run on the same tree: ~6 min); `tests/test_imports.py` alone is
+~40 s because it starts child interpreters. On a login node run only the files you
+touched; run the whole suite through `pbs/run_tests.pbs`.
+
+### Opt-in markers
+
+Three markers are **deselected by default** (they neither run nor count as skipped) and
+selected by a flag or by any `-m` expression that names them (`tests/conftest.py`):
+
+| marker | flag | what | where it runs |
+| --- | --- | --- | --- |
+| `legacy` | `--legacy` or `-m legacy` | tests of approaches no longer in the recipe (table below) | login, CPU, ~30 s for the 48 |
+| `e2e` | `--e2e` | `tests/e2e/`: every entry point as a subprocess on tiny synthetic data | debug node, `pbs/run_e2e.pbs` |
+| `golden` | `--golden` | `tests/golden/`: frozen checkpoints on frozen inputs vs stored references | debug node, `pbs/run_e2e.pbs`; skips without /flare |
 
 The split is not arbitrary. A login node has no XPU, so anything about tile binding,
 collectives, bf16 kernels or ZeRO-2 sharding is **unprovable** there, and a suite that
@@ -86,23 +106,31 @@ cases that need a device, and `pbs/run_tests.pbs` runs them.
 | a checkpoint save/load round trip | |
 | the distributed gather emits no stray labels | FT4 **(regression)** |
 
-## Removed (approach no longer used)
+## Opt-in (legacy approaches)
 
-The suite covers the recipe as it stands: contrastive = SupCon + KL anchor + same-mass
-batches, mean+max pooling, no projection head; alignment = MSE student onto frozen
-teacher embeddings, mean+max readout. Tests of rejected or superseded approaches were
-removed; the LIBRARY CODE they tested was not. To restore any of them:
-`git show fa90d44:tests/<file>` (the last commit that has them all).
+The default run covers the recipe as it stands: contrastive = SupCon + KL anchor +
+same-mass batches, mean+max pooling, no projection head; alignment = MSE student onto
+frozen teacher embeddings, mean+max readout. Tests of rejected or superseded approaches
+are kept, marked `legacy`, and run only on request -- the library code they test still
+exists and a parked retry (layer mix) may come back:
 
-| removed | decision | what it tested |
+```bash
+PYTHONPATH=. .venv/bin/python -m pytest tests -q --legacy      # everything, legacy included
+PYTHONPATH=. .venv/bin/python -m pytest tests -q -m legacy     # only the legacy tests
+```
+
+48 tests; all pass (2026-09-27). Tests that were moved into the default suite when these
+were dropped (7ed4e19) stay where they were moved and are not duplicated here.
+
+| opt-in (`legacy`) | decision | what it tests |
 | --- | --- | --- |
 | `tests/test_projection_head.py` (whole file) | C9 (no projection head) | `--projection_dim` head: width, readout switch, head gradients, GradCache exact through the head |
-| `test_contrastive.py::TestSigmoidLoss` (except `test_rejects_an_unknown_loss`, moved to `TestContrastiveModel`) | C8 (keep SupCon) | `sigmoid_contrastive_loss` hand value, learnable scale/bias, GradCache exactness with the sigmoid loss |
+| `test_contrastive.py::TestSigmoidLoss` (`test_rejects_an_unknown_loss` is in the default `TestContrastiveModel`) | C8 (keep SupCon) | `sigmoid_contrastive_loss` hand value, learnable scale/bias, GradCache exactness with the sigmoid loss |
 | `test_contrastive.py::TestPairSamplerAndLoss` | FT17 (pair loss superseded) | `PairBatchSampler`, `pair_contrastive_loss` |
-| `test_contrastive.py::TestLayerMixPooler` | C9 design decision / FT11 (layer mix dropped; PLAN lists it as a *parked retry*, restore with it) | `LayerMixPooler`, `encoder_layer_states`, `pooling=layer_mix` |
-| `tests/test_align_contrastive.py` (whole file; `test_default_model_loss_is_mse` moved to `test_models.py::TestAlignmentModel::test_default_loss_is_plain_mse`) | A4 / A6 (LiT student, hard negatives) | `hard_negatives`, `lit_contrastive_loss`, `AlignmentCollator(hard_negatives=...)`, `loss="lit"` gradient regression |
-| `tests/test_mass_aware.py` (whole file; `test_peptide_neutral_mass` moved to `test_contrastive.py::TestSameMassBatches`, since it feeds C19's `group_masses`) | A8 (mass-aware student) | `MassNegativePool`, `MassBatchSampler`, `AlignmentCollator(neg_source="mass")` |
-| `test_student_readout.py::test_shapes_and_unit_norm`, `::test_padding_does_not_leak` | A3 (cls/attn readouts rejected, keep mean+max) | cls/attn forward shapes and padding. `student_readout()` detection stays: the loaders use it on legacy A3 dirs |
+| `test_contrastive.py::TestLayerMixPooler` | C9 design decision / FT11 (layer mix dropped; PLAN lists it as a *parked retry*) | `LayerMixPooler`, `encoder_layer_states`, `pooling=layer_mix` |
+| `tests/test_align_contrastive.py` (whole file; the plain-MSE default is checked by the default `test_models.py::TestAlignmentModel::test_default_loss_is_plain_mse`) | A4 / A6 (LiT student, hard negatives) | `hard_negatives`, `lit_contrastive_loss`, `AlignmentCollator(hard_negatives=...)`, `loss="lit"` gradient regression |
+| `tests/test_mass_aware.py` (whole file; `test_peptide_neutral_mass` is in the default `test_contrastive.py::TestSameMassBatches`, since it feeds C19's `group_masses`) | A8 (mass-aware student) | `MassNegativePool`, `MassBatchSampler`, `AlignmentCollator(neg_source="mass")` |
+| `test_student_readout.py::test_shapes_and_unit_norm`, `::test_padding_does_not_leak` | A3 (cls/attn readouts rejected, keep mean+max) | cls/attn forward shapes and padding. `student_readout()` detection is in the default run: the loaders use it on legacy A3 dirs |
 
 ## Imports and metric fixtures
 
