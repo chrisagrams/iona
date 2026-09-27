@@ -1,0 +1,3 @@
+[score] shard 8/12: 1 of 12 models on xpu
+Loading weights:   0%|          | 0/170 [00:00<?, ?it/s]Loading weights:  88%|████████▊ | 150/170 [00:00<00:00, 1437.58it/s]Loading weights: 100%|██████████| 170/170 [00:00<00:00, 1583.93it/s]
+  hp50_p170k3: all MAP@R 0.7356  experimental MAP@R 0.7356  (403s)

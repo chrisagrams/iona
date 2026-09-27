@@ -1,0 +1,3 @@
+[score] shard 7/12: 1 of 12 models on xpu
+Loading weights:   0%|          | 0/170 [00:00<?, ?it/s]Loading weights:  31%|███       | 52/170 [00:00<00:00, 505.28it/s]Loading weights:  61%|██████    | 103/170 [00:00<00:00, 319.62it/s]Loading weights:  82%|████████▏ | 139/170 [00:00<00:00, 232.21it/s]Loading weights: 100%|██████████| 170/170 [00:00<00:00, 275.66it/s]
+  hp50_p128k2: all MAP@R 0.7137  experimental MAP@R 0.8709  (741s)

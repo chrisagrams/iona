@@ -1,0 +1,22 @@
+{
+ "name": "hp50_lr2e-4",
+ "path": "/lus/flare/projects/UIC-HPC/khuss/msdelta/runs/sweep-s050m_ck540k_lr2e-4-8872806/final",
+ "pooling": "mean+max",
+ "data": "/lus/flare/projects/UIC-HPC/khuss/msdelta/baselines/nine_oodval20k/prepared",
+ "metrics": {
+  "all/Hit@1": 0.877374525094981,
+  "all/Precision@1": 0.877374525094981,
+  "all/R-Precision": 0.74963250147822,
+  "all/MAP@R": 0.740398837957018,
+  "all/R@5": 0.6310540016020233,
+  "all/MAP@100": 0.772825714398136,
+  "all/queries": 20004.0,
+  "experimental/Hit@1": 0.877374525094981,
+  "experimental/Precision@1": 0.877374525094981,
+  "experimental/R-Precision": 0.74963250147822,
+  "experimental/MAP@R": 0.740398837957018,
+  "experimental/R@5": 0.6310540016020233,
+  "experimental/MAP@100": 0.772825714398136,
+  "experimental/queries": 20004.0
+ }
+}

@@ -1,0 +1,22 @@
+{
+ "name": "hp50_t0.001",
+ "path": "/lus/flare/projects/UIC-HPC/khuss/msdelta/runs/sweep-s050m_ck540k_t0.001-8872806/final",
+ "pooling": "mean+max",
+ "data": "/lus/flare/projects/UIC-HPC/khuss/msdelta/baselines/nine_oodval20k/prepared",
+ "metrics": {
+  "all/Hit@1": 0.8685762847430514,
+  "all/Precision@1": 0.8685762847430514,
+  "all/R-Precision": 0.7402074333668422,
+  "all/MAP@R": 0.7303354148506236,
+  "all/R@5": 0.6231167035635842,
+  "all/MAP@100": 0.7625866855437506,
+  "all/queries": 20004.0,
+  "experimental/Hit@1": 0.8685762847430514,
+  "experimental/Precision@1": 0.8685762847430514,
+  "experimental/R-Precision": 0.7402074333668422,
+  "experimental/MAP@R": 0.7303354148506236,
+  "experimental/R@5": 0.6231167035635842,
+  "experimental/MAP@100": 0.7625866855437506,
+  "experimental/queries": 20004.0
+ }
+}

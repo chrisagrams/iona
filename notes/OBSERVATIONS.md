@@ -1821,3 +1821,27 @@ k in -2..2. MAP@R open / 20ppm / iso, one seed:
 5. HEK (low-res MS2) is out of domain for the encoders; the question can't be answered there.
 
 Would overturn: more seeds reversing (4); a dataset where the isotope window's extra candidates cost more than it recovers.
+
+---
+
+## C23 50m HP search on the single-dataset recipe: learning rate is the lever, the rest transfers (jobs 8872806, 8873673, 8873676; 2026-09-27 04:34 UTC)
+
+One factor at a time around base (lr 1e-4, t 0.002, KL 10, P85xK3), 50m@540k, 3 epochs, one seed; full
+validation (exp MAP@R) and 8-species OOD. Base reproduces the c8c19 supcon_mass 3-seed mean (.867 vs .8675);
+seed spread there ~±.001 validation, ~±.009 OOD.
+
+    setting     val    OOD        setting     val    OOD
+    lr4e-4     .879   .752        base       .867   .734
+    lr2e-4     .876   .740        t0.001     .864   .730
+    kl0        .874   .732        kl30       .859   .727
+    kl1        .872   .743        t0.01      .859   .723
+    p128k2     .871   .749        lr5e-5     .855   .717
+    p170k3     .867   .736        t0.005     .865   .739
+
+1. lr 4e-4 wins on both sets (+.012 / +.018) and is the edge of the range: optimum unlocated.
+2. Temperature, KL, group shape: within noise of base or worse; the old recipe's values transfer.
+3. Side finding (K54): MAP@R with consensus spectra in the gallery swings with KL (kl0 .848, base .744,
+   kl30 .664) while experimental-only barely moves -- the KL anchor ties the embedding to how the
+   pretrained model sees consensus-style spectra. Tested next with consensus in training (C20).
+Next: sweep-hp50b (lr 8e-4, 1.6e-3, lr4e-4+p128k2, lr4e-4+kl1, x3 seeds; K53).
+

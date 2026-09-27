@@ -1,0 +1,13 @@
+# C23 hp-single 50m finals (job 8872806)
+hp50_base /lus/flare/projects/UIC-HPC/khuss/msdelta/runs/sweep-s050m_ck540k_base-8872806/final
+hp50_kl0 /lus/flare/projects/UIC-HPC/khuss/msdelta/runs/sweep-s050m_ck540k_kl0-8872806/final
+hp50_kl1 /lus/flare/projects/UIC-HPC/khuss/msdelta/runs/sweep-s050m_ck540k_kl1-8872806/final
+hp50_kl30 /lus/flare/projects/UIC-HPC/khuss/msdelta/runs/sweep-s050m_ck540k_kl30-8872806/final
+hp50_lr2e-4 /lus/flare/projects/UIC-HPC/khuss/msdelta/runs/sweep-s050m_ck540k_lr2e-4-8872806/final
+hp50_lr4e-4 /lus/flare/projects/UIC-HPC/khuss/msdelta/runs/sweep-s050m_ck540k_lr4e-4-8872806/final
+hp50_lr5e-5 /lus/flare/projects/UIC-HPC/khuss/msdelta/runs/sweep-s050m_ck540k_lr5e-5-8872806/final
+hp50_p128k2 /lus/flare/projects/UIC-HPC/khuss/msdelta/runs/sweep-s050m_ck540k_p128k2-8872806/final
+hp50_p170k3 /lus/flare/projects/UIC-HPC/khuss/msdelta/runs/sweep-s050m_ck540k_p170k3-8872806/final
+hp50_t0.001 /lus/flare/projects/UIC-HPC/khuss/msdelta/runs/sweep-s050m_ck540k_t0.001-8872806/final
+hp50_t0.005 /lus/flare/projects/UIC-HPC/khuss/msdelta/runs/sweep-s050m_ck540k_t0.005-8872806/final
+hp50_t0.01 /lus/flare/projects/UIC-HPC/khuss/msdelta/runs/sweep-s050m_ck540k_t0.01-8872806/final

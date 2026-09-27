@@ -1,0 +1,3 @@
+[score] shard 6/12: 1 of 12 models on xpu
+Loading weights:   0%|          | 0/170 [00:00<?, ?it/s]Loading weights:  86%|████████▌ | 146/170 [00:00<00:00, 1456.09it/s]Loading weights: 100%|██████████| 170/170 [00:00<00:00, 1575.88it/s]
+  hp50_lr5e-5: all MAP@R 0.7171  experimental MAP@R 0.7171  (403s)
