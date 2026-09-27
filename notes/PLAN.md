@@ -4,6 +4,8 @@ The one file that says **what we are trying to find out**. `STATUS.md` says wher
 thing stands, `OBSERVATIONS.md` records results, `TODO.md` lists defects. Every job must
 name the question below that it answers; a job that answers none should not be queued.
 
+Last reviewed: 2026-09-27 (after the paper deadline; working branch `dev_finetune_02`).
+
 ## Goal
 
 Two conclusions, for two downstream tasks:
@@ -15,7 +17,7 @@ Tasks: **denoise** (per-peak noise classification, metric AUROC/F1) and **contra
 (spectrum embeddings for retrieval/reranking, metric MAP@R with Precision@1 and
 R-Precision beside it — Musgrave et al., ECCV 2020).
 
-Axes: model size 50m/100m/200m/400m × canonical checkpoints
+Axes: model size (25m)/50m/100m/200m/400m × canonical checkpoints
 10000 / 120000 / 220000 / 330000 / 430000 / 540423 (6 rungs, max_steps 540423).
 Compute on the x-axis is pretraining grad steps until real budgets are supplied.
 
@@ -47,7 +49,7 @@ Status: ✅ answered · 🟡 partly · ⏳ running/queued · ⬜ not started
 | C7 | Does training on ms-contrastive-100k beat the replicate corpus, and does scale show there? | ✅ | **yes**: one epoch, test exp MAP@R 50m 0.839, **400m 0.868** (Hit@1 0.913), vs replicate-only 0.656 / 0.714 and binned cosine 0.730; selected on VALIDATION (400m seed 0 0.864). Uploaded private: Gaolaboratory/iona-contrastive-400m, -50m (sha verified). Job 8860522 |
 | C8 | Does a per-pair sigmoid loss (SigLIP, Zhai et al. 2023) beat SupCon? | ✅ | **No; keep SupCon.** 50m@540k, ms-contrastive-100k only, 3 seeds, 3 epochs: validation exp MAP@R sigmoid 0.761 / 0.788 (random / same-mass) vs SupCon 0.858 / 0.868; OOD 0.514 / 0.637 vs 0.645 / 0.724. Job 8872141; see Design decisions |
 | C9 | Does an MLP projection head (master's MSDeltaForRetrieval) help the embedding -- retrieving on the head output, or on the pre-head features (SimCLR)? | ✅ | **No; keep the no-head design.** 24 epochs, 3 seeds, small eval: no head 0.877, head output 0.825, pre-head 0.705 (3 epochs: 0.60 / 0.30 / 0.29). Job 8860587 |
-| C10 | Zero-shot scaling: how does FROZEN-encoder retrieval scale with model size and pretraining? (kept to show how much training improves embeddings) | 🟡 | best-layer exp MAP@R @220k: 50m 0.208, 100m 0.140, 200m 0.151, 400m 0.432. **All-but-the-top** (Mu & Viswanath 2018; mean + top-D PCs fitted on TRAIN removed): 50m best block 0.208 -> 0.395, final 0.112 -> 0.296 at D=32, still rising. Full run (D 8/32/64/128): 8 of 10 encoders done (job 8865987 hit the 1 h debug limit), ~2x everywhere, 200m@540k 0.432, 400m@10k 0.414 (OBSERVATIONS 2026-09-25). **Deferred (user, lower priority)**: (a) rerun 400m@220k and 400m@430k on capacity with 2 h walltime (`pbs/eval_zeroshot_layers.pbs`, same MODELS/ABTT; skips finished encoders); (b) extend D to 256 for ALL encoders, since D=128 was best for 200m/400m (edge of range, optimum unlocated) |
+| C10 | Zero-shot scaling: how does FROZEN-encoder retrieval scale with model size and pretraining? (kept to show how much training improves embeddings) | ✅ | best layer + all-but-the-top (Mu & Viswanath 2018; top-D PCs fitted on TRAIN removed) roughly doubles zero-shot retrieval at every encoder; all 24 encoder JSONs scored and the summary rebuilt 2026-09-26 (paper figure C_zeroshot; the in-distribution 400m number is 0.660, not the stale 0.432). D=128 is best for 200m/400m (edge of range). **Deferred (user, lower priority)**: extend D to 256 |
 
 ### Alignment (peptide embedder)
 
@@ -61,11 +63,11 @@ library search. Metric: peptide->spectrum Hit@1 / MAP@R on held-out peptides.
 | A1 | Does training on ms-contrastive-100k (~88k peptides) give a much better student? | ✅ | **yes**: teacher C7-50m step 600; on the TEST split, all 25,137 spectra vs all 9,771 candidates: Hit@1 **0.898** (3 seeds, ±0.001), Hit@5 0.932, MRR 0.914 -- vs 0.73 for R1's student on 94 peptides. Jobs 8861093/8861292/8861309/8861310 |
 | A2 | Does student quality track teacher quality? | ✅ | **yes**: teacher C7 400m final (seed 0 by validation) -> test Hit@1 **0.923** (3 seeds +-0.0002) vs A1 0.898; Hit@5 0.949, MRR 0.935. Uploaded private: Gaolaboratory/iona-peptide-embedder-400m (seed 0, sha verified; standalone module). Next: reranking with A2 embeddings; yHydra comparisons |
 | A3 | Does order-aware pooling fix the adjacent-swap blindness? | ✅ | **no**: cls 0.894 / attn 0.893 vs pool 0.899 test Hit@1; near-miss 68.5% vs 70.6%. Keep mean+max |
-| A4 | Does a contrastive (LiT, SupCon-style multi-positive) student with distinguishable hard negatives (adjacent swaps / local shuffles, never reversals) beat A1's MSE student? | ⏳ | first sweep invalid (stray no_grad; fixed + gradient test). Rerun 8865869: validation Hit@1 LiT+4 hard negatives 0.931-0.934 vs A1 0.9305; best seed chosen on validation. Test eval + FDR vs A1 (with cosine_null + vectors) chained |
+| A4 | Does a contrastive (LiT, SupCon-style multi-positive) student with distinguishable hard negatives beat A1's MSE student? | ✅ | **No.** Test Hit@1: MSE 0.898-0.899; LiT 0.898; LiT + 4 hard negatives 0.895-0.897; LiT + MSE 0.892-0.896 (job 8865869, 3 seeds each). Near-miss (adjacent swap) 68.8% vs 70.5%: hard negatives did not fix the blindness. Reranking gains were within single-seed noise |
 | A5 | vs yHydra (cross-modal spectrum -> peptide, identical queries/candidates, the 88.5% yHydra can represent) | 🟡 | ms-contrastive-100k test (in-distribution for us): open **A1 0.901 vs yHydra 0.196**; +-1.1 Da window 0.973 vs 0.754; 20 ppm 0.993 vs 0.942 (8-9x fewer errors). UNSEEN HEK ion-trap data: open 0.061 vs 0.016, +-1.1 Da 0.601 vs 0.345, 20 ppm 0.679 vs 0.606 -- ahead everywhere, both degraded (low-res domain shift). Still needed: an unseen HIGH-RES set **Nine-species (unseen)**: open yHydra 0.060 / A1 0.253 / A2 0.388 / A-oodsel 0.410; +-1.1 Da 0.650 / 0.537 / 0.639 / 0.659; 20 ppm 0.890 / 0.691 / 0.761 / 0.765 |
-| A6 (low priority) | A2 + A4: the 400m teacher with A4's loss (LiT + 4 hard negatives, no MSE), 3 seeds (configs/sweep-a6, `make_a4.py --teacher 400m`). A4 on the 50m teacher did not change retrieval (0.895-0.898 vs 0.898) but improved reranking (MLP ms+embws 94,224 vs A1 93,843; null arm 93,557) | ⏳ | submits once A2's reranking job has started |
-| A7 (LOWER PRIORITY, user 2026-09-25; c1rep cache job 8868981 DEQUEUED 20:40 UTC to free a queue slot for the MS2Rescore cross-over -- resubmit: qsub -q capacity -l select=1 -l walltime=01:00:00 -N 400m-c1rep-cache -v ARGS_FILE=configs/a1-align-100k-400m-c1rep/training.args,TARGET_CACHE=/lus/flare/projects/UIC-HPC/khuss/msdelta/align-targets-400m-c1rep pbs/precompute_align_sharded.pbs; random/frozen not submitted) | Pretraining / fine-tuning ablation for A: the SAME student trained against teachers = random-init 400m / frozen pretrained 400m@220k / replicate-only 400m (C1) / C7 400m (= A2, 0.923); 3 seeds each, test Hit@1 | ⏳ | queued 2026-09-25 (user) |
-| A8 | Mass-aware student training: mass-bucketed batches (in-batch negatives are same-mass competitors) + same-mass hard negatives (+-20 ppm), LiT + small MSE; select on WINDOWED Hit@1 (validation + 8-other-species OOD set); eval yeast open/1.1 Da/20 ppm vs yHydra, then R | ⏳ | built (sweeps/make_a8.py, tests/test_mass_aware.py); chain: tests -> sweep -> test eval -> nine-species vs yHydra -> R |
+| A6 (low priority) | A2 + A4: the 400m teacher with A4's loss (LiT + 4 hard negatives), 3 seeds | 🟡 | validation Hit@1 0.9425-0.945 (vs A2's MSE student); never test-evaluated. A4 showed no retrieval gain at 50m, so not pursued |
+| A7 (lower priority, user 2026-09-25) | Pretraining / fine-tuning ablation for A: the SAME student against teachers = random-init 400m / frozen pretrained 400m@220k / replicate-only 400m / C7 400m (= A2, 0.923); 3 seeds each, test Hit@1 | ⬜ | never run (the teacher-cache job 8868981 was dequeued 2026-09-25 to free a slot); configs in configs/a1-align-100k-400m-c1rep |
+| A8 | Mass-aware student: mass-bucketed batches + same-mass (±20 ppm) hard negatives, LiT + small MSE; select on WINDOWED Hit@1 | 🟡 | ran (job 8869110, 3 seeds × with/without 4 hard negatives), never written up: OPEN test Hit@1 **0.30-0.38** vs 0.90 for the MSE student -- it no longer ranks peptides globally. The windowed test and the yHydra comparison it was designed for were never run. Revisit with the alignment caveats |
 | A9 (NOT PLANNED, user 2026-09-26: headline nine-species results already in hand) | Iona vs yHydra on the other 8 species of the Noble nine-species-balanced set (as done for mouse, pbs/mouse_vs_yhydra.pbs): ~754k spectra; only the 6 known modifications (build runs unchanged); >512-peak spectra trimmed to top-512 (yeast 50%, Vigna 25%, Apis/Methanosarcina/Bacillus 10-15%); one capacity node ~2-2.5 h, one species per tile | ⬜ | ~30 min setup: generalise build_mouse.py to a species argument + a per-tile job |
 
 ### Reranking (downstream of contrastive)
@@ -85,21 +87,20 @@ peptide among each spectrum's candidates, paired seeds (arms share split and ini
 | R5 | Embedding VECTORS: element-wise product spectrum x peptide, PCA 64 on training rows; null = product with a random spectrum | 🟡 | **confounded**: with A2 the null arm gains up to +2.4k PSMs (the product keeps the peptide's own embedding -> sequence-only / decoy-like signal). Needs a stricter control (same-mass-window spectrum, or a peptide-only arm) before any claim |
 | C11 | A retrieval benchmark NEITHER we nor GLEAMS trained on: confident (1% FDR) MSFragger PSMs of psm-rerank-hek-hct116 (8 runs; spectra <=512 peaks, groups capped at 20 spectra -- the uncapped run failed on groups of up to 466; effectively HEK-only), same MAP@R/Hit@1. GLEAMS vs ours (replicate-only and C7) vs binned cosine | 🟡 | **ours does NOT transfer here**: binned 1 Da 0.554, GLEAMS 0.530, C7 400m 0.17, replicate-only 0.017 (job 8866238). Likely resolution domain shift (ion-trap CID). Needed: provenance of our training data, m/z-jitter test, a clean unseen HIGH-RES HCD set for the fair comparison. To do: C11b keeping all PSMs (top-512 peaks for ours), GLEAMS check vs its paper, provenance question (MassIVE-KB overlap) **Lab (2026-09-25): HEK = high-res MS1, LOW-res MS2; HCT116 = high-res MS1 and MS2.** So the collapse is the low-res fragment domain. C11-HCT116 with trimming CANCELLED (user: trimming changes the spectrum) |
 | C13 | Unseen HIGH-RES HCD benchmark: nine-species (DeepNovo; InstaDeepAI/ms_ninespecies_benchmark, test split = yeast, 111k spectra, all <= 452 peaks: nothing trimmed or dropped). Groups modified peptide + charge, >= 2, capped at 20. C: GLEAMS vs ours (C7, replicate-only) vs binned; A: yHydra vs ours (open, +-1.1 Da, 20 ppm) | 🟡 | **ours LOSES**: binned 0.790, GLEAMS 0.676, C7 400m 0.47-0.56 (seed spread 0.09), replicate-only 0.44-0.50. C claim is in-distribution only. A (yHydra) running **Diagnostic (20k subset)**: frozen 400m@220k + ABTT 0.709 > every fine-tuned model (C7 <= 0.656; peaks at step 600) < GLEAMS 0.770 < binned 0.916 -- fine-tuning specialises. Next: OOD validation from the 8 other species to select a transferring teacher |
-| C14 (submitted 2026-09-25 19:13 as 8869871 on capacity: the chain sat in a qsub retry loop until a slot freed; A2/A-oodsel HCT116 retrieval jobs follow it; 20k-spectrum whole-group sample, trimmed to top-512) | HCT116 unseen high-res test WITH trimming (user OK'd trimming 2026-09-25): all 18 HCT116 runs, confident PSMs, spectra > 512 peaks trimmed to their top-512 (as reranking stage 1 does), groups capped at 20; C and A comparisons. Needs the trim option restored in c11_build.py | ⬜ | waiting on the choice of test set |
-| C15 (queued overnight after C14; 8 non-human species x 5k, trimmed) | Noble-lab multi-species benchmark (Zenodo 10.5281/zenodo.12819175; main 12.4 GB / balanced 2.6 GB zipped): a newer, uniformly reprocessed nine-species set; not the same as C13's DeepNovo set | ⬜ | candidate |
-| C16 (user 2026-09-25) | C7 recipe from the FINAL 200m checkpoint (540,423), 1 seed: stage 1 replicate corpus (12 ep) -> stage 2 one epoch ms-contrastive-100k (encoder every 300 steps); then C eval (100k test, nine-species), A student + yHydra, R reranking (per-run lab +-emb +null). `sweeps/make_c16.py` | ⏳ | smoke -> stage 1 (~2 h) -> stage 2 (~11-12 h); done ~Sep 26 04:00-06:00 UTC |
+| C14 | HCT116 unseen test (all 18 HCT116 runs, confident PSMs, spectra trimmed to top-512, groups capped at 20; 20k-spectrum whole-group sample) | ✅ | **ours does not transfer**: fine-tuned C7 400M 0.23-0.32 MAP@R, GLEAMS 0.658, binned 1 Da 0.742; frozen + ABTT near chance (≤ 0.047). Low-res MS2 caveat as C11 (the resolution audit found HCT116 MS2 not Orbitrap-accurate either). No further C compute on it (user, 2026-09-25) |
+| C15 | Noble-lab nine-species-balanced (Zenodo 10.5281/zenodo.12819175), unseen high-res species | ✅ | built as noble_mouse20k / noble_human20k (+ nine_oodval20k = 8 non-yeast species for OOD selection). In the paper's C_transfer figure; filter-failure analysis (C24) runs on mouse/human |
+| C16 (user 2026-09-25) | C7 two-stage recipe from the FINAL 200m checkpoint (540,423), 1 seed | 🟡 | stage 2 ran (job 8869387) but its run dir has no final/ and it was never scored -- needs a look before anyone relies on a 200m@540k two-stage point |
 | C17 (not a priority, user 2026-09-25) | C7 recipe at 100m to add a scaling point (50/100/200/400m); needs a checkpoint choice (220k matches C7 50m/400m, 540k matches C16) | ⬜ | parked |
 | C18 (camera-ready, user 2026-09-25) | GLEAMS-inspired: (a) train on MassIVE-KB / more diverse data; (b) precursor mass + charge as encoder inputs | ⬜ | deferred to camera-ready |
 | C19 | GLEAMS-inspired same-mass negatives: batches of peptide groups with NEARBY neutral masses | ✅ | **Yes; adopted.** Same run as C8: SupCon same-mass vs random, validation 0.868 vs 0.858 (+0.009), OOD 0.724 vs 0.645 (+0.080), ahead at every half-epoch snapshot. Open vs precursor-windowed evaluation: job 8872964. See Design decisions |
 | C20 (user 2026-09-27) | Train WITH the consensus spectrum in each group (4 spectra/group: K up to 4) instead of experimental-only; eval unchanged (experimental MAP@R) | ⬜ | queued idea; single-dataset recipe, 50m@540k, 3 seeds, after sweep-mix |
-| C21 (user 2026-09-27) | Knob for far-mass negatives in same-mass batches: `random_group_fraction` (0 = pure same-mass, 1 ≈ random). Does seeing both near- and far-mass pairs beat either extreme? | ⏳ | sweep-mix 8873159: 0.25 and 0.5 within-batch, 0.25 between-batch; c8c19 gives 0 and 1. Two-region batches (user's design, K22): every batch = two same-mass blocks from unrelated mass regions, 75/25 and 50/50 (sweeps/make_regions.py; smoke 8873427 -> capacity 8873428). Considered, NOT tested (user 2026-09-27: not worth it): random spectra added as negative-only singles (no group), which would give 3x more distinct far peptides per step |
-| C22 (proposed K7) | Exact per-anchor 75/25: batch = 4 mass blocks, SupCon denominator masked so each anchor sees its own block's negatives + a 1/3-size random subset of the others; P85 and P170 | ⬜ | awaiting go |
-| C12 (low priority; likely rebuttal period; seed count TBD) | Repeat the C7 recipe from the FINAL 400m pretraining checkpoint (540,423; now backed up and verified identical to Chris's) instead of 220k, which was used because pretraining had not finished then: stage 1 (replicate corpus, 12 ep, t 0.002, KL 10) + stage 2 (1 epoch ms-contrastive-100k), 3 seeds, select on validation; compare with iona-contrastive-400m (220k base) on the 100k test, C11 and the ABTT zero-shot curve | ⏳ | added 2026-09-25 (user) |
+| C21 (user 2026-09-27) | Knob for far-mass negatives in same-mass batches: `random_group_fraction` (0 = pure same-mass, 1 ≈ random). Does seeing both near- and far-mass pairs beat either extreme? | ⏳ | mix (job 8873159): 25% / 50% random groups within every batch, 25% of batches fully random. Two-region batches (user's design, K22; `random_mix=regions`): every batch = two same-mass blocks from unrelated mass regions, 75/25 and 50/50 (smoke 8873562 -> capacity 8873563). c8c19 gives the 0 and 1 ends. Considered, NOT tested (user: not worth it): random spectra added as negative-only singles |
+| C22 | Exact per-anchor 75/25 via a masked SupCon denominator (4 mass blocks per batch) | ⬜ | not pursued for now: the user preferred the two-region design (C21), which uses every negative. Revisit only if two-region shows the ratio matters |
+| C23 (user 2026-09-26) | Single-dataset recipe HPs per scale: do the old recipe's HPs transfer? One factor at a time around lr 1e-4 / t 0.002 / KL 10 / P85×K3 (lr, temperature, KL, P/K; 12 arms), 3 epochs, every scale at 540k; then the winning setting on every pretraining checkpoint | ⏳ | 50m first (job 8872806, finishing 2026-09-27 ~04:15 UTC); then score every half-epoch snapshot on validation + OOD, decide, and run 25m/100m/200m/400m (`sweeps/make_hp_single.py`) |
+| C24 (user 2026-09-27) | What does precursor filtering cost? Evaluate with vs without the filter, and on the queries where the filter drops a correct match | ✅ | (a) filter width on theoretical masses (job 8872964): C19's gain is largest unfiltered (OOD +0.080) and shrinks to +0.011 at 20 ppm; 98-99% of open top-1 errors are far in mass. (b) measured precursors (job 8873366): 20 ppm loses ~0.25 MAP@R on the 35-40% of queries it breaks (isotope-offset precursors) and turns 5-6% of queries right -> wrong; our encoders recover 79-84% of the unanswerable ones unfiltered; an isotope-tolerant 20 ppm window removes the loss. OBSERVATIONS 2026-09-26/27 |
+| C12 (low priority; likely rebuttal period) | Repeat the C7 two-stage recipe from the FINAL 400m checkpoint (540,423) instead of 220k, 3 seeds; compare with iona-contrastive-400m | ⬜ | not started. Largely superseded by the single-stage recipe work (C19-C23) |
 | S25 (later; user 2026-09-25) | A NEW 25m scale exists (Gaolaboratory/iona-base-25m; Chris's runs msdelta-25m-production-01 / msdelta-base-25m-production-01 under cgrams/msdelta-runs). Recreate the scale results with it: denoise ladder (D1/D3), contrastive (C2/C4/C7), zero-shot + ABTT (C10), alignment (A1), so every scaling curve gains a 25m point | ⬜ | deferred; first check which 25m run is canonical and back its checkpoints up (as for 400m) |
 
-R1's first pass runs now with the current best encoders: they are ~2.3x better than the
-one behind the −0.109, which is the question, and it proves the pipeline so the final
-C1 winners can go through it immediately.
 
 ## Design decisions
 
@@ -114,7 +115,7 @@ SupCon loss, t 0.002, KL 10 to the frozen pretrained intensity head, lr 1e-4 cos
 | decision | chosen | status |
 |---|---|---|
 | loss | SupCon (multi-positive softmax) | tested (C8) |
-| batch composition | same-mass blocks (C19) | tested (C19); 75/25 mixed ablation planned |
+| batch composition | same-mass blocks (C19) | tested (C19); mixed and two-region ablations running (C21) |
 | same-mass jitter | ±1.0 Da | **set, untested** |
 | batch shape | P85 × K3 | K fixed by the data; P under test (hp-single) |
 | temperature | 0.002 | tested at the old recipe (C1); retested per scale in hp-single |
@@ -124,7 +125,7 @@ SupCon loss, t 0.002, KL 10 to the frozen pretrained intensity head, lr 1e-4 cos
 | head / readout | none; mean+max over the last layer | tested (C9); layer mix only on the rejected metric |
 | pretrained init | required | tested (C3) |
 | model selection | validation, never test | rule |
-| metric | experimental MAP@R, open gallery | tested (C0); filtered variant: job 8872964 |
+| metric | experimental MAP@R, open gallery | tested (C0); filtered and filter-failure variants measured (C24) |
 | GradCache trimming, no gradient checkpointing | on / off | benchmarked; the result is exact, so this is speed only |
 
 <details><summary><b>Loss: SupCon, not per-pair sigmoid (C8)</b></summary>
@@ -256,7 +257,7 @@ Test Hit@1: pool 0.899, cls 0.894, attn 0.893. Near-miss discrimination (adjacen
 - **Selection:** on validation LOSS, not validation Hit@1 (A8 would select on windowed Hit@1).
 - **Known blind spot:** adjacent-residue swaps (about 70% near-miss accuracy).
 - **Domain:** unseen data is much worse (nine-species open Hit@1 0.39 for A2; HEK ion-trap 0.06). The windowed numbers are what a search sees.
-- **Not mass-aware:** A8 (same-mass batches + ±20 ppm hard negatives) was built but never run.
+- **Not mass-aware:** A8 (same-mass batches + ±20 ppm hard negatives) ran but was never written up; its open test Hit@1 collapsed to 0.30-0.38 and its windowed evaluation was never run.
 </details>
 
 ### Denoise, current recipe
@@ -287,47 +288,23 @@ RERANKING (on the incoming reranking dataset)
 
 ## Order of work
 
-CONTRASTIVE follows four stages (decided 2026-09-23). Training on ms-contrastive-100k
-costs ~7 h/epoch at 50m and ~22 h at 400m on one tile, so the full suite trains on the
-small replicate corpus and the large corpus is used to (a) TEST everything and (b) train
-a few chosen models.
+The paper was submitted 2026-09-26 on branch `dev_finetune` (frozen). Current work, in order:
 
-```
-DENOISE                                   CONTRASTIVE
-───────                                   ───────────
-D1 ✅  D2 ✅  D3 ✅  D4 ✅                  STAGE 1  full suite on the replicate corpus
-  D3 at 200m/400m: ends-big wave            C0 ✅ C1 ✅ C3 ✅ C5 ✅ C6 ✅
-  (8860442 smoke → 18 arms)                 C2 ⏳ 8860092   C4 ⏳ 8860093 (50m/100m)
-  400m 330k-540k: not pretrained yet                  │
-      └─► denoise scaling figures                     ▼
-          (AUROC and F1)                  STAGE 2  score every Stage-1 model on the
-                                            ms-contrastive-100k test split
-                                            69 models: small-eval vs 100k MAP@R Spearman
-                                            0.78 (0.98 on the first 27). Recipe/length
-                                            effects transfer; SCALE and CHECKPOINT effects
-                                            do not -- they are read here only
-                                                      │
-                                                      ▼
-                                          STAGE 3  a few configs trained ON ms-contrastive-100k
-                                            (C7; 50m ep1 x3 queued 8860292; rest chosen
-                                            from Stage 2)
-                                                      │
-                                                      ▼
-                                          STAGE 4  score those on the same test split,
-                                            vs binned cosine (0.730) and GLEAMS
-                                                      │
-                                   ┌──────────────────┴─────────────┐
-                                   ▼                                ▼
-                         C8 sigmoid vs SupCon          A1-A3 peptide embedder (teacher
-                                                       = best Stage 3/4 encoder)
-                                                                    │
-                                                                    ▼
-                                                     R0-R2 on the incoming reranking dataset
-```
+**Now (running)**
+1. C23 HP search at 50m (job 8872806) → score snapshots on validation + OOD → does the old recipe transfer?
+2. C21 batch composition: mix (8873159) and two-region (8873562 → 8873563) → score, plus the filter-width breakdown on the finals.
 
-Reranking waits for the new reranking dataset (2026-09-23: being obtained). Until then
-the work is good spectrum and peptide embedders; R0-R2 as written assume our synthetic
-decoys and will be re-set against that dataset.
+**Next**
+3. C23 per-scale HP search (25m/100m/200m/400m), then the winning recipe on every pretraining checkpoint (the single-dataset scaling curve).
+4. C20 train with the consensus spectrum.
+5. Engineering on `dev_finetune_02`: cutover of the main checkout (after the mix job), rename to "peptide encoder" / "spectrum encoder", move `data/synthetic` to /flare (K4), P1 Pairformer port (HF-compliant; unit tests + a short debug pretraining comparison).
+
+**Later / waiting on a decision**
+- Alignment caveats (Design decisions → Alignment → Caveats), incl. A8's open-retrieval collapse and a student for the single-stage encoder. User asked to be reminded.
+- C18 (MassIVE-KB / more diverse training data; precursor mass + charge as inputs), S25 (25m everywhere), C16 check, C12.
+- Reranking (R3-R5) has had no new work since 2026-09-25.
+
+Done since the last review: C8 (SupCon kept), C19 (same-mass batches adopted), C24 (filter cost), GradCache trimming (~4x faster), per-job code snapshots, the package reorganisation (task subpackages, results raw/processed), opt-in legacy / e2e / golden tests, FT26 device-suite crash (pyarrow before deepspeed), K38 resume batch order.
 
 ## Parked
 

@@ -4,54 +4,45 @@ What is true right now. Overwritten, not appended: before changing the diagram, 
 old one into `status-history/`. The questions it tracks are in `PLAN.md`; results with
 their evidence are in `OBSERVATIONS.md`; hazards are in `TODO.md`.
 
-Last updated: 2026-09-23, 18:30.
+Last updated: 2026-09-27, ~04:20 UTC.
 
 ```
 LEGEND  [x] done  [~] RUNNING  [ ] queued / next  [>] blocked on something  [X] retracted
 
+BRANCHES
+──────────────────────────────────────────────────────────────────────────
+  dev_finetune ...... frozen at paper submission (2026-09-26); main checkout,
+                      until the mix job ends
+  dev_finetune_02 ... working branch (~/code/msdelta-02); new jobs go from here
+  master ............ upstream, never touched
 
 JOBS
 ──────────────────────────────────────────────────────────────────────────
-  nothing running or queued -- every job has reported
+  [~] 8872806  C23 HP search, 50m @540k, 12 arms ............. finishing
+  [~] 8873159  C21 mix: within75 / within50 / between75 x3 ... ~2.5 h left
+  [~] 8873562  C21 two-region smoke + first code-snapshot job (debug-scaling)
+  [>] 8873563  C21 two-region 75/25 + 50/50 x3 ............... held on the smoke
+  [ ] 8873598  e2e tests from dev_finetune_02 (debug) ........ K38 re-check
 
-
-DENOISE  (AUROC and F1)
+CONTRASTIVE (single-dataset recipe: SupCon + same-mass, ms-contrastive-100k)
 ──────────────────────────────────────────────────────────────────────────
-  [x] D1 model size ...... 0.9317 / 0.9400 / 0.9447 / 0.9434, 400m turnover real
-  [x] D2 pretraining ..... ~+0.05 at every scale (+0.046/+0.051/+0.048/+0.045)
-  [x] D3 checkpoints ..... saturating: 50m 0.910 -> 0.936, 100m 0.919 -> 0.943
-                           over 10k -> 540k, flat from ~330k; 400m flat
-  [x] D4 HP transfer ..... lr2e-4 / es0.5 holds at 540423
-  [x] splits ............. peptide-disjoint (audit 8859654)
-  [>] 200m/400m later rungs wait on pretraining (200m 82%, 400m 47%)
+  [x] C8  sigmoid loss rejected      [x] C19 same-mass batches adopted
+  [x] C24 filter cost measured (isotope-tolerant window removes the loss)
+  [~] C23 HPs per scale (50m first)  [~] C21 far-mass knob
+  [ ] C20 train with the consensus spectrum
 
-
-CONTRASTIVE  (MAP@R)
+ENGINEERING
 ──────────────────────────────────────────────────────────────────────────
-  [x] C0 metric .......... separation ratio invalid; MAP@R
-  [~] C1 recipe .......... t ~0.002, width 256, 24 epochs -> 0.877 (50m).
-                           Training length was the lever (+0.11), not negatives
-  [ ] C2 model size ...... all 4 scales at the final recipe
-  [x] C3 pretraining ..... random init at chance at every scale
-  [ ] C4 checkpoints ..... ladder at the final recipe
-  [x] C5 / C6 ............ HPs transfer; best-model selection irrelevant
+  [x] reorg (task subpackages + shims, results raw/processed) merged into dev_finetune_02
+  [x] opt-in legacy / e2e / golden tests; FT26 fixed; K38 fixed; per-job code snapshots
+  [ ] cutover of the main checkout to dev_finetune_02 (after 8873159)
+  [ ] rename peptide/spectrum "embedder" -> "encoder"
+  [ ] K4 data/synthetic -> /flare (deletion protocol)
+  [ ] P1 Pairformer port (HF-compliant)
 
-
-RERANKING  (Hit@1)
+REMINDER
 ──────────────────────────────────────────────────────────────────────────
-  [~] R0/R1 .............. embedding costs ~0.11, but the benchmark is unfit:
-                           decoys not mass-matched (FT30), split leaked (FT29,
-                           fixed). Near-miss decoys are its only hard case and
-                           the student is blind to residue order
-  [>] R1 re-take ......... needs truly mass-matched candidates
-
-
-DECISIONS NEEDED
-──────────────────────────────────────────────────────────────────────────
-  [ ] freeze the C1 recipe (width 256, 24 epochs, t 0.002) and run C2 + C4?
-  [ ] reranking benchmark: MassIVE-KB same-mass decoys, or ask Chris for real
-      search-engine candidate lists?
-  [ ] reranking vs retrieval: which does the project claim?
+  alignment caveats (PLAN.md -> Design decisions -> Alignment -> Caveats)
 ```
 
 Job history is not kept here any more: `pbs/job_history.sh` regenerates it from the
