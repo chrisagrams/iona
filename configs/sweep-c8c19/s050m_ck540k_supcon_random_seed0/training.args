@@ -43,3 +43,4 @@
 --save_only_model true
 --split_seed 0
 --gradcache_trim_padding true
+--same_mass_batches false

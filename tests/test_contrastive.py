@@ -1106,3 +1106,33 @@ class TestResumeKeepsBatchOrder:
 
         import msdelta.finetune_contrastive as fc
         assert "SamplerEpochCallback(trainer)" in inspect.getsource(fc.main)
+
+
+class TestSameMassIsTheDefault:
+    """Since 2026-09-27 same-mass batches are the default; unset is resolved (and logged) in main."""
+
+    def _parse(self, argv):
+        from transformers import HfArgumentParser
+
+        from msdelta.finetune_contrastive import ContrastiveDataArguments
+        (d,) = HfArgumentParser(ContrastiveDataArguments).parse_args_into_dataclasses(argv)
+        return d.same_mass_batches
+
+    def test_unset_true_false(self):
+        assert self._parse([]) is None                      # main() resolves None -> True, loudly
+        assert self._parse(["--same_mass_batches", "true"]) is True
+        assert self._parse(["--same_mass_batches", "false"]) is False
+
+    def test_main_resolves_unset_to_true_with_a_log_line(self):
+        import inspect
+
+        import msdelta.finetune_contrastive as fc
+        src = inspect.getsource(fc.main)
+        assert "same_mass_batches is None" in src and "defaulting to TRUE" in src
+
+    def test_c8c19_random_arms_are_explicit(self):
+        from pathlib import Path
+        root = Path(__file__).resolve().parents[1] / "configs" / "sweep-c8c19"
+        for arm in root.glob("*_random_seed*"):
+            assert "--same_mass_batches false" in (arm / "training.args").read_text(), arm.name
+

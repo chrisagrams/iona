@@ -37,7 +37,9 @@ SEEDS = ("0", "1", "2")
 STEPS_PER_EPOCH = 1062          # ms-contrastive-100k train, P85 x K3 (sweep-con100k-best logs)
 LOSSES = {"supcon": {}, "sigmoid": {"--loss": "sigmoid", "--sigmoid_init_scale": "10.0",
                                     "--sigmoid_init_bias": "-10.0"}}
-BATCHES = {"random": {}, "mass": {"--same_mass_batches": "true", "--mass_jitter": "1.0"}}
+# random is explicit: same_mass_batches defaults to true since 2026-09-27
+BATCHES = {"random": {"--same_mass_batches": "false"},
+           "mass": {"--same_mass_batches": "true", "--mass_jitter": "1.0"}}
 COMMON = {"--pretrained_path": PRETRAINED, "--num_train_epochs": "3",
           "--save_steps": str(STEPS_PER_EPOCH // 2), "--save_total_limit": "10",
           "--gradcache_trim_padding": "true",

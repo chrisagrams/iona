@@ -46,3 +46,4 @@
 --loss sigmoid
 --sigmoid_init_scale 10.0
 --sigmoid_init_bias -10.0
+--same_mass_batches false

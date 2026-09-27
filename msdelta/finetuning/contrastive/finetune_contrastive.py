@@ -11,6 +11,8 @@ The resulting checkpoint is then the `--pretrained_path` for the alignment run.
 
 from __future__ import annotations
 
+from typing import Optional
+
 import os
 import sys
 from dataclasses import asdict, dataclass, field
@@ -211,11 +213,16 @@ class ContrastiveDataArguments:
                           "on, groups_per_batch x replicates can far exceed what fits: "
                           "peak memory is one chunk, not the batch. The gradient is "
                           "exact -- tests assert it against a full-batch backward."})
-    same_mass_batches: bool = field(
-        default=False,
+    # Default ON since 2026-09-27 (C19 won everywhere it was measured; PLAN.md). None means
+    # "not set": resolved to True with a loud log line, because every config written before
+    # that date that omits the flag RAN WITH RANDOM BATCHES -- replaying or resuming one needs
+    # an explicit `--same_mass_batches false`.
+    same_mass_batches: Optional[bool] = field(
+        default=None,
         metadata={"help": "C19: build each batch from peptide groups that are neighbours in "
                           "neutral mass (sorted with +-mass_jitter Da jitter each epoch), so "
-                          "in-batch negatives are same-mass competitors."})
+                          "in-batch negatives are same-mass competitors. Default true since "
+                          "2026-09-27; configs older than that which omit it used random batches."})
     mass_jitter: float = field(default=1.0, metadata={"help": "same_mass_batches: jitter (Da)"})
     random_group_fraction: float = field(
         default=0.0,
@@ -639,6 +646,12 @@ def main(argv: list[str] | None = None) -> int:
                       zip(train_peptides, datasets["train"]["charge"])]),
             return_inverse=True)
         group_masses = None
+        if data_args.same_mass_batches is None:
+            data_args.same_mass_batches = True
+            if training_args.process_index == 0:
+                print("[contrastive] --same_mass_batches not set: defaulting to TRUE (the default "
+                      "changed on 2026-09-27; configs written before then that omit it ran with "
+                      "RANDOM batches -- pass --same_mass_batches false to replay one)", flush=True)
         if data_args.same_mass_batches:
             from msdelta.rescoring.reranking import peptide_neutral_mass
             first = {}
