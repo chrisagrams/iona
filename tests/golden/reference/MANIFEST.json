@@ -1,0 +1,291 @@
+{
+ "generated": "2026-09-27T02:54:58+0000",
+ "code_commit": "1b8c0b457f81ee5a06490f1cd638362068ce1b54",
+ "torch": "2.10.0a0+git449b176",
+ "reference_device": "cpu",
+ "reference_dtype": "fp32",
+ "stored_float16": [
+  "pretrained25m/embeddings",
+  "contrastive50m/embeddings",
+  "peptide400m/embeddings"
+ ],
+ "checkpoints": {
+  "pretrained25m": "/flare/UIC-HPC/khuss/msdelta/pretrained/msdelta-25m-production-01-checkpoint-540423",
+  "contrastive50m": "/lus/flare/projects/UIC-HPC/khuss/msdelta/runs/sweep-cont050m_ep01_seed1-8860522/final",
+  "peptide400m": "Gaolaboratory/iona-peptide-embedder-400m"
+ },
+ "peptide400m_snapshot": "7ead88a245f42533aa27dfe5991e25ff409804d8",
+ "sha256": {
+  "pretrained25m": "8e17ec78925524a547a55a1a81b99f9bffbe267108c80c18e0bff494d82d1c0e",
+  "contrastive50m": "f4be3b8a37e8b618cbf80f4e6ada75540ba572a29ecb699a694b6d8ee6c5cc00",
+  "peptide400m": {
+   "model.safetensors": "37bf512031790983b1796c953727d198521e33bf642a7a7abee7c17039595ab5"
+  }
+ },
+ "inputs": {
+  "eval_data": "/lus/flare/projects/UIC-HPC/khuss/msdelta/eval-data/ms-contrastive-100k-validation-mp512",
+  "row_indices": [
+   0,
+   199
+  ],
+  "head_rows": 32,
+  "peptides": [
+   [
+    "NTKIEVLEEELR",
+    3
+   ],
+   [
+    "DALSLFTVPEDC[57.0215]PIGQK",
+    2
+   ],
+   [
+    "RSELSQDAEPAGSQETK",
+    2
+   ],
+   [
+    "KHISQISVAEDDDESLLGHLMIVGK",
+    4
+   ],
+   [
+    "REQAEEER",
+    2
+   ],
+   [
+    "IM[15.9949]NDLSGR",
+    2
+   ],
+   [
+    "FWSWVGQANDIGLLK",
+    2
+   ],
+   [
+    "QEILENKDVVVQHVHFDGLGR",
+    3
+   ],
+   [
+    "ALQAAVASEQPGLFSEWLR",
+    2
+   ],
+   [
+    "RLGINLLGGPLGGK",
+    2
+   ],
+   [
+    "DAGMPIQGQPC[57.0215]FC[57.0215]K",
+    2
+   ],
+   [
+    "LKEVLDASESR",
+    2
+   ],
+   [
+    "GDSEAEALSEIK",
+    2
+   ],
+   [
+    "ANFSNILENEFTVSGLTEDAAYEFR",
+    2
+   ],
+   [
+    "M[15.9949]QQENMKPQEQLTLEPYER",
+    3
+   ],
+   [
+    "WSIDLQK",
+    2
+   ],
+   [
+    "LAAAELQENGC[57.0215]WK",
+    2
+   ],
+   [
+    "GNDISSGTVLSDYVGSGPPK",
+    3
+   ],
+   [
+    "SELTQQLNALFQDK",
+    2
+   ],
+   [
+    "AYHLVC[57.0215]LDPELDRAPEGK",
+    2
+   ],
+   [
+    "GVVPLAGTNGETTTQGLDGLSER",
+    4
+   ],
+   [
+    "IWDANGSRDFLDSLGFSTR",
+    3
+   ],
+   [
+    "TIPGTALVEM[15.9949]GDEYAVER",
+    3
+   ],
+   [
+    "ATEPTETVQTWIELLTGETWNPFK",
+    3
+   ],
+   [
+    "GMVLLC[57.0215]DPPYHFPDDLSYR",
+    2
+   ],
+   [
+    "MAEDELFNR",
+    2
+   ],
+   [
+    "EDATPMDAYLR",
+    2
+   ],
+   [
+    "NTGVILANDANAERLK",
+    2
+   ],
+   [
+    "DGDQC[57.0215]ETSPC[57.0215]QNQGK",
+    2
+   ],
+   [
+    "DIQAVATSLLPLTEANLR",
+    3
+   ],
+   [
+    "DASEETSTSVMQK",
+    2
+   ],
+   [
+    "SPVQC[57.0215]VSPELALTIALNPGGRPK",
+    3
+   ],
+   [
+    "VNPLGGAVALGHPLGC[57.0215]TGAR",
+    3
+   ],
+   [
+    "VIIEKYYTR",
+    3
+   ],
+   [
+    "NKDTLFQDFK",
+    2
+   ],
+   [
+    "ITLAEALLHPFFAGLTPEER",
+    3
+   ],
+   [
+    "KQEDFMTTMDANEEK",
+    2
+   ],
+   [
+    "IYQEEEMPESGAGSEFNR",
+    2
+   ],
+   [
+    "DITDTSIGAYWTSAPGM[15.9949]VR",
+    2
+   ],
+   [
+    "YPPPTELLDLQPLPVSALR",
+    2
+   ],
+   [
+    "KTGC[57.0215]NVLLIQK",
+    3
+   ],
+   [
+    "GFSVTVR",
+    2
+   ],
+   [
+    "FQDAHFEFYQSK",
+    3
+   ],
+   [
+    "KLTVEEAFK",
+    2
+   ],
+   [
+    "LAYNEEQIHKFDK",
+    3
+   ],
+   [
+    "KLNVNAKPFVPNVHAAEFVPSFLR",
+    3
+   ],
+   [
+    "FQAMDISLK",
+    2
+   ],
+   [
+    "EEILANGGSLSHHHGVGK",
+    4
+   ],
+   [
+    "LKDYAFVHFEDR",
+    2
+   ],
+   [
+    "EGTIGDMAILGITESFQVK",
+    3
+   ]
+  ]
+ },
+ "pooling": "mean+max",
+ "batch_size": 4,
+ "tolerances": {
+  "fp32": {
+   "embeddings": 0.0001,
+   "head_logprob": 0.0001,
+   "retrieval": 0.0001
+  },
+  "bf16": {
+   "embeddings": 0.01,
+   "head_logprob": 0.25,
+   "retrieval": 0.05
+  }
+ },
+ "measured_bf16_xpu_max_abs_deviation": {
+  "pretrained25m/embeddings": 0.005448564887046814,
+  "pretrained25m/retrieval": 0.0071942446043165575,
+  "pretrained25m/head_logprob": 0.08712577819824219,
+  "contrastive50m/embeddings": 0.002064123749732971,
+  "contrastive50m/retrieval": 0.0008417765299478797,
+  "peptide400m/embeddings": 0.0010694563388824463
+ },
+ "retrieval_fp32": {
+  "pretrained25m": {
+   "all/Hit@1": 0.1919191919191919,
+   "all/MAP@100": 0.12799141623757102,
+   "all/MAP@R": 0.0949775522405451,
+   "all/Precision@1": 0.1919191919191919,
+   "all/R-Precision": 0.11279462563871133,
+   "all/R@5": 0.14225589867794153,
+   "all/queries": 198.0,
+   "experimental/Hit@1": 0.2517985611510791,
+   "experimental/MAP@100": 0.2357959335656475,
+   "experimental/MAP@R": 0.16906474820143885,
+   "experimental/Precision@1": 0.2517985611510791,
+   "experimental/R-Precision": 0.18345323741007194,
+   "experimental/R@5": 0.26258992805755393,
+   "experimental/queries": 139.0
+  },
+  "contrastive50m": {
+   "all/Hit@1": 0.9191919191919192,
+   "all/MAP@100": 0.8690416740648674,
+   "all/MAP@R": 0.8225308813229956,
+   "all/Precision@1": 0.9191919191919192,
+   "all/R-Precision": 0.8308080037434896,
+   "all/R@5": 0.8745791502673217,
+   "all/queries": 198.0,
+   "experimental/Hit@1": 0.9424460431654677,
+   "experimental/MAP@100": 0.9235573089380058,
+   "experimental/MAP@R": 0.8920863309352518,
+   "experimental/Precision@1": 0.9424460431654677,
+   "experimental/R-Precision": 0.8920863309352518,
+   "experimental/R@5": 0.9460431654676259,
+   "experimental/queries": 139.0
+  }
+ }
+}
