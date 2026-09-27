@@ -91,6 +91,9 @@ peptide among each spectrum's candidates, paired seeds (arms share split and ini
 | C17 (not a priority, user 2026-09-25) | C7 recipe at 100m to add a scaling point (50/100/200/400m); needs a checkpoint choice (220k matches C7 50m/400m, 540k matches C16) | ⬜ | parked |
 | C18 (camera-ready, user 2026-09-25) | GLEAMS-inspired: (a) train on MassIVE-KB / more diverse data; (b) precursor mass + charge as encoder inputs | ⬜ | deferred to camera-ready |
 | C19 | GLEAMS-inspired same-mass negatives: batches of peptide groups with NEARBY neutral masses | ✅ | **Yes; adopted.** Same run as C8: SupCon same-mass vs random, validation 0.868 vs 0.858 (+0.009), OOD 0.724 vs 0.645 (+0.080), ahead at every half-epoch snapshot. Open vs precursor-windowed evaluation: job 8872964. See Design decisions |
+| C20 (user 2026-09-27) | Train WITH the consensus spectrum in each group (4 spectra/group: K up to 4) instead of experimental-only; eval unchanged (experimental MAP@R) | ⬜ | queued idea; single-dataset recipe, 50m@540k, 3 seeds, after sweep-mix |
+| C21 (user 2026-09-27) | Knob for far-mass negatives in same-mass batches: `random_group_fraction` (0 = pure same-mass, 1 ≈ random). Does seeing both near- and far-mass pairs beat either extreme? | ⏳ | sweep-mix 8873159: 0.25 and 0.5 within-batch, 0.25 between-batch; c8c19 gives 0 and 1. Variant to consider: random spectra added as NEGATIVE-ONLY singles (no group), more distinct far peptides per step |
+| C22 (proposed K7) | Exact per-anchor 75/25: batch = 4 mass blocks, SupCon denominator masked so each anchor sees its own block's negatives + a 1/3-size random subset of the others; P85 and P170 | ⬜ | awaiting go |
 | C12 (low priority; likely rebuttal period; seed count TBD) | Repeat the C7 recipe from the FINAL 400m pretraining checkpoint (540,423; now backed up and verified identical to Chris's) instead of 220k, which was used because pretraining had not finished then: stage 1 (replicate corpus, 12 ep, t 0.002, KL 10) + stage 2 (1 epoch ms-contrastive-100k), 3 seeds, select on validation; compare with iona-contrastive-400m (220k base) on the 100k test, C11 and the ABTT zero-shot curve | ⏳ | added 2026-09-25 (user) |
 | S25 (later; user 2026-09-25) | A NEW 25m scale exists (Gaolaboratory/iona-base-25m; Chris's runs msdelta-25m-production-01 / msdelta-base-25m-production-01 under cgrams/msdelta-runs). Recreate the scale results with it: denoise ladder (D1/D3), contrastive (C2/C4/C7), zero-shot + ABTT (C10), alignment (A1), so every scaling curve gains a 25m point | ⬜ | deferred; first check which 25m run is canonical and back its checkpoints up (as for 400m) |
 
@@ -325,6 +328,8 @@ the work is good spectrum and peptide embedders; R0-R2 as written assume our syn
 decoys and will be re-set against that dataset.
 
 ## Parked
+
+- **P1 — Pairformer as an architecture option (user 2026-09-27).** Port the Pairformer (AlphaFold-style single + pair representations, cubic triangle update on the pair representation) from branch `sweep/pairformer-aurora` into the model package on `dev_finetune_02` as a selectable architecture. Future runs use `/lus/flare/projects/UIC-HPC/khuss/`, not `kelhus2`.
 
 Real questions, deliberately not on the path to the two conclusions. Each keeps its
 write-up in TODO.md under the same number.
