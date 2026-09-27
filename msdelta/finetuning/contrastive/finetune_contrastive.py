@@ -255,6 +255,28 @@ class ContrastiveTrainingArguments(TrainingArguments):
                           "namespace with hasattr, which silently fell back to 2000."})
 
 
+class SamplerEpochCallback(TrainerCallback):
+    """Set the batch sampler's epoch from the step count at every epoch start (FT/K38).
+
+    The samplers reshuffle by their own epoch counter (seeded [seed, epoch]). On a resume
+    from checkpoint-N that counter restarts at 0, and transformers' own set_epoch does not
+    reach a custom batch_sampler behind accelerate's wrappers, so the resumed epoch replayed
+    epoch 0's batch order (then skipped N of them) instead of continuing the interrupted
+    epoch. The epoch is global_step // optimizer-steps-per-epoch at every epoch start --
+    fresh or resumed -- so a resumed run draws exactly the batches the uninterrupted run did.
+    """
+
+    def __init__(self, trainer):
+        self.trainer = trainer
+
+    def on_epoch_begin(self, args, state, control, **kwargs):
+        sampler = getattr(self.trainer, "_batch_sampler", None)
+        if sampler is None or not hasattr(sampler, "set_epoch"):
+            return
+        steps_per_epoch = max(len(sampler) // max(args.gradient_accumulation_steps, 1), 1)
+        sampler.set_epoch(state.global_step // steps_per_epoch)
+
+
 class SaveEncoderCallback(TrainerCallback):
     """Write a loadable HF encoder into every checkpoint the Trainer saves.
 
@@ -396,6 +418,7 @@ class ContrastiveTrainer(Trainer):
                                         mass_jitter=self.mass_jitter,
                                         random_fraction=self.random_group_fraction,
                                         random_mix=self.random_mix)
+        self._batch_sampler = sampler          # SamplerEpochCallback sets its epoch
         return DataLoader(self.train_dataset, batch_sampler=sampler,
                           collate_fn=self.data_collator,
                           num_workers=self.args.dataloader_num_workers,
@@ -647,6 +670,7 @@ def main(argv: list[str] | None = None) -> int:
             pairs_per_batch=data_args.pairs_per_batch,
             positive_fraction=data_args.positive_fraction)
         trainer.add_callback(MemoryProbe(every=50))
+        trainer.add_callback(SamplerEpochCallback(trainer))
         trainer.add_callback(SaveEncoderCallback(model, processor))
         # Pass it explicitly. Trainer.train() defaults resume_from_checkpoint to None
         # and never falls back to args.resume_from_checkpoint, so the CLI flag parses

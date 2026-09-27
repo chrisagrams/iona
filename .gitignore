@@ -21,6 +21,7 @@ data/*
 !data/*.md
 
 # Credentials: loaded at runtime by pbs/load_keys.sh, never committed
+.keys
 .keys/
 
 # process core dumps

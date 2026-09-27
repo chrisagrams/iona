@@ -1075,3 +1075,34 @@ class TestMixedMassBatches:
         with pytest.raises(ValueError):
             GroupBatchSampler(groups, 4, 2, group_masses={i: 1.0 for i in range(10)},
                               random_fraction=0.5, random_mix="sideways")
+
+
+class TestResumeKeepsBatchOrder:
+    """K38: after a resume, the sampler continues the interrupted epoch's batch order."""
+
+    def _sampler(self):
+        from msdelta.contrastive import GroupBatchSampler
+        groups = np.repeat(np.arange(40), 3)
+        return GroupBatchSampler(groups, 4, 2, seed=7,
+                                 group_masses={i: 500.0 + 13 * i for i in range(40)})
+
+    def test_callback_sets_epoch_from_global_step(self):
+        from types import SimpleNamespace
+
+        from msdelta.finetune_contrastive import SamplerEpochCallback
+        ref = self._sampler()
+        epochs = [[tuple(b) for b in ref] for _ in range(3)]          # uninterrupted run
+        steps = len(ref)                                               # 10 per epoch
+        for global_step, epoch in ((0, 0), (steps, 1), (steps + 4, 1), (2 * steps + 9, 2)):
+            fresh = self._sampler()                                    # counter back at 0
+            trainer = SimpleNamespace(_batch_sampler=fresh)
+            SamplerEpochCallback(trainer).on_epoch_begin(
+                SimpleNamespace(gradient_accumulation_steps=1),
+                SimpleNamespace(global_step=global_step), None)
+            assert [tuple(b) for b in fresh] == epochs[epoch]
+
+    def test_trainer_registers_the_callback(self):
+        import inspect
+
+        import msdelta.finetune_contrastive as fc
+        assert "SamplerEpochCallback(trainer)" in inspect.getsource(fc.main)
