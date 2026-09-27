@@ -40,6 +40,13 @@ IDs carry a track suffix: -C contrastive (spectrum encoder), -A alignment (pepti
 | 2026-09-27 | K68-C | New single-dataset recipe: lr 4e-4 + P128×K2 | user |
 | 2026-09-27 | K72-S | Experiment cards and this log; no settings chosen without approval | user |
 | 2026-09-27 | K66-C | **Approved as carded:** per-scale search 25m/100m/200m/400m @540k; lr {2e-4, 4e-4, 8e-4} × P128×K2 and lr 4e-4 × P170×K2; 3 seeds; debug smoke (25m + 400m, 20 steps); walltime 14 h for 400m, 10 h others; scored on validation / OOD / mouse / human with filtered metrics (`sweeps/make_hp_scale.py`) | user |
+| 2026-09-27 | P1-P | Go ahead with the Pairformer port (code + unit tests; the debug comparison run needs its own approved card) | user |
+| 2026-09-27 | A | Alignment waits for the optimal C models | user |
+| 2026-09-27 | C18-C | MassIVE-KB work is low priority, later; user is ~95% certain the datasets are distinct from ours | user |
+| 2026-09-27 | K74-C | Validation is for selection; test is for reporting only; never select on test | user |
+| 2026-09-27 | K56-C | Default contrastive testing: ms-contrastive-100k (validation for selection, test for reporting), human, mouse, yeast -- human/mouse/yeast have measured precursors, so the filter's mistakes are scored there | user |
+| 2026-09-27 | K57-S | Remove the leftover folders (portable_eval cache file, empty results/figures) -- done | user |
+| 2026-09-27 | K63-I | Build the thin custom DAG layer (not Balsam/Parsl/Snakemake) | user |
 
 ## Settings chosen WITHOUT explicit approval (before this log existed)
 
