@@ -101,6 +101,13 @@ peptide among each spectrum's candidates, paired seeds (arms share split and ini
 | R5 | Embedding VECTORS: element-wise product spectrum x peptide, PCA 64 on training rows; null = product with a random spectrum | 🟡 | **confounded**: with A2 the null arm gains up to +2.4k PSMs (the product keeps the peptide's own embedding -> sequence-only / decoy-like signal). Needs a stricter control (same-mass-window spectrum, or a peptide-only arm) before any claim |
 
 
+### Architecture (Pairformer)
+
+| id | question | status | evidence / job |
+|---|---|---|---|
+| P1 (user 2026-09-27) | Port the Pairformer (AlphaFold-style single + pair representations, cubic triangle update on the pair representation) from branch `sweep/pairformer-aurora` into the model package as a selectable architecture | ⬜ | planned after the cutover (K8/K12/K17). Requirements: Hugging Face Transformers-compliant like the rest (PretrainedConfig with its own model_type, PreTrainedModel classes, save/load round trip, Auto* registration, same processor and task heads so the fine-tuning entry points work unchanged). Validation: (a) unit tests (config/save/load, shapes, masking); (b) a short debug pretraining comparison vs the transformer at similar size (loss curves, step time). Runs use `/lus/flare/projects/UIC-HPC/khuss/`, never `kelhus2` |
+| P2 | Does the Pairformer beat the transformer encoder at matched size / compute, in pretraining loss and downstream (denoise AUROC, contrastive MAP@R)? | ⬜ | after P1; design the comparison (sizes, steps, checkpoints) once P1's debug comparison shows it trains |
+
 ### Cross-cutting
 
 | id | question | status | evidence / job |
@@ -302,7 +309,7 @@ The paper was submitted 2026-09-26 on branch `dev_finetune` (frozen). Current wo
 **Next**
 3. C23 per-scale HP search (25m/100m/200m/400m), then the winning recipe on every pretraining checkpoint (the single-dataset scaling curve).
 4. C20 train with the consensus spectrum.
-5. Engineering on `dev_finetune_02`: cutover of the main checkout (after the mix job), rename to "peptide encoder" / "spectrum encoder", move `data/synthetic` to /flare (K4), P1 Pairformer port (HF-compliant; unit tests + a short debug pretraining comparison).
+5. Engineering on `dev_finetune_02`: cutover of the main checkout (after the mix job), rename to "peptide encoder" / "spectrum encoder", move `data/synthetic` to /flare (K4), P1 Pairformer port (see Questions → Architecture).
 
 **Later / waiting on a decision**
 - Alignment caveats (Design decisions → Alignment → Caveats), incl. A8's open-retrieval collapse and a student for the single-stage encoder. User asked to be reminded.
@@ -312,8 +319,6 @@ The paper was submitted 2026-09-26 on branch `dev_finetune` (frozen). Current wo
 Done since the last review: C8 (SupCon kept), C19 (same-mass batches adopted), C24 (filter cost), GradCache trimming (~4x faster), per-job code snapshots, the package reorganisation (task subpackages, results raw/processed), opt-in legacy / e2e / golden tests, FT26 device-suite crash (pyarrow before deepspeed), K38 resume batch order.
 
 ## Parked
-
-- **P1 — Pairformer as an architecture option (user 2026-09-27).** Port the Pairformer (AlphaFold-style single + pair representations, cubic triangle update on the pair representation) from branch `sweep/pairformer-aurora` into the model package on `dev_finetune_02` as a selectable architecture, Hugging Face Transformers-compliant like the rest (PretrainedConfig subclass with its own model_type, PreTrainedModel classes, save_pretrained/from_pretrained round trip, AutoConfig/AutoModel registration, same processor and heads). Validation (user K17: both): (a) unit tests (config/save/load round trip, shapes, masking); (b) a short debug pretraining comparison vs the transformer at similar size (a few hundred steps, same data): loss curves and step time. Future runs use `/lus/flare/projects/UIC-HPC/khuss/`, not `kelhus2`.
 
 Real questions, deliberately not on the path to the two conclusions. Each keeps its
 write-up in TODO.md under the same number.
