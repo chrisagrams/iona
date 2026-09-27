@@ -77,14 +77,15 @@ def binned_embeddings(rows, width: float, max_mz: float = 2000.0) -> torch.Tenso
 
 
 def score_model(path, pooling, rows, groups, experimental, collator, device,
-                batch_size) -> dict:
+                batch_size, filter_inputs=None) -> dict:
     from msdelta.finetuning.contrastive.contrastive import (MSDeltaForContrastive, embed_dataset,
                                      retrieval_metrics_topk)
     from msdelta.models.modeling_msdelta import MSDeltaForPreTraining
 
     if path.startswith("binned:"):
         emb = binned_embeddings(rows, float(path.split(":", 1)[1]))
-        return _variants(emb, groups, experimental, device, retrieval_metrics_topk)
+        return _variants(emb, groups, experimental, device, retrieval_metrics_topk,
+                         filter_inputs=filter_inputs)
     if path.startswith("pca:"):
         # pca:<bin width>:<dims>:<prepared TRAIN sample dir> -- PCA fitted on train
         # spectra only, test spectra projected; cosine retrieval in the PCA space.
@@ -96,7 +97,8 @@ def score_model(path, pooling, rows, groups, experimental, collator, device,
         _, _, v = torch.pca_lowrank(fit - mean, q=int(dims), center=False, niter=4)
         x = torch.nn.functional.normalize(binned_embeddings(rows, float(width)), dim=-1)
         emb = (x - mean) @ v[:, :int(dims)]
-        return _variants(emb, groups, experimental, device, retrieval_metrics_topk)
+        return _variants(emb, groups, experimental, device, retrieval_metrics_topk,
+                         filter_inputs=filter_inputs)
     encoder = MSDeltaForPreTraining.from_pretrained(path)
     # A projection head saved by finetune_contrastive (--projection_dim) is scored both
     # ways: `all/...` from the head output (the loss space) and `pooled_all/...` from the
@@ -121,7 +123,8 @@ def score_model(path, pooling, rows, groups, experimental, collator, device,
             prefix = "pooled_" if readout == "pooled" else ""
             out |= {prefix + k: v for k, v in
                     _variants(emb, groups, experimental, device,
-                              retrieval_metrics_topk).items()}
+                              retrieval_metrics_topk,
+                              filter_inputs=filter_inputs).items()}
     finally:
         del model, encoder
         if device.type == "xpu":
@@ -129,13 +132,26 @@ def score_model(path, pooling, rows, groups, experimental, collator, device,
     return out
 
 
-def _variants(emb, groups, experimental, device, metric) -> dict:
-    """`all` (consensus + replicates) and `experimental` (replicates only), same pass."""
+def _variants(emb, groups, experimental, device, metric, filter_inputs=None) -> dict:
+    """`all` (consensus + replicates) and `experimental` (replicates only), same pass.
+
+    With filter_inputs = (precursor m/z, charge) per row, the experimental variant is also
+    scored with and without a precursor filter, on the queries the filter passes and fails
+    (msdelta.eval.filtered_retrieval; standard since 2026-09-27): keys
+    `experimental/{open,20ppm,iso20ppm}/{full,F,Fbar,F_all}/{MAP@R,Hit@1,n}`, net loss/gain
+    and `experimental/rescue`."""
     out = {}
     for variant, mask in (("all", np.ones(len(groups), dtype=bool)),
                           ("experimental", experimental)):
         metrics = metric(emb[torch.from_numpy(mask)], groups[mask], device=device)
         out |= {f"{variant}/{k}": v for k, v in metrics.items()}
+    if filter_inputs is not None:
+        from msdelta.eval.filtered_retrieval import filtered_report, flatten
+        prec, charge = filter_inputs
+        m = torch.from_numpy(experimental)
+        report = filtered_report(emb[m], groups[experimental], prec[experimental],
+                                 charge[experimental], device=device)
+        out |= flatten(report, "experimental")
     return out
 
 
@@ -158,6 +174,12 @@ def score(cli) -> int:
     rows = load_from_disk(cli.data)
     groups = group_ids(rows)
     experimental = np.array([s == "experimental" for s in rows["source"]])
+    filter_inputs = None
+    if cli.filters and "precursor" in rows.column_names:
+        filter_inputs = (np.asarray(rows["precursor"], dtype=np.float64),
+                         np.asarray(rows["charge"], dtype=np.int64))
+    elif cli.filters:
+        print("[score] no `precursor` column: filtered metrics skipped", flush=True)
     collator = ContrastiveCollator(max_peptide_length=64, pad_spectra_to=cli.max_peaks)
     out_dir = Path(cli.out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -168,12 +190,16 @@ def score(cli) -> int:
             continue
         t0 = time.time()
         metrics = score_model(path, pooling, rows, groups, experimental, collator,
-                              device, cli.batch_size)
+                              device, cli.batch_size, filter_inputs=filter_inputs)
         target.write_text(json.dumps({"name": name, "path": path, "pooling": pooling,
                                       "data": cli.data, "metrics": metrics}, indent=1))
         print(f"  {name}: all MAP@R {metrics.get('all/MAP@R', float('nan')):.4f}  "
               f"experimental MAP@R {metrics.get('experimental/MAP@R', float('nan')):.4f}  "
-              f"({time.time() - t0:.0f}s)", flush=True)
+              + (f"20ppm {metrics.get('experimental/20ppm/full/MAP@R', float('nan')):.4f}  "
+                 f"iso20ppm {metrics.get('experimental/iso20ppm/full/MAP@R', float('nan')):.4f}  "
+                 f"F {int(metrics.get('experimental/open/F/n', 0))}  "
+                 if filter_inputs is not None else "")
+              + f"({time.time() - t0:.0f}s)", flush=True)
     return 0
 
 
@@ -200,6 +226,8 @@ def main(argv: list[str] | None = None) -> int:
     s.add_argument("--max-peaks", type=int, default=512)
     # DeltaMZBias is O(batch * peaks^2 * n_freqs); 16 x 512 peaks is 8 GiB.
     s.add_argument("--batch-size", type=int, default=16)
+    s.add_argument("--no-filters", dest="filters", action="store_false",
+                   help="skip the with/without precursor-filter metrics (on by default)")
     cli = ap.parse_args(argv)
     return prepare(cli) if cli.cmd == "prepare" else score(cli)
 

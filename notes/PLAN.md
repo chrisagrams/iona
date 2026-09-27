@@ -137,7 +137,7 @@ SupCon loss, t 0.002, KL 10 to the frozen pretrained intensity head, lr 1e-4 cos
 | head / readout | none; mean+max over the last layer | tested (C9); layer mix only on the rejected metric |
 | pretrained init | required | tested (C3) |
 | model selection | validation, never test | rule |
-| metric | experimental MAP@R, open gallery | tested (C0); filtered and filter-failure variants measured (C24) |
+| metric | experimental MAP@R, open gallery, plus the filtered / filter-failure split | tested (C0); with/without filter standard since 2026-09-27 (C24) |
 | GradCache trimming, no gradient checkpointing | on / off | benchmarked; the result is exact, so this is speed only |
 
 <details><summary><b>Loss: SupCon, not per-pair sigmoid (C8)</b></summary>
@@ -337,4 +337,5 @@ write-up in TODO.md under the same number.
 - Grids are validated on debug before capacity. Never regenerate a grid dir a queued job
   points at (queued jobs read configs at run time).
 - Contrastive is scored on MAP@R; the separation ratio is reported, never selected on.
+- **Every retrieval evaluation is reported with AND without a precursor filter** (user, 2026-09-27): unfiltered, 20 ppm, isotope-tolerant 20 ppm; each on all queries, on the queries the 20 ppm filter passes (F̄) and on those it fails (F, plus F_all = all positives excluded), with net loss and rescue. `msdelta/eval/filtered_retrieval.py`, on by default in `eval_grouped_retrieval score` (`--no-filters` to skip). F uses MEASURED precursors: on ms-contrastive-100k and the OOD set the precursors are theoretical, so F is empty there; the failure split only has content on mouse / human / HEK.
 - A result at the edge of a swept range means the optimum is unlocated.

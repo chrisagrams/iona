@@ -205,3 +205,42 @@ def test_cross_modal_peptide_to_spectrum_hand_computed():
     cos = lambda d: math.cos(math.radians(d))
     assert m["crossmodal/paired_cosine"] == pytest.approx((cos(5) + cos(25) + cos(70)) / 3,
                                                           abs=1e-6)
+
+
+def test_filtered_metrics_pass_fail_split():
+    """Standard filtered evaluation (msdelta.eval.filtered_retrieval, 2026-09-27).
+
+    4 groups x 3 spectra, well separated; spectrum 1 of group 0 has its precursor one isotope
+    high (+1.00336/z, z=2), so the 20 ppm filter excludes it from queries 0 and 2 and excludes
+    BOTH positives of query 1. F = {0, 1, 2}, F_all = {1}.
+      open: every query perfect -> 1.0 everywhere.
+      20ppm: q0, q2 find 1 of 2 positives at rank 1 -> AP@R = 1/2; q1 finds none -> 0.
+             F = (0.5 + 0 + 0.5) / 3 = 1/3; Fbar = 1; full = (1 + 9) / 12 = 10/12.
+             net_loss = 1/12 (q1 right unfiltered, wrong filtered); rescue = 1 (q1 open hit).
+      iso20ppm: the +1 isotope step is allowed -> 1.0 everywhere.
+    """
+    import numpy as np
+    import torch
+
+    from msdelta.eval.eval_grouped_retrieval import _variants
+    from msdelta.finetuning.contrastive.contrastive import retrieval_metrics_topk
+    torch.manual_seed(0)
+    g = np.repeat(np.arange(4), 3)
+    emb = torch.eye(8)[:4][g] * 10 + 0.01 * torch.randn(12, 8)
+    prec = np.repeat(np.array([500., 600., 700., 800.]), 3)
+    prec[1] += 1.00336 / 2
+    out = _variants(emb, g, np.ones(12, dtype=bool), torch.device("cpu"), retrieval_metrics_topk,
+                    filter_inputs=(prec, np.full(12, 2)))
+    approx = lambda k, v: abs(out[k] - v) < 1e-6  # noqa: E731
+    assert approx("experimental/open/full/MAP@R", 1.0)
+    assert approx("experimental/20ppm/F/MAP@R", 1 / 3)
+    assert approx("experimental/20ppm/Fbar/MAP@R", 1.0)
+    assert approx("experimental/20ppm/full/MAP@R", 10 / 12)
+    assert approx("experimental/20ppm/net_loss", 1 / 12)
+    assert approx("experimental/rescue", 1.0)
+    assert approx("experimental/iso20ppm/full/MAP@R", 1.0)
+    assert out["experimental/open/F/n"] == 3 and out["experimental/open/F_all/n"] == 1
+    assert approx("experimental/open/full/MAP@R", out["experimental/MAP@R"])
+    # without precursor inputs, no filtered keys (old behaviour)
+    plain = _variants(emb, g, np.ones(12, dtype=bool), torch.device("cpu"), retrieval_metrics_topk)
+    assert not any("/20ppm/" in k for k in plain)

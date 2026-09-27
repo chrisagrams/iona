@@ -84,13 +84,24 @@ from pathlib import Path
 out, models = Path(sys.argv[1]), sys.argv[2]
 names = [l.split()[0] for l in Path(models).read_text().splitlines()
          if l.strip() and not l.startswith("#")]
-print(f"{'model':38s} {'all MAP@R':>9s} {'exp MAP@R':>9s} {'exp Hit@1':>9s} {'queries':>8s}")
+# Standard since 2026-09-27: exp MAP@R without a filter, with 20 ppm and isotope-tolerant
+# 20 ppm filters, on the queries the 20 ppm filter passes (Fbar) and fails (F).
+def g(m, k):
+    v = m.get(k)
+    return f"{v:7.4f}" if isinstance(v, (int, float)) else f"{'-':>7s}"
+print(f"{'model':38s} {'all':>7s} {'exp':>7s} {'Hit@1':>7s} {'queries':>7s} | "
+      f"{'20ppm':>7s} {'iso':>7s} | F: {'open':>7s} {'20ppm':>7s} {'iso':>7s} | "
+      f"Fbar: {'open':>7s} {'20ppm':>7s} | {'F n':>6s} {'loss':>6s} {'rescue':>6s}")
 for n in names:
     f = out / f"{n}.json"
     if not f.exists():
         print(f"{n:38s} {'(missing)':>9s}"); continue
     m = json.loads(f.read_text())["metrics"]
-    print(f"{n:38s} {m['all/MAP@R']:9.4f} {m['experimental/MAP@R']:9.4f} "
-          f"{m['experimental/Hit@1']:9.4f} {int(m['experimental/queries']):8d}")
+    e = "experimental/"
+    print(f"{n:38s} {g(m, 'all/MAP@R')} {g(m, e + 'MAP@R')} {g(m, e + 'Hit@1')} "
+          f"{int(m[e + 'queries']):7d} | {g(m, e + '20ppm/full/MAP@R')} {g(m, e + 'iso20ppm/full/MAP@R')} | "
+          f"F: {g(m, e + 'open/F/MAP@R')} {g(m, e + '20ppm/F/MAP@R')} {g(m, e + 'iso20ppm/F/MAP@R')} | "
+          f"Fbar: {g(m, e + 'open/Fbar/MAP@R')} {g(m, e + '20ppm/Fbar/MAP@R')} | "
+          f"{int(m.get(e + 'open/F/n', 0)):6d} {g(m, e + '20ppm/net_loss')[1:]} {g(m, e + 'rescue')[1:]}")
 EOF
 exit $failed
