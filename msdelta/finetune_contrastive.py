@@ -224,7 +224,9 @@ class ContrastiveDataArguments:
     random_mix: str = field(
         default="within",
         metadata={"help": "with random_group_fraction: 'within' = every batch mixes same-mass "
-                          "and random groups; 'between' = that fraction of batches is random"})
+                          "and random groups; 'between' = that fraction of batches is random; "
+                          "'regions' = every batch is two same-mass blocks from two mass "
+                          "regions, the second holding that fraction of the groups"})
     gradcache_trim_padding: bool = field(
         default=False,
         metadata={"help": "GradCache: sort each batch's spectra by length and cut every chunk "

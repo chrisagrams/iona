@@ -70,13 +70,16 @@ class GroupBatchSampler(Sampler[list[int]]):
         # groups is set aside and served in random order. "within": every batch is
         # round(P * (1 - f)) consecutive same-mass groups + the rest random groups, so each
         # step sees both near-mass and global negatives. "between": that fraction of
-        # BATCHES is fully random, the rest fully same-mass. 0 = pure C19, unchanged.
+        # BATCHES is fully random, the rest fully same-mass. "regions" (C21, user's design):
+        # every batch is two same-mass blocks from two unrelated mass regions, sized
+        # 1 - f and f, so both parts have near-mass negatives of their own and far-mass
+        # negatives from the other. 0 = pure C19, unchanged.
         self.group_masses = None if group_masses is None else dict(group_masses)
         self.mass_jitter = mass_jitter
         if not 0.0 <= random_fraction < 1.0:
             raise ValueError("random_fraction must be in [0, 1)")
-        if random_mix not in ("within", "between"):
-            raise ValueError("random_mix must be 'within' or 'between'")
+        if random_mix not in ("within", "between", "regions"):
+            raise ValueError("random_mix must be 'within', 'between' or 'regions'")
         if random_fraction and group_masses is None:
             raise ValueError("random_fraction mixes into same-mass batches: pass group_masses")
         self.random_fraction = random_fraction
@@ -145,6 +148,8 @@ class GroupBatchSampler(Sampler[list[int]]):
         the batches, as in the pure orders."""
         P = self.groups_per_batch
         keys = rng.permutation(np.array(list(self.members)))
+        if self.random_mix == "regions":
+            return self._two_region_order(rng, keys)
         if self.random_mix == "within":
             n_rand = int(round(P * self.random_fraction))
             n_mass = P - n_rand
@@ -165,6 +170,29 @@ class GroupBatchSampler(Sampler[list[int]]):
         else:
             batches = mass_blocks + [rand[i * P:(i + 1) * P] for i in range(len(rand) // P)]
         return np.concatenate([batches[j] for j in rng.permutation(len(batches))])
+
+    def _by_mass(self, rng, keys) -> np.ndarray:
+        mass = np.array([self.group_masses[int(k)] for k in keys], dtype=np.float64)
+        return keys[np.argsort(mass + rng.uniform(-self.mass_jitter, self.mass_jitter,
+                                                   len(keys)), kind="stable")]
+
+    def _two_region_order(self, rng, keys) -> np.ndarray:
+        """Each batch = n_major consecutive-in-mass groups + n_minor consecutive-in-mass
+        groups from a randomly paired (so, almost always distant) block. The two pools are
+        a random split of the groups in proportion, so both blocks span about the same Da
+        as a pure same-mass block."""
+        P = self.groups_per_batch
+        n_minor = int(round(P * self.random_fraction))
+        n_major = P - n_minor
+        n_batches = len(keys) // P
+        minor = self._by_mass(rng, keys[:n_batches * n_minor])
+        major = self._by_mass(rng, keys[n_batches * n_minor:])
+        major_blocks = [major[i * n_major:(i + 1) * n_major] for i in range(n_batches)]
+        minor_blocks = [minor[i * n_minor:(i + 1) * n_minor] for i in range(n_batches)]
+        pairing = rng.permutation(n_batches)
+        batches = [np.concatenate([major_blocks[i], minor_blocks[pairing[i]]])
+                   for i in range(n_batches)]
+        return np.concatenate([batches[j] for j in rng.permutation(n_batches)])
 
 
 class PairBatchSampler(Sampler[list[int]]):

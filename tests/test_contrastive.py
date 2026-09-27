@@ -1033,6 +1033,18 @@ class TestMixedMassBatches:
         tight = [np.ptp(self.MASSES[b]) < 300 for b in batches]
         assert sum(tight) == 50 - round(50 * 0.25)
 
+    @pytest.mark.parametrize("frac,minor", [(0.25, 2), (0.5, 4)])
+    def test_regions_two_tight_blocks_far_apart(self, frac, minor):
+        batches, _ = self._batches(frac, "regions")
+        assert len(batches) == 50 and len(np.unique(np.concatenate(batches))) == 400
+        gaps = []
+        for b in batches:
+            major, minr = self.MASSES[b[:8 - minor]], self.MASSES[b[8 - minor:]]
+            # each block is consecutive in its own pool (1/4 or 1/2 or 3/4 density): tight
+            assert np.ptp(major) < 200 and np.ptp(minr) < 200
+            gaps.append(abs(np.median(major) - np.median(minr)))
+        assert np.median(gaps) > 300                          # the two regions are unrelated
+
     def test_rejects_bad_settings(self):
         from msdelta.contrastive import GroupBatchSampler
         groups = np.repeat(np.arange(10), 3)

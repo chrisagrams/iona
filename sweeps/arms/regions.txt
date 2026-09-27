@@ -1,0 +1,6 @@
+s050m_ck540k_supcon_regions50_seed0
+s050m_ck540k_supcon_regions50_seed1
+s050m_ck540k_supcon_regions50_seed2
+s050m_ck540k_supcon_regions75_seed0
+s050m_ck540k_supcon_regions75_seed1
+s050m_ck540k_supcon_regions75_seed2
