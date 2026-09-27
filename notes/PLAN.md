@@ -345,6 +345,7 @@ write-up in TODO.md under the same number.
 ## Rules
 
 - Every job is tagged with a question id in its generator docstring.
+- Jobs run from a per-job code snapshot (`pbs/lib/code_snapshot.sh`, `$S/code-snapshots/<job>/SNAPSHOT.txt` records the commit), so switching branches or editing the checkout never affects a queued or running job. Jobs submitted before 16a9be9 still run from the checkout.
 - Grids are validated on debug before capacity. Never regenerate a grid dir a queued job
   points at (queued jobs read configs at run time).
 - Contrastive is scored on MAP@R; the separation ratio is reported, never selected on.
