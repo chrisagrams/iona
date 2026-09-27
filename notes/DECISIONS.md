@@ -53,6 +53,11 @@ IDs carry a track suffix: -C contrastive (spectrum encoder), -A alignment (pepti
 | 2026-09-27 | K76-C | Yeast in the default contrastive test set = the FULL nine-species yeast set (nine_yeast, 86k spectra) | user |
 | 2026-09-27 | K78-C | Library search matters (it is what reranking improves): measure retrieval against a consensus-only library | user |
 | 2026-09-27 | K77-A | (1) cross-modal eval gets the with/without-filter + pass/fail split: yes; (2) keep selecting alignment on validation LOSS for now (user asks how much it differs in practice) | user |
+| 2026-09-27 | K79-C | Implement the library-search evaluation (consensus-only library); ms-contrastive-100k val/test; C20 + K66-C models | user |
+| 2026-09-27 | K78-C | Building consensus libraries for mouse/human/yeast: later | user |
+| 2026-09-27 | K80-A | Measure how correlated loss-based and Hit@1-based checkpoint selection are, and their effect on test; user prefers loss selection; decide after results (PLAN A10) | user |
+| 2026-09-27 | K76-C / K81-C | Always test on the SAME yeast set: the full nine_yeast (86,184), frozen with CANONICAL.txt + sha256; scored on capacity (3 h walltime) | user |
+| 2026-09-27 | K82-S | Remove the data/real-sample symlinks (done; targets untouched) | user |
 
 ## Settings chosen WITHOUT explicit approval (before this log existed)
 

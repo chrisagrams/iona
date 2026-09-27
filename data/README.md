@@ -39,7 +39,7 @@ Built by the benchmark builders in `baselines_wip/` (kept there with the baselin
 |---|---|---|---|
 | `c11_cap20` (HEK) | 27,637 | `Gaolaboratory/psm-rerank-hek-hct116` confident PSMs | `c11_build.py` |
 | `c14_hct116_20k` | 20,002 | same, HCT116 runs, trimmed to 512 peaks | `c11_build.py` (`C11_TRIM=1`) |
-| `nine_yeast`, `nine_yeast20k` | 86,184 / 20,019 | `InstaDeepAI/ms_ninespecies_benchmark` (yeast test) | `nine_build.py` |
+| `nine_yeast` (**canonical yeast test set**, K76-C: always this one; `CANONICAL.txt` with sha256 alongside), `nine_yeast20k` (older figures only) | 86,184 / 20,019 | `InstaDeepAI/ms_ninespecies_benchmark` (yeast test) | `nine_build.py` |
 | `nine_oodval20k` | 20,004 | same, 8 non-yeast species (train split): OOD validation | `nine_build.py` |
 | `noble_mouse20k`, `noble_human20k` | 20,003 / 20,000 | Noble nine-species-balanced, Mus musculus / H. sapiens | `noble_build.py` (`NOBLE_SPECIES=...`) |
 
