@@ -307,6 +307,9 @@ export MSDELTA_XPUS_PER_HOST=$XPUS_PER_HOST
 # One node per arm, so the world is always a single node regardless of allocation size.
 export MSDELTA_WORLD_SIZE=$XPUS_PER_HOST
 export PYTHONPATH=$REPO_DIR${PYTHONPATH:+:$PYTHONPATH}
+# Run from a frozen copy of the code (pbs/lib/code_snapshot.sh): branch switches and
+# edits in the checkout cannot affect this job once it has started.
+source "$REPO_DIR/pbs/lib/code_snapshot.sh"
 # Probes: dtype, index-range and finiteness checks, and -- the useful part --
 # a device synchronise at each stage, so an asynchronous GPU fault is reported
 # where it was caused rather than dozens of steps later. Set MSDELTA_PROBES=1 on
@@ -440,7 +443,7 @@ run_node() {
         WANDB_RUN_ID=$RUN_PREFIX$arm-$JOB_ID \
         mpiexec --envall --pmi=pmix -n "$TILES_PER_ARM" --ppn "$TILES_PER_ARM" \
             --cpu-bind depth --depth "${CPU_DEPTH:-8}" --hostfile="$hostfile" \
-            "$REPO_DIR/pbs/rank_wrapper.sh" \
+            "$MSDELTA_CODE_DIR/pbs/rank_wrapper.sh" \
             "$VENV_DIR/bin/python" -m "$SWEEP_MODULE" \
                 --args_file "$CONFIG_SNAPSHOT/$arm/training.args" \
                 --output_dir "$dir" "${SHORT[@]}" "${resume[@]}" \

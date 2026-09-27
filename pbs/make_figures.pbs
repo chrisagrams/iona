@@ -20,6 +20,9 @@ source /usr/share/lmod/lmod/init/bash
 module load "${FRAMEWORKS_MODULE:-frameworks/2025.3.1}"
 set -u
 export PYTHONPATH=$REPO_DIR${PYTHONPATH:+:$PYTHONPATH}
+# Run from a frozen copy of the code (pbs/lib/code_snapshot.sh): branch switches and
+# edits in the checkout cannot affect this job once it has started.
+source "$REPO_DIR/pbs/lib/code_snapshot.sh"
 rc=0
 for s in ${SCRIPTS:-sweeps/plot_ladder.py sweeps/plot_c1.py sweeps/plot_contrastive_100k.py}; do
     echo "=== $s"

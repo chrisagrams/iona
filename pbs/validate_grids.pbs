@@ -65,6 +65,9 @@ export CCL_PROCESS_LAUNCHER=pmix CCL_ATL_TRANSPORT=mpi CCL_KVS_MODE=mpi
 export FI_MR_CACHE_MONITOR=${FI_MR_CACHE_MONITOR:-userfaultfd}
 unset CCL_ZE_IPC; unset CCL_ZE_IPC_EXCHANGE
 export PYTHONPATH=$REPO_DIR${PYTHONPATH:+:$PYTHONPATH}
+# Run from a frozen copy of the code (pbs/lib/code_snapshot.sh): branch switches and
+# edits in the checkout cannot affect this job once it has started.
+source "$REPO_DIR/pbs/lib/code_snapshot.sh"
 export HF_HOME=${HF_HOME:-$SCRATCH_ROOT/huggingface}
 export HF_HUB_OFFLINE=${HF_HUB_OFFLINE:-1} HF_DATASETS_OFFLINE=${HF_DATASETS_OFFLINE:-1}
 ALCF_PROXY=${ALCF_PROXY:-http://proxy.alcf.anl.gov:3128}
@@ -110,7 +113,7 @@ for grid in $GRIDS; do
     export ZE_AFFINITY_MASK=$(seq -s, 0 $(( tiles - 1 )))
     mpiexec --envall --pmi=pmix -n "$tiles" --ppn "$tiles" \
         --cpu-bind depth --depth "${CPU_DEPTH:-8}" --hostfile="$HOSTFILE" \
-        "$REPO_DIR/pbs/rank_wrapper.sh" \
+        "$MSDELTA_CODE_DIR/pbs/rank_wrapper.sh" \
         "$VENV_DIR/bin/python" -m "$MODULE" \
             --args_file "$args" --output_dir "$dir" \
             --max_samples "$MAX_SAMPLES" --eval_steps "$EVAL_STEPS" \

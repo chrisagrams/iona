@@ -22,6 +22,9 @@ set -u
 export HF_HOME=${HF_HOME:-/lus/flare/projects/UIC-HPC/$USER/msdelta/huggingface}
 export HF_HUB_OFFLINE=1 HF_DATASETS_OFFLINE=1
 export PYTHONPATH=$REPO_DIR${PYTHONPATH:+:$PYTHONPATH}
+# Run from a frozen copy of the code (pbs/lib/code_snapshot.sh): branch switches and
+# edits in the checkout cannot affect this job once it has started.
+source "$REPO_DIR/pbs/lib/code_snapshot.sh"
 rc=0
 for s in sweeps/audit_splits.py; do
     echo "=== $s"
