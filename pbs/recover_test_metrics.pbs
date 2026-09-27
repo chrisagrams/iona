@@ -52,6 +52,9 @@ export ZE_AFFINITY_MASK=${ZE_AFFINITY_MASK:-$(seq -s, 0 $((XPUS_PER_HOST - 1)))}
 export OMP_NUM_THREADS=${OMP_NUM_THREADS:-4}
 export MKL_NUM_THREADS=${MKL_NUM_THREADS:-4}
 export PYTHONPATH=$REPO_DIR${PYTHONPATH:+:$PYTHONPATH}
+# Run from a frozen copy of the code (pbs/lib/code_snapshot.sh): branch switches and
+# edits in the checkout cannot affect this job once it has started.
+source "$REPO_DIR/pbs/lib/code_snapshot.sh"
 export HF_HOME=${HF_HOME:-$SCRATCH_ROOT/huggingface}
 export HF_HUB_OFFLINE=${HF_HUB_OFFLINE:-1}
 export HF_DATASETS_OFFLINE=${HF_DATASETS_OFFLINE:-1}
@@ -107,7 +110,7 @@ run_arm() {
 
     mpiexec --envall --pmi=pmix -n "$XPUS_PER_HOST" --ppn "$XPUS_PER_HOST" \
         --cpu-bind depth --depth "${CPU_DEPTH:-8}" --hostfile="$HOSTFILE" \
-        "$REPO_DIR/pbs/rank_wrapper.sh" \
+        "$MSDELTA_CODE_DIR/pbs/rank_wrapper.sh" \
         "$VENV_DIR/bin/python" -m msdelta.eval_checkpoint \
             --args_file "$args" \
             --checkpoint "$dir/checkpoint-$final" \

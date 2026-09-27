@@ -197,6 +197,9 @@ export HF_HOME
 export HF_HUB_OFFLINE=${HF_HUB_OFFLINE:-1}
 export HF_DATASETS_OFFLINE=${HF_DATASETS_OFFLINE:-1}
 export PYTHONPATH=$REPO_DIR${PYTHONPATH:+:$PYTHONPATH}
+# Run from a frozen copy of the code (pbs/lib/code_snapshot.sh): branch switches and
+# edits in the checkout cannot affect this job once it has started.
+source "$REPO_DIR/pbs/lib/code_snapshot.sh"
 export MASTER_ADDR=${MASTER_ADDR:-$(head -n 1 "$NODE_LIST")}
 export MASTER_PORT=${MASTER_PORT:-29500}
 export MSDELTA_XPUS_PER_HOST=$XPUS_PER_HOST

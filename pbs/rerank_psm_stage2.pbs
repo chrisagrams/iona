@@ -28,6 +28,9 @@ set -u
 export ONEAPI_DEVICE_SELECTOR=level_zero:gpu ZE_FLAT_DEVICE_HIERARCHY=FLAT ZE_AFFINITY_MASK=0
 export OMP_NUM_THREADS=${OMP_NUM_THREADS:-16}
 export PYTHONPATH=$REPO_DIR${PYTHONPATH:+:$PYTHONPATH}
+# Run from a frozen copy of the code (pbs/lib/code_snapshot.sh): branch switches and
+# edits in the checkout cannot affect this job once it has started.
+source "$REPO_DIR/pbs/lib/code_snapshot.sh"
 export HF_HOME=${HF_HOME:-$SCRATCH_ROOT/huggingface}
 export HF_HUB_OFFLINE=1 HF_DATASETS_OFFLINE=1
 PY="$VENV_DIR/bin/python"

@@ -104,6 +104,9 @@ export MASTER_PORT=${MASTER_PORT:-29500}
 export MSDELTA_XPUS_PER_HOST=$XPUS_PER_HOST
 export MSDELTA_WORLD_SIZE=$TOTAL_XPUS
 export PYTHONPATH=$REPO_DIR${PYTHONPATH:+:$PYTHONPATH}
+# Run from a frozen copy of the code (pbs/lib/code_snapshot.sh): branch switches and
+# edits in the checkout cannot affect this job once it has started.
+source "$REPO_DIR/pbs/lib/code_snapshot.sh"
 # Probes: dtype, index-range and finiteness checks, and -- the useful part --
 # a device synchronise at each stage, so an asynchronous GPU fault is reported
 # where it was caused rather than dozens of steps later. Set MSDELTA_PROBES=1 on

@@ -34,6 +34,9 @@ export ZE_FLAT_DEVICE_HIERARCHY=FLAT
 export ZE_AFFINITY_MASK=0
 export OMP_NUM_THREADS=${OMP_NUM_THREADS:-8}
 export PYTHONPATH=$REPO_DIR${PYTHONPATH:+:$PYTHONPATH}
+# Run from a frozen copy of the code (pbs/lib/code_snapshot.sh): branch switches and
+# edits in the checkout cannot affect this job once it has started.
+source "$REPO_DIR/pbs/lib/code_snapshot.sh"
 export HF_HOME=${HF_HOME:-$SCRATCH_ROOT/huggingface}
 export HF_HUB_OFFLINE=1 HF_DATASETS_OFFLINE=1
 PY="$REPO_DIR/.venv/bin/python"
@@ -42,7 +45,7 @@ LOGS=$(dirname "$OUT"); mkdir -p "$LOGS" "$EMB_DIR"
 echo "=== $(date -Is) embed on $SHARDS tiles"
 pids=()
 for (( i = 0; i < SHARDS; i++ )); do
-    ZE_AFFINITY_MASK=$i "$PY" pbs/diag/filter_failure_eval.py embed --models "$MODELS" \
+    ZE_AFFINITY_MASK=$i "$PY" "$MSDELTA_CODE_DIR"/pbs/diag/filter_failure_eval.py embed --models "$MODELS" \
         --data "${DATA[@]}" --emb-dir "$EMB_DIR" --shard "$i" --num-shards "$SHARDS" \
         > "$LOGS/.embed$i.log" 2>&1 &
     pids+=($!)
@@ -54,7 +57,7 @@ done
 grep -h "s)$\|cached" "$LOGS"/.embed*.log
 
 echo "=== $(date -Is) analyse"
-"$PY" pbs/diag/filter_failure_eval.py analyse --models "$MODELS" --data "${DATA[@]}" \
+"$PY" "$MSDELTA_CODE_DIR"/pbs/diag/filter_failure_eval.py analyse --models "$MODELS" --data "${DATA[@]}" \
     --emb-dir "$EMB_DIR" --out "$OUT" || failed=1
 echo "=== $(date -Is) done (failed=$failed)"
 exit $failed

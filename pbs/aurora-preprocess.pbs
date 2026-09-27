@@ -49,6 +49,9 @@ export HF_HOME=${HF_HOME:-${DATASET_CACHE_DIR%/datasets}}
 export HF_HUB_OFFLINE=${HF_HUB_OFFLINE:-0}
 export HF_DATASETS_OFFLINE=${HF_DATASETS_OFFLINE:-0}
 export PYTHONPATH=$REPO_DIR${PYTHONPATH:+:$PYTHONPATH}
+# Run from a frozen copy of the code (pbs/lib/code_snapshot.sh): branch switches and
+# edits in the checkout cannot affect this job once it has started.
+source "$REPO_DIR/pbs/lib/code_snapshot.sh"
 export OMP_NUM_THREADS=${OMP_NUM_THREADS:-1}
 export MKL_NUM_THREADS=${MKL_NUM_THREADS:-1}
 export OPENBLAS_NUM_THREADS=${OPENBLAS_NUM_THREADS:-1}
