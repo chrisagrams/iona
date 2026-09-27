@@ -217,6 +217,14 @@ class ContrastiveDataArguments:
                           "neutral mass (sorted with +-mass_jitter Da jitter each epoch), so "
                           "in-batch negatives are same-mass competitors."})
     mass_jitter: float = field(default=1.0, metadata={"help": "same_mass_batches: jitter (Da)"})
+    random_group_fraction: float = field(
+        default=0.0,
+        metadata={"help": "same_mass_batches ablation: fraction of groups served in random "
+                          "order (0 = pure same-mass). See --random_mix."})
+    random_mix: str = field(
+        default="within",
+        metadata={"help": "with random_group_fraction: 'within' = every batch mixes same-mass "
+                          "and random groups; 'between' = that fraction of batches is random"})
     gradcache_trim_padding: bool = field(
         default=False,
         metadata={"help": "GradCache: sort each batch's spectra by length and cut every chunk "
@@ -294,7 +302,8 @@ class ContrastiveTrainer(Trainer):
 
     def __init__(self, *args, groups=None, groups_per_batch=12, replicates=4,
                  gradcache_chunk=0, gradcache_trim_padding=False, group_masses=None,
-                 mass_jitter=1.0, encoder_lr_scale=1.0, layer_mix_lr=None,
+                 mass_jitter=1.0, random_group_fraction=0.0, random_mix="within",
+                 encoder_lr_scale=1.0, layer_mix_lr=None,
                  pair_loss=False, pairs_per_batch=8, positive_fraction=0.5,
                  **kwargs):
         super().__init__(*args, **kwargs)
@@ -305,6 +314,8 @@ class ContrastiveTrainer(Trainer):
         self.gradcache_trim_padding = gradcache_trim_padding
         self.group_masses = group_masses
         self.mass_jitter = mass_jitter
+        self.random_group_fraction = random_group_fraction
+        self.random_mix = random_mix
         self.encoder_lr_scale = encoder_lr_scale
         self.layer_mix_lr = layer_mix_lr
         self.pair_loss = pair_loss
@@ -380,7 +391,9 @@ class ContrastiveTrainer(Trainer):
             sampler = GroupBatchSampler(self.groups, self.groups_per_batch,
                                         self.replicates, seed=self.args.seed,
                                         group_masses=self.group_masses,
-                                        mass_jitter=self.mass_jitter)
+                                        mass_jitter=self.mass_jitter,
+                                        random_fraction=self.random_group_fraction,
+                                        random_mix=self.random_mix)
         return DataLoader(self.train_dataset, batch_sampler=sampler,
                           collate_fn=self.data_collator,
                           num_workers=self.args.dataloader_num_workers,
@@ -623,6 +636,8 @@ def main(argv: list[str] | None = None) -> int:
             gradcache_chunk=data_args.gradcache_chunk,
             gradcache_trim_padding=data_args.gradcache_trim_padding,
             group_masses=group_masses, mass_jitter=data_args.mass_jitter,
+            random_group_fraction=data_args.random_group_fraction,
+            random_mix=data_args.random_mix,
             encoder_lr_scale=model_args.encoder_lr_scale,
             layer_mix_lr=(model_args.layer_mix_lr
                           if model_args.pooling == "layer_mix" else None),

@@ -987,3 +987,60 @@ class TestSameMassBatches:
         a = [tuple(b) for b in GroupBatchSampler(groups, 4, 2, seed=3)]
         b = [tuple(b) for b in GroupBatchSampler(groups, 4, 2, seed=3, group_masses=None)]
         assert a == b
+
+
+class TestMixedMassBatches:
+    """C19 ablation: a fraction of groups served in random order, mixed within or between batches."""
+
+    MASSES = np.random.default_rng(0).uniform(500, 3000, 400)
+
+    def _sampler(self, frac, mix, p=8, seed=0):
+        from msdelta.contrastive import GroupBatchSampler
+        groups = np.repeat(np.arange(len(self.MASSES)), 3)
+        return GroupBatchSampler(groups, p, 2, seed=seed, group_masses=dict(enumerate(self.MASSES)),
+                                 mass_jitter=0.0, random_fraction=frac, random_mix=mix), groups
+
+    def _batches(self, frac, mix, p=8):
+        sampler, groups = self._sampler(frac, mix, p)
+        return [groups[b][::2] for b in sampler], sampler       # k=2: one id per group
+
+    def test_zero_fraction_is_pure_same_mass(self):
+        from msdelta.contrastive import GroupBatchSampler
+        groups = np.repeat(np.arange(len(self.MASSES)), 3)
+        pure = GroupBatchSampler(groups, 8, 2, seed=0, group_masses=dict(enumerate(self.MASSES)),
+                                 mass_jitter=0.0)
+        assert [tuple(b) for b in pure] == [tuple(b) for b in self._sampler(0.0, "within")[0]]
+
+    @pytest.mark.parametrize("mix", ["within", "between"])
+    def test_full_batches_each_group_at_most_once(self, mix):
+        batches, sampler = self._batches(0.25, mix)
+        assert len(batches) == len(sampler) == 50
+        seen = np.concatenate(batches)
+        assert all(len(np.unique(b)) == 8 for b in batches)
+        assert len(np.unique(seen)) == len(seen) == 400
+
+    def test_within_every_batch_is_6_neighbours_plus_2_random(self):
+        batches, _ = self._batches(0.25, "within")
+        # the same-mass block comes first: 6 consecutive of the ~300 non-random groups over
+        # 2,500 Da span ~40 Da; 6 random groups would span ~1,800
+        assert np.median([np.ptp(self.MASSES[b[:6]]) for b in batches]) < 100
+        assert max(np.ptp(self.MASSES[b[:6]]) for b in batches) < 300
+        spans = [np.ptp(self.MASSES[b]) for b in batches]
+        assert np.median(spans) > 1000                         # the random groups widen every batch
+
+    def test_between_quarter_of_batches_random(self):
+        batches, _ = self._batches(0.25, "between")
+        tight = [np.ptp(self.MASSES[b]) < 300 for b in batches]
+        assert sum(tight) == 50 - round(50 * 0.25)
+
+    def test_rejects_bad_settings(self):
+        from msdelta.contrastive import GroupBatchSampler
+        groups = np.repeat(np.arange(10), 3)
+        with pytest.raises(ValueError):
+            GroupBatchSampler(groups, 4, 2, random_fraction=0.25)          # no masses
+        with pytest.raises(ValueError):
+            GroupBatchSampler(groups, 4, 2, group_masses={i: 1.0 for i in range(10)},
+                              random_fraction=1.0)
+        with pytest.raises(ValueError):
+            GroupBatchSampler(groups, 4, 2, group_masses={i: 1.0 for i in range(10)},
+                              random_fraction=0.5, random_mix="sideways")

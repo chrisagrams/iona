@@ -170,6 +170,11 @@ declare -A GRID_CHECK=(
     [configs/sweep-pairaccum]="sweeps/make_pairaccum_grid.py --check"
     [configs/sweep-gradcache-v2]="sweeps/make_gradcache_v2_grid.py --check"
     [configs/sweep-contrastive-hp-big]="sweeps/make_contrastive_hp_big.py --check"
+    # Single-dataset contrastive recipe: C8 x C19, its per-scale HP search, and the
+    # mixed same-mass / random batch ablation.
+    [configs/sweep-c8c19]="sweeps/make_c8c19.py --check"
+    [configs/sweep-hp-single]="sweeps/make_hp_single.py --check"
+    [configs/sweep-mix]="sweeps/make_mix.py --check"
 )
 if [[ -z ${SKIP_GRID_CHECK:-} ]]; then
     check=${GRID_CHECK[${SWEEP_ROOT%/}]:-}

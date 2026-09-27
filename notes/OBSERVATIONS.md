@@ -1756,3 +1756,37 @@ Recorded precursor mass vs the peptide's computed mass (the window test's own pe
 24.9% outside 20 ppm = +1 isotope 18.8% / +2 4.3% / -1 1.7%; mouse 25,490 spectra, 11.9% outside = all +1.
 EVERY out-of-window case is within 20 ppm of an exact isotope offset (k x 1.00336 Da): no residue from our mass
 calculation or modification mapping. The earlier "mostly" for mouse was unverified; now measured.
+
+---
+
+## Precursor filter width: C19's gain is biggest unfiltered and is NOT a within-window effect (job 8872964, 2026-09-26 23:53 UTC)
+
+Same embeddings, only the candidate filter varies (`pbs/diag/mass_window_eval.py`; theoretical
+masses; experimental spectra; `results/finetune/contrastive/mass-window/summary.json`).
+50M@540k, ms-contrastive-100k only, 3 epochs, mean of 3 seeds, MAP@R:
+
+    validation      open   100Da  25Da   5Da    1Da    0.1Da  100ppm 20ppm  10ppm
+    frozen 50m      .103   .125   .159   .220   .325   .451   .532   .768   .862
+    supcon mass     .868   .890   .915   .945   .969   .980   .981   .991   .994
+    supcon random   .858   .871   .897   .932   .962   .976   .976   .988   .993
+    mass - random  +.009  +.019  +.018  +.013  +.007  +.003  +.005  +.003  +.001
+    OOD (8 species)
+    supcon mass     .724   .774   .816   .869   .926   .958   .966   .986   .992
+    supcon random   .645   .691   .741   .807   .884   .931   .940   .975   .986
+    mass - random  +.080  +.083  +.076  +.063  +.042  +.027  +.026  +.011  +.006
+    sigmoid: same pattern, larger gaps (OOD +.123 open, +.011 at 20 ppm)
+
+1. A filter helps everything a lot; at 20 ppm same charge every SupCon model is >= 0.975, and the
+   frozen encoder goes from 0.10 to 0.77 (validation) -- that is the filter, not the encoder.
+2. C19's gain shrinks monotonically as the window narrows (OOD +0.080 open -> +0.011 at 20 ppm,
+   still ~20x the seed spread). With a search engine's filter the benefit is small.
+3. Only 1-2% of open-retrieval top-1 errors are within 1 Da of the query (chance ~0.1%), so
+   errors are overwhelmingly FAR-mass confusions, and same-mass training reduced them
+   (OOD 3,505 -> 2,658 errors). Harder negatives improved the embedding GLOBALLY rather than
+   teaching within-window discrimination.
+4. "Crowding" (other peptides within 1 Da) does not measure difficulty: open MAP@R RISES with
+   crowding (validation .73 -> .87), likely because isolated masses are unusual peptides
+   (very short/long/heavily modified). Not used further.
+
+Would overturn: a mixed-batch or jitter ablation where near-mass errors, not far ones, move;
+or the same pattern failing at another scale.

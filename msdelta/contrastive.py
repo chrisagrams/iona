@@ -59,14 +59,28 @@ class GroupBatchSampler(Sampler[list[int]]):
 
     def __init__(self, groups, groups_per_batch: int = 12, replicates: int = 4,
                  seed: int = 0, drop_last: bool = True, group_masses=None,
-                 mass_jitter: float = 1.0):
+                 mass_jitter: float = 1.0, random_fraction: float = 0.0,
+                 random_mix: str = "within"):
         # C19 (same-mass batches): with group_masses (neutral mass per group id), each epoch
         # sorts the groups by mass + uniform(+-mass_jitter Da), cuts them into consecutive
         # blocks of groups_per_batch and shuffles the blocks, so a batch's negatives are
         # near-same-mass peptides -- the competitors a precursor window leaves (GLEAMS).
         # Without it, groups are drawn in random order as before.
+        # Mixed same-mass / random (ablation of C19): a random_fraction of each epoch's
+        # groups is set aside and served in random order. "within": every batch is
+        # round(P * (1 - f)) consecutive same-mass groups + the rest random groups, so each
+        # step sees both near-mass and global negatives. "between": that fraction of
+        # BATCHES is fully random, the rest fully same-mass. 0 = pure C19, unchanged.
         self.group_masses = None if group_masses is None else dict(group_masses)
         self.mass_jitter = mass_jitter
+        if not 0.0 <= random_fraction < 1.0:
+            raise ValueError("random_fraction must be in [0, 1)")
+        if random_mix not in ("within", "between"):
+            raise ValueError("random_mix must be 'within' or 'between'")
+        if random_fraction and group_masses is None:
+            raise ValueError("random_fraction mixes into same-mass batches: pass group_masses")
+        self.random_fraction = random_fraction
+        self.random_mix = random_mix
         if replicates < 2:
             raise ValueError("replicates must be >= 2 or there are no positive pairs")
         if groups_per_batch < 2:
@@ -102,6 +116,8 @@ class GroupBatchSampler(Sampler[list[int]]):
         rng = np.random.default_rng([self.seed, self.epoch])
         if self.group_masses is None:
             order = rng.permutation(list(self.members))
+        elif self.random_fraction:
+            order = self._mixed_order(rng)
         else:
             keys = np.array(list(self.members))
             mass = np.array([self.group_masses[int(k)] for k in keys], dtype=np.float64)
@@ -123,6 +139,32 @@ class GroupBatchSampler(Sampler[list[int]]):
             yield batch
         # Advance regardless of whether anyone calls set_epoch. See the class docstring.
         self.epoch += 1
+
+    def _mixed_order(self, rng) -> np.ndarray:
+        """Group order for random_fraction > 0; consecutive runs of groups_per_batch are
+        the batches, as in the pure orders."""
+        P = self.groups_per_batch
+        keys = rng.permutation(np.array(list(self.members)))
+        if self.random_mix == "within":
+            n_rand = int(round(P * self.random_fraction))
+            n_mass = P - n_rand
+            n_batches = len(keys) // P
+            rand, rest = keys[:n_batches * n_rand], keys[n_batches * n_rand:]
+        else:
+            n_batches = len(keys) // P
+            n_rand_batches = int(round(n_batches * self.random_fraction))
+            rand, rest = keys[:n_rand_batches * P], keys[n_rand_batches * P:]
+            n_mass = P
+        mass = np.array([self.group_masses[int(k)] for k in rest], dtype=np.float64)
+        by_mass = rest[np.argsort(mass + rng.uniform(-self.mass_jitter, self.mass_jitter,
+                                                      len(rest)), kind="stable")]
+        mass_blocks = [by_mass[i * n_mass:(i + 1) * n_mass] for i in range(len(by_mass) // n_mass)]
+        if self.random_mix == "within":
+            rand_blocks = [rand[i * n_rand:(i + 1) * n_rand] for i in range(n_batches)]
+            batches = [np.concatenate([m, r]) for m, r in zip(mass_blocks, rand_blocks)]
+        else:
+            batches = mass_blocks + [rand[i * P:(i + 1) * P] for i in range(len(rand) // P)]
+        return np.concatenate([batches[j] for j in rng.permutation(len(batches))])
 
 
 class PairBatchSampler(Sampler[list[int]]):

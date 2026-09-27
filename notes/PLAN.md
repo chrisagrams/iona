@@ -144,9 +144,9 @@ Sigmoid trails SupCon by about 0.08–0.10 at every snapshot and drifts about 45
 
 Evidence: the table above. SupCon same-mass beats random at every snapshot: +0.009 on validation and **+0.080 on OOD** at 3 epochs, 3 seeds each.
 
-Open questions:
-- Does the gain survive a precursor filter at evaluation, or does it only teach what the filter does anyway? Job 8872964 (`pbs/diag/mass_window_eval.py`) compares open, ±1 Da and 20 ppm same-charge retrieval on the same embeddings.
-- Does a mix keep the benefit and restore the global structure? 75% same-mass / 25% random batches is planned after that analysis.
+With vs without a precursor filter (job 8872964, OBSERVATIONS "Precursor filter width"): same embeddings, only the filter width varied. The same-mass gain is largest unfiltered and shrinks as the window narrows (OOD +0.080 open, +0.042 at 1 Da, +0.011 at 20 ppm same charge; validation +0.009 → +0.003). Only 1–2% of open-retrieval top-1 errors are within 1 Da, so C19 reduced far-mass confusions: it improved the embedding globally. With a search engine's filter, the benefit is small but consistent across seeds.
+
+Mixed batches (sweeps/make_mix.py, configs/sweep-mix): 25% of groups random within every batch, 50% within, or 25% of batches fully random. 3 seeds each. The c8c19 supcon_mass/random arms are the 0% and 100% ends.
 </details>
 
 <details><summary><b>Jitter ±1.0 Da: set, not tuned</b></summary>
