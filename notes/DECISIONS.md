@@ -47,6 +47,12 @@ IDs carry a track suffix: -C contrastive (spectrum encoder), -A alignment (pepti
 | 2026-09-27 | K56-C | Default contrastive testing: ms-contrastive-100k (validation for selection, test for reporting), human, mouse, yeast -- human/mouse/yeast have measured precursors, so the filter's mistakes are scored there | user |
 | 2026-09-27 | K57-S | Remove the leftover folders (portable_eval cache file, empty results/figures) -- done | user |
 | 2026-09-27 | K63-I | Build the thin custom DAG layer (not Balsam/Parsl/Snakemake) | user |
+| 2026-09-27 | K75-C | Mark the cases where something was selected on test (PLAN.md); do not rescore old models | user |
+| 2026-09-27 | C16-C | Archive C16 (superseded) | user |
+| 2026-09-27 | K4-S | Move data/synthetic to /flare (done: $S/shelf/data-synthetic, checksums verified, staged removal) | user |
+| 2026-09-27 | K76-C | Yeast in the default contrastive test set = the FULL nine-species yeast set (nine_yeast, 86k spectra) | user |
+| 2026-09-27 | K78-C | Library search matters (it is what reranking improves): measure retrieval against a consensus-only library | user |
+| 2026-09-27 | K77-A | (1) cross-modal eval gets the with/without-filter + pass/fail split: yes; (2) keep selecting alignment on validation LOSS for now (user asks how much it differs in practice) | user |
 
 ## Settings chosen WITHOUT explicit approval (before this log existed)
 

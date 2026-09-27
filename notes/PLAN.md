@@ -55,7 +55,7 @@ Status: ✅ answered · 🟡 partly · ⏳ running/queued · ⬜ not started
 | C13 | Unseen HIGH-RES HCD benchmark: nine-species (DeepNovo; InstaDeepAI/ms_ninespecies_benchmark, test split = yeast, 111k spectra, all <= 452 peaks: nothing trimmed or dropped). Groups modified peptide + charge, >= 2, capped at 20. C: GLEAMS vs ours (C7, replicate-only) vs binned; A: yHydra vs ours (open, +-1.1 Da, 20 ppm) | 🟡 | **ours LOSES**: binned 0.790, GLEAMS 0.676, C7 400m 0.47-0.56 (seed spread 0.09), replicate-only 0.44-0.50. C claim is in-distribution only. A (yHydra) running **Diagnostic (20k subset)**: frozen 400m@220k + ABTT 0.709 > every fine-tuned model (C7 <= 0.656; peaks at step 600) < GLEAMS 0.770 < binned 0.916 -- fine-tuning specialises. Next: OOD validation from the 8 other species to select a transferring teacher |
 | C14 | HCT116 unseen test (all 18 HCT116 runs, confident PSMs, spectra trimmed to top-512, groups capped at 20; 20k-spectrum whole-group sample) | ✅ | **ours does not transfer**: fine-tuned C7 400M 0.23-0.32 MAP@R, GLEAMS 0.658, binned 1 Da 0.742; frozen + ABTT near chance (≤ 0.047). Low-res MS2 caveat as C11 (the resolution audit found HCT116 MS2 not Orbitrap-accurate either). No further C compute on it (user, 2026-09-25) |
 | C15 | Noble-lab nine-species-balanced (Zenodo 10.5281/zenodo.12819175), unseen high-res species | ✅ | built as noble_mouse20k / noble_human20k (+ nine_oodval20k = 8 non-yeast species for OOD selection). In the paper's C_transfer figure; filter-failure analysis (C24) runs on mouse/human |
-| C16 (user 2026-09-25) | C7 two-stage recipe from the FINAL 200m checkpoint (540,423), 1 seed | 🟡 | stage 2 ran (job 8869387) but its run dir has no final/ and it was never scored -- needs a look before anyone relies on a 200m@540k two-stage point |
+| C16 (user 2026-09-25) | C7 two-stage recipe from the FINAL 200m checkpoint (540,423), 1 seed | archived | **Archived (user, 2026-09-27): superseded by the single-dataset recipe.** Stage 1 finished (run s200m540k_t0002_pk256_ep12_seed0-8868879); stage 2 only ran as a 20-step debug smoke (8869387), killed by walltime during its end-of-run eval; the real stage 2 was never submitted |
 | C17 (not a priority, user 2026-09-25) | C7 recipe at 100m to add a scaling point (50/100/200/400m); needs a checkpoint choice (220k matches C7 50m/400m, 540k matches C16) | ⬜ | parked |
 | C18 (camera-ready, user 2026-09-25) | GLEAMS-inspired: (a) train on MassIVE-KB / more diverse data; (b) precursor mass + charge as encoder inputs | ⬜ | deferred to camera-ready |
 | C19 | GLEAMS-inspired same-mass negatives: batches of peptide groups with NEARBY neutral masses | ✅ | **Yes; adopted.** Same run as C8: SupCon same-mass vs random, validation 0.868 vs 0.858 (+0.009), OOD 0.724 vs 0.645 (+0.080), ahead at every half-epoch snapshot. Open vs precursor-windowed evaluation: job 8872964. See Design decisions. **Default since 2026-09-27 (user, K49):** `--same_mass_batches` defaults to true; unset is logged loudly; configs from before that date that omit it ran with random batches (replay with `--same_mass_batches false`). Mix / two-region results may still change the default recipe |
@@ -120,6 +120,17 @@ peptide among each spectrum's candidates, paired seeds (arms share split and ini
 | id | question | status | evidence / job |
 |---|---|---|---|
 | S25 (later; user 2026-09-25) | A NEW 25m scale exists (Gaolaboratory/iona-base-25m; Chris's runs msdelta-25m-production-01 / msdelta-base-25m-production-01 under cgrams/msdelta-runs). Recreate the scale results with it: denoise ladder (D1/D3), contrastive (C2/C4/C7), zero-shot + ABTT (C10), alignment (A1), so every scaling curve gains a 25m point | ⬜ | deferred; first check which 25m run is canonical and back its checkpoints up (as for 400m) |
+
+### Known cases of selection on TEST (K75-C, user 2026-09-27: mark them, do not rescore old models)
+
+Rule: validation selects, test only reports. These predate or slipped past the rule; each result that depends on them carries this caveat.
+
+| where | picked on test | checked on validation? |
+|---|---|---|
+| A1 teacher (C7 50m step 600, 2026-09-24) | the seed | yes: validation picks the same seed (seed 1). Validation's best teacher overall would have been a different checkpoint (final seed 1), A1 kept step 600 |
+| C10 zero-shot figure (C_zeroshot) | best layer and all-but-the-top D per encoder | only for 3 of 24 encoders (validation pass finished for those): same setting all 3 times; the other 21 unchecked. Stated in the figure's README |
+| C_transfer mouse frozen bar | the better of two 400m frozen encoders, chosen on mouse itself | no |
+
 
 ## Design decisions
 

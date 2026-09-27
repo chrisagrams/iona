@@ -50,4 +50,4 @@ Built by the benchmark builders in `baselines_wip/` (kept there with the baselin
 | `/flare/UIC-HPC/khuss/msdelta/pretrained/msdelta-<size>-production-01-checkpoint-<step>` | pretrained encoders (25M-400M, checkpoints 10k-540k) |
 | `$S/runs/sweep-<arm>-<job>/final` | fine-tuned models (every sweep arm); released ones are on the Hub as `Gaolaboratory/iona-*` |
 | `$S/shelf/` | code shelved from this repository (`portable_eval/`, the first Hub peptide-embedder module, i.e. the peptide encoder's standalone loader) |
-| `$S/data/synthetic/` | the synthetic parquet shards that used to sit in `data/synthetic/` |
+| `$S/shelf/data-synthetic/` | 4 untracked parquet shards (3,000 spectra each) that sat in `data/synthetic/`; never used by our code, likely a remnant from master (shelved 2026-09-27, K4-S, SHA256SUMS alongside) |
