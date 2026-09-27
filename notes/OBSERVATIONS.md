@@ -1870,3 +1870,21 @@ K53 (lr follow-up, same-mass, 3 seeds):   lr1e-4 ref .868 / .724;  lr8e-4 .869 /
     lr4e-4+KL1 .879 / .751;  **lr4e-4 + P128xK2 .886±.002 / .784±.009**  (val / OOD)
 3. The lr optimum is located (~4e-4: 8e-4 no better than 1e-4, 1.6e-3 degrades). P128xK2 (more peptides per batch,
    2 spectra each) on top of lr 4e-4 adds +0.007 val / +0.033 OOD -- the largest OOD gain of any single-dataset change.
+
+---
+
+## C20 consensus in training: headline unchanged, consensus-gallery retrieval fixed (job 8873850; scored 8874703/04/13/15, 2026-09-27 17:56 UTC)
+
+50m@540k, same-mass, lr 1e-4, 3 seeds (± half range). "val all" = consensus spectra included in queries + gallery.
+
+    training                      val exp     val all     OOD         mouse open/20ppm/iso   mouse F open  human
+    experimental only (ref)       .868±.000   .753±.005   .724±.009   .847/.823/.951         .800          .891
+    +consensus, 85x3 of 4         .865±.001   .893±.001   .736±.003   .843/.823/.952         .796          .888
+    +consensus, 64x4              .861±.001   .890±.000   .719±.006   .841/.823/.951         .795          .889
+    +consensus, 85x3, KL 0        .872±.001   .899±.001   .737±.010   .840/.823/.952         .793          .891
+
+1. Experimental-only retrieval (the headline) barely moves (-.003 to +.004); OOD +.012 (K3); unseen mouse -.004 to -.007.
+2. Retrieval WITH consensus spectra jumps .753 -> .89-.90: the K54 KL sensitivity came from consensus spectra never
+   being seen in training; once they are, KL matters little (.893 at KL 10 vs .899 at KL 0).
+3. So consensus training only pays if the use case searches against consensus spectra (a spectral library).
+   Keep experimental-only as the default; revisit for library-search evaluations.

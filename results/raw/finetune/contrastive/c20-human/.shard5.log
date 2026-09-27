@@ -1,0 +1,3 @@
+[score] shard 5/12: 1 of 12 models on xpu
+Loading weights:   0%|          | 0/170 [00:00<?, ?it/s]Loading weights:  29%|██▉       | 49/170 [00:00<00:00, 480.90it/s]Loading weights:  58%|█████▊    | 98/170 [00:00<00:00, 244.21it/s]Loading weights:  76%|███████▌  | 129/170 [00:00<00:00, 227.57it/s]Loading weights:  91%|█████████ | 155/170 [00:00<00:00, 235.77it/s]Loading weights: 100%|██████████| 170/170 [00:00<00:00, 265.78it/s]
+  cons_k3_seed2: all MAP@R 0.8871  experimental MAP@R 0.8871  20ppm 0.8328  iso20ppm 0.9525  F 6964  (419s)
