@@ -51,6 +51,9 @@ fi
 VENV_DIR=${VENV_DIR:-$REPO_DIR/.venv}
 PROJECT=${PROJECT:-UIC-HPC}
 SCRATCH_ROOT=${SCRATCH_ROOT:-/lus/flare/projects/$PROJECT/$USER/msdelta}
+# Job-DAG reporting (pbs/dag/README.md): a notification file when the job ends, and the
+# _SUCCESS.json manifest when every arm finished. No-op under DRY_RUN or outside PBS.
+source "$REPO_DIR/pbs/lib/job_finish.sh"
 XPUS_PER_HOST=${XPUS_PER_HOST:-12}
 # TILES_PER_ARM=1 gives each arm a whole tile to itself and runs twelve arms per node
 # instead of one. It is slower per arm (no data parallelism) but removes DDP entirely --
@@ -537,6 +540,9 @@ failed_file=$SCRATCH_ROOT/runs/.failed-$JOB_ID
 failed_count=0
 [[ -f $failed_file ]] && failed_count=$(wc -l < "$failed_file")
 ok=$completed
+JF_ARMS_OK=$ok JF_ARMS_TOTAL=${#ARM_LIST[@]}
+JF_SUMMARY="$ok/${#ARM_LIST[@]} arms ok ($failed_count failed, $node_failures node subshells died)"
+for arm in "${ARM_LIST[@]}"; do jf_output "$SCRATCH_ROOT/runs/sweep-$arm-$out_job"; done
 echo; echo "=== done: $ok/${#ARM_LIST[@]} arms ok "\
      "($failed_count failed, $(( ${#ARM_LIST[@]} - completed - failed_count )) unfinished, "\
      "$node_failures node subshells died) ==="

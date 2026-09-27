@@ -29,6 +29,9 @@ DATA=${DATA:-$SCRATCH_ROOT/eval-data/ms-contrastive-100k-$SPLIT-mp512}
 PROCESSOR=${PROCESSOR:-/flare/UIC-HPC/khuss/msdelta/pretrained/msdelta-50m-production-01-checkpoint-220000}
 OUT_DIR=${OUT_DIR:-results/raw/finetune/contrastive/grouped100k-$SPLIT}
 SHARDS=${SHARDS:-12}
+# Job-DAG reporting (pbs/dag/README.md): a notification file when the job ends, and the
+# _SUCCESS.json manifest when every listed model was scored. No-op outside PBS.
+source "$REPO_DIR/pbs/lib/job_finish.sh"
 
 set +u
 source /usr/share/lmod/lmod/init/bash
@@ -104,4 +107,13 @@ for n in names:
           f"Fbar: {g(m, e + 'open/Fbar/MAP@R')} {g(m, e + '20ppm/Fbar/MAP@R')} | "
           f"{int(m.get(e + 'open/F/n', 0)):6d} {g(m, e + '20ppm/net_loss')[1:]} {g(m, e + 'rescue')[1:]}")
 EOF
+_every_model_scored() {
+    local name rest
+    while read -r name rest; do
+        [[ -z $name || $name == \#* ]] && continue
+        [[ -f $OUT_DIR/$name.json ]] || return 1
+    done < "$MODELS"
+}
+jf_output "$OUT_DIR"
+jf_check "every model in $MODELS scored" _every_model_scored
 exit $failed
