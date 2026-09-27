@@ -211,6 +211,8 @@ Random init trained contrastively ends at chance at every scale (MAP@100 ≈ 0.0
 
 <details><summary><b>GradCache: trimmed chunks, no gradient checkpointing</b></summary>
 
+GradCache is Gao et al. 2021 (arXiv:2101.06983), not ours; how it works is in notes/METHODS.md. Our additions are the trimming and turning checkpointing off.
+
 Exact: the tests check the gradients equal the untrimmed ones. Step time, untrimmed → trimmed, no checkpointing, chunk 4 (`pbs/diag/gradcache_bench.pbs`):
 
 | model | untrimmed | trimmed |
@@ -329,7 +331,7 @@ decoys and will be re-set against that dataset.
 
 ## Parked
 
-- **P1 — Pairformer as an architecture option (user 2026-09-27).** Port the Pairformer (AlphaFold-style single + pair representations, cubic triangle update on the pair representation) from branch `sweep/pairformer-aurora` into the model package on `dev_finetune_02` as a selectable architecture, Hugging Face Transformers-compliant like the rest (PretrainedConfig subclass with its own model_type, PreTrainedModel classes, save_pretrained/from_pretrained round trip, AutoConfig/AutoModel registration, same processor and heads). Future runs use `/lus/flare/projects/UIC-HPC/khuss/`, not `kelhus2`.
+- **P1 — Pairformer as an architecture option (user 2026-09-27).** Port the Pairformer (AlphaFold-style single + pair representations, cubic triangle update on the pair representation) from branch `sweep/pairformer-aurora` into the model package on `dev_finetune_02` as a selectable architecture, Hugging Face Transformers-compliant like the rest (PretrainedConfig subclass with its own model_type, PreTrainedModel classes, save_pretrained/from_pretrained round trip, AutoConfig/AutoModel registration, same processor and heads). Validation (user K17: both): (a) unit tests (config/save/load round trip, shapes, masking); (b) a short debug pretraining comparison vs the transformer at similar size (a few hundred steps, same data): loss curves and step time. Future runs use `/lus/flare/projects/UIC-HPC/khuss/`, not `kelhus2`.
 
 Real questions, deliberately not on the path to the two conclusions. Each keeps its
 write-up in TODO.md under the same number.

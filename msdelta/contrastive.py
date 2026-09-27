@@ -936,7 +936,8 @@ def gradcache_step(model, batch, chunk_size: int, accelerator=None,
     steps cannot help. More NEGATIVES can, and DeltaMZBias at O(batch * peaks^2) caps the
     batch at four spectra of 512 peaks on a tile.
 
-    GradCache (Gao et al., 2021) breaks that link. The contrastive loss needs every
+    GradCache (Gao, Zhang, Han & Callan, RepL4NLP 2021, arXiv:2101.06983; notes/METHODS.md)
+    breaks that link. The contrastive loss needs every
     embedding at once, but it does not need every ACTIVATION at once:
 
       1. embed every chunk under no_grad, keeping only the embeddings
