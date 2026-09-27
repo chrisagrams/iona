@@ -225,6 +225,12 @@ class TestContrastiveModel:
         with pytest.raises(ValueError, match="reference"):
             model(**spectra, group=torch.tensor([0, 0]))
 
+    def test_rejects_an_unknown_loss(self):
+        """Only supcon is in the recipe (sigmoid was rejected, C8); a typo must not train."""
+        from msdelta.contrastive import MSDeltaForContrastive
+        with pytest.raises(ValueError):
+            MSDeltaForContrastive(torch.nn.Linear(2, 2), None, kl_weight=0.0, loss="triplet")
+
 
 class TestTrainerIntegration:
     """MSDeltaForContrastive is a plain nn.Module, so Trainer's hooks must be forwarded.
@@ -509,101 +515,6 @@ class TestGradCacheEdges:
         self._assert_matches(self._batch(size=8), chunk_size=8)
 
 
-class TestLayerMixPooler:
-    """A trained mixture over depth, instead of picking one layer by hand.
-
-    Motivated by job 8841973: the separation ratio peaks mid-stack at every scale and
-    sags at the output, so every embedding measured in this repo was read from the wrong
-    layer. These tests pin the properties that make the mixture mean what it says.
-    """
-
-    def _model(self, layers=4, hidden=32):
-        from msdelta.configuration_msdelta import MSDeltaConfig
-        from msdelta.modeling_msdelta import MSDeltaForPreTraining
-        return MSDeltaForPreTraining(MSDeltaConfig(
-            hidden_size=hidden, num_hidden_layers=layers,
-            num_attention_heads=4, intermediate_size=hidden * 2))
-
-    def _batch(self, batch=2, peaks=10, pad_from=7):
-        mz = torch.rand(batch, peaks) * 1000 + 100
-        log_intensity = torch.rand(batch, peaks)
-        mask = torch.ones(batch, peaks, dtype=torch.bool)
-        mask[0, pad_from:] = False
-        return mz, log_intensity, mask
-
-    def test_captures_one_state_per_depth_plus_the_embedding(self):
-        from msdelta.contrastive import encoder_layer_states
-        model = self._model(layers=4)
-        states, _ = encoder_layer_states(model.msdelta, *self._batch())
-        assert len(states) == 5
-
-    def test_embedding_is_d_model_not_double(self):
-        """A sequence mean only. Doubling it would silently change every consumer."""
-        from msdelta.contrastive import MSDeltaForContrastive, embedding_size
-        model = self._model(hidden=32)
-        wrapped = MSDeltaForContrastive(model, pooling="layer_mix", kl_weight=0.0)
-        pooled, _ = wrapped.embed(*self._batch())
-        assert pooled.shape[-1] == 32 == embedding_size(model, "layer_mix")
-
-    def test_mixture_starts_uniform_and_stays_convex(self):
-        from msdelta.contrastive import LayerMixPooler
-        weights = LayerMixPooler(5, 8).weights
-        assert float(weights.sum()) == pytest.approx(1.0)
-        assert float(weights.std()) < 1e-6
-
-    def test_padding_cannot_reach_the_embedding(self, ):
-        """(regression) The masked mean is the only thing keeping padded peaks out."""
-        from msdelta.contrastive import MSDeltaForContrastive
-        wrapped = MSDeltaForContrastive(self._model(), pooling="layer_mix",
-                                        kl_weight=0.0).eval()
-        mz, log_intensity, mask = self._batch()
-        with torch.no_grad():
-            before, _ = wrapped.embed(mz, log_intensity, mask)
-            noisy = log_intensity.clone(); noisy[0, 7:] = 999.0
-            after, _ = wrapped.embed(mz, noisy, mask)
-            shifted = mz.clone(); shifted[0, 7:] = 5000.0
-            moved, _ = wrapped.embed(shifted, log_intensity, mask)
-        assert torch.allclose(before, after, atol=1e-6)
-        assert torch.allclose(before, moved, atol=1e-6)
-
-    def test_gradient_reaches_the_mix_and_the_whole_stack(self):
-        """The mixture must train the encoder through every depth it draws on."""
-        from msdelta.contrastive import MSDeltaForContrastive
-        model = self._model()
-        wrapped = MSDeltaForContrastive(model, pooling="layer_mix", kl_weight=0.0)
-        wrapped.embed(*self._batch())[0].pow(2).sum().backward()
-        assert wrapped.layer_mix.mix.grad is not None
-        assert bool((wrapped.layer_mix.mix.grad != 0).any())
-        first_block = [p.grad for p in model.msdelta.blocks[0].parameters()
-                       if p.grad is not None]
-        assert first_block and any(bool((g != 0).any()) for g in first_block)
-
-    def test_normalisation_is_what_stops_deep_layers_dominating(self):
-        """Without it the 'learned' mixture is decided by magnitude before step one.
-
-        The 200m probe measured in-group distances of 0.0044 at block 2 against 0.0596
-        at block 15, so an unnormalised convex sum is the deepest layer with extra steps.
-        """
-        from msdelta.contrastive import LayerMixPooler
-        states = [torch.ones(2, 4, 8) * scale for scale in (0.01, 0.1, 10.0)]
-        mask = torch.ones(2, 4, dtype=torch.bool)
-        without = LayerMixPooler(3, 8, normalise=False)(states, mask)
-        # Uniform weights over 0.01/0.1/10.0 -> 3.37, i.e. the largest layer and nothing
-        # else. Normalised, every depth contributes on equal footing.
-        assert float(without.mean()) == pytest.approx(3.37, abs=0.01)
-        with_norm = LayerMixPooler(3, 8, normalise=True)(states, mask)
-        assert abs(float(with_norm.mean())) < 1e-5
-
-    def test_refuses_gradient_checkpointing_rather_than_mishandling_it(self):
-        """Under checkpointing each block runs twice and the first output is detached."""
-        from msdelta.contrastive import encoder_layer_states
-        model = self._model()
-        model.msdelta.gradient_checkpointing = True
-        model.msdelta.train()
-        with pytest.raises(RuntimeError, match="gradient checkpointing"):
-            encoder_layer_states(model.msdelta, *self._batch())
-
-
 class TestSaveEncoderCallback:
     """Mid-run checkpoints must contain something loadable.
 
@@ -663,101 +574,6 @@ class TestSaveEncoderCallback:
     def test_tolerates_a_model_with_no_save_pretrained(self, tmp_path):
         from msdelta.finetune_contrastive import SaveEncoderCallback
         self._fire(SaveEncoderCallback(torch.nn.Linear(2, 2)), tmp_path)  # must not raise
-
-
-class TestPairSamplerAndLoss:
-    """The pair formulation: independent per-pair terms instead of in-batch softmax.
-
-    Pairs decompose, so gradient accumulation gives breadth that PK sampling could only
-    get from a batch that fits in memory all at once.
-    """
-
-    def _groups(self, n_groups=40, per_group=5):
-        return np.repeat(np.arange(n_groups), per_group)
-
-    def test_batches_are_pairs_with_the_requested_positive_fraction(self):
-        from msdelta.contrastive import PairBatchSampler
-        groups = self._groups()
-        s = PairBatchSampler(groups, pairs_per_batch=8, positive_fraction=0.5, seed=0)
-        batch = next(iter(s))
-        assert len(batch) == 16, "a batch is 2 rows per pair"
-        same = [groups[batch[2 * i]] == groups[batch[2 * i + 1]] for i in range(8)]
-        assert sum(same) == 4, f"expected 4 positive pairs, got {sum(same)}"
-
-    def test_positive_fraction_is_actually_controllable(self):
-        """The thing PK sampling could not do: set the in/out balance directly."""
-        from msdelta.contrastive import PairBatchSampler
-        groups = self._groups()
-        for fraction, expected in ((0.25, 2), (0.5, 4), (0.75, 6)):
-            s = PairBatchSampler(groups, pairs_per_batch=8,
-                                 positive_fraction=fraction, seed=0)
-            batch = next(iter(s))
-            same = sum(groups[batch[2 * i]] == groups[batch[2 * i + 1]]
-                       for i in range(8))
-            assert same == expected, f"{fraction} gave {same}, expected {expected}"
-
-    def test_positive_pairs_are_two_DISTINCT_rows(self):
-        """Pairing a spectrum with itself makes the positive term identically zero."""
-        from msdelta.contrastive import PairBatchSampler
-        groups = self._groups()
-        s = PairBatchSampler(groups, pairs_per_batch=8, positive_fraction=0.9, seed=0)
-        for batch in list(s)[:20]:
-            for i in range(0, len(batch), 2):
-                if groups[batch[i]] == groups[batch[i + 1]]:
-                    assert batch[i] != batch[i + 1]
-
-    def test_it_reshuffles_without_anyone_calling_set_epoch(self):
-        """(regression) FT14: GroupBatchSampler replayed identical batches all run."""
-        from msdelta.contrastive import PairBatchSampler
-        s = PairBatchSampler(self._groups(), pairs_per_batch=4, seed=0)
-        assert list(s) != list(s), "consecutive epochs must differ"
-
-    def test_degenerate_balances_are_refused(self):
-        from msdelta.contrastive import PairBatchSampler
-        for bad in (0.0, 1.0):
-            with pytest.raises(ValueError, match="positive_fraction"):
-                PairBatchSampler(self._groups(), positive_fraction=bad)
-
-    def test_loss_pulls_positives_together_and_pushes_negatives_apart(self):
-        from msdelta.contrastive import pair_contrastive_loss
-        groups = torch.tensor([0, 0, 1, 2])          # pair0 same, pair1 different
-        far = torch.tensor([[1.0, 0.0], [-1.0, 0.0],   # same peptide, far apart: bad
-                            [1.0, 0.0], [0.99, 0.14]])  # different, close: bad
-        near = torch.tensor([[1.0, 0.0], [1.0, 0.0],   # same, together: good
-                             [1.0, 0.0], [-1.0, 0.0]])  # different, apart: good
-        assert pair_contrastive_loss(far, groups)["loss"] > \
-               pair_contrastive_loss(near, groups)["loss"]
-
-    def test_margin_stops_pushing_once_far_enough(self):
-        """Past the margin a negative contributes nothing -- the defining property."""
-        from msdelta.contrastive import pair_contrastive_loss
-        groups = torch.tensor([0, 1])
-        at = torch.tensor([[1.0, 0.0], [0.0, 1.0]])            # distance sqrt(2) > 1.0
-        got = pair_contrastive_loss(at, groups, margin=1.0)
-        assert float(got["loss"]) == pytest.approx(0.0)
-        assert float(pair_contrastive_loss(at, groups, margin=1.9)["loss"]) > 0
-
-    def test_reports_the_two_terms_separately(self):
-        """A run where positives collapse and negatives idle looks fine in the total."""
-        from msdelta.contrastive import pair_contrastive_loss
-        got = pair_contrastive_loss(torch.randn(8, 4),
-                                    torch.tensor([0, 0, 1, 2, 3, 3, 4, 5]))
-        for key in ("pair_positive", "pair_negative", "pair_positive_fraction",
-                    "pair_distance_same", "pair_distance_diff"):
-            assert key in got
-        assert float(got["pair_positive_fraction"]) == pytest.approx(0.5)
-
-    def test_odd_row_count_is_refused_not_truncated(self):
-        from msdelta.contrastive import pair_contrastive_loss
-        with pytest.raises(ValueError, match="even number"):
-            pair_contrastive_loss(torch.randn(5, 4), torch.zeros(5, dtype=torch.long))
-
-    def test_gradient_flows_to_both_members_of_a_pair(self):
-        from msdelta.contrastive import pair_contrastive_loss
-        z = torch.randn(4, 8, requires_grad=True)
-        pair_contrastive_loss(z, torch.tensor([0, 0, 1, 2]))["loss"].backward()
-        assert z.grad is not None and bool((z.grad != 0).any())
-
 
 
 def _module_source(module: str) -> str:
@@ -882,73 +698,15 @@ class TestRetrievalSummary:
         assert out == {}, "all-singleton split has nothing to retrieve"
 
 
-class TestSigmoidLoss:
-    """C8: SigLIP-style pairwise sigmoid loss as an alternative to SupCon."""
-
-    def test_matches_a_hand_computed_value(self):
-        from msdelta.contrastive import sigmoid_contrastive_loss
-        emb = torch.tensor([[1.0, 0.0], [1.0, 0.0], [0.0, 1.0]])
-        groups = torch.tensor([0, 0, 1])
-        log_scale, bias = torch.tensor(0.0), torch.tensor(0.0)     # logit = cosine
-        # pairs (ordered, i != j): (0,1),(1,0) same, cos 1 -> -log sig(1); four cross pairs, cos 0
-        # -> -log sig(-0) each
-        expected = (2 * -torch.nn.functional.logsigmoid(torch.tensor(1.0))
-                    + 4 * -torch.nn.functional.logsigmoid(torch.tensor(0.0))) / 3
-        got = sigmoid_contrastive_loss(emb, groups, log_scale, bias)
-        assert float(got) == pytest.approx(float(expected), abs=1e-6)
-
-    def test_scale_and_bias_are_learnable_parameters(self):
-        from msdelta.contrastive import MSDeltaForContrastive
-        from msdelta.configuration_msdelta import MSDeltaConfig
-        from msdelta.modeling_msdelta import MSDeltaForPreTraining
-        cfg = MSDeltaConfig(hidden_size=32, num_attention_heads=4, num_hidden_layers=2,
-                            intermediate_size=64, delta_bias_n_freqs=8, delta_bias_per_head_hidden=4)
-        m = MSDeltaForContrastive(MSDeltaForPreTraining(cfg), None, kl_weight=0.0, loss="sigmoid")
-        names = {n for n, p in m.named_parameters() if p.requires_grad}
-        assert {"sigmoid_log_scale", "sigmoid_bias"} <= names
-        assert float(m.sigmoid_log_scale.exp()) == pytest.approx(10.0)
-        assert float(m.sigmoid_bias) == pytest.approx(-10.0)
-
-    def test_rejects_an_unknown_loss(self):
-        from msdelta.contrastive import MSDeltaForContrastive
-        with pytest.raises(ValueError):
-            MSDeltaForContrastive(torch.nn.Linear(2, 2), None, kl_weight=0.0, loss="triplet")
-
-    @pytest.mark.parametrize("trim", [False, True])
-    @pytest.mark.parametrize("chunk", [1, 3, 8])
-    def test_gradcache_gradient_matches_full_batch(self, chunk, trim):
-        """Including the gradient on the learnable scale and bias."""
-        from msdelta.configuration_msdelta import MSDeltaConfig
-        from msdelta.contrastive import MSDeltaForContrastive, gradcache_step
-        from msdelta.modeling_msdelta import MSDeltaForPreTraining
-        cfg = MSDeltaConfig(hidden_size=32, num_attention_heads=4, num_hidden_layers=2,
-                            intermediate_size=64, delta_bias_n_freqs=8, delta_bias_per_head_hidden=4,
-                            hidden_dropout_prob=0.0, attention_probs_dropout_prob=0.0)
-
-        def model():
-            torch.manual_seed(0)
-            return MSDeltaForContrastive(MSDeltaForPreTraining(cfg), MSDeltaForPreTraining(cfg),
-                                         kl_weight=10.0, loss="sigmoid",
-                                         sigmoid_init_scale=5.0, sigmoid_init_bias=-2.0).train()
-        torch.manual_seed(1)
-        mask = torch.zeros(8, 12, dtype=torch.long)
-        for i, n in enumerate([12, 3, 7, 12, 5, 9, 2, 11]):
-            mask[i, :n] = 1
-        batch = {"mz": torch.rand(8, 12) * 1000, "log_intensity": torch.rand(8, 12),
-                 "attention_mask": mask, "group": torch.tensor([0, 1, 2, 3, 0, 1, 2, 3])}
-        direct = model(); direct(**batch)["loss"].backward()
-        cached = model(); gradcache_step(cached, batch, chunk_size=chunk, trim_padding=trim)
-
-        def flat(m):
-            return torch.cat([p.grad.flatten() for _, p in sorted(m.named_parameters())
-                              if p.grad is not None])
-        ref, got = flat(direct), flat(cached)
-        assert (ref - got).norm() / ref.norm() < 1e-4
-        assert cached.sigmoid_bias.grad is not None and cached.sigmoid_log_scale.grad is not None
-
-
 class TestSameMassBatches:
     """C19: GroupBatchSampler with group_masses builds batches of mass-neighbouring groups."""
+
+    def test_peptide_neutral_mass(self):
+        """The mass finetune_contrastive assigns each group; a wrong mass mis-sorts every batch."""
+        from msdelta.reranking import peptide_neutral_mass
+        assert peptide_neutral_mass("PEPTIDE") == pytest.approx(799.3600, abs=1e-3)
+        assert peptide_neutral_mass("AC[57.0215]M[15.9949]K") == pytest.approx(524.2087, abs=1e-3)
+        assert peptide_neutral_mass("[42.0106]PEPTIDE") == pytest.approx(841.3706, abs=1e-3)
 
     def _sampler(self, masses, p=4, k=2, seed=0, jitter=0.0):
         from msdelta.contrastive import GroupBatchSampler
