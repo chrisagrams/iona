@@ -1887,4 +1887,4 @@ K53 (lr follow-up, same-mass, 3 seeds):   lr1e-4 ref .868 / .724;  lr8e-4 .869 /
 2. Retrieval WITH consensus spectra jumps .753 -> .89-.90: the K54 KL sensitivity came from consensus spectra never
    being seen in training; once they are, KL matters little (.893 at KL 10 vs .899 at KL 0).
 3. So consensus training only pays if the use case searches against consensus spectra (a spectral library).
-   Keep experimental-only as the default; revisit for library-search evaluations.
+   Proposal (not decided): keep experimental-only as the default; revisit for library-search evaluations.
