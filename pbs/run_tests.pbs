@@ -45,8 +45,8 @@ echo "=== msdelta device tests: $(date -Is) ==="
 # Both halves: the CPU suite, then the device suite it cannot cover.
 echo "--- login suite"
 "$VENV_DIR/bin/python" -m pytest tests -p no:cacheprovider && login=0 || login=$?
-# SUITE=cpu skips the device suite, which segfaults at collection (TODO FT26); commits
-# are gated on the CPU suite until that is fixed.
+# SUITE=cpu skips the device suite. It used to segfault at collection (TODO FT26: pyarrow's
+# jemalloc vs deepspeed's XPU init, fixed by importing pyarrow first in tests/conftest.py).
 if [[ ${SUITE:-all} == cpu ]]; then
     device=0; echo "--- device suite skipped (SUITE=cpu)"
 else

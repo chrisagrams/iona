@@ -8,6 +8,16 @@ a real 50m checkpoint is marked `slow` and skipped unless the checkpoint is read
 
 from __future__ import annotations
 
+# FT26/FT33 -- keep this the FIRST import. pyarrow's bundled jemalloc starts a background
+# thread that segfaults (libarrow.so background_thread_entry) when libarrow is first
+# loaded in the middle of deepspeed's XPU accelerator initialisation. pytest-randomly
+# (frameworks env) loads every `pytest_randomly.random_seeder` entry point, deepspeed
+# registers one, so `import deepspeed` ran before anything had loaded pyarrow: tests/gpu
+# died at collection and single test files could too. Loading pyarrow first removes
+# the ordering (`import pyarrow; import deepspeed` is fine on a compute node, bare
+# `import deepspeed` is not). Diagnosis: debug jobs 8873344, 8873382, 8873433.
+import pyarrow  # noqa: F401,E402
+
 import os
 from pathlib import Path
 

@@ -20,7 +20,8 @@ qsub -q debug -l select=1 -l walltime=01:00:00 -A UIC-HPC -l filesystems=home:fl
 
 **It is not a seconds-long suite.** Measured 2026-09-27: the default CPU run is 647 tests
 (641 pass, 6 known environment failures -- 4 level-zero PBS checks, 2 paths absent in a fresh worktree -- and 29 skipped) and took **10 min 20 s** on a loaded
-login node (an earlier run on the same tree: ~6 min); `tests/test_imports.py` alone is
+login node (an earlier run on the same tree: ~6 min) and 4 min 49 s on a debug compute
+node through `pbs/run_tests.pbs` (job 8873488, where the device suite then took 19 s); `tests/test_imports.py` alone is
 ~40 s because it starts child interpreters. On a login node run only the files you
 touched; run the whole suite through `pbs/run_tests.pbs`.
 
