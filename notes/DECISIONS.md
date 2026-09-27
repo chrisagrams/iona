@@ -39,6 +39,7 @@ IDs carry a track suffix: -C contrastive (spectrum encoder), -A alignment (pepti
 | 2026-09-27 | K67-C | Pure same-mass batches stay the default after C21 | user |
 | 2026-09-27 | K68-C | New single-dataset recipe: lr 4e-4 + P128×K2 | user |
 | 2026-09-27 | K72-S | Experiment cards and this log; no settings chosen without approval | user |
+| 2026-09-27 | K66-C | **Approved as carded:** per-scale search 25m/100m/200m/400m @540k; lr {2e-4, 4e-4, 8e-4} × P128×K2 and lr 4e-4 × P170×K2; 3 seeds; debug smoke (25m + 400m, 20 steps); walltime 14 h for 400m, 10 h others; scored on validation / OOD / mouse / human with filtered metrics (`sweeps/make_hp_scale.py`) | user |
 
 ## Settings chosen WITHOUT explicit approval (before this log existed)
 
@@ -56,4 +57,3 @@ Recorded so the record is honest; their results stand but were not the user's ch
 
 | ID | proposal |
 |---|---|
-| K66-C | Per-scale search (C23): 25m/100m/200m/400m @540k; lr {2e-4, 4e-4, 8e-4} × P128×K2 and lr 4e-4 × P170×K2; 3 seeds; card in the conversation of 2026-09-27 |

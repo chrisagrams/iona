@@ -1,0 +1,1 @@
+HP-SCALE ARM (C23/K66-C, approved): 25m, lr2e-4_p128k2 (--learning_rate 2e-4 --groups_per_batch 128 --replicates 2), seed 1. Otherwise sweep-c8c19 s050m_ck540k_supcon_mass_seed1, from the 25m checkpoint 540,423. sweeps/make_hp_scale.py.
