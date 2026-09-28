@@ -1,0 +1,4 @@
+[score] shard 3/12: 1 of 12 models on xpu
+[score] no consensus rows (or no experimental rows): library search skipped
+Loading weights:   0%|          | 0/266 [00:00<?, ?it/s]Loading weights:  48%|████▊     | 128/266 [00:00<00:00, 1264.07it/s]Loading weights:  96%|█████████▌| 255/266 [00:00<00:00, 1125.64it/s]Loading weights: 100%|██████████| 266/266 [00:00<00:00, 1189.98it/s]
+  s200m_ck540k_lr4e-4_p128k2_seed0: all MAP@R 0.6024  experimental MAP@R 0.6024  20ppm 0.9461  iso20ppm 0.8374  F 240  (3558s)
