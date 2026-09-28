@@ -1,5 +1,5 @@
 [project]
-name = "iona"
+name = "iona-ms"
 version = "0.1.0"
 description = "Mass-spec transformer with learned per-head Δm/z attention bias"
 readme = "README.md"
@@ -55,6 +55,9 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["iona"]
+
+[tool.hatch.build.targets.sdist]
+include = ["iona", "tests", "README.md", "MODEL_CARD.md"]
 
 [tool.ruff]
 target-version = "py313"
