@@ -1,49 +1,60 @@
 # Project status
 
-What is true right now. Overwritten, not appended: before changing the diagram, copy the
-old one into `status-history/`. The questions it tracks are in `PLAN.md`; results with
-their evidence are in `OBSERVATIONS.md`; hazards are in `TODO.md`.
+What is true right now. Overwritten, not appended: before changing it, copy the old one into
+`status-history/`. Questions: `PLAN.md`; results: `OBSERVATIONS.md`; decisions: `DECISIONS.md`;
+waiting on the user: `OPEN_QUESTIONS.md` (top: "Your to-do").
 
-Last updated: 2026-09-27, ~04:20 UTC.
+Last updated: 2026-09-28 ~12:30 UTC (Aurora maintenance; this session may restart).
 
 ```
-LEGEND  [x] done  [~] RUNNING  [ ] queued / next  [>] blocked on something  [X] retracted
-
-BRANCHES
+BRANCHES / CHECKOUTS
 ──────────────────────────────────────────────────────────────────────────
-  dev_finetune ...... frozen at paper submission (2026-09-26); main checkout,
-                      until the mix job ends
-  dev_finetune_02 ... working branch (~/code/msdelta-02); new jobs go from here
-  master ............ upstream, never touched
+  ~/code/msdelta          dev_finetune_02 (working branch; main checkout)
+  dev_finetune            frozen at paper submission; master untouched
+  other worktrees         msdelta-pr, msdelta-rerank, msdelta-denoise-pr (older; kept, K109)
+  merges                  scratch worktree -> tests -> pbs/checkout_ff (K111); jobs snapshot a commit
 
-JOBS
+JOBS (capacity queue blocked by maintenance: "Insufficient amount of resource: at_queue")
 ──────────────────────────────────────────────────────────────────────────
-  [~] 8872806  C23 HP search, 50m @540k, 12 arms ............. finishing
-  [~] 8873159  C21 mix: within75 / within50 / between75 x3 ... ~2.5 h left
-  [~] 8873562  C21 two-region smoke + first code-snapshot job (debug-scaling)
-  [>] 8873563  C21 two-region 75/25 + 50/50 x3 ............... held on the smoke
-  [ ] 8873598  e2e tests from dev_finetune_02 (debug) ........ K38 re-check
+  [ ] 8875260  K66-C 400m training (12 arms, 14 h walltime)   queued since 2026-09-27 23:37
+  [ ] 8875263  K66-C 25m  training (12 arms, 10 h walltime)   queued since 2026-09-27 23:37
+  [x] K66-C 100m, 200m: trained + scored on validation / oodval / test / mouse / human / yeast
+      results/raw/finetune/contrastive/hp-scale-{100m,200m}-{...}/
 
-CONTRASTIVE (single-dataset recipe: SupCon + same-mass, ms-contrastive-100k)
+SCORING WATCHERS (background loops in the Claude session -- they DIE if the session restarts)
 ──────────────────────────────────────────────────────────────────────────
-  [x] C8  sigmoid loss rejected      [x] C19 same-mass batches adopted
-  [x] C24 filter cost measured (isotope-tolerant window removes the loss)
-  [~] C23 HPs per scale (50m first)  [~] C21 far-mass knob
-  [ ] C20 train with the consensus spectrum
+  When a training job ends with "=== done: 12/12 arms ok" in pbs/logs/<job>.*.OU they submit scoring.
+  Restart them (from ~/code/msdelta) -- they skip nothing twice only if the scoring dirs are checked first:
+    bash <scratchpad>/k66_pipeline.sh 8875194 400m=8875260 025m=8875263     (val/ood/test/mouse/human, debug)
+    bash <scratchpad>/k66_yeast.sh     (edit JOB map to 400m/025m only; yeast on capacity 3 h)
+  The scripts live in the session scratchpad (/tmp/claude-40253/...). If they are gone, submit by hand
+  for each finished scale s in {400m, 025m}:
+    models file: sweeps/arms/score_hp_scale_<s>.txt  (one line per arm: "<name> <run>/final",
+                 runs at $S/runs/sweep-s<s>_ck540k_*-<jobid>)
+    qsub -q debug -l select=1 -l walltime=01:00:00 -v MODELS=<file>,SPLIT=validation,OUT_DIR=results/raw/finetune/contrastive/hp-scale-<s>-validation pbs/eval_grouped_retrieval.pbs
+    same with SPLIT=test; DATA=$S/baselines/{nine_oodval20k,noble_mouse20k,noble_human20k}/prepared for oodval/mouse/human;
+    yeast: -q capacity -l walltime=03:00:00, DATA=$S/baselines/nine_yeast/prepared (canonical, K76)
+  ($S = /lus/flare/projects/UIC-HPC/khuss/msdelta)
 
-ENGINEERING
+DONE RECENTLY
 ──────────────────────────────────────────────────────────────────────────
-  [x] reorg (task subpackages + shims, results raw/processed) merged into dev_finetune_02
-  [x] opt-in legacy / e2e / golden tests; FT26 fixed; K38 fixed; per-job code snapshots
-  [ ] cutover of the main checkout to dev_finetune_02 (after 8873159)
-  [x] rename "peptide embedder" -> "peptide encoder" (and "spectrum encoder"); old names aliased
-  [x] K4 data/synthetic -> /flare shelf (checksums verified)
-  [ ] P1 Pairformer port (HF-compliant)
+  [x] C21 batch mixes (none beats same-mass), C20 consensus training, C24 filter cost
+  [x] K66-C per-scale search: 100m/200m done (see OBSERVATIONS when written)
+  [x] reorg + encoder renames; strict loading default; run-from-commit (pbs/qsub_ref);
+      race-free snapshots + pbs/checkout_ff; job DAG built + first live trial passed (pbs/dagctl)
+  [x] Pairformer ported (architecture="pairformer"), reviewed, diagrams (notes/PAIRFORMER.md);
+      triangle attention SDPA default (K102/K115)
+  [x] filtered metrics (with/without filter, passes/failures) + library search, on by default
+  [x] MSConsensus-100M (190 GB) and MassIVE-KB (all splits) on /flare
 
-REMINDER
+NEXT
 ──────────────────────────────────────────────────────────────────────────
-  alignment caveats (PLAN.md -> Design decisions -> Alignment -> Caveats)
+  [ ] K66-C 400m / 25m -> scoring -> full comparison + proposal to the user (winner per scale)
+  [ ] Stage 0 (Pairformer vs transformer sanity run): preprocessing at cap 150, then the run
+  [ ] then the winning C recipe on every pretraining checkpoint (card)
+  [ ] alignment resumes on the new C models (caveats list)
+
+REMINDERS FOR THE USER
+──────────────────────────────────────────────────────────────────────────
+  K63-I DAG review · C18-C MassIVE-KB review · Pairformer study (notes/PAIRFORMER.md)
 ```
-
-Job history is not kept here any more: `pbs/job_history.sh` regenerates it from the
-logs, which is more trustworthy than a hand-kept table.
