@@ -1,5 +1,5 @@
 [project]
-name = "iona"
+name = "iona-ms"
 version = "0.1.0"
 description = "Mass-spec transformer with learned per-head Δm/z attention bias"
 readme = "README.md"

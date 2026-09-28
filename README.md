@@ -3,6 +3,14 @@
 Iona is a transformer foundation model for tandem mass spectra (MS/MS). Each centroided peak is a
 token, and attention is biased by the m/z difference between every pair of peaks.
 
+## Installation
+
+```sh
+pip install iona-ms
+```
+
+The package is imported as `iona`.
+
 ## Model weights
 
 ### Base weights

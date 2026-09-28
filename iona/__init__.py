@@ -29,7 +29,7 @@ from iona.processing_iona import (
     IonaProcessor,
 )
 
-__version__ = "0.1.0"
+__version__ = "0.1.0"  # x-release-please-version
 
 AutoConfig.register(IonaConfig.model_type, IonaConfig, exist_ok=True)
 AutoConfig.register(

@@ -5,15 +5,16 @@
   "packages": {
     ".": {
       "release-type": "python",
-      "package-name": "iona",
+      "package-name": "iona-ms",
       "bump-minor-pre-major": true,
       "bump-patch-for-minor-pre-major": true,
       "changelog-path": "CHANGELOG.md",
       "extra-files": [
+        "iona/__init__.py",
         {
           "type": "toml",
           "path": "uv.lock",
-          "jsonpath": "$.package[?(@.name.value=='iona')].version"
+          "jsonpath": "$.package[?(@.name.value=='iona-ms')].version"
         }
       ]
     }
