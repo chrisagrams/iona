@@ -41,8 +41,8 @@ def test_sharded_merge_equals_unsharded(tmp_path, monkeypatch):
     from msdelta.reranking import attach_teacher_embeddings
 
     teacher = _tiny_teacher()
-    monkeypatch.setattr(pa.MSDeltaForPreTraining, "from_pretrained",
-                        classmethod(lambda cls, *a, **k: teacher))
+    # precompute_align loads its teacher through load_strict (K94-P); stub that.
+    monkeypatch.setattr(pa, "load_strict", lambda cls, *a, **k: teacher)
     splits = {"train": Dataset.from_list(_rows(23, 0)),
               "validation": Dataset.from_list(_rows(7, 1))}
     for name, split in splits.items():

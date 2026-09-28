@@ -80,6 +80,7 @@ def main(argv: list[str] | None = None) -> int:
     from huggingface_hub import hf_hub_download
     from safetensors.torch import load_file
 
+    from msdelta.models.loading import load_strict
     from msdelta.models.modeling_msdelta import MSDeltaForPreTraining
     from msdelta.models.processing_msdelta import MSDeltaProcessor
     from msdelta.rescoring.reranking import (AlignmentCollator, PeptideCollator, PeptideEncoder,
@@ -115,7 +116,7 @@ def main(argv: list[str] | None = None) -> int:
         pooling = cli.pooling
         width = int(state["sequence_encoder.projection.3.weight"].shape[0])
     processor = MSDeltaProcessor.from_pretrained(encoder_dir, max_peaks=cli.max_peaks)
-    encoder = MSDeltaForPreTraining.from_pretrained(encoder_dir).to(device).eval()
+    encoder = load_strict(MSDeltaForPreTraining, encoder_dir).to(device).eval()
     enc = getattr(encoder, "msdelta", encoder)
     student = PeptideEncoder(embedding_size=width, hidden_size=256,
                              num_layers=4, num_heads=8, pooling=pooling,

@@ -99,6 +99,7 @@ def main(argv: list[str] | None = None) -> int:
     from msdelta.finetuning.contrastive.contrastive import encoder_layer_states, retrieval_metrics_topk
     from msdelta.finetuning.contrastive.finetune_contrastive import ContrastiveCollator
     from msdelta.data.grouped_retrieval import group_ids
+    from msdelta.models.loading import load_strict
     from msdelta.models.modeling_msdelta import MSDeltaForPreTraining
     from msdelta.rescoring.reranking import pool_sequence
 
@@ -123,7 +124,7 @@ def main(argv: list[str] | None = None) -> int:
         if target.exists():
             print(f"  {name}: already scored", flush=True); continue
         t0 = time.time()
-        model = MSDeltaForPreTraining.from_pretrained(path).to(device).eval()
+        model = load_strict(MSDeltaForPreTraining, path).to(device).eval()
         encoder = getattr(model, "msdelta", model)
         def embed(feats, raw):
             """Pooled vectors per layer: unit-norm halves, or raw float32 for abtt."""

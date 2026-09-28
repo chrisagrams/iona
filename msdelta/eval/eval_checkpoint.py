@@ -41,6 +41,7 @@ from msdelta.finetuning.denoise.finetune_denoise import (DenoiseDataArguments, D
                                       DenoiseFinetuneTrainer, DenoiseModelArguments,
                                       build_denoising_model, denoise_metrics,
                                       select_device, subset_splits)
+from msdelta.models.loading import check_keys
 from msdelta.models.processing_msdelta import MSDeltaProcessor
 
 
@@ -126,11 +127,8 @@ def load_weights(model: torch.nn.Module, checkpoint: Path) -> None:
     missing, unexpected = model.load_state_dict(state, strict=False)
     # mask_token is frozen out of the graph during denoise training and some checkpoints
     # therefore omit it; it is never read on this path. Anything else missing is real.
-    missing = [k for k in missing if not k.endswith("embed.mask_token")]
-    if missing or unexpected:
-        raise SystemExit(f"checkpoint does not match the model\n"
-                         f"  missing:    {missing[:8]}\n"
-                         f"  unexpected: {unexpected[:8]}")
+    check_keys(missing, unexpected, allow_missing=("*embed.mask_token",),
+               source=str(checkpoint), error=SystemExit)
 
 
 def main(argv: list[str] | None = None) -> int:

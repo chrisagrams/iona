@@ -51,10 +51,11 @@ def score_encoder(path: str, datasets, collator, device, max_rows: int,
     """
     from msdelta.finetuning.contrastive.contrastive import (MSDeltaForContrastive, embed_dataset,
                                      retrieval_metrics_exact)
+    from msdelta.models.loading import load_strict
     from msdelta.models.modeling_msdelta import MSDeltaForPreTraining
     from msdelta.rescoring.reranking import group_separation_metrics
 
-    encoder = MSDeltaForPreTraining.from_pretrained(path)
+    encoder = load_strict(MSDeltaForPreTraining, path)
     model = MSDeltaForContrastive(encoder, None, kl_weight=0).to(device)
     try:
         embeddings, groups = embed_dataset(model, datasets["validation"], collator,

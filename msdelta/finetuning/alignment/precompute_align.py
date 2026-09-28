@@ -28,6 +28,7 @@ from dataclasses import dataclass, field
 
 from msdelta.finetuning.alignment.finetune_align import AlignDataArguments, AlignModelArguments
 from msdelta.finetuning.denoise.finetune_denoise import subset_splits
+from msdelta.models.loading import load_strict
 from msdelta.models.modeling_msdelta import MSDeltaForPreTraining
 from msdelta.models.processing_msdelta import MSDeltaProcessor
 from msdelta.rescoring.reranking import attach_teacher_embeddings, build_alignment_datasets
@@ -103,7 +104,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"[precompute] prepared flat splits under {cache / '_flat'}", flush=True)
         return 0
 
-    teacher = MSDeltaForPreTraining.from_pretrained(model_args.pretrained_path)
+    teacher = load_strict(MSDeltaForPreTraining, model_args.pretrained_path)
     datasets = attach_teacher_embeddings(
         datasets, teacher, model_args.pooling,
         batch_size=precompute_args.batch_size,
@@ -116,7 +117,7 @@ def _shard(cache, model_args, precompute_args, device) -> int:
     from datasets import load_from_disk
 
     n, i = precompute_args.num_shards, precompute_args.shard_index
-    teacher = MSDeltaForPreTraining.from_pretrained(model_args.pretrained_path)
+    teacher = load_strict(MSDeltaForPreTraining, model_args.pretrained_path)
     for name in ("train", "validation"):
         flat = cache / "_flat" / name
         out = cache / "_shards" / name / f"{i:03d}"
