@@ -1,0 +1,86 @@
+#!/bin/bash -l
+# MassIVE-KB -> contrastive training data with every evaluation peptide removed
+# (data/prepare_massive_kb.py; notes/C18_prepare_card.md). CPU only; one node.
+#
+# Dry run first (2 shards per split, ~230k spectra, a few minutes):
+#   qsub -q debug -l select=1 -l walltime=00:30:00 \
+#        -v OUT=/lus/flare/projects/UIC-HPC/khuss/msdelta/data/massive-kb-contrastive-dryrun,SHARDS=2 \
+#        pbs/prepare_massive_kb.pbs
+# Full run:
+#   qsub -q debug -l select=1 -l walltime=01:00:00 pbs/prepare_massive_kb.pbs
+#
+# 1. the unit tests of the script -- abort if they fail;
+# 2. the exclusion set, built ONCE into $EXCL (skipped if $EXCL/exclusion.json exists);
+# 3. prepare into $OUT (refuses if $OUT exists; RESUME=1 continues $OUT.partial after a
+#    walltime kill);
+# 4. check $OUT.
+
+#PBS -N msdelta-mkb-prep
+#PBS -A UIC-HPC
+#PBS -l place=scatter
+#PBS -l filesystems=home:flare
+#PBS -j oe
+#PBS -o pbs/logs/
+
+set -uo pipefail
+REPO_DIR=${REPO_DIR:-${PBS_O_WORKDIR:-$PWD}}
+cd "$REPO_DIR"
+VENV_DIR=${VENV_DIR:-$REPO_DIR/.venv}
+PROJECT=${PROJECT:-UIC-HPC}
+SCRATCH_ROOT=${SCRATCH_ROOT:-/lus/flare/projects/$PROJECT/$USER/msdelta}
+OUT=${OUT:-$SCRATCH_ROOT/data/massive-kb-contrastive}
+EXCL=${EXCL:-$SCRATCH_ROOT/data/massive-kb-exclusion}
+SHARDS=${SHARDS:-0}            # first N shards per split; 0 = all
+LIMIT=${LIMIT:-0}              # first N rows per shard; 0 = all
+WORKERS=${WORKERS:-64}
+IL_FLAG=${IL_FLAG:---il-collapse}
+SPLIT_POLICY=${SPLIT_POLICY:-peptide}
+RESUME=${RESUME:-}
+source "$REPO_DIR/pbs/lib/job_finish.sh"
+
+set +u
+source /usr/share/lmod/lmod/init/bash
+module load "${FRAMEWORKS_MODULE:-frameworks/2025.3.1}"
+set -u
+
+# No GPU work here, but the exclusion step and the tests import torch, which initialises
+# Level Zero and segfaults on a compute node without these (tests/test_configs.py).
+export ONEAPI_DEVICE_SELECTOR=level_zero:gpu
+export ZE_FLAT_DEVICE_HIERARCHY=FLAT
+export ZE_AFFINITY_MASK=0
+export OMP_NUM_THREADS=${OMP_NUM_THREADS:-1}
+export PYTHONPATH=$REPO_DIR${PYTHONPATH:+:$PYTHONPATH}
+source "$REPO_DIR/pbs/lib/code_snapshot.sh"
+export HF_HOME=${HF_HOME:-$SCRATCH_ROOT/huggingface}
+export HF_HUB_OFFLINE=${HF_HUB_OFFLINE:-1}
+export HF_DATASETS_OFFLINE=${HF_DATASETS_OFFLINE:-1}
+PY="$VENV_DIR/bin/python"
+SCRIPT="$MSDELTA_CODE_DIR/data/prepare_massive_kb.py"
+
+echo "=== $(date -Is) tests"
+"$PY" -m pytest -q -p no:randomly "$MSDELTA_CODE_DIR/tests/test_prepare_massive_kb.py" \
+    || { echo "unit tests failed; not preparing" >&2; exit 1; }
+
+if [[ ! -f $EXCL/exclusion.json ]]; then
+    echo "=== $(date -Is) exclusion set -> $EXCL"
+    "$PY" "$SCRIPT" exclusion --out "$EXCL" --scratch-root "$SCRATCH_ROOT" \
+        || { echo "exclusion failed" >&2; exit 1; }
+fi
+cat "$EXCL/exclusion_counts.json"
+
+echo "=== $(date -Is) prepare -> $OUT (shards=$SHARDS limit=$LIMIT workers=$WORKERS)"
+"$PY" "$SCRIPT" prepare --out "$OUT" --exclusion "$EXCL" \
+    --shards "$SHARDS" --limit "$LIMIT" --workers "$WORKERS" \
+    "$IL_FLAG" --split-policy "$SPLIT_POLICY" ${RESUME:+--resume}
+status=$?
+[[ $status -eq 0 ]] || { echo "prepare exited $status" >&2; exit "$status"; }
+
+echo "=== $(date -Is) check $OUT"
+"$PY" "$SCRIPT" check "$OUT"
+status=$?
+jf_output "$OUT/manifest.json"
+jf_check "prepare_massive_kb check" test "$status" -eq 0
+du -sh "$OUT"
+JF_SUMMARY="massive-kb prepared: $OUT (check exit $status)"
+echo "=== $(date -Is) done"
+exit $status
