@@ -55,6 +55,16 @@ Context: built on branch `i2-dag` (tested only on a simulated batch system). Spe
 `notes/DAG_SPEC.md`. First live trial approved (K84-I). You said you would read it and say whether
 you agree with the design.
 
+### K103-I: the DAG trial is blocked by the permission system (open, 2026-09-28)
+Context: K84-I approved a first live trial of the scheduler. The agent running it prepared the trial
+pipeline (pbs/dag/pipelines/dagtrial.py, sweeps/arms/dagtrial_{smoke,models}.txt, a trial-only
+home with dry_run off) and validated it (the plan proposes exactly one debug smoke job, 25m arm
+only). Its `git commit` of those three files in the main checkout was DENIED by Claude Code's
+permission classifier ("modify shared resources"), and the live `tick --live` (a real qsub) would
+likely hit the same gate. Claude will not work around a denial. Options: (a) you allow these actions
+(or run the commit and ticks yourself: commands in the chat of 2026-09-28); (b) run with the files
+uncommitted (job snapshots then say dirty=true); (c) drop the trial.
+
 ### K96-S: pretraining input normalisation may leak which masked peak is the base peak (parked)
 Context: in `msdelta/models/processing_msdelta.py` the model's INPUT intensity feature is
 log1p(I) divided by the maximum of log1p(I) over ALL peaks, computed before masking. The TARGET is
@@ -87,26 +97,14 @@ Context: library search (C25) needs consensus spectra; only ms-contrastive-100k 
 them for the species sets means merging replicates into consensus spectra (a method choice:
 peak merging, minimum replicates).
 
-### K97-C: drop or keep `library/MAP@R` (open)
-Context: in library search each query has exactly ONE correct library entry, so MAP@R (hits within
-the top R, R = 1) equals Hit@1; the key just repeats it. Drop it, or keep it for table consistency?
-
-### K98-C: ties in library search count as misses (open)
-Context: if the correct library entry has exactly the same similarity as a wrong one, the new
-library-search code counts it as a miss (conservative; identical embeddings cannot score well). The
-older retrieval metric breaks ties arbitrarily. Keep the conservative rule?
-
-### K99-C: groups without consensus / consensus without queries (open)
-Context: in ms-contrastive-100k validation, 48 groups have no consensus spectrum (their 201
-experimental queries cannot be scored; they are counted and excluded) and 201 groups have a
-consensus but no experimental spectra (kept in the library as distractors, as in a real library).
-Keep both behaviours?
-
-### K100-C: when to run library search (open)
-Context: approved card K79-C: ms-contrastive-100k validation + test, on the C20 models and the K66-C
-models. Proposal: after K97-K99 and merging `c25-library-search`, score the C20 models now (one
-debug job per split) and include library search in the K66-C scoring automatically.
-
+### K100-C: when to run library search (open; clarified 2026-09-28)
+Context: the library-search evaluation is code on branch `c25-library-search`; nothing has been
+scored with it yet. The approved card (K79-C) says: score it on ms-contrastive-100k validation and
+test, for the C20 models (trained with/without consensus spectra -- the most interesting comparison
+for library search) and the K66-C models. Two things need your OK: (1) merge the branch into
+dev_finetune_02 (see K90-S); (2) then submit two short debug scoring jobs for the C20 models now
+(validation, test), and add library search to the K66-C scoring that runs automatically as each
+scale finishes (it adds seconds, not a new job, because it reuses the embeddings).
 ### C18-C: MassIVE-KB (parked, low priority)
 Context: MassIVE-KB (chrisagrams/massive_kb_v1_shuffled, 30.5M spectra, all splits now on /flare)
 could be a larger contrastive training set. No prep script exists. User is ~95% sure it does not

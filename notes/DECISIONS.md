@@ -67,6 +67,9 @@ IDs carry a track suffix: -C contrastive (spectrum encoder), -A alignment (pepti
 | 2026-09-28 | K96-S | Input-normalisation leak: revisit later (OPEN_QUESTIONS.md) | user |
 | 2026-09-28 | Pairformer ablations | In principle (each still needs a card): #2 m/z control OK, #3 matched params vs matched compute -- very important, #4 pair input features OK, #5 peaks cap OK, #6 pair width OK, #8 triangle attention: find how to make it win; #11 precursor features: make the model work with AND without them | user |
 | 2026-09-28 | K63-I etc. | Open questions are logged in notes/OPEN_QUESTIONS.md with full context; K86-K91 parked there | user |
+| 2026-09-28 | K97-C | Library search: drop library/MAP@R; report average Hit@1, Hit@5 (and MRR) plus statistics of R = rank of the true library entry among the whole library (mean/median/p90/p99/max, fraction with R <= 1/5/10/100; filter-excluded counted separately) | user |
+| 2026-09-28 | K98-C | Ties count as misses (conservative) | user |
+| 2026-09-28 | K99-C | Library search only on datasets that have consensus spectra; queries without a consensus excluded (counted); consensus-only groups stay as distractors | user |
 
 ## Settings chosen WITHOUT explicit approval (before this log existed)
 
