@@ -17,7 +17,6 @@ from transformers import HfArgumentParser, Trainer, TrainerCallback, TrainingArg
 from iona.configuration_iona import IonaRetrievalConfig
 from iona.contrastive import (
     GroupBatchSampler,
-    gradcache_step,
     group_separation_summary,
     retrieval_summary,
     subset_by_group,
@@ -52,7 +51,6 @@ class ContrastiveDataArguments:
     max_samples: int = 0
     groups_per_batch: int = 6
     replicates: int = 4
-    gradcache_chunk: int = 0
 
 
 @dataclass
@@ -81,13 +79,11 @@ class SaveEncoderCallback(TrainerCallback):
 class ContrastiveTrainer(Trainer):
     """Standard Trainer, with the PK sampler and the loss components surfaced."""
 
-    def __init__(self, *args, groups=None, groups_per_batch=12, replicates=4,
-                 gradcache_chunk=0, **kwargs):
+    def __init__(self, *args, groups=None, groups_per_batch=12, replicates=4, **kwargs):
         super().__init__(*args, **kwargs)
         self.groups = groups
         self.groups_per_batch = groups_per_batch
         self.replicates = replicates
-        self.gradcache_chunk = gradcache_chunk
 
     def _get_train_sampler(self, *args, **kwargs):
         # Batches come from the PK sampler in get_train_dataloader.
@@ -100,20 +96,6 @@ class ContrastiveTrainer(Trainer):
                           collate_fn=self.data_collator,
                           num_workers=self.args.dataloader_num_workers,
                           pin_memory=self.args.dataloader_pin_memory)
-
-    def training_step(self, model, inputs, num_items_in_batch=None):
-        """GradCache when a chunk size is set, otherwise the ordinary path."""
-        if not self.gradcache_chunk:
-            return super().training_step(model, inputs, num_items_in_batch)
-        model.train()
-        inputs = self._prepare_inputs(inputs)
-        inner = model.module if hasattr(model, "module") else model
-        outputs = gradcache_step(inner, inputs, self.gradcache_chunk,
-                                 accelerator=getattr(self, "accelerator", None))
-        if self.state.global_step % max(self.args.logging_steps, 1) == 0:
-            self.log({"contrastive": float(outputs["contrastive"]),
-                      "kl": float(outputs["kl"])})
-        return outputs["loss"].detach()
 
     def compute_loss(self, model, inputs, return_outputs=False, **kwargs):
         outputs = model(**inputs)
@@ -225,8 +207,7 @@ def main(argv: list[str] | None = None) -> int:
             model=model, args=training_args, train_dataset=datasets["train"],
             eval_dataset=datasets.get("validation"), data_collator=collator,
             groups=groups, groups_per_batch=data_args.groups_per_batch,
-            replicates=data_args.replicates,
-            gradcache_chunk=data_args.gradcache_chunk)
+            replicates=data_args.replicates)
         trainer.add_callback(SaveEncoderCallback(encoder, processor))
         # Trainer.train() does not read args.resume_from_checkpoint on its own.
         trainer.train(resume_from_checkpoint=training_args.resume_from_checkpoint)

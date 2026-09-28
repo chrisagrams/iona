@@ -549,30 +549,25 @@ class IonaForRetrieval(IonaPreTrainedModel):
             self.reference.eval()
         return self
 
-    def embed(
-        self, mz: Tensor, log_intensity: Tensor, attention_mask: Tensor | None = None
-    ) -> tuple[Tensor, Tensor]:
-        """Return unit-length spectrum embeddings and the encoder's last hidden state."""
-        if attention_mask is None:
-            attention_mask = torch.ones_like(mz, dtype=torch.long)
+    def _encode(self, mz: Tensor, log_intensity: Tensor, attention_mask: Tensor) -> Tensor:
         with torch.set_grad_enabled(torch.is_grad_enabled() and not self._encoder_is_frozen):
-            hidden = self.iona(
+            return self.iona(
                 mz=mz, log_intensity=log_intensity, attention_mask=attention_mask, return_dict=True
             ).last_hidden_state
+
+    def _pool(self, hidden: Tensor, attention_mask: Tensor) -> Tensor:
         embeddings = pool_sequence(hidden, attention_mask, self.config.pooling)
         if self.retrieval_head is not None:
             embeddings = self.retrieval_head(embeddings)
-        return F.normalize(embeddings.float(), dim=-1), hidden
+        return F.normalize(embeddings.float(), dim=-1)
 
-    @torch.no_grad()
-    def reference_logits(self, mz: Tensor, log_intensity: Tensor, attention_mask: Tensor) -> Tensor:
-        """Intensity logits of the frozen reference model."""
-        if self.reference is None:
-            raise ValueError("kl_weight > 0 needs a reference model or cached reference_logits")
-        hidden = self.reference.iona(
-            mz=mz, log_intensity=log_intensity, attention_mask=attention_mask
-        ).last_hidden_state
-        return self.reference.intensity_head(hidden)
+    def embed(
+        self, mz: Tensor, log_intensity: Tensor, attention_mask: Tensor | None = None
+    ) -> Tensor:
+        """Return unit-length spectrum embeddings."""
+        if attention_mask is None:
+            attention_mask = torch.ones_like(mz, dtype=torch.long)
+        return self._pool(self._encode(mz, log_intensity, attention_mask), attention_mask)
 
     def forward(
         self,
@@ -580,14 +575,14 @@ class IonaForRetrieval(IonaPreTrainedModel):
         log_intensity: Tensor,
         attention_mask: Tensor | None = None,
         group_ids: Tensor | None = None,
-        reference_logits: Tensor | None = None,
         return_dict: bool | None = None,
     ) -> IonaForRetrievalOutput | tuple[Tensor, ...]:
         if return_dict is None:
             return_dict = self.config.return_dict
         if attention_mask is None:
             attention_mask = torch.ones_like(mz, dtype=torch.long)
-        embeddings, hidden = self.embed(mz, log_intensity, attention_mask)
+        hidden = self._encode(mz, log_intensity, attention_mask)
+        embeddings = self._pool(hidden, attention_mask)
         if group_ids is None:
             return IonaForRetrievalOutput(embeddings=embeddings) if return_dict else (embeddings,)
 
@@ -609,8 +604,13 @@ class IonaForRetrieval(IonaPreTrainedModel):
         contrastive = self.contrastive_loss(loss_embeddings, labels)
         kl = embeddings.new_zeros(())
         if self.config.kl_weight > 0:
-            if reference_logits is None:
-                reference_logits = self.reference_logits(mz, log_intensity, attention_mask)
+            if self.reference is None:
+                raise ValueError("kl_weight > 0 needs a reference model")
+            with torch.no_grad():
+                reference_hidden = self.reference.iona(
+                    mz=mz, log_intensity=log_intensity, attention_mask=attention_mask
+                ).last_hidden_state
+                reference_logits = self.reference.intensity_head(reference_hidden)
             kl = head_kl(self.intensity_head(hidden), reference_logits, attention_mask)
         loss = contrastive + self.config.kl_weight * kl
 

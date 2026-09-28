@@ -33,5 +33,4 @@
 --seed 1
 --report_to wandb
 --save_only_model true
---gradcache_chunk 4
 --split_seed 0

@@ -5,11 +5,9 @@ from __future__ import annotations
 import numpy as np
 import torch
 from torch import Tensor, nn
-from torch.utils.checkpoint import get_device_states, set_device_states
 from torch.utils.data import Sampler
 
 from iona.data import peptide_key
-from iona.modeling_iona import head_kl
 from iona.reranking import group_separation_metrics
 from iona.retrieval import retrieval_metrics
 
@@ -107,8 +105,8 @@ def embed_dataset(model, dataset, collator, device, max_rows: int = 2000,
             for start in range(0, len(rows), batch_size):
                 chunk = rows[start : start + batch_size]
                 batch = {k: v.to(device) for k, v in collator(chunk).items()}
-                pooled, _ = model.embed(batch["mz"], batch["log_intensity"],
-                                        batch["attention_mask"])
+                pooled = model.embed(batch["mz"], batch["log_intensity"],
+                                     batch["attention_mask"])
                 embeddings.append(pooled.cpu())
     finally:
         model.train(was_training)
@@ -158,55 +156,3 @@ def subset_by_group(dataset, max_samples: int, group_key, min_members: int = 4):
         total += size
     indices = [i for i, key in enumerate(keys) if key in keep]
     return dataset.select(indices)
-
-
-def gradcache_step(model, batch, chunk_size: int, accelerator=None) -> dict[str, Tensor]:
-    """One GradCache step (Gao et al., 2021): a contrastive batch larger than memory allows.
-
-    Embed chunks without grad, take dL/dembedding over the whole batch, then re-embed each
-    chunk with grad and backprop the cached gradient. Exact, at the cost of two forwards.
-    """
-    keys = ("mz", "log_intensity", "attention_mask")
-    total = len(batch["group_ids"])
-    chunks = [{k: batch[k][i:i + chunk_size] for k in keys}
-              for i in range(0, total, chunk_size)]
-
-    # 1. embeddings only; save RNG state so step 3 replays the same dropout masks.
-    states = []
-    cached = []
-    with torch.no_grad():
-        for chunk in chunks:
-            states.append((torch.get_rng_state(), *get_device_states(chunk["mz"])))
-            cached.append(model.embed(chunk["mz"], chunk["log_intensity"],
-                                      chunk["attention_mask"])[0])
-
-    # 2. loss over the whole batch, gradient w.r.t. the embeddings only.
-    leaves = [e.detach().requires_grad_(True) for e in cached]
-    contrastive = model.contrastive_loss(torch.cat(leaves), batch["group_ids"])
-    contrastive.backward()
-    grads = [leaf.grad for leaf in leaves]
-
-    # 3. re-embed with grad, push the cached gradient through, add the KL term.
-    kl_total = torch.zeros((), device=contrastive.device)
-    for chunk, grad, (cpu_state, devices, device_states) in zip(chunks, grads, states):
-        torch.set_rng_state(cpu_state)
-        set_device_states(devices, device_states, device_type=chunk["mz"].device.type)
-        embeddings, hidden = model.embed(chunk["mz"], chunk["log_intensity"],
-                                         chunk["attention_mask"])
-        surrogate = (embeddings * grad).sum()
-        if model.config.kl_weight > 0 and model.reference is not None:
-            logits = model.intensity_head(hidden)
-            reference_logits = model.reference_logits(chunk["mz"], chunk["log_intensity"],
-                                                      chunk["attention_mask"])
-            # Scaled by the chunk's share so the total matches a full-batch step.
-            share = len(chunk["mz"]) / total
-            kl = head_kl(logits, reference_logits, chunk["attention_mask"])
-            kl_total = kl_total + kl.detach() * share
-            surrogate = surrogate + model.config.kl_weight * kl * share
-        if accelerator is not None:
-            accelerator.backward(surrogate)
-        else:
-            surrogate.backward()
-
-    return {"loss": (contrastive.detach() + model.config.kl_weight * kl_total),
-            "contrastive": contrastive.detach(), "kl": kl_total}
