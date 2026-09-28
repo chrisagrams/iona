@@ -110,15 +110,28 @@ just below an integer mass (CO, CO2, O) from those just above (H2O, NH3). Inheri
 Options: fix before any comparison (integer frequencies, or feed the signed defect) or run as-is
 and test the fix as an ablation.
 
-### K101-P: order of Pairformer work -- sanity comparison first, then ablations/HP search (open, 2026-09-28)
-Context: user asked whether K85-P runs at "default" architecture choices or after an HP search.
-Proposal: Stage 0 = K85-P: one short run of each architecture at the best-known settings (the
-Pairformer at the source's 50m experiment settings, with the K91 decision applied; the transformer
-at our standard pretraining recipe) -- only to confirm the port trains sanely and measure step
-time/memory. Stage 1 = the ablations the user endorsed: #1 pair-update x write-back, #3 matched
-parameters vs matched compute (very important), #2 m/z control. Stage 2 = HP / feature sweeps (#4 pair
-input features, #5 peaks cap, #6 pair width, #8 triangle attention). Each stage is its own card.
-
+### K107-P: approve the Stage 0 card (open, 2026-09-28) -- notes/P1_stage0_card.md
+Context: Stage 0 (user: "we should run it") = one short debug pretraining run of each architecture,
+only to check the Pairformer port trains and to measure step time / memory. Full card:
+notes/P1_stage0_card.md; architecture: notes/PAIRFORMER.md. Arms: Pairformer 512x10, 8 heads, FFN 2048,
+pair/triangle 64, write-back 16, triangle attention off (46.1M params; every pair setting taken
+from the source's pairformer-sweep-50m config, cited by line) vs our msdelta-base-50m transformer
+(49.8M) unchanged. Both: peaks cap 150, 300 steps, global batch 512, lr 1.3e-4 cosine, warmup 11,
+bf16, mask ratio 0.5, seed 0; gradient checkpointing on for the Pairformer. Debug queue, ~25-35 min
+per Pairformer job (estimate). Decisions needed:
+(1) DATA: our pretraining corpus MSConsensus-100M (190 GB) is not in our HF cache (Chris's cache is
+    not readable). Proposal: download a small pinned subset (~2.6 GB: 4 train + 1 validation shard)
+    on the login node, then one debug preprocessing job at cap 150.
+(2) PEAKS CAP 150 DROPS SPECTRA: our processor drops any spectrum with more than 150 peaks (the
+    source instead kept the 150 most intense after a 1% threshold); median spectrum has ~205 peaks,
+    so over half are dropped and the kept set skews to short spectra. Same for both arms, so Stage 0
+    is still fair; matching the source needs a code change (own card). Accept for Stage 0?
+(3) W&B: pbs/aurora-pretrain.pbs does not load the W&B key; add the one standard line
+    (pbs/load_keys.sh) or run with --report_to none.
+(4) Settings the agent had to choose (not in the source): warmup 11 (keeps the source's 3.6%
+    warmup fraction), 300 steps, logging every 10 steps, saves/probes off, transformer micro-batch 32
+    (its standard is 64), which data shards, OOM fallback micro 16 x accum 4. Approve or change.
+(5) K91-P: run with the source's mass-defect encoding (as carded) or fix it first.
 ### K102-P: add per-chunk gradient checkpointing to triangle attention before trying it (open)
 Context: triangle attention stores its attention weights for the backward pass: about
 3.2 x batch x peaks^3 x heads x 4 bytes, ~5.5 GB per module at 32 spectra x 150 peaks x 4 heads
