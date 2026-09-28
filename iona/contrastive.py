@@ -1,21 +1,16 @@
-"""Fine-tune the spectrum encoder so its embedding space separates peptides.
-
-Supervised contrastive loss on the pooled embedding, plus KL to the original model's
-intensity head so the encoder keeps the peak chemistry.
-"""
+"""Training and evaluation utilities for contrastive encoder fine-tuning (see IonaForRetrieval)."""
 
 from __future__ import annotations
 
 import numpy as np
 import torch
-import torch.nn.functional as F
-from pytorch_metric_learning.losses import SupConLoss
 from torch import Tensor, nn
 from torch.utils.checkpoint import get_device_states, set_device_states
 from torch.utils.data import Sampler
 
 from iona.data import peptide_key
-from iona.reranking import group_separation_metrics, pool_sequence
+from iona.modeling_iona import head_kl
+from iona.reranking import group_separation_metrics
 from iona.retrieval import retrieval_metrics
 
 
@@ -67,16 +62,6 @@ class GroupBatchSampler(Sampler[list[int]]):
         self.epoch += 1
 
 
-def head_kl(logits: Tensor, reference_logits: Tensor, attention_mask: Tensor) -> Tensor:
-    """KL(reference || current) over each spectrum's distribution across its real peaks."""
-    valid = attention_mask.bool()
-    current = logits.float().masked_fill(~valid, float("-inf")).log_softmax(dim=-1)
-    reference = reference_logits.float().masked_fill(~valid, float("-inf")).log_softmax(dim=-1)
-    # Termwise rather than F.kl_div, which gives NaN at the -inf padded positions.
-    terms = reference.exp() * (reference - current)
-    return torch.where(valid, terms, torch.zeros_like(terms)).sum(-1).mean()
-
-
 def encoder_layer_states(encoder: nn.Module, mz: Tensor, log_intensity: Tensor,
                          attention_mask: Tensor) -> tuple[list[Tensor], Tensor]:
     """Run the encoder and capture every block's output (via forward hooks) plus the input embedding."""
@@ -96,61 +81,6 @@ def encoder_layer_states(encoder: nn.Module, mz: Tensor, log_intensity: Tensor,
     if len(captured) != expected:
         raise RuntimeError(f"captured {len(captured)} of {expected} layer states")
     return [captured[i] for i in range(expected)], final
-
-
-class IonaForContrastive(nn.Module):
-    """Spectrum encoder trained to separate peptides while still explaining peaks."""
-
-    def __init__(self, model: nn.Module, reference: nn.Module | None = None,
-                 pooling: str = "mean+max", temperature: float = 0.07,
-                 kl_weight: float = 1.0):
-        super().__init__()
-        self.model = model
-        self.reference = reference
-        if self.reference is not None:
-            # Frozen and in eval mode so the KL target does not move.
-            self.reference.requires_grad_(False)
-            self.reference.eval()
-        self.pooling = pooling
-        self.contrastive_loss = SupConLoss(temperature=temperature)
-        self.kl_weight = kl_weight
-
-    def train(self, mode: bool = True):
-        super().train(mode)
-        if self.reference is not None:
-            self.reference.eval()
-        return self
-
-    def embed(self, mz, log_intensity, attention_mask) -> tuple[Tensor, Tensor]:
-        encoder = getattr(self.model, "iona", self.model)
-        hidden = encoder(mz=mz, log_intensity=log_intensity,
-                         attention_mask=attention_mask).last_hidden_state
-        pooled = pool_sequence(hidden, attention_mask, self.pooling)
-        return F.normalize(pooled.float(), dim=-1), hidden
-
-    def forward(self, mz, log_intensity, attention_mask, group,
-                reference_logits=None, return_loss: bool = True):
-        embeddings, hidden = self.embed(mz, log_intensity, attention_mask)
-        contrastive = self.contrastive_loss(embeddings, group)
-
-        kl = embeddings.new_zeros(())
-        if self.kl_weight > 0:
-            logits = self.model.intensity_head(hidden)
-            if reference_logits is None:
-                if self.reference is None:
-                    raise ValueError("kl_weight > 0 needs a reference model or cached "
-                                     "reference_logits")
-                with torch.no_grad():
-                    reference_hidden = getattr(
-                        self.reference, "iona", self.reference
-                    )(mz=mz, log_intensity=log_intensity,
-                      attention_mask=attention_mask).last_hidden_state
-                    reference_logits = self.reference.intensity_head(reference_hidden)
-            kl = head_kl(logits, reference_logits, attention_mask)
-
-        loss = contrastive + self.kl_weight * kl
-        return {"loss": loss, "contrastive": contrastive.detach(), "kl": kl.detach(),
-                "embeddings": embeddings}
 
 
 @torch.no_grad()
@@ -237,7 +167,7 @@ def gradcache_step(model, batch, chunk_size: int, accelerator=None) -> dict[str,
     chunk with grad and backprop the cached gradient. Exact, at the cost of two forwards.
     """
     keys = ("mz", "log_intensity", "attention_mask")
-    total = len(batch["group"])
+    total = len(batch["group_ids"])
     chunks = [{k: batch[k][i:i + chunk_size] for k in keys}
               for i in range(0, total, chunk_size)]
 
@@ -252,7 +182,7 @@ def gradcache_step(model, batch, chunk_size: int, accelerator=None) -> dict[str,
 
     # 2. loss over the whole batch, gradient w.r.t. the embeddings only.
     leaves = [e.detach().requires_grad_(True) for e in cached]
-    contrastive = model.contrastive_loss(torch.cat(leaves), batch["group"])
+    contrastive = model.contrastive_loss(torch.cat(leaves), batch["group_ids"])
     contrastive.backward()
     grads = [leaf.grad for leaf in leaves]
 
@@ -264,23 +194,19 @@ def gradcache_step(model, batch, chunk_size: int, accelerator=None) -> dict[str,
         embeddings, hidden = model.embed(chunk["mz"], chunk["log_intensity"],
                                          chunk["attention_mask"])
         surrogate = (embeddings * grad).sum()
-        if model.kl_weight > 0 and model.reference is not None:
-            logits = model.model.intensity_head(hidden)
-            with torch.no_grad():
-                reference_hidden = getattr(
-                    model.reference, "iona", model.reference
-                )(mz=chunk["mz"], log_intensity=chunk["log_intensity"],
-                  attention_mask=chunk["attention_mask"]).last_hidden_state
-                reference_logits = model.reference.intensity_head(reference_hidden)
+        if model.config.kl_weight > 0 and model.reference is not None:
+            logits = model.intensity_head(hidden)
+            reference_logits = model.reference_logits(chunk["mz"], chunk["log_intensity"],
+                                                      chunk["attention_mask"])
             # Scaled by the chunk's share so the total matches a full-batch step.
             share = len(chunk["mz"]) / total
             kl = head_kl(logits, reference_logits, chunk["attention_mask"])
             kl_total = kl_total + kl.detach() * share
-            surrogate = surrogate + model.kl_weight * kl * share
+            surrogate = surrogate + model.config.kl_weight * kl * share
         if accelerator is not None:
             accelerator.backward(surrogate)
         else:
             surrogate.backward()
 
-    return {"loss": (contrastive.detach() + model.kl_weight * kl_total),
+    return {"loss": (contrastive.detach() + model.config.kl_weight * kl_total),
             "contrastive": contrastive.detach(), "kl": kl_total}

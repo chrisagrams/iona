@@ -23,8 +23,7 @@ from datasets import load_from_disk
 from iona.contrastive import encoder_layer_states
 from iona.data import group_ids
 from iona.finetune.contrastive import ContrastiveCollator
-from iona.modeling_iona import IonaForPreTraining
-from iona.reranking import pool_sequence
+from iona.modeling_iona import IonaForPreTraining, pool_sequence
 from iona.retrieval import retrieval_metrics
 
 

@@ -11,20 +11,19 @@ from pathlib import Path
 
 import numpy as np
 import torch
-from torch import nn
 from torch.utils.data import DataLoader
 from transformers import HfArgumentParser, Trainer, TrainerCallback, TrainingArguments, set_seed
 
+from iona.configuration_iona import IonaRetrievalConfig
 from iona.contrastive import (
     GroupBatchSampler,
-    IonaForContrastive,
     gradcache_step,
     group_separation_summary,
     retrieval_summary,
     subset_by_group,
 )
 from iona.data import group_ids, load_spectrum_datasets, peptide_key
-from iona.modeling_iona import IonaForPreTraining
+from iona.modeling_iona import IonaForPreTraining, IonaForRetrieval
 from iona.processing_iona import IonaProcessor
 from iona.reranking import AlignmentCollator
 from iona.wandb_distributed import init_wandb_run
@@ -64,17 +63,17 @@ class ContrastiveTrainingArguments(TrainingArguments):
 
 
 class SaveEncoderCallback(TrainerCallback):
-    """Save the inner HF encoder into every checkpoint, so intermediate checkpoints are loadable."""
+    """Save the encoder as an IonaForPreTraining into every checkpoint, for downstream loaders."""
 
-    def __init__(self, model: nn.Module, processor=None):
-        self.model = model
+    def __init__(self, encoder: IonaForPreTraining, processor=None):
+        self.encoder = encoder
         self.processor = processor
 
     def on_save(self, args, state, control, **kwargs):
         if not state.is_world_process_zero:
             return
         target = Path(args.output_dir) / f"checkpoint-{state.global_step}" / "encoder"
-        self.model.model.save_pretrained(str(target))
+        self.encoder.save_pretrained(str(target))
         if self.processor is not None:
             self.processor.save_pretrained(str(target))
 
@@ -161,7 +160,7 @@ class ContrastiveCollator(AlignmentCollator):
                  if k in ("mz", "log_intensity", "attention_mask")}
         keys = [peptide_key(f["peptide"], int(f.get("charge", 0))) for f in features]
         lookup = {key: index for index, key in enumerate(dict.fromkeys(keys))}
-        batch["group"] = torch.tensor([lookup[k] for k in keys], dtype=torch.long)
+        batch["group_ids"] = torch.tensor([lookup[k] for k in keys], dtype=torch.long)
         return batch
 
 
@@ -184,9 +183,14 @@ def main(argv: list[str] | None = None) -> int:
     encoder = IonaForPreTraining.from_pretrained(model_args.pretrained_path)
     reference = (IonaForPreTraining.from_pretrained(model_args.pretrained_path)
                  if model_args.kl_weight > 0 else None)
-    model = IonaForContrastive(encoder, reference, pooling=model_args.pooling,
-                                  temperature=model_args.temperature,
-                                  kl_weight=model_args.kl_weight)
+    # Shares the encoder's modules, so `encoder` always holds the fine-tuned weights.
+    # No projection head: the embedding is the pooled encoder output. SupCon stays
+    # per-rank; each rank's PK batch already holds its own positives.
+    config = IonaRetrievalConfig(encoder=encoder.config, projection_head=False,
+                                 pooling=model_args.pooling,
+                                 temperature=model_args.temperature,
+                                 kl_weight=model_args.kl_weight, gather_across_ranks=False)
+    model = IonaForRetrieval.from_pretraining(encoder, config, reference=reference)
 
     wandb_run = None
     if training_args.wandb_project:
@@ -212,7 +216,7 @@ def main(argv: list[str] | None = None) -> int:
                       zip(datasets["train"]["peptide"], datasets["train"]["charge"])]),
             return_inverse=True)[1]
         if training_args.process_index == 0:
-            print(f"[contrastive] " + " ".join(f"{k}={len(v):,}" for k, v in datasets.items())
+            print("[contrastive] " + " ".join(f"{k}={len(v):,}" for k, v in datasets.items())
                   + f" train_groups={len(set(groups.tolist())):,}", flush=True)
 
         collator = ContrastiveCollator(max_peptide_length=64,
@@ -223,7 +227,7 @@ def main(argv: list[str] | None = None) -> int:
             groups=groups, groups_per_batch=data_args.groups_per_batch,
             replicates=data_args.replicates,
             gradcache_chunk=data_args.gradcache_chunk)
-        trainer.add_callback(SaveEncoderCallback(model, processor))
+        trainer.add_callback(SaveEncoderCallback(encoder, processor))
         # Trainer.train() does not read args.resume_from_checkpoint on its own.
         trainer.train(resume_from_checkpoint=training_args.resume_from_checkpoint)
         if trainer.state.global_step == 0:
@@ -248,7 +252,7 @@ def main(argv: list[str] | None = None) -> int:
                 trainer.save_metrics("retrieval", retrieval)
 
         if trainer.is_world_process_zero():
-            model.model.save_pretrained(str(out_dir / "final"))
+            encoder.save_pretrained(str(out_dir / "final"))
             processor.save_pretrained(str(out_dir / "final"))
             print(f"[contrastive] saved to {out_dir / 'final'}", flush=True)
     finally:

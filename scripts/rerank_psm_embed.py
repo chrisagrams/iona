@@ -19,11 +19,10 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 import torch
 from huggingface_hub import hf_hub_download, snapshot_download
-from safetensors.torch import load_file
 
-from iona.modeling_iona import IonaForPreTraining
+from iona.modeling_iona import IonaForPreTraining, IonaPeptideEncoder
 from iona.processing_iona import IonaProcessor
-from iona.reranking import AlignmentCollator, PeptideCollator, PeptideEncoder, embed_spectrum
+from iona.reranking import AlignmentCollator, PeptideCollator, embed_spectrum
 
 KEEP = ("msfragger_hyperscore", "search_rank", "search_delta_score",
         "search_neglog10_evalue", "num_matched_ions", "tot_num_ions", "massdiff",
@@ -54,8 +53,7 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--student", required=True,
                     help="peptide embedder dir or Hub repo id")
     ap.add_argument("--cache", default="",
-                    help="optional teacher cache dir")
-    ap.add_argument("--pooling", default="mean+max")
+                    help="optional teacher cache dir, checked against the student's pooling")
     ap.add_argument("--out", required=True)
     ap.add_argument("--max-peaks", type=int, default=512)
     ap.add_argument("--max-spectra", type=int, default=0)
@@ -82,21 +80,17 @@ def main(argv: list[str] | None = None) -> int:
         return snapshot_download(path_or_repo)
 
     encoder_dir, student_dir = local(cli.encoder), local(cli.student)
-    state = load_file(str(Path(student_dir) / "model.safetensors"))
+    student = IonaPeptideEncoder.from_pretrained(student_dir).to(device).eval()
+    pooling = student.config.pooling
     if cli.cache:
-        manifest = dict(l.split(": ", 1) for l in
-                        (Path(cli.cache) / "MANIFEST.txt").read_text().splitlines() if ": " in l)
-        pooling, width = manifest["pooling"], int(manifest["embedding_size"])
-    else:
-        pooling = cli.pooling
-        width = int(state["sequence_encoder.projection.3.weight"].shape[0])
+        manifest = dict(line.split(": ", 1) for line in
+                        (Path(cli.cache) / "MANIFEST.txt").read_text().splitlines()
+                        if ": " in line)
+        if manifest["pooling"] != pooling:
+            ap.error(f"student pooling {pooling!r} does not match the cache's "
+                     f"{manifest['pooling']!r}")
     processor = IonaProcessor.from_pretrained(encoder_dir, max_peaks=cli.max_peaks)
     encoder = IonaForPreTraining.from_pretrained(encoder_dir).to(device).eval()
-    student = PeptideEncoder(embedding_size=width, hidden_size=256,
-                             num_layers=4, num_heads=8, pooling=pooling)
-    student.load_state_dict({k.removeprefix("sequence_encoder."): v for k, v in state.items()
-                             if k.startswith("sequence_encoder.")})
-    student = student.to(device).eval()
     collator = AlignmentCollator(pad_spectra_to=cli.max_peaks)
 
     # --- spectra -> unit embeddings ---------------------------------------------------
@@ -146,7 +140,7 @@ def main(argv: list[str] | None = None) -> int:
     with torch.no_grad():
         for s in range(0, len(peptides), 512):
             b = pc(peptides[s:s + 512], [min(max(z, 0), 7) for z in charges[s:s + 512]])
-            emb = student(**{k: v.to(device) for k, v in b.items()}).float().cpu()
+            emb = student(**{k: v.to(device) for k, v in b.items()}).embeddings.cpu()
             own = spec[torch.tensor(owner[s:s + 512])]
             cos.append((emb * own).sum(-1))
     out["cosine"] = torch.cat(cos).tolist()

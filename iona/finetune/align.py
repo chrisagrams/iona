@@ -15,18 +15,16 @@ import torch
 from datasets import load_from_disk
 from transformers import HfArgumentParser, Trainer, TrainingArguments, set_seed
 
+from iona.configuration_iona import IonaPeptideConfig
 from iona.data import load_spectrum_datasets, peptide_key
 from iona.finetune.denoise import subset_splits
-from iona.modeling_iona import IonaForPreTraining
+from iona.modeling_iona import IonaForPreTraining, IonaPeptideForAlignment, pooled_width
 from iona.processing_iona import IonaProcessor
 from iona.reranking import (
     AlignmentCollator,
-    PeptideEncoder,
-    SequenceAlignmentModel,
     attach_teacher_embeddings,
     cross_modal_metrics,
     group_separation_metrics,
-    pooled_width,
 )
 from iona.wandb_distributed import init_wandb_run
 
@@ -141,14 +139,14 @@ def main(argv: list[str] | None = None) -> int:
     else:
         teacher = IonaForPreTraining.from_pretrained(model_args.pretrained_path)
         embedding_size = pooled_width(teacher.config.hidden_size, model_args.pooling)
-    model = SequenceAlignmentModel(
-        PeptideEncoder(embedding_size=embedding_size,
-                       hidden_size=model_args.sequence_hidden_size,
-                       num_layers=model_args.sequence_num_layers,
-                       num_heads=model_args.sequence_num_heads,
-                       max_length=model_args.max_peptide_length,
-                       dropout=model_args.sequence_dropout,
-                       pooling=model_args.pooling))
+    model = IonaPeptideForAlignment(IonaPeptideConfig(
+        embedding_size=embedding_size,
+        hidden_size=model_args.sequence_hidden_size,
+        num_hidden_layers=model_args.sequence_num_layers,
+        num_attention_heads=model_args.sequence_num_heads,
+        max_position_embeddings=model_args.max_peptide_length,
+        dropout=model_args.sequence_dropout,
+        pooling=model_args.pooling))
     collator = AlignmentCollator(max_peptide_length=model_args.max_peptide_length)
     # `target` is the label, so evaluation reports eval_loss; no metrics need the predictions.
     training_args.label_names = ["target"]
@@ -164,8 +162,7 @@ def main(argv: list[str] | None = None) -> int:
         )
     try:
         if training_args.process_index == 0:
-            print(f"[align] embedding size {model.sequence_encoder.projection[-1].out_features}",
-                  flush=True)
+            print(f"[align] embedding size {model.config.embedding_size}", flush=True)
 
         if teacher is None:
             datasets = {name: load_from_disk(str(cached / name))

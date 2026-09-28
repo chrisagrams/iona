@@ -20,10 +20,11 @@ import numpy as np
 import torch
 from datasets import load_dataset, load_from_disk
 
-from iona.contrastive import IonaForContrastive, embed_dataset
+from iona.configuration_iona import IonaRetrievalConfig
+from iona.contrastive import embed_dataset
 from iona.data import build_grouped_split, corpus_peptides, group_ids
 from iona.finetune.contrastive import ContrastiveCollator
-from iona.modeling_iona import IonaForPreTraining
+from iona.modeling_iona import IonaForPreTraining, IonaForRetrieval
 from iona.processing_iona import IonaProcessor
 from iona.retrieval import retrieval_metrics
 
@@ -52,7 +53,8 @@ def prepare(cli) -> int:
 def score_model(path, pooling, rows, groups, experimental, collator, device,
                 batch_size) -> dict:
     encoder = IonaForPreTraining.from_pretrained(path)
-    model = IonaForContrastive(encoder, None, pooling=pooling, kl_weight=0).to(device)
+    config = IonaRetrievalConfig(encoder=encoder.config, projection_head=False, pooling=pooling)
+    model = IonaForRetrieval.from_pretraining(encoder, config).to(device)
     try:
         emb, _ = embed_dataset(model, rows, collator, device, max_rows=len(rows),
                                batch_size=batch_size)

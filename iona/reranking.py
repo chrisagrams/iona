@@ -1,8 +1,4 @@
-"""Map a peptide sequence into the spectrum encoder's embedding space.
-
-A peptide encoder is trained against a frozen spectrum encoder (the teacher), with L2 on
-unit vectors so the loss matches cosine retrieval.
-"""
+"""Data, teacher-target and metric utilities for peptide alignment (see IonaPeptideForAlignment)."""
 
 from __future__ import annotations
 
@@ -13,34 +9,7 @@ import torch
 import torch.nn.functional as F
 from torch import Tensor, nn
 
-from iona.fourier import FourierFeatures
-
-# 20 standard residues plus `n`, which this corpus uses as an N-terminal marker.
-RESIDUES = "ACDEFGHIKLMNPQRSTVWYn"
-PAD, UNK = 0, 1
-RESIDUE_TO_ID = {residue: index + 2 for index, residue in enumerate(RESIDUES)}
-VOCAB_SIZE = len(RESIDUE_TO_ID) + 2
-
-
-POOLING_MODES = ("mean", "mean+max")
-
-
-def pool_sequence(tokens: Tensor, mask: Tensor, mode: str = "mean+max") -> Tensor:
-    """Reduce variable-length token embeddings to one vector. Both towers must use the same mode."""
-    if mode not in POOLING_MODES:
-        raise ValueError(f"pooling must be one of {POOLING_MODES}, got {mode!r}")
-    mask = mask.bool().unsqueeze(-1)
-    mean = (tokens * mask).sum(1) / mask.sum(1).clamp_min(1)
-    if mode == "mean":
-        return mean
-    maximum = torch.nan_to_num(tokens.masked_fill(~mask, float("-inf")).max(1).values,
-                               neginf=0.0)
-    return torch.cat([mean, maximum], dim=-1)
-
-
-def pooled_width(hidden_size: int, mode: str) -> int:
-    """Width `pool_sequence` produces, so the projection can be sized without a forward."""
-    return 2 * hidden_size if mode == "mean+max" else hidden_size
+from iona.modeling_iona import RESIDUE_TO_ID, UNK, pool_sequence
 
 
 def parse_peptide(peptide: str) -> tuple[list[int], list[float]]:
@@ -106,85 +75,12 @@ class PeptideCollator:
         }
 
 
-class PeptideEncoder(nn.Module):
-    """Encode a modified peptide plus its charge into a fixed-size embedding."""
-
-    def __init__(
-        self,
-        embedding_size: int,
-        hidden_size: int = 256,
-        num_layers: int = 4,
-        num_heads: int = 8,
-        max_length: int = 64,
-        n_charges: int = 8,
-        mod_n_freqs: int = 16,
-        dropout: float = 0.1,
-        pooling: str = "mean+max",
-    ):
-        super().__init__()
-        self.pooling = pooling
-        self.residue = nn.Embedding(VOCAB_SIZE, hidden_size, padding_idx=PAD)
-        self.position = nn.Embedding(max_length, hidden_size)
-        self.charge = nn.Embedding(n_charges, hidden_size)
-        # 1e-2..1e3 spans a whole modification down to fine isotopic structure.
-        self.mod_features = FourierFeatures(mod_n_freqs, 1e-2, 1e3)
-        self.mod_projection = nn.Linear(self.mod_features.out_dim, hidden_size)
-
-        layer = nn.TransformerEncoderLayer(
-            d_model=hidden_size, nhead=num_heads, dim_feedforward=4 * hidden_size,
-            dropout=dropout, batch_first=True, norm_first=True, activation="gelu",
-        )
-        self.encoder = nn.TransformerEncoder(layer, num_layers=num_layers,
-                                             enable_nested_tensor=False)
-        self.norm = nn.LayerNorm(hidden_size)
-        width = pooled_width(hidden_size, pooling)
-        self.projection = nn.Sequential(
-            nn.Linear(width, width), nn.GELU(), nn.Dropout(dropout),
-            nn.Linear(width, embedding_size),
-        )
-
-    def forward(self, residues, modifications, sequence_mask, charge) -> Tensor:
-        length = residues.shape[1]
-        position = torch.arange(length, device=residues.device).clamp_max(
-            self.position.num_embeddings - 1
-        )
-        hidden = self.residue(residues) + self.position(position)[None]
-        # Only modified residues get a mass contribution.
-        modified = (modifications.abs() > 1e-6).unsqueeze(-1)
-        mod = self.mod_projection(self.mod_features(modifications).to(hidden.dtype))
-        hidden = hidden + mod * modified
-        hidden = hidden + self.charge(charge.clamp(0, self.charge.num_embeddings - 1))[:, None]
-        # Autocast off, activations cast to the weights' dtype: the fused eval fast path
-        # ignores autocast on XPU and fails on a dtype mismatch.
-        param_dtype = next(self.encoder.parameters()).dtype
-        with torch.autocast(device_type=hidden.device.type, enabled=False):
-            hidden = hidden.to(param_dtype)
-            hidden = self.norm(self.encoder(hidden, src_key_padding_mask=~sequence_mask.bool()))
-        pooled = pool_sequence(hidden, sequence_mask, self.pooling)
-        return F.normalize(self.projection(pooled).float(), dim=-1)
-
-
 @torch.no_grad()
 def embed_spectrum(spectrum_model, mz, log_intensity, attention_mask, pooling: str) -> Tensor:
     """Unit-length pooled embedding of a batch of spectra from a frozen IonaForPreTraining."""
     hidden = spectrum_model.iona(mz=mz, log_intensity=log_intensity,
                                     attention_mask=attention_mask).last_hidden_state
     return F.normalize(pool_sequence(hidden, attention_mask, pooling).float(), dim=-1)
-
-
-class SequenceAlignmentModel(nn.Module):
-    """Peptide student trained onto precomputed teacher targets with L2 on unit vectors."""
-
-    def __init__(self, sequence_encoder: PeptideEncoder):
-        super().__init__()
-        self.sequence_encoder = sequence_encoder
-
-    def forward(self, residues, modifications, sequence_mask, charge, target):
-        target = F.normalize(target.float(), dim=-1)
-        predicted = self.sequence_encoder(residues, modifications, sequence_mask, charge)
-        # Mean squared L2; equals 2 - 2cos on unit vectors.
-        loss = ((predicted - target) ** 2).sum(dim=-1).mean()
-        return {"loss": loss, "embeddings": predicted, "target": target}
 
 
 @torch.no_grad()
