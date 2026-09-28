@@ -32,3 +32,10 @@ token, and attention is biased by the m/z difference between every pair of peaks
 | Model | Weights |
 |---|---|
 | iona-peptide-embedder-400m | <https://anonymous-hf.com/a/4ilud8sqip5n/> |
+## Releasing
+
+Releases are automated with [release-please](https://github.com/googleapis/release-please). PRs are
+squash-merged, and their titles must follow [Conventional Commits](https://www.conventionalcommits.org/)
+(`feat:`, `fix:`, `docs:`, ...). Pushes to `main` keep a release PR up to date with the next version and
+`CHANGELOG.md`. Merging that PR tags the release, creates a GitHub release and publishes the package to
+PyPI.
