@@ -96,6 +96,8 @@ IDs carry a track suffix: -C contrastive (spectrum encoder), -A alignment (pepti
 | 2026-09-28 | Stage 0 prep | Green light to prepare Stage 0 (preprocessing + both arms + runbook); submit after maintenance | user |
 | 2026-09-28 | K110-S | Checkpoint inventory waits until after maintenance | user |
 | 2026-09-28 | K66-C write-up | Write up 100m/200m now (done: OBSERVATIONS) | user |
+| 2026-09-28 | K114-P | Run a profiling job to get per-block Pairformer speed numbers (standalone pbs/diag script; prepared now, submitted after maintenance) | user |
+| 2026-09-28 | K119-P | Run the FlexAttention support test on XPU (job-only Intel Triton path; prepared now, submitted after maintenance) | user |
 
 ## Settings chosen WITHOUT explicit approval (before this log existed)
 

@@ -124,13 +124,6 @@ K118; XPU support in this PyTorch uncertain) ~1-2 days; (2) torch.compile of the
 several weeks. Proposal: after K115 (bf16 check) and K117 (copy cost / size sweep), try K118(a) then (1)
 and (2), one short debug job each; (3) only if they fall short.
 
-### K121-P: per-block speed profile in Stage 0 (open, 2026-09-28)
-Context: we have no per-block forward/backward timing of OUR Pairformer on XPU (only the source's
-0.569 steps/s and "triangle mult. = 87% of step time", and our per-module triangle-attention benchmark).
-K114 (single blocks per pair update) must be calibrated on it. Proposal: in Stage 0, turn on an opt-in
-profiler for a few steps (being prepared, off by default) -> time per block: embed, write-back, triangle
-mult out/in, pair transition, bias readout, single attention, single transition.
-
 ### C26-C: what is needed for the spectrum-only database search card (open)
 (1) Which intensity predictor: the user's "predict all intensities from m/z" model (does one exist yet?
 is it Chris's msdelta-intensity work?), our pretrained model with every peak masked, or Prosit as a
@@ -141,7 +134,7 @@ MSFragger's settings (precursor tolerance, enzyme, modifications) for the compar
 Context: Stage 0 prep (branch stage0-prep: 67ae52b, cde0905) adds an opt-in per-block timer
 (`--block_timing_steps N`, off by default; msdelta/utils/block_timing.py) that is wired into
 msdelta/pretraining/train.py and training_args.py -- master's pretraining code, which the user asked not
-to change. Tests show identical loss/gradients when on and no effect when off. Options: (a) merge as is;
+to change. Tests show identical loss/gradients when on and no effect when off. Update: with the standalone K114 profiler (pbs/diag, no train.py change) the hook is not needed; proposal: (b). Options: (a) merge as is;
 (b) merge everything except the train.py wiring and profile Stage 0 another way; (c) keep the branch
 unmerged until decided. Stage 0 facts: 72% of spectra exceed 150 peaks and are dropped (median 207);
 ~280k train / 70k validation remain; transformer 49.81M, Pairformer 46.33M params; runbook
