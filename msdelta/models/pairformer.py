@@ -84,6 +84,7 @@ import math
 
 import torch
 import torch.nn.functional as F
+import torch.utils.checkpoint
 from torch import Tensor, nn
 
 from .configuration_msdelta import MSDeltaConfig
@@ -257,7 +258,18 @@ class TriangleMultiplication(nn.Module):
 class TriangleAttention(nn.Module):
     """Triangle self-attention around the starting or ending node (AF3 Alg. 14/15).
 
-    Chunked over the query row to bound the ``(B, chunk, N, N, heads)`` logits.
+    Chunked over the query row to bound the ``(B, chunk, N, N, heads)`` logits. Two
+    training-memory options (K102), both numerically equivalent to the default:
+
+    - ``pair_tri_attn_checkpoint_chunks``: each chunk runs under
+      ``torch.utils.checkpoint`` (non-reentrant) while grad is enabled, so autograd keeps
+      only the chunk's inputs (views of q/k/v plus the shared bias) instead of every
+      chunk's ``(B, chunk, N, N, H)`` attention weights; backward recomputes one chunk at a
+      time.
+    - ``pair_tri_attn_impl="sdpa"``: each chunk is one
+      ``F.scaled_dot_product_attention`` call with the triangle bias plus the padded-key
+      mask as its float ``attn_mask`` (broadcast over the query row), so a fused /
+      memory-efficient backend can avoid materialising the weights.
     """
 
     def __init__(self, config: MSDeltaConfig, starting: bool):
@@ -267,6 +279,9 @@ class TriangleAttention(nn.Module):
         self.h = config.pair_tri_attn_heads
         self.d = config.pair_tri_attn_dim
         self.chunk = config.pair_tri_attn_chunk
+        self.impl = getattr(config, "pair_tri_attn_impl", "naive")
+        self.checkpoint_chunks = getattr(config, "pair_tri_attn_checkpoint_chunks", False)
+        self.sdpa_flatten = True  # see _chunk_sdpa; not a config field (benchmarking only)
         inner = self.h * self.d
         self.norm = nn.LayerNorm(c_z, eps=config.layer_norm_eps)
         self.q = nn.Linear(c_z, inner, bias=False)
@@ -275,6 +290,31 @@ class TriangleAttention(nn.Module):
         self.bias = nn.Linear(c_z, self.h, bias=False)
         self.gate = nn.Linear(c_z, inner)
         self.out = nn.Linear(inner, c_z)
+
+    def _chunk_naive(self, q: Tensor, k: Tensor, v: Tensor, bias: Tensor,
+                     key_mask: Tensor) -> Tensor:
+        """q/k/v ``(B, c, N, H, d)``; bias ``(B, N, N, H)``; key_mask ``(B, 1, 1, N, 1)``."""
+        scale = 1.0 / math.sqrt(self.d)
+        logits = torch.einsum("bcjhd,bckhd->bcjkh", q, k) * scale
+        logits = logits.float() + bias[:, None].float() + key_mask
+        attn = torch.softmax(logits, dim=3).to(v.dtype)
+        return torch.einsum("bcjkh,bckhd->bcjhd", attn, v)
+
+    def _chunk_sdpa(self, q: Tensor, k: Tensor, v: Tensor, attn_mask: Tensor) -> Tensor:
+        """q/k/v ``(B, c, N, H, d)``; attn_mask ``(B, 1, H, N, N)`` (broadcast over c).
+
+        ``sdpa_flatten`` (default) folds ``(B, c)`` into one batch dim so the call is the 4-D
+        form fused backends expect; the mask is then expanded to ``(B * c, H, N, N)`` (one
+        chunk's worth, in the compute dtype). With it off the 5-D tensors go in as is and the
+        mask broadcasts without a copy (backends may then fall back to the math path).
+        """
+        b, c, n = q.shape[:3]
+        q, k, v = (t.permute(0, 1, 3, 2, 4) for t in (q, k, v))  # (B, c, H, N, d)
+        if self.sdpa_flatten:
+            q, k, v = (t.reshape(b * c, self.h, n, self.d) for t in (q, k, v))
+            attn_mask = attn_mask.expand(b, c, self.h, n, n).reshape(b * c, self.h, n, n)
+        out = F.scaled_dot_product_attention(q, k, v, attn_mask=attn_mask)
+        return out.view(b, c, self.h, n, self.d).permute(0, 1, 3, 2, 4)  # (B, c, N, H, d)
 
     def forward(self, z: Tensor, mask: Tensor) -> Tensor:
         # Ending-node attention is starting-node attention on the transposed pair tensor.
@@ -286,17 +326,28 @@ class TriangleAttention(nn.Module):
         k = self.k(z).view(b, n, n, self.h, self.d)
         v = self.v(z).view(b, n, n, self.h, self.d)
         bias = self.bias(z)  # (B, N(j), N(k), H), broadcast over the query row i.
-        key_mask = torch.zeros(mask.shape, dtype=torch.float32, device=z.device)
-        key_mask = key_mask.masked_fill(~mask, torch.finfo(torch.float32).min)
-        key_mask = key_mask[:, None, None, :, None]
-        scale = 1.0 / math.sqrt(self.d)
+        if self.impl == "sdpa":
+            # Float mask (B, 1, H, N(j), N(k)) in the compute dtype: the bias with padded keys
+            # set to that dtype's most negative value (masked_fill rather than +, so the sum
+            # cannot overflow to -inf and a fully padded row stays finite, as in the naive path).
+            attn_mask = bias.to(q.dtype).permute(0, 3, 1, 2)[:, None]
+            attn_mask = attn_mask.masked_fill(~mask[:, None, None, None, :],
+                                              torch.finfo(q.dtype).min)
+            fn, extra = self._chunk_sdpa, (attn_mask,)
+        else:
+            key_mask = torch.zeros(mask.shape, dtype=torch.float32, device=z.device)
+            key_mask = key_mask.masked_fill(~mask, torch.finfo(torch.float32).min)
+            key_mask = key_mask[:, None, None, :, None]
+            fn, extra = self._chunk_naive, (bias, key_mask)
+        use_ckpt = self.checkpoint_chunks and torch.is_grad_enabled()
         out = torch.empty_like(q)
         for s in range(0, n, self.chunk):
             e = min(s + self.chunk, n)
-            logits = torch.einsum("bcjhd,bckhd->bcjkh", q[:, s:e], k[:, s:e]) * scale
-            logits = logits.float() + bias[:, None].float() + key_mask
-            attn = torch.softmax(logits, dim=3).to(v.dtype)
-            out[:, s:e] = torch.einsum("bcjkh,bckhd->bcjhd", attn, v[:, s:e])
+            args = (q[:, s:e], k[:, s:e], v[:, s:e], *extra)
+            if use_ckpt:
+                out[:, s:e] = torch.utils.checkpoint.checkpoint(fn, *args, use_reentrant=False)
+            else:
+                out[:, s:e] = fn(*args)
         out = torch.sigmoid(self.gate(z)) * out.reshape(b, n, n, -1)
         out = self.out(out)
         return out if self.starting else out.transpose(1, 2)
