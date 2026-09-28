@@ -49,6 +49,10 @@ DONE RECENTLY
 
 NEXT
 ──────────────────────────────────────────────────────────────────────────
+  [ ] K114 profiler + K119 FlexAttention test: ready on branch k114-k119-prep (pushed; worktree
+      ~/code/msdelta-prof; runbook notes/K114_K119_runbook.md there). After maintenance, from that worktree:
+        qsub -q debug -l select=1 -l walltime=00:45:00 -A UIC-HPC -l filesystems=home:flare -v REPO_DIR=$PWD pbs/diag/pairformer_profile.pbs
+        qsub -q debug -l select=1 -l walltime=01:00:00 -A UIC-HPC -l filesystems=home:flare -v REPO_DIR=$PWD pbs/diag/flexattn_test.pbs
   [ ] K66-C 400m / 25m -> scoring -> full comparison + proposal to the user (winner per scale)
   [ ] Stage 0 (Pairformer vs transformer sanity run): prepared on branch stage0-prep (runbook
       notes/P1_stage0_runbook.md there; worktree ~/code/msdelta-stage0); merge pending K122-S; submit after maintenance
