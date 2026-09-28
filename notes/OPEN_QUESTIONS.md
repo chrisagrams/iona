@@ -42,14 +42,6 @@ still uses the plain metric; proposal: leave it (it is a health check, not the t
 
 ## Infrastructure / cross-cutting
 
-### K90-S: how finished branches get merged (parked 2026-09-28)
-Context: work is done in separate git worktrees/branches so it cannot disturb running jobs or other
-work. Finished, unmerged branches: `a-filtered-eval` (filtered alignment eval), `p1-pairformer`
-(Pairformer port), `c25-library-search` (library-search evaluation); `i2-dag` (job scheduler) is
-being merged under K84-I.
-Question: merge each into `dev_finetune_02` as soon as you approve its content, or review each
-branch yourself first?
-
 ### K63-I: your review of the job-DAG scheduler (open; reminder requested)
 Context: built on branch `i2-dag` (tested only on a simulated batch system). Spec sheet:
 `notes/DAG_SPEC.md`. First live trial approved (K84-I). You said you would read it and say whether
@@ -80,17 +72,24 @@ Context: alternative to K104-S: override `from_pretrained` in the base model cla
 protection, but it changes behaviour globally (outside code expecting HF's lenient loading would now
 fail). The agent used an explicit helper because that is what was asked.
 
-### K96-S: pretraining input normalisation may leak which masked peak is the base peak (parked)
-Context: in `msdelta/models/processing_msdelta.py` the model's INPUT intensity feature is
-log1p(I) divided by the maximum of log1p(I) over ALL peaks, computed before masking. The TARGET is
-a proper distribution: I / sum(I), renormalised over the masked peaks, and the loss is KL between
-it and a softmax over the masked peaks. If the tallest peak is masked, no visible peak has input
-value 1.0, which hints that a masked peak is the tallest. Affects every pretrained model (both
-architectures); comparisons stay fair, absolute pretraining scores may be inflated. Not yet
-measured.
-Options: (a) record as a caveat; (b) measure how often/how much it matters; (c) normalise over
-visible peaks for NEW pretraining runs only (master's pipeline untouched).
-
+### K96-S: the pretraining loss, and the input-normalisation leak (parked; user wants to explore other losses)
+The pretraining task (msdelta/models/processing_msdelta.py + modeling_msdelta.py):
+- Per spectrum, a random subset of peaks is masked: round(mask_ratio x peaks), at least 1
+  (mask_ratio 0.50 in the production configs, e.g. configs/msdelta-base-50m; code default 0.15).
+- Input per peak: its m/z (always visible) and an intensity feature x = log(1+I) / max over ALL peaks
+  of log(1+I) (in [0,1]). For masked peaks the intensity token is replaced by a learned mask token;
+  their m/z stays visible.
+- Target: the intensity distribution p = I / sum(I) over all peaks, restricted to the masked peaks
+  and renormalised to sum to 1 over them.
+- Prediction: one logit per peak from the intensity head; softmax over the MASKED peaks only -> q.
+- Loss: KL(p || q) = sum over masked peaks of p log(p / q), averaged over the batch. So the model
+  learns the RELATIVE intensities of the masked peaks (how the missing intensity is shared among
+  them), not their absolute values.
+The leak: the input feature's max is taken over all peaks BEFORE masking; if the tallest peak is
+masked, no visible peak has x = 1.0, which hints that a masked peak is the tallest.
+Options for the leak: (a) caveat; (b) measure it; (c) normalise over visible peaks for new runs only.
+Other losses to explore later (user): e.g. regression on log intensity per masked peak, KL on the
+full spectrum with visible peaks given, ranking losses, or predicting absolute intensity share.
 ---
 
 ## Contrastive (spectrum encoder)

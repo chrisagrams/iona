@@ -70,6 +70,7 @@ IDs carry a track suffix: -C contrastive (spectrum encoder), -A alignment (pepti
 | 2026-09-28 | K97-C | Library search: drop library/MAP@R; report average Hit@1, Hit@5 (and MRR) plus statistics of R = rank of the true library entry among the whole library (mean/median/p90/p99/max, fraction with R <= 1/5/10/100; filter-excluded counted separately) | user |
 | 2026-09-28 | K98-C | Ties count as misses (conservative) | user |
 | 2026-09-28 | K99-C | Library search only on datasets that have consensus spectra; queries without a consensus excluded (counted); consensus-only groups stay as distractors | user |
+| 2026-09-28 | K90-S | Don't require merging to run code: jobs should take their code snapshot from a given git commit/branch (being built on branch k90-code-ref, with one tiny live check); tell the user any reason not to | user |
 
 ## Settings chosen WITHOUT explicit approval (before this log existed)
 
