@@ -30,6 +30,8 @@ from pathlib import Path
 import numpy as np
 import torch
 
+from msdelta.utils.provenance import code_provenance
+
 
 def prepare(cli) -> int:
     from datasets import load_dataset
@@ -192,7 +194,8 @@ def score(cli) -> int:
         metrics = score_model(path, pooling, rows, groups, experimental, collator,
                               device, cli.batch_size, filter_inputs=filter_inputs)
         target.write_text(json.dumps({"name": name, "path": path, "pooling": pooling,
-                                      "data": cli.data, "metrics": metrics}, indent=1))
+                                      "data": cli.data, "metrics": metrics,
+                                      "code": code_provenance()}, indent=1))
         print(f"  {name}: all MAP@R {metrics.get('all/MAP@R', float('nan')):.4f}  "
               f"experimental MAP@R {metrics.get('experimental/MAP@R', float('nan')):.4f}  "
               + (f"20ppm {metrics.get('experimental/20ppm/full/MAP@R', float('nan')):.4f}  "

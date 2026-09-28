@@ -39,6 +39,20 @@ export HF_HOME=${HF_HOME:-/lus/flare/projects/${PROJECT:-UIC-HPC}/$USER/msdelta/
 export HF_HUB_OFFLINE=${HF_HUB_OFFLINE:-1}
 export HF_DATASETS_OFFLINE=${HF_DATASETS_OFFLINE:-1}
 export WANDB_MODE=disabled
+# Code from a commit (pbs/qsub_ref, MSDELTA_CODE_REF): run the commit's tests against the
+# commit's code, from a git-archive snapshot. Without a ref this script runs the checkout
+# directly, as it always has (no snapshot).
+TESTS_ROOT=
+if [[ -n ${MSDELTA_CODE_REF:-} ]]; then
+    # SCRATCH_ROOT here means the TEST scratch (below); the snapshot goes where every other
+    # job's does.
+    _tests_scratch=${SCRATCH_ROOT:-}
+    SCRATCH_ROOT=/lus/flare/projects/${PROJECT:-UIC-HPC}/$USER/msdelta
+    source "$REPO_DIR/pbs/lib/code_snapshot.sh"
+    SCRATCH_ROOT=$_tests_scratch
+    [[ -n $SCRATCH_ROOT ]] || unset SCRATCH_ROOT
+    TESTS_ROOT=$MSDELTA_CODE_DIR/
+fi
 
 SUITE=${SUITE:-all}
 SCRATCH_ROOT=${SCRATCH_ROOT:-/lus/flare/projects/${PROJECT:-UIC-HPC}/$USER/msdelta/test-scratch}
@@ -46,17 +60,19 @@ BASETEMP=$SCRATCH_ROOT/${SUITE}-${PBS_JOBID:-local-$$}
 mkdir -p "$SCRATCH_ROOT"
 
 echo "=== msdelta $SUITE tests: $(date -Is) repo=$REPO_DIR commit=$(git -C "$REPO_DIR" rev-parse --short HEAD) ==="
+[[ -z ${MSDELTA_CODE_REF:-} ]] || echo "    code: commit ${MSDELTA_CODE_REF:0:12} (git archive in $MSDELTA_CODE_DIR), not the checkout"
 "$VENV_DIR/bin/python" -c "import torch; print(f'  torch={torch.__version__} xpus={torch.xpu.device_count()}')"
 
 if [[ $SUITE == regenerate-golden ]]; then
+    [[ -z ${MSDELTA_CODE_REF:-} ]] || { echo "regenerate-golden writes into the tree: not under a ref" >&2; exit 2; }
     "$VENV_DIR/bin/python" -m tests.golden.regenerate --xpu && rc=0 || rc=$?
     echo "=== rc=$rc $(date -Is) ==="
     exit $rc
 fi
 
 paths=(); flags=()
-[[ $SUITE == e2e || $SUITE == all ]] && { paths+=(tests/e2e); flags+=(--e2e); }
-[[ $SUITE == golden || $SUITE == all ]] && { paths+=(tests/golden); flags+=(--golden); }
+[[ $SUITE == e2e || $SUITE == all ]] && { paths+=("${TESTS_ROOT}tests/e2e"); flags+=(--e2e); }
+[[ $SUITE == golden || $SUITE == all ]] && { paths+=("${TESTS_ROOT}tests/golden"); flags+=(--golden); }
 
 "$VENV_DIR/bin/python" -m pytest "${paths[@]}" "${flags[@]}" -p no:cacheprovider -p no:randomly \
     --basetemp="$BASETEMP" --durations=0 -rA && rc=0 || rc=$?

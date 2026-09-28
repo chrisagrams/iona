@@ -40,6 +40,8 @@ export PYTHONPATH=$REPO_DIR${PYTHONPATH:+:$PYTHONPATH}
 # Run from a frozen copy of the code (pbs/lib/code_snapshot.sh): branch switches and
 # edits in the checkout cannot affect this job once it has started.
 source "$REPO_DIR/pbs/lib/code_snapshot.sh"
+# Under a ref (pbs/qsub_ref, MSDELTA_CODE_REF) repo-relative reads below are the commit's.
+[[ -z ${MSDELTA_CODE_REF:-} ]] || export RUNS_FILE=$(msdelta_code_path "${RUNS_FILE#"$REPO_DIR"/}")
 export HF_HOME=${HF_HOME:-$SCRATCH_ROOT/huggingface} HF_HUB_OFFLINE=0 HF_DATASETS_OFFLINE=0
 P=http://proxy.alcf.anl.gov:3128
 export HTTP_PROXY=$P HTTPS_PROXY=$P http_proxy=$P https_proxy=$P
@@ -48,7 +50,7 @@ export NO_PROXY="$no_proxy"
 export NNODES=$(sort -u "$PBS_NODEFILE" | wc -l)
 
 echo "=== $(date -Is) tests"
-"$PY" -m pytest -q -p no:cacheprovider tests/test_rerank_psm.py || { echo "tests failed" >&2; exit 1; }
+"$PY" -m pytest -q -p no:cacheprovider "${MSDELTA_REF_PREFIX}tests/test_rerank_psm.py" || { echo "tests failed" >&2; exit 1; }
 echo "=== $(date -Is) $(grep -vc '^#' "$RUNS_FILE") runs on $NNODES nodes x 12 tiles; $(ls "$BASE/rows" | wc -l) already embedded"
-mpiexec --envall --pmi=pmix -n "$NNODES" --ppn 1 --cpu-bind none bash "$REPO_DIR/pbs/rerank_psm_worker.sh"
+mpiexec --envall --pmi=pmix -n "$NNODES" --ppn 1 --cpu-bind none bash "${MSDELTA_REF_PREFIX:-$REPO_DIR/}pbs/rerank_psm_worker.sh"
 echo "=== $(date -Is) rows $(ls "$BASE/rows"/*.parquet | wc -l), handfeat $(ls "$BASE/handfeat"/*.parquet | wc -l)"

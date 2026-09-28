@@ -36,10 +36,11 @@ export PYTHONPATH=$REPO_DIR${PYTHONPATH:+:$PYTHONPATH}
 # Run from a frozen copy of the code (pbs/lib/code_snapshot.sh): branch switches and
 # edits in the checkout cannot affect this job once it has started.
 source "$REPO_DIR/pbs/lib/code_snapshot.sh"
+# Under a ref (pbs/qsub_ref, MSDELTA_CODE_REF) repo-relative reads below are the commit's.
 export HF_HOME=${HF_HOME:-$SCRATCH_ROOT/huggingface}
 export HF_HUB_OFFLINE=${HF_HUB_OFFLINE:-1}
 export HF_DATASETS_OFFLINE=${HF_DATASETS_OFFLINE:-1}
 
 # Name the output for what it holds. A filtered run must not overwrite a full-job
 # file, and two halves of one split must not overwrite each other.
-"$VENV_DIR/bin/python" $REPO_DIR/sweeps/ckpt_vs_final.py
+"$VENV_DIR/bin/python" "${MSDELTA_REF_PREFIX:-$REPO_DIR/}sweeps/ckpt_vs_final.py"

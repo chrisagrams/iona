@@ -107,6 +107,9 @@ export PYTHONPATH=$REPO_DIR${PYTHONPATH:+:$PYTHONPATH}
 # Run from a frozen copy of the code (pbs/lib/code_snapshot.sh): branch switches and
 # edits in the checkout cannot affect this job once it has started.
 source "$REPO_DIR/pbs/lib/code_snapshot.sh"
+# Under a ref (pbs/qsub_ref, MSDELTA_CODE_REF) a committed ARGS_FILE is the commit's; one
+# the commit does not have is read from the path given (ad hoc).
+[[ -z ${MSDELTA_CODE_REF:-} ]] || ARGS_FILE=$(msdelta_code_path "${ARGS_FILE#"$REPO_DIR"/}")
 # Probes: dtype, index-range and finiteness checks, and -- the useful part --
 # a device synchronise at each stage, so an asynchronous GPU fault is reported
 # where it was caused rather than dozens of steps later. Set MSDELTA_PROBES=1 on

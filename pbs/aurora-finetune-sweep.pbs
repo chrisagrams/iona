@@ -31,6 +31,74 @@
 set -uo pipefail
 REPO_DIR=${REPO_DIR:-${PBS_O_WORKDIR:-$PWD}}
 cd "$REPO_DIR"
+# Code from a commit (pbs/qsub_ref, MSDELTA_CODE_REF): take the snapshot FIRST, so the grid,
+# the arms file and the staleness check below are the commit's, not the checkout's. A grid
+# or arms file the commit does not have is read from the checkout path given (ad hoc).
+# Without a ref the snapshot is taken further down, as before.
+#
+# RESUME_JOB=<job> continues that job, so by default it runs THAT job's configs and code:
+#   configs  $SCRATCH_ROOT/runs/.configs-<job>, never SWEEP_ROOT as it is now (no grid
+#            check either: those configs were checked when they were launched);
+#   code     the commit in $SCRATCH_ROOT/code-snapshots/<job>/SNAPSHOT.txt, rebuilt with
+#            git archive -- or, when that snapshot was taken from a DIRTY working tree (or
+#            its commit is gone), that snapshot directory itself, reused as is.
+# RESUME_CONFIGS=current / RESUME_CODE=current take what this job was submitted with
+# instead (the old behaviour), e.g. for a job from before snapshots existed.
+RESUME_CONFIGS_DIR=
+if [[ -n ${RESUME_JOB:-} ]]; then
+    SCRATCH_ROOT=${SCRATCH_ROOT:-/lus/flare/projects/${PROJECT:-UIC-HPC}/$USER/msdelta}
+    if [[ ${RESUME_CONFIGS:-original} != current ]]; then
+        RESUME_CONFIGS_DIR=$SCRATCH_ROOT/runs/.configs-$RESUME_JOB
+        [[ -d $RESUME_CONFIGS_DIR ]] || {
+            echo "RESUME_JOB=$RESUME_JOB: its config snapshot $RESUME_CONFIGS_DIR is missing." >&2
+            echo "  RESUME_CONFIGS=current resumes with SWEEP_ROOT as it is now instead." >&2
+            exit 2; }
+        echo "=== resume $RESUME_JOB: configs from $RESUME_CONFIGS_DIR"
+    fi
+    if [[ ${RESUME_CODE:-original} != current ]]; then
+        _old=$SCRATCH_ROOT/code-snapshots/$RESUME_JOB
+        [[ -f $_old/SNAPSHOT.txt ]] || {
+            echo "RESUME_JOB=$RESUME_JOB: no code snapshot at $_old, so its code is unknown." >&2
+            echo "  RESUME_CODE=current resumes with the code this job was submitted with." >&2
+            exit 2; }
+        _old_commit=$(sed -n 's/^commit: *//p' "$_old/SNAPSHOT.txt" | head -1)
+        _old_name=$(sed -n 's/^branch: *//p' "$_old/SNAPSHOT.txt" | head -1)
+        _old_dirty=
+        if grep -q '^mode: *git-archive' "$_old/SNAPSHOT.txt"; then
+            _old_dirty=
+        elif grep -q '^dirty: *yes' "$_old/SNAPSHOT.txt" \
+             || sed -n '/^uncommitted changes/,$p' "$_old/SNAPSHOT.txt" | tail -n +2 \
+                | grep -q '[^[:space:]]'; then
+            _old_dirty=1
+        fi
+        if [[ -n ${MSDELTA_CODE_REF:-} && $_old_commit != "$MSDELTA_CODE_REF"* ]]; then
+            echo "RESUME_JOB=$RESUME_JOB ran $_old_commit, but this job was submitted with" >&2
+            echo "  MSDELTA_CODE_REF=$MSDELTA_CODE_REF. RESUME_CODE=current to run that instead." >&2
+            exit 2
+        fi
+        if [[ -z $_old_dirty && -n $_old_commit ]] \
+           && git -C "$REPO_DIR" rev-parse --verify --quiet "${_old_commit}^{commit}" >/dev/null; then
+            export MSDELTA_CODE_REF=$_old_commit MSDELTA_CODE_REF_NAME=${_old_name:-$_old_commit}
+            echo "=== resume $RESUME_JOB: code from its commit ${_old_commit:0:12} (git archive)"
+        else
+            unset MSDELTA_CODE_REF
+            export MSDELTA_CODE_REUSE=$_old
+            if [[ -n $_old_dirty ]]; then
+                echo "!!! resume $RESUME_JOB: its snapshot was taken from a DIRTY working tree" \
+                     "(commit ${_old_commit:0:12} + uncommitted changes, see $_old/SNAPSHOT.txt);" \
+                     "reusing that snapshot directory as is, not the commit" | tee /dev/stderr
+            else
+                echo "!!! resume $RESUME_JOB: commit ${_old_commit:-?} is not in $REPO_DIR;" \
+                     "reusing its snapshot directory $_old as is" | tee /dev/stderr
+            fi
+        fi
+        unset _old _old_commit _old_name _old_dirty
+    fi
+fi
+if [[ -n ${MSDELTA_CODE_REF:-} || -n ${MSDELTA_CODE_REUSE:-} ]]; then
+    SCRATCH_ROOT=${SCRATCH_ROOT:-/lus/flare/projects/${PROJECT:-UIC-HPC}/$USER/msdelta}
+    source "$REPO_DIR/pbs/lib/code_snapshot.sh"
+fi
 # ARMS as a comma-separated list only works for small sweeps: `qsub -v` rejects a long
 # environment ("cannot send environment with the job"), and 72 arm names exceed it. So the
 # default is every generated arm, and a subset goes through a file instead of the job
@@ -41,11 +109,21 @@ cd "$REPO_DIR"
 # to fork the file per objective.
 SWEEP_ROOT=${SWEEP_ROOT:-configs/sweep-denoise}
 SWEEP_MODULE=${SWEEP_MODULE:-msdelta.finetune_denoise}
+# Where the grid is READ from: SWEEP_ROOT itself, or the commit's copy of it under a ref.
+# SWEEP_ROOT stays the name (GRID_CHECK key, messages).
+SWEEP_DIR=$SWEEP_ROOT
+[[ -z ${MSDELTA_CODE_REF:-} ]] || SWEEP_DIR=$(msdelta_code_path "$SWEEP_ROOT")
+[[ -z $RESUME_CONFIGS_DIR ]] || SWEEP_DIR=$RESUME_CONFIGS_DIR
 ARMS=${ARMS:-}
 if [[ -n ${ARMS_FILE:-} ]]; then
+    [[ -z ${MSDELTA_CODE_REF:-} ]] || ARMS_FILE=$(msdelta_code_path "$ARMS_FILE")
     ARMS=$(tr -s ' \n' ',' < "$ARMS_FILE" | sed 's/,$//')
+elif [[ -n $RESUME_CONFIGS_DIR && -z $ARMS ]]; then
+    # every arm the original job had (its config snapshot also holds CODE_SNAPSHOT.txt)
+    ARMS=$(find "$RESUME_CONFIGS_DIR" -mindepth 1 -maxdepth 1 -type d ! -name '.*' -printf '%f\n' \
+           | sort | paste -sd,)
 elif [[ -z $ARMS ]]; then
-    ARMS=$(ls "$SWEEP_ROOT" | sort | paste -sd,)
+    ARMS=$(ls "$SWEEP_DIR" | sort | paste -sd,)
 fi
 [[ -n $ARMS ]] || { echo "no arms: generate them with sweeps/make_denoise_grid.py" >&2; exit 2; }
 VENV_DIR=${VENV_DIR:-$REPO_DIR/.venv}
@@ -79,7 +157,7 @@ JOB_ID=${PBS_JOBID:-local}; JOB_ID=${JOB_ID%%.*}
 
 IFS=',' read -r -a ARM_LIST <<< "$ARMS"
 for arm in "${ARM_LIST[@]}"; do
-    [[ -f $SWEEP_ROOT/$arm/training.args ]] \
+    [[ -f $SWEEP_DIR/$arm/training.args ]] \
         || { echo "unknown arm: $arm" >&2; exit 2; }
 done
 
@@ -183,7 +261,9 @@ declare -A GRID_CHECK=(
     [configs/sweep-c20]="sweeps/make_c20.py --check"
     [configs/sweep-hp-scale]="sweeps/make_hp_scale.py --check"
 )
-if [[ -z ${SKIP_GRID_CHECK:-} ]]; then
+if [[ -n $RESUME_CONFIGS_DIR ]]; then
+    echo "  grid check skipped: resuming with $RESUME_JOB's own configs, checked at its launch"
+elif [[ -z ${SKIP_GRID_CHECK:-} ]]; then
     check=${GRID_CHECK[${SWEEP_ROOT%/}]:-}
     if [[ -z $check ]]; then
         echo "no staleness check registered for $SWEEP_ROOT." >&2
@@ -191,13 +271,25 @@ if [[ -z ${SKIP_GRID_CHECK:-} ]]; then
         echo "  to accept arms that nothing has verified against their template." >&2
         exit 2
     fi
-    "$VENV_DIR/bin/python" $check \
-        || { echo "sweep arms are stale against their template" >&2; exit 2; }
+    if [[ -z ${MSDELTA_CODE_REF:-} ]]; then
+        "$VENV_DIR/bin/python" $check \
+            || { echo "sweep arms are stale against their template" >&2; exit 2; }
+    else
+        # The commit's generator against the commit's grid and templates: run it inside the
+        # snapshot (generators find configs/ relative to their own file, verify_subset.py
+        # relative to the cwd). A grid the commit does not have cannot be checked there.
+        [[ $SWEEP_DIR == "$MSDELTA_CODE_DIR/"* ]] || {
+            echo "$SWEEP_ROOT is not committed at $MSDELTA_CODE_REF: its check cannot run" >&2
+            echo "  against the commit. Commit the grid on that branch, or SKIP_GRID_CHECK=1." >&2
+            exit 2; }
+        ( cd "$MSDELTA_CODE_DIR" && "$VENV_DIR/bin/python" $check ) \
+            || { echo "sweep arms are stale against their template (at $MSDELTA_CODE_REF)" >&2; exit 2; }
+    fi
 fi
 
 # Multiple tiles per arm without DeepSpeed means the DDP reducer, which faults (FT7).
 if (( TILES_PER_ARM > 1 )) \
-   && ! grep -q -- "--deepspeed" "$SWEEP_ROOT/${ARM_LIST[0]}/training.args"; then
+   && ! grep -q -- "--deepspeed" "$SWEEP_DIR/${ARM_LIST[0]}/training.args"; then
     echo "TILES_PER_ARM=$TILES_PER_ARM but the arms name no --deepspeed config:" >&2
     echo "  that is the DDP reducer, which takes a GPU page fault. See notes/TODO.md FT7." >&2
     exit 2
@@ -216,7 +308,7 @@ fi
 #
 # Override with ONE_TILE_OK=1 if a single-tile DeepSpeed run is genuinely wanted.
 if (( TILES_PER_ARM == 1 )) && [[ -z ${ONE_TILE_OK:-} ]] \
-   && grep -q -- "--deepspeed" "$SWEEP_ROOT/${ARM_LIST[0]}/training.args"; then
+   && grep -q -- "--deepspeed" "$SWEEP_DIR/${ARM_LIST[0]}/training.args"; then
     echo "TILES_PER_ARM is 1 but the arms name a --deepspeed config." >&2
     echo "  That changes the EFFECTIVE BATCH, not just the speed: per_device 1 on one" >&2
     echo "  tile is batch 1, where every other denoise run is batch 12. Pass" >&2
@@ -231,7 +323,18 @@ fi
 # submission and makes its configs recoverable afterwards from the run directory.
 CONFIG_SNAPSHOT=$SCRATCH_ROOT/runs/.configs-$JOB_ID
 mkdir -p "$CONFIG_SNAPSHOT"
-cp -r "$SWEEP_ROOT/." "$CONFIG_SNAPSHOT/"
+cp -r "$SWEEP_DIR/." "$CONFIG_SNAPSHOT/"
+# training.args name other files by repo-relative path (configs/deepspeed-zero2.json), which
+# the trainer resolves against the cwd -- the checkout. Under a ref, say so when the
+# checkout's copy differs from the commit's.
+if [[ -n ${MSDELTA_CODE_REF:-} ]]; then
+    for _f in $(grep -ohE '(^|[[:space:]])configs/[^[:space:]]+' "$CONFIG_SNAPSHOT"/*/training.args \
+                | sort -u); do
+        [[ -f $MSDELTA_CODE_DIR/$_f ]] || continue
+        cmp -s "$MSDELTA_CODE_DIR/$_f" "$REPO_DIR/$_f" \
+            || echo "WARNING: $_f (named in training.args, read from the checkout) differs from ${MSDELTA_CODE_REF:0:12}'s" >&2
+    done
+fi
 [[ -n ${DRY_RUN:-} ]] || echo "  configs snapshot: $CONFIG_SNAPSHOT"
 
 mapfile -t HOSTS < <(sort -u "${PBS_NODEFILE:?PBS_NODEFILE is required}")
@@ -316,6 +419,8 @@ export PYTHONPATH=$REPO_DIR${PYTHONPATH:+:$PYTHONPATH}
 # Run from a frozen copy of the code (pbs/lib/code_snapshot.sh): branch switches and
 # edits in the checkout cannot affect this job once it has started.
 source "$REPO_DIR/pbs/lib/code_snapshot.sh"
+# Record the code each arm ran (SNAPSHOT.txt: commit, branch or ref, mode) with its outputs.
+[[ -f $MSDELTA_CODE_DIR/SNAPSHOT.txt ]] && cp "$MSDELTA_CODE_DIR/SNAPSHOT.txt" "$CONFIG_SNAPSHOT/CODE_SNAPSHOT.txt"
 # Probes: dtype, index-range and finiteness checks, and -- the useful part --
 # a device synchronise at each stage, so an asynchronous GPU fault is reported
 # where it was caused rather than dozens of steps later. Set MSDELTA_PROBES=1 on
@@ -439,6 +544,8 @@ run_node() {
             fi
         fi
         mkdir -p "$dir/logs"
+        # per job, so a resumed arm keeps the record of every job that trained it
+        [[ -f $MSDELTA_CODE_DIR/SNAPSHOT.txt ]] && cp "$MSDELTA_CODE_DIR/SNAPSHOT.txt" "$dir/CODE_SNAPSHOT-$JOB_ID.txt"
         start=$SECONDS
         # Each slot pins its own tiles and its own port, so concurrent arms on one host
         # never share a device or a rendezvous.

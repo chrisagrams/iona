@@ -52,6 +52,9 @@ export PYTHONPATH=$REPO_DIR${PYTHONPATH:+:$PYTHONPATH}
 # Run from a frozen copy of the code (pbs/lib/code_snapshot.sh): branch switches and
 # edits in the checkout cannot affect this job once it has started.
 source "$REPO_DIR/pbs/lib/code_snapshot.sh"
+# Under a ref (pbs/qsub_ref, MSDELTA_CODE_REF) a committed ARGS_FILE is the commit's; one
+# the commit does not have is read from the path given (ad hoc).
+[[ -z ${MSDELTA_CODE_REF:-} ]] || ARGS_FILE=$(msdelta_code_path "${ARGS_FILE#"$REPO_DIR"/}")
 export OMP_NUM_THREADS=${OMP_NUM_THREADS:-1}
 export MKL_NUM_THREADS=${MKL_NUM_THREADS:-1}
 export OPENBLAS_NUM_THREADS=${OPENBLAS_NUM_THREADS:-1}

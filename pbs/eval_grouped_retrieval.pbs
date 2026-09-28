@@ -47,13 +47,16 @@ export PYTHONPATH=$REPO_DIR${PYTHONPATH:+:$PYTHONPATH}
 # Run from a frozen copy of the code (pbs/lib/code_snapshot.sh): branch switches and
 # edits in the checkout cannot affect this job once it has started.
 source "$REPO_DIR/pbs/lib/code_snapshot.sh"
+# Under a ref (pbs/qsub_ref, MSDELTA_CODE_REF) the tests and a committed MODELS file are the
+# commit's; a MODELS file the commit does not have is read from the path given (ad hoc).
+MODELS=$(msdelta_code_path "$MODELS")
 export HF_HOME=${HF_HOME:-$SCRATCH_ROOT/huggingface}
 export HF_HUB_OFFLINE=${HF_HUB_OFFLINE:-1}
 export HF_DATASETS_OFFLINE=${HF_DATASETS_OFFLINE:-1}
 PY="$VENV_DIR/bin/python"
 
 echo "=== $(date -Is) tests"
-ZE_AFFINITY_MASK=0 "$PY" -m pytest -q tests/test_grouped_retrieval.py \
+ZE_AFFINITY_MASK=0 "$PY" -m pytest -q "${MSDELTA_REF_PREFIX}tests/test_grouped_retrieval.py" \
     || { echo "unit tests failed; not scoring" >&2; exit 1; }
 
 if [[ ! -d $DATA ]]; then

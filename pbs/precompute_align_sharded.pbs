@@ -42,6 +42,9 @@ export PYTHONPATH=$REPO_DIR${PYTHONPATH:+:$PYTHONPATH}
 # Run from a frozen copy of the code (pbs/lib/code_snapshot.sh): branch switches and
 # edits in the checkout cannot affect this job once it has started.
 source "$REPO_DIR/pbs/lib/code_snapshot.sh"
+# Under a ref (pbs/qsub_ref, MSDELTA_CODE_REF) a committed ARGS_FILE is the commit's; one
+# the commit does not have is read from the path given (ad hoc).
+[[ -z ${MSDELTA_CODE_REF:-} ]] || ARGS_FILE=$(msdelta_code_path "${ARGS_FILE#"$REPO_DIR"/}")
 export HF_HOME=${HF_HOME:-$SCRATCH_ROOT/huggingface}
 export HF_HUB_OFFLINE=${HF_HUB_OFFLINE:-1}
 export HF_DATASETS_OFFLINE=${HF_DATASETS_OFFLINE:-1}
@@ -50,7 +53,7 @@ run() { "$PY" -m msdelta.precompute_align --args_file "$ARGS_FILE" \
         --target_cache "$TARGET_CACHE" --num_shards "$SHARDS" "$@"; }
 
 echo "=== $(date -Is) tests"
-"$PY" -m pytest -q tests/test_precompute_sharded.py || { echo "tests failed" >&2; exit 1; }
+"$PY" -m pytest -q "${MSDELTA_REF_PREFIX}tests/test_precompute_sharded.py" || { echo "tests failed" >&2; exit 1; }
 if [[ ! -d $TARGET_CACHE/_flat/train ]]; then
     echo "=== $(date -Is) prepare"
     run --stage prepare || { echo "prepare failed" >&2; exit 1; }
