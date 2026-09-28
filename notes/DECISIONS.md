@@ -77,6 +77,9 @@ IDs carry a track suffix: -C contrastive (spectrum encoder), -A alignment (pepti
 | 2026-09-28 | C18-C | Write the MassIVE-KB prep script now (code; running it needs a card) | user |
 | 2026-09-28 | K93-P | Write a Pairformer architecture note (notes/PAIRFORMER.md) for the user to study | user |
 | 2026-09-28 | K101-P | Run Stage 0 (sanity run of both architectures) -- exact card being prepared (notes/P1_stage0_card.md) | user |
+| 2026-09-28 | K103-I | Claude may commit the DAG trial files and run the live trial (done: bd8fa7f; first live tick submitted 8875624) | user |
+| 2026-09-28 | K105-S | Strict loading is the default in the model classes (every caller protected; explicit opt-out); covers K104-S | user |
+| 2026-09-28 | K90-S (addendum) | A resumed job takes the configs of its ORIGINAL run and the code of the commit it was launched from | user |
 
 ## Settings chosen WITHOUT explicit approval (before this log existed)
 

@@ -47,30 +47,17 @@ Context: built on branch `i2-dag` (tested only on a simulated batch system). Spe
 `notes/DAG_SPEC.md`. First live trial approved (K84-I). You said you would read it and say whether
 you agree with the design.
 
-### K103-I: the DAG trial is blocked by the permission system (open, 2026-09-28)
-Context: K84-I approved a first live trial of the scheduler. The agent running it prepared the trial
-pipeline (pbs/dag/pipelines/dagtrial.py, sweeps/arms/dagtrial_{smoke,models}.txt, a trial-only
-home with dry_run off) and validated it (the plan proposes exactly one debug smoke job, 25m arm
-only). Its `git commit` of those three files in the main checkout was DENIED by Claude Code's
-permission classifier ("modify shared resources"), and the live `tick --live` (a real qsub) would
-likely hit the same gate. Claude will not work around a denial. Options: (a) you allow these actions
-(or run the commit and ticks yourself: commands in the chat of 2026-09-28); (b) run with the files
-uncommitted (job snapshots then say dirty=true); (c) drop the trial.
-
-### K104-S: make the one-off pbs/ scripts strict too? (open, 2026-09-28)
-Context: K94-P is implemented on branch `k94-strict-load` (7152d47): every model load inside
-`msdelta/` (fine-tuning, evaluation, rescoring, the peptide encoder) goes through `load_strict`,
-which raises on missing / unexpected / wrong-shape weights or an unsupported architecture instead of
-continuing with random weights. Real checkpoints (25m pretrained, a contrastive encoder, the released
-peptide encoder) load unchanged. Not converted: one-off diagnostic scripts under `pbs/`
-(pooling_probe.py, preflight_align.py, bisect_align.py, diag/mass_window_eval.py,
-diag/backcompat_check.py, diag/memprobe*). Switch them too?
-
-### K105-S: strict by default everywhere instead of a helper? (open)
-Context: alternative to K104-S: override `from_pretrained` in the base model class so EVERY caller
-(including pbs/ scripts and outside code) is strict by default, with an explicit opt-out. Broader
-protection, but it changes behaviour globally (outside code expecting HF's lenient loading would now
-fail). The agent used an explicit helper because that is what was asked.
+### K106-S: stop branching? (open, 2026-09-28)
+Context: the extra branches (reorg, p1-pairformer, i2-dag, a-filtered-eval, c25-library-search,
+k94-strict-load, k90-code-ref, c18-massivekb-prep) were created by Claude, one per background
+agent, in separate git worktrees. Two reasons: (1) before per-job code snapshots existed, jobs ran
+code straight from the main checkout, so editing it could break running jobs; (2) several agents
+editing the same checkout at once would overwrite each other's files and mix unrelated half-done
+work into commits. (1) is solved (snapshots); (2) still holds when agents run in parallel.
+Options: (a) keep one branch per parallel agent but MERGE into dev_finetune_02 as soon as its
+tests pass and you've seen the report (no waiting); (b) no branches: agents work one at a time
+directly on dev_finetune_02 (slower, no parallelism); (c) current practice (branches wait for
+explicit approval to merge).
 
 ### K96-S: the pretraining loss, and the input-normalisation leak (parked; user wants to explore other losses)
 The pretraining task (msdelta/models/processing_msdelta.py + modeling_msdelta.py):
