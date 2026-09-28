@@ -71,6 +71,12 @@ IDs carry a track suffix: -C contrastive (spectrum encoder), -A alignment (pepti
 | 2026-09-28 | K98-C | Ties count as misses (conservative) | user |
 | 2026-09-28 | K99-C | Library search only on datasets that have consensus spectra; queries without a consensus excluded (counted); consensus-only groups stay as distractors | user |
 | 2026-09-28 | K90-S | Don't require merging to run code: jobs should take their code snapshot from a given git commit/branch (being built on branch k90-code-ref, with one tiny live check); tell the user any reason not to | user |
+| 2026-09-28 | K55-C | No headline numbers for now; keep tracking all filtered numbers | user |
+| 2026-09-28 | K83-C | Add the ±1.1 Da window as an evaluation filter (testing only; not in training) | user |
+| 2026-09-28 | K78-C | No consensus building now; likely delegated | user |
+| 2026-09-28 | C18-C | Write the MassIVE-KB prep script now (code; running it needs a card) | user |
+| 2026-09-28 | K93-P | Write a Pairformer architecture note (notes/PAIRFORMER.md) for the user to study | user |
+| 2026-09-28 | K101-P | Run Stage 0 (sanity run of both architectures) -- exact card being prepared (notes/P1_stage0_card.md) | user |
 
 ## Settings chosen WITHOUT explicit approval (before this log existed)
 

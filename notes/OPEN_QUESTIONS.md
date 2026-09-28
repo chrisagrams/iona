@@ -94,41 +94,20 @@ full spectrum with visible peaks given, ranking losses, or predicting absolute i
 
 ## Contrastive (spectrum encoder)
 
-### K55-C: which filtered number to headline (parked)
-Context: every retrieval number is reported three ways: no filter, plain 20 ppm, isotope-tolerant
-20 ppm (the latter never drops correct matches on real data, at ~5x more candidates). Full tables
-show all three. The question is only which ONE "with filter" number goes into headline figures /
-summaries when there is room for one. Related: K83-C.
-
-### K83-C: add the ±1.1 Da window as a fourth standard filter? (open)
-Context: ±1.1 Da on neutral mass (used in the yHydra comparisons and the paper) also tolerates ±1
-isotope errors, but admits every peptide within ~1 Da (dozens of candidates); isotope-tolerant
-20 ppm is much tighter and also tolerates ±2. Adding ±1.1 Da would make our tables line up with the
-paper's yHydra numbers. Cost: one more column in the same pass.
-
-### K78-C: build consensus libraries for mouse / human / yeast (parked)
-Context: library search (C25) needs consensus spectra; only ms-contrastive-100k has them. Building
-them for the species sets means merging replicates into consensus spectra (a method choice:
-peak merging, minimum replicates).
-
-### K100-C: when to run library search (open; clarified 2026-09-28)
-Context: the library-search evaluation is code on branch `c25-library-search`; nothing has been
-scored with it yet. The approved card (K79-C) says: score it on ms-contrastive-100k validation and
-test, for the C20 models (trained with/without consensus spectra -- the most interesting comparison
-for library search) and the K66-C models. Two things need your OK: (1) merge the branch into
-dev_finetune_02 (see K90-S); (2) then submit two short debug scoring jobs for the C20 models now
-(validation, test), and add library search to the K66-C scoring that runs automatically as each
-scale finishes (it adds seconds, not a new job, because it reuses the embeddings).
-### C18-C: MassIVE-KB (parked, low priority)
-Context: MassIVE-KB (chrisagrams/massive_kb_v1_shuffled, 30.5M spectra, all splits now on /flare)
-could be a larger contrastive training set. No prep script exists. User is ~95% sure it does not
-overlap our evaluation sets; an overlap check (one debug job) and asking Chris about its provenance
-were proposed.
-
----
-
-## Pairformer (P1)
-
+### K100-C: run the library-search evaluation on C20 now? (open; terminology clarified 2026-09-28)
+Three different search settings (all "identify the peptide behind a spectrum"):
+- replicate retrieval (our current contrastive metric): query spectrum vs other EXPERIMENTAL spectra;
+  several correct answers (the same peptide's other replicates).
+- spectral LIBRARY search (C25): query spectrum vs a library of CONSENSUS spectra, one per
+  peptide+charge; exactly one correct answer; the peptide is read off the matched entry.
+- DATABASE search (what search engines like MSFragger do): query spectrum vs candidate PEPTIDE
+  SEQUENCES (from a protein database), scored against theoretical/predicted spectra; our analogue is
+  the alignment cross-modal evaluation (spectrum encoder vs peptide encoder).
+Library search is close to replicate retrieval but not the same: the gallery is one clean consensus
+per peptide instead of several noisy replicates, and there is exactly one correct entry (so Hit@k
+and rank statistics, not MAP@R). Code is ready (branch c25-library-search). Question: approve
+scoring the C20 models (validation, test) with it now, running from that branch (K90-S mechanism,
+once built) without merging?
 ### K85-P: the first Pairformer vs transformer comparison run (open; see K91-K95 and the review)
 Context: `notes/P1_card_draft.md` (branch p1-pairformer) drafts a short debug pretraining run
 comparing the ported Pairformer with our transformer at ~50M parameters (loss curves, step time).
