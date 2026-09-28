@@ -65,6 +65,21 @@ likely hit the same gate. Claude will not work around a denial. Options: (a) you
 (or run the commit and ticks yourself: commands in the chat of 2026-09-28); (b) run with the files
 uncommitted (job snapshots then say dirty=true); (c) drop the trial.
 
+### K104-S: make the one-off pbs/ scripts strict too? (open, 2026-09-28)
+Context: K94-P is implemented on branch `k94-strict-load` (7152d47): every model load inside
+`msdelta/` (fine-tuning, evaluation, rescoring, the peptide encoder) goes through `load_strict`,
+which raises on missing / unexpected / wrong-shape weights or an unsupported architecture instead of
+continuing with random weights. Real checkpoints (25m pretrained, a contrastive encoder, the released
+peptide encoder) load unchanged. Not converted: one-off diagnostic scripts under `pbs/`
+(pooling_probe.py, preflight_align.py, bisect_align.py, diag/mass_window_eval.py,
+diag/backcompat_check.py, diag/memprobe*). Switch them too?
+
+### K105-S: strict by default everywhere instead of a helper? (open)
+Context: alternative to K104-S: override `from_pretrained` in the base model class so EVERY caller
+(including pbs/ scripts and outside code) is strict by default, with an explicit opt-out. Broader
+protection, but it changes behaviour globally (outside code expecting HF's lenient loading would now
+fail). The agent used an explicit helper because that is what was asked.
+
 ### K96-S: pretraining input normalisation may leak which masked peak is the base peak (parked)
 Context: in `msdelta/models/processing_msdelta.py` the model's INPUT intensity feature is
 log1p(I) divided by the maximum of log1p(I) over ALL peaks, computed before masking. The TARGET is
