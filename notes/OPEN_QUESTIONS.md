@@ -95,15 +95,6 @@ and open points: notes/PAIRFORMER_REVIEW.md ablation #12. Proposal: test the rat
 compute-matched); build the parallel version only if a larger ratio doesn't hurt quality. Needs a card
 (and code) when Pairformer ablations start.
 
-### K115-P: make fused attention (SDPA) the default for triangle attention? (open, 2026-09-28)
-Context: K102 (branch k102-triattn-memory; benchmark job 8875808, results/raw/diag/triattn_bench/): one
-triangle-attention module, fwd+bwd, bf16, B32 x N150: naive 128 ms / 4.40 GB; naive+chunk checkpointing
-194 ms / 2.84 GB; SDPA 57.5 ms / 2.85 GB; SDPA+checkpointing 69.1 ms / 2.08 GB. XPU fuses it
-(memory-efficient attention kernel, incl. backward). Recommendation: no custom kernel now (remaining
-memory is pair-sized tensors; a kernel could win at most ~10-15% memory, ~20% time). Equivalence was
-tested in fp32 only; under bf16 the naive path does softmax in fp32, SDPA in bf16. Proposal: one short
-bf16 comparison on a debug node, then SDPA default (+ checkpointing when memory-bound).
-
 ### K116-P: the no-copy 5-D mask variant (open)
 Context: passing the mask broadcast (5-D) instead of copying it per chunk was fastest (44.6 ms / 2.45 GB
 at B32 N150) but runs on the plain (non-fused) math path; bf16 precision unverified. Include it in the
