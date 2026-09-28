@@ -58,6 +58,9 @@ IDs carry a track suffix: -C contrastive (spectrum encoder), -A alignment (pepti
 | 2026-09-27 | K80-A | Measure how correlated loss-based and Hit@1-based checkpoint selection are, and their effect on test; user prefers loss selection; decide after results (PLAN A10) | user |
 | 2026-09-27 | K76-C / K81-C | Always test on the SAME yeast set: the full nine_yeast (86,184), frozen with CANONICAL.txt + sha256; scored on capacity (3 h walltime) | user |
 | 2026-09-27 | K82-S | Remove the data/real-sample symlinks (done; targets untouched) | user |
+| 2026-09-28 | K55-C | Which filtered number to headline: decide later | user |
+| 2026-09-28 | K77-A | A8 / mass-aware peptide encoder follow-up: later, once the new C models exist | user |
+| 2026-09-28 | K63-I | User will read the DAG build and confirm later (remind); write a spec sheet so it can be generalised into a feature later | user |
 
 ## Settings chosen WITHOUT explicit approval (before this log existed)
 
