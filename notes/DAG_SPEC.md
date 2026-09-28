@@ -104,3 +104,55 @@ R15 **Secrets / site rules** -- never pass secrets through the batch system's va
 - Whether debug-queue queued jobs count toward the generic limit (currently assumed yes).
 - How ticks are driven once live (cron on the login node vs a session loop) and who is alerted.
 - Generalisation: split backend / queue policy / sweep plugin / approval source into separate modules and a package boundary.
+
+## 9. Running code from a commit (K90)
+
+Every job runs from a per-job code snapshot (`pbs/lib/code_snapshot.sh`,
+`$SCRATCH_ROOT/code-snapshots/<job>/`). Normally that is an rsync of the checkout's working
+tree; `SNAPSHOT.txt` records the full commit sha, `mode: working-tree (rsync)`, a
+`dirty: yes|no` flag and the dirty files, and a dirty snapshot also holds `uncommitted.diff`
+(`git diff HEAD --binary` of the code paths), so any job can be rebuilt as commit (+ patch).
+
+To run ANY commit -- e.g. an unmerged branch -- without checking it out or merging:
+
+    pbs/qsub_ref c25-library-search -q debug -l select=1 -l walltime=00:30:00 \
+        -v MODELS=sweeps/arms/x.txt,SPLIT=validation pbs/eval_grouped_retrieval.pbs
+
+`pbs/qsub_ref <ref> <qsub args...> <script>` resolves the ref to a full sha at submit time,
+submits the PBS script **from that commit** (copied to
+`$SCRATCH_ROOT/code-refs/submit/<sha12>-<name>.pbs`), and adds
+`MSDELTA_CODE_REF=<sha>,MSDELTA_CODE_REF_NAME=<ref>,REPO_DIR=<this checkout>` to the one `-v`
+(any `-v` you pass are merged into it). The job's snapshot is then `git archive <sha>` of
+the code paths plus `configs/`, and `SNAPSHOT.txt` says `mode: git-archive`, the ref, the
+sha and `dirty: n/a`. A sha the repository lacks fails the job (exit 3).
+
+Rules:
+- **Anything committed comes from the commit**: Python, tests, scripts launched by path,
+  rank_wrapper, sweep grids (`SWEEP_ROOT`), committed arms/models/args files, and the
+  grid-check generators (run inside the snapshot).
+- **Ad-hoc files passed by explicit path come from where they are**: a `MODELS`,
+  `ARMS_FILE`, `ARGS_FILE` or grid the commit does not have is read from the checkout path
+  given (`msdelta_code_path`). A path the commit HAS is always the commit's version, even
+  if the checkout has an edited copy.
+- **Outputs land in the checkout you submitted from** (`REPO_DIR`, cwd unchanged):
+  `results/`, `pbs/logs`, `./runs`. They carry the sha: `SNAPSHOT.txt`, the job_finish
+  notification/manifest (`commit`, `branch` = the ref), the eval JSONs' `code` field, and
+  a sweep's `CODE_SNAPSHOT.txt` (config snapshot) / `CODE_SNAPSHOT-<job>.txt` (each arm).
+- **From the checkout, by design**: `pbs/lib/*.sh` (code_snapshot, job_finish),
+  `pbs/load_keys.sh` and `.keys`, `.venv`, data and checkpoints. So the checkout must
+  itself have K90's `code_snapshot.sh` while such jobs are queued.
+- Files named inside a `training.args` by repo-relative path (`configs/deepspeed-zero2.json`)
+  are resolved by the trainer against the cwd, i.e. the checkout; the sweep runner warns
+  when the checkout's copy differs from the commit's.
+- qsub_ref refuses scripts that take no snapshot (they would silently ignore the ref) and
+  warns for a script from before K90 (no `MSDELTA_CODE_REF` in it): its Python comes from
+  the commit but its repo-relative reads (`tests/...`) come from the checkout.
+
+**Resuming a sweep** (`RESUME_JOB=<job>`, by hand or by the scheduler) continues THAT job:
+its config snapshot `runs/.configs-<job>` (no grid check; SWEEP_ROOT as it is now is not
+read) and its code -- the commit in its `SNAPSHOT.txt`, rebuilt with git archive, or, if
+that snapshot was taken from a dirty tree (or the commit is gone), that snapshot directory
+itself, reused as is (`MSDELTA_CODE_REUSE`, logged with `!!!`). `RESUME_CONFIGS=current` /
+`RESUME_CODE=current` restore the old behaviour (e.g. jobs from before snapshots existed).
+Before K90 a resume re-read SWEEP_ROOT from the checkout, re-ran the grid check and ran
+the checkout's current working tree.
