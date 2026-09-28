@@ -87,6 +87,9 @@ IDs carry a track suffix: -C contrastive (spectrum encoder), -A alignment (pepti
 | 2026-09-28 | C18-C | Review the MassIVE-KB prep later (remind) | user |
 | 2026-09-28 | K109-S | Keep the three older worktrees (msdelta-pr, msdelta-rerank, msdelta-denoise-pr) for now | user |
 | 2026-09-28 | K107-P (data) | MSConsensus-100M downloaded to /flare (Gaolaboratory, revision 78b3e74, 190 GB) | user |
+| 2026-09-28 | K91-P / K113-P | Drop the Pairformer's separate mass-defect feature for now (default off; Stage 0 card updated) | user |
+| 2026-09-28 | K102-P | Try (1) chunk checkpointing and (2) PyTorch fused scaled_dot_product_attention for triangle attention first; then decide whether a custom kernel is worth it | user |
+| 2026-09-28 | K112-C | Spectrum-only database search: options = (a) our own intensity-prediction task (predict all intensities from fragment m/z) -> embed -> search; (b) generated consensus spectra; (c) peptides directly once alignment is done. Implication (user): consensus spectra must then matter in our training | user |
 
 ## Settings chosen WITHOUT explicit approval (before this log existed)
 

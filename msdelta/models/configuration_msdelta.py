@@ -51,7 +51,7 @@ class MSDeltaConfig(PretrainedConfig):
         pair_opm_channels: int = 8,
         pair_single_use_mz: bool = True,
         pair_use_intensity: bool = True,
-        pair_use_mass_defect: bool = True,
+        pair_use_mass_defect: bool = False,  # dropped by default (user, K91/K113, 2026-09-28)
         pair_mass_defect_n_freqs: int = 16,
         pair_use_loss_bank: bool = True,
         pair_loss_bank_sigma_ppm: float = 20.0,

@@ -3,8 +3,8 @@
 > studies; peaks cap 150 is fine for this test (final runs will likely use 512 like the current
 > pretrained models); W&B logging on (pbs/aurora-pretrain.pbs now loads the key); the agent's
 > unsourced choices are fine for this test (real runs will decide or HP-search them); data =
-> Gaolaboratory/MSConsensus-100M, downloading in full to /flare. Still open: K91-P (mass-defect
-> encoding) -- the user will decide after studying notes/PAIRFORMER.md.
+> Gaolaboratory/MSConsensus-100M, downloaded in full to /flare (revision 78b3e74). Mass-defect feature
+> DROPPED (K91/K113).
 
 # P1 Stage 0: one short debug pretraining run per architecture
 
@@ -67,7 +67,7 @@ the commit in `SNAPSHOT.txt`.
 | `pair_opm_channels` | 16 | `opm_channels` :23 |
 | `pair_single_use_mz` | true | `single_use_mz` :34 (K92: fine) |
 | `pair_use_intensity` | true | :30 |
-| `pair_use_mass_defect` | true | :33 (K91 parked, so the source behaviour is kept) |
+| `pair_use_mass_defect` | **false** (user 2026-09-28, K91/K113: dropped -- redundant with the raw-difference Fourier features, and mis-encoded) | source had true (:33) |
 | `pair_mass_defect_n_freqs` | 32 | `mass_defect_n_freqs` :18 |
 | `pair_use_loss_bank` | true | :32 |
 | `pair_loss_bank_sigma_ppm` | 10.0 | `loss_bank_sigma_ppm` :17 (measured choice, source `sweeps/README.md:153-171`) |
@@ -170,7 +170,7 @@ have N close to 150.
   "pair_use_intensity": true,
   "pair_use_isotope": true,
   "pair_use_loss_bank": true,
-  "pair_use_mass_defect": true,
+  "pair_use_mass_defect": false,
   "pair_use_triangle_attention": false,
   "pair_use_writeback": true
 }
