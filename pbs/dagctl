@@ -1,0 +1,7 @@
+#!/bin/bash
+# The job-DAG scheduler CLI (pbs/dag/README.md). Stdlib only; runs on the login node.
+#   pbs/dagctl validate | plan | tick [--live] | status | commits | simulate --backend fake
+here=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+py=${DAG_PYTHON:-$here/../.venv/bin/python}
+[[ -x $py ]] || py=python3
+PYTHONPATH=$here${PYTHONPATH:+:$PYTHONPATH} exec "$py" -m dag "$@"
