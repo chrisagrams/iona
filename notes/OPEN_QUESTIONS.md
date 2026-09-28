@@ -132,5 +132,33 @@ just below an integer mass (CO, CO2, O) from those just above (H2O, NH3). Inheri
 Options: fix before any comparison (integer frequencies, or feed the signed defect) or run as-is
 and test the fix as an ablation.
 
-### K93-P / K95-P: explained in chat 2026-09-28 (memory needs; configuration defaults); decisions
-pending on the K85-P card.
+### K101-P: order of Pairformer work -- sanity comparison first, then ablations/HP search (open, 2026-09-28)
+Context: user asked whether K85-P runs at "default" architecture choices or after an HP search.
+Proposal: Stage 0 = K85-P: one short run of each architecture at the best-known settings (the
+Pairformer at the source's 50m experiment settings, with the K91 decision applied; the transformer
+at our standard pretraining recipe) -- only to confirm the port trains sanely and measure step
+time/memory. Stage 1 = the ablations the user endorsed: #1 pair-update x write-back, #3 matched
+parameters vs matched compute (very important), #2 m/z control. Stage 2 = HP / feature sweeps (#4 pair
+input features, #5 peaks cap, #6 pair width, #8 triangle attention). Each stage is its own card.
+
+### K102-P: add per-chunk gradient checkpointing to triangle attention before trying it (open)
+Context: triangle attention stores its attention weights for the backward pass: about
+3.2 x batch x peaks^3 x heads x 4 bytes, ~5.5 GB per module at 32 spectra x 150 peaks x 4 heads
+(two modules per layer). The code's "chunking" only reduces memory without gradients (inference).
+User wants to find how to make triangle attention win (ablation #8); that needs this memory fix
+first (recompute each chunk in the backward pass; slower, but memory ~ one chunk). Small code
+change + a test.
+
+### K95-P: every Pairformer setting must be listed explicitly on the K85-P card (open)
+Context: the new pair_* config fields default to tiny test-sized values (pair channels 16, triangle
+hidden 16, outer-product 8, triangle attention 2 heads x 8, 16 mass-defect frequencies, loss-dictionary
+tolerance 20 ppm). A run config that omits one silently gets the tiny value. The source's experiments
+used different values (tolerance 10 ppm, 32 mass-defect frequencies, Fourier 64/0.01/1000).
+Proposal: the card lists and the user picks every pair_* value; optionally change the defaults to the
+source's 50m values.
+
+### K93-P: memory (explained 2026-09-28; no decision beyond K102-P)
+Triangle multiplication keeps ~12 pair-sized tensors per module for the backward pass: at 32 spectra
+x 150 peaks x 64 channels that is ~2.3 GB per module, ~45 GB for 10 layers -- more than a tile
+comfortably holds with everything else. So gradient checkpointing (recompute in backward, ~30% slower)
+is required for the Pairformer, not optional.
