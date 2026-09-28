@@ -19,10 +19,26 @@ filtered), `net_gain` (the reverse), and `rescue` = unfiltered Hit@1 on F_all (h
 model finds what the filter would have made unfindable).
 
 Origin: pbs/diag/filter_failure_eval.py (job 8873366, OBSERVATIONS 2026-09-27).
+
+CROSS-MODAL (spectrum -> peptide; `crossmodal_report`, K77-A): the same three filters, but
+the query spectrum's MEASURED precursor m/z is compared with each CANDIDATE PEPTIDE's
+THEORETICAL m/z at the query's charge, (M + z*PROTON)/z; with candidate charges given
+(peptide+charge candidates) the candidate's charge must equal the query's. Each query has
+exactly ONE correct candidate, so F (the 20 ppm filter excludes a positive) and F_all (it
+excludes every positive) are the same set; both keys are written for a uniform schema.
+Metrics are Hit@1, Hit@5 and MRR (with one relevant item AP = MRR and MAP@R = Hit@1).
+That part is numpy-only and needs no torch, so yHydra's Python 3.8 env can load this file
+by path (baselines_wip/yhydra_crossmodal.py); it also carries the legacy yHydra windows
+(`legacy_20ppm`, `legacy_1.1Da`: neutral mass, no charge check) the paper's numbers use.
 """
 from __future__ import annotations
 
-import torch
+import numpy as np
+
+try:
+    import torch
+except ImportError:     # yHydra's numpy-only env loads this file for the cross-modal part
+    torch = None
 
 ISOTOPE = 1.00336
 ISO_K = (-2, -1, 0, 1, 2)
@@ -157,3 +173,162 @@ def flatten(report: dict, prefix: str) -> dict[str, float]:
     if report["rescue"] is not None:
         flat[f"{prefix}/rescue"] = report["rescue"]
     return flat
+
+
+# ------------------------------------------------------------------ cross-modal (K77-A)
+PROTON = 1.007276
+XM_METRICS = ("hit@1", "hit@5", "mrr")
+LEGACY_WINDOWS = {"legacy_20ppm": (20.0, True), "legacy_1.1Da": (1.1, False)}
+
+
+def crossmodal_filters(query_mz, query_charge, cand_mass, cand_charge=None, ppm: float = PPM,
+                       iso_k=ISO_K) -> dict:
+    """Allowed-candidate functions q (index array) -> bool[len(q), n_cand].
+
+    query_mz: MEASURED precursor m/z per query spectrum; query_charge: its charge;
+    cand_mass: THEORETICAL neutral monoisotopic mass per candidate peptide; cand_charge:
+    per-candidate charge, or None when candidates carry no charge (yHydra's sequences).
+      open        everything
+      20ppm       |mz_q - mz_c(z_q)| <= ppm * mz_q, same charge
+      iso20ppm    |mz_q - mz_c(z_q) - k*ISOTOPE/z_q| <= ppm * mz_q for some k, same charge
+      legacy_*    the yHydra comparison's original windows (window_hits): neutral masses,
+                  |M_c - (mz_q - PROTON) * z_q| <= tol (Da, or ppm of that mass), no charge
+                  check. Kept so the published +-1.1 Da numbers are reproduced exactly.
+    """
+    qmz = np.asarray(query_mz, dtype=np.float64)
+    z = np.asarray(query_charge, dtype=np.int64)
+    cm = np.asarray(cand_mass, dtype=np.float64)
+    cz = None if cand_charge is None else np.asarray(cand_charge, dtype=np.int64)
+    nc = len(cm)
+
+    def same(q):
+        return np.ones((len(q), nc), dtype=bool) if cz is None else z[q, None] == cz[None]
+
+    def delta(q):       # measured - theoretical m/z at the query's charge
+        zq = z[q, None].astype(np.float64)
+        return qmz[q, None] - (cm[None] + zq * PROTON) / zq
+
+    def open_(q):
+        return np.ones((len(q), nc), dtype=bool)
+
+    def ppm_(q):
+        return same(q) & (np.abs(delta(q)) <= ppm * 1e-6 * qmz[q, None])
+
+    def iso_(q):
+        d, tol = delta(q), ppm * 1e-6 * qmz[q, None]
+        step = ISOTOPE / z[q, None].astype(np.float64)
+        ok = np.zeros((len(q), nc), dtype=bool)
+        for k in iso_k:
+            ok |= np.abs(d - k * step) <= tol
+        return ok & same(q)
+
+    def legacy(tol, in_ppm):
+        def f(q):
+            m = (qmz[q] - PROTON) * z[q].astype(np.float64)
+            lim = m[:, None] * tol * 1e-6 if in_ppm else tol
+            return np.abs(cm[None] - m[:, None]) <= lim
+        return f
+
+    out = {"open": open_, "20ppm": ppm_, "iso20ppm": iso_}
+    out.update({name: legacy(*spec) for name, spec in LEGACY_WINDOWS.items()})
+    return out
+
+
+def crossmodal_ranks(queries, cands, truth, allowed_fn=None, metric: str = "cos",
+                     chunk: int = 1024):
+    """Per query: rank of its true candidate among the ALLOWED candidates (0 = top; ties go
+    to the true candidate), whether the filter allows it, and how many candidates it allows.
+    metric "cos" (cosine) or "l2" (negative squared distance). float32, like the callers."""
+    q = np.asarray(queries, np.float32)
+    c = np.asarray(cands, np.float32)
+    truth = np.asarray(truth, dtype=np.int64)
+    if metric == "cos":
+        q = q / np.linalg.norm(q, axis=1, keepdims=True)
+        c = c / np.linalg.norm(c, axis=1, keepdims=True)
+    n = len(q)
+    rank = np.zeros(n, dtype=np.int64)
+    inside = np.ones(n, dtype=bool)
+    size = np.full(n, len(c), dtype=np.int64)
+    for s in range(0, n, chunk):
+        idx = np.arange(s, min(s + chunk, n))
+        qq = q[idx]
+        sim = qq @ c.T if metric == "cos" else -(
+            (qq ** 2).sum(1)[:, None] + (c ** 2).sum(1)[None] - 2 * qq @ c.T)
+        t = truth[idx]
+        true = sim[np.arange(len(idx)), t]
+        if allowed_fn is not None:
+            ok = allowed_fn(idx)
+            size[idx] = ok.sum(1)
+            inside[idx] = ok[np.arange(len(idx)), t]
+            sim = np.where(ok, sim, -np.inf)
+        rank[idx] = (sim > true[:, None]).sum(1)
+    return rank, inside, size
+
+
+def _xm_per_query(rank, inside):
+    return {"hit@1": (inside & (rank == 0)).astype(np.float64),
+            "hit@5": (inside & (rank < 5)).astype(np.float64),
+            "mrr": np.where(inside, 1.0 / (rank + 1), 0.0)}
+
+
+def crossmodal_report(queries, cands, truth, query_mz, query_charge, cand_mass,
+                      cand_charge=None, metric: str = "cos", chunk: int = 1024) -> dict:
+    """{filter: {subset: {n, hit@1, hit@5, mrr}, net_loss, net_gain}, rescue} for
+    spectrum -> peptide retrieval (module docstring). `truth[i]` indexes query i's correct
+    candidate. F = F_all = queries whose correct candidate the plain 20 ppm filter excludes;
+    Fbar = the rest. rescue = unfiltered Hit@1 on F."""
+    filters = crossmodal_filters(query_mz, query_charge, cand_mass, cand_charge)
+    per = {}
+    for w in FILTERS:
+        rank, inside, _ = crossmodal_ranks(queries, cands, truth,
+                                           None if w == "open" else filters[w], metric, chunk)
+        per[w] = (_xm_per_query(rank, inside), inside)
+    passes = per["20ppm"][1]
+    masks = {"full": np.ones(len(passes), dtype=bool), "F": ~passes, "Fbar": passes,
+             "F_all": ~passes}
+    open_hit = per["open"][0]["hit@1"]
+    nf = max(len(passes), 1)
+    out = {}
+    for w in FILTERS:
+        vals = per[w][0]
+        out[w] = {s: dict({"n": int(m.sum())},
+                          **{k: (float(vals[k][m].mean()) if m.any() else None)
+                             for k in XM_METRICS})
+                  for s, m in masks.items()}
+        if w != "open":
+            hit = vals["hit@1"]
+            out[w]["net_loss"] = float(((open_hit > 0) & (hit == 0)).sum()) / nf
+            out[w]["net_gain"] = float(((open_hit == 0) & (hit > 0)).sum()) / nf
+    out["rescue"] = out["open"]["F"]["hit@1"]
+    return out
+
+
+def crossmodal_flatten(report: dict, prefix: str = "crossmodal") -> dict:
+    """Flat float keys, e.g. `crossmodal/20ppm/F/hit@1`, `crossmodal/iso20ppm/net_loss`,
+    `crossmodal/rescue`; prefix "" gives `20ppm/F/hit@1`. Empty subsets keep only `.../n` (0)."""
+    pre = f"{prefix}/" if prefix else ""
+    flat = {}
+    for w in FILTERS:
+        for s in SUBSETS:
+            cell = report[w][s]
+            flat[f"{pre}{w}/{s}/n"] = float(cell["n"])
+            for m in XM_METRICS:
+                if cell[m] is not None:
+                    flat[f"{pre}{w}/{s}/{m}"] = cell[m]
+        for extra in ("net_loss", "net_gain"):
+            if extra in report[w]:
+                flat[f"{pre}{w}/{extra}"] = report[w][extra]
+    if report["rescue"] is not None:
+        flat[f"{pre}rescue"] = report["rescue"]
+    return flat
+
+
+def measured_precursor(column):
+    """Measured precursor m/z as float64, or None when absent or incomplete (0, NaN, None;
+    grouped_retrieval writes 0.0 for a missing value); callers then skip filtered keys."""
+    if column is None:
+        return None
+    p = np.array([np.nan if v is None else v for v in column], dtype=np.float64)
+    if len(p) == 0 or not np.all(np.isfinite(p) & (p > 0)):
+        return None
+    return p

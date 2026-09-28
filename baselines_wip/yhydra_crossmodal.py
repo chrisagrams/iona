@@ -18,12 +18,28 @@ peptide yHydra can represent, candidates = the representable test peptides. On i
            reported at sequence level (top candidate's sequence == query's, charge ignored,
            the yHydra-comparable number) and at peptide+charge level (our usual one).
 Ours on the FULL set (every query, every candidate) is reported beside it.
+
+All ranking goes through msdelta/eval/filtered_retrieval.py (crossmodal_ranks; loaded by
+path, numpy-only, since this env has no torch). The original windows (`window_20ppm`,
+`window_1.1Da`: neutral mass, no charge check; the paper's numbers) are kept unchanged, and
+the standard filtered report (K77-A) is added under `.../filtered`: open / 20 ppm /
+isotope-tolerant 20 ppm on measured precursor m/z vs candidate m/z at the query's charge
+(same charge for our peptide+charge candidates; yHydra's sequences have none), on full,
+Fbar, F (= F_all), plus net_loss/net_gain and rescue.
 """
+import importlib.util
 import json
 import sys
+from pathlib import Path
 
 import numpy as np
 import pyarrow.parquet as pq
+
+_spec = importlib.util.spec_from_file_location(
+    "filtered_retrieval",
+    Path(__file__).resolve().parents[1] / "msdelta" / "eval" / "filtered_retrieval.py")
+fr = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(fr)
 
 YH = "/lus/flare/projects/UIC-HPC/khuss/msdelta/baselines/yhydra"
 MODEL = f"{YH}/saved_27_06_2021"
@@ -60,52 +76,21 @@ def peptide_mass(peptide: str) -> float:
     return sum(MONO[a] for a in residues) + mods + WATER
 
 
-def window_hits(q, c, truth, qmass, cmass, tol, ppm, metric="cos", chunk=1024):
-    """Hit@1 with candidates restricted to |cand mass - precursor mass| <= tol (Da, or ppm
-    of the precursor). A query whose true candidate falls outside its own window counts
-    as a miss (reported separately as `true_outside`)."""
-    q = np.asarray(q, np.float32); c = np.asarray(c, np.float32)
-    if metric == "cos":
-        q = q / np.linalg.norm(q, axis=1, keepdims=True)
-        c = c / np.linalg.norm(c, axis=1, keepdims=True)
-    hit = outside = 0; sizes = []
-    for s in range(0, len(q), chunk):
-        qq = q[s:s + chunk]
-        sim = qq @ c.T if metric == "cos" else -(
-            (qq ** 2).sum(1)[:, None] + (c ** 2).sum(1)[None] - 2 * qq @ c.T)
-        m = qmass[s:s + chunk, None]
-        lim = m * tol * 1e-6 if ppm else tol
-        ok = np.abs(cmass[None] - m) <= lim
-        sizes.append(ok.sum(1))
-        sim = np.where(ok, sim, -np.inf)
-        t = truth[s:s + chunk]
-        inside = ok[np.arange(len(t)), t]
-        outside += (~inside).sum()
-        hit += ((sim.argmax(1) == t) & inside).sum()
-    sizes = np.concatenate(sizes)
-    return {"hit@1": hit / len(q), "true_outside": outside / len(q),
+def window_hits(q, c, truth, allowed_fn, metric="cos"):
+    """Hit@1 with candidates restricted by `allowed_fn` (fr.crossmodal_filters). A query
+    whose true candidate falls outside its own window counts as a miss (reported
+    separately as `true_outside`)."""
+    rank, inside, sizes = fr.crossmodal_ranks(q, c, truth, allowed_fn, metric)
+    return {"hit@1": float((inside & (rank == 0)).mean()), "true_outside": float((~inside).mean()),
             "median_candidates": float(np.median(sizes)), "queries": len(q)}
 
 
-def topk_hits(queries, cands, truth, metric="cos", chunk=1024):
+def topk_hits(queries, cands, truth, metric="cos"):
     """Hit@1/Hit@5/MRR of each query's true candidate among all candidates."""
-    q = np.asarray(queries, np.float32); c = np.asarray(cands, np.float32)
-    if metric == "cos":
-        q = q / np.linalg.norm(q, axis=1, keepdims=True)
-        c = c / np.linalg.norm(c, axis=1, keepdims=True)
-    h1 = h5 = rr = 0.0
-    for s in range(0, len(q), chunk):
-        if metric == "cos":
-            sim = q[s:s + chunk] @ c.T
-        else:       # -||q - c||^2 without materialising (chunk, N, D)
-            qq = q[s:s + chunk]
-            sim = -((qq ** 2).sum(1)[:, None] + (c ** 2).sum(1)[None] - 2 * qq @ c.T)
-        true = sim[np.arange(len(sim)), truth[s:s + chunk]]
-        rank = (sim > true[:, None]).sum(1)          # 0 = best
-        h1 += (rank == 0).sum(); h5 += (rank < 5).sum(); rr += (1.0 / (rank + 1)).sum()
-    n = len(q)
-    return {"hit@1": h1 / n, "hit@5": h5 / n, "mrr": rr / n, "queries": n,
-            "candidates": len(c)}
+    rank, _, _ = fr.crossmodal_ranks(queries, cands, truth, None, metric)
+    return {"hit@1": float((rank == 0).mean()), "hit@5": float((rank < 5).mean()),
+            "mrr": float((1.0 / (rank + 1)).mean()), "queries": len(queries),
+            "candidates": len(cands)}
 
 
 def seq_level_hits(queries, cands, cand_seq, query_seq, chunk=1024):
@@ -164,16 +149,30 @@ def main(data_dir, ours_path, out_path):
     res["ours/shared/sequence"] = seq_level_hits(
         o_spec[shared_q], o_seq[c_idx], cseq[c_idx].astype(str), qseq[shared_q].astype(str))
     # precursor-mass windows (yHydra's native setting; real search): both models
-    qm = ((rows["precursor"].to_numpy(float) - PROTON) * rows["charge"].to_numpy(float))
     yh_cmass = np.array([peptide_mass(s.replace("C", "C[57.0215]")) for s in uniq])
     o_cmass = np.array([peptide_mass(p) for p in cpep])
-    for name, tol, ppm in (("20ppm", 20.0, True), ("1.1Da", 1.1, False)):
+    qmz, qz = rows["precursor"].to_numpy(float), rows["charge"].to_numpy(int)
+    yh_f = fr.crossmodal_filters(qmz[shared_q], qz[shared_q], yh_cmass)
+    o_f = fr.crossmodal_filters(qmz[shared_q], qz[shared_q], o_cmass[c_idx], cchg[c_idx])
+    for name in ("20ppm", "1.1Da"):
         res[f"yhydra/shared/l2/window_{name}"] = window_hits(
-            yh_q, yh_seq, truth, qm[shared_q], yh_cmass, tol, ppm, "l2")
+            yh_q, yh_seq, truth, yh_f[f"legacy_{name}"], "l2")
         res[f"ours/shared/peptide+charge/window_{name}"] = window_hits(
-            o_spec[shared_q], o_seq[c_idx], o_truth, qm[shared_q], o_cmass[c_idx], tol, ppm)
+            o_spec[shared_q], o_seq[c_idx], o_truth, o_f[f"legacy_{name}"])
     # ours on everything (our standard number)
     res["ours/full/peptide+charge"] = topk_hits(o_spec, o_seq, grp, "cos")
+    # standard filtered report (K77-A); needs a measured precursor for every query
+    if fr.measured_precursor(qmz) is None:
+        print("[xmodal] no complete measured precursor: filtered reports skipped", flush=True)
+    else:
+        for metric in ("cos", "l2"):
+            res[f"yhydra/shared/{metric}/filtered"] = fr.crossmodal_flatten(fr.crossmodal_report(
+                yh_q, yh_seq, truth, qmz[shared_q], qz[shared_q], yh_cmass, metric=metric), "")
+        res["ours/shared/peptide+charge/filtered"] = fr.crossmodal_flatten(fr.crossmodal_report(
+            o_spec[shared_q], o_seq[c_idx], o_truth, qmz[shared_q], qz[shared_q],
+            o_cmass[c_idx], cchg[c_idx]), "")
+        res["ours/full/peptide+charge/filtered"] = fr.crossmodal_flatten(fr.crossmodal_report(
+            o_spec, o_seq, grp, qmz, qz, o_cmass, cchg), "")
     json.dump(res, open(out_path, "w"), indent=1)
     for k, v in res.items():
         print(k, v if not isinstance(v, dict) else

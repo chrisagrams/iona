@@ -244,3 +244,109 @@ def test_filtered_metrics_pass_fail_split():
     # without precursor inputs, no filtered keys (old behaviour)
     plain = _variants(emb, g, np.ones(12, dtype=bool), torch.device("cpu"), retrieval_metrics_topk)
     assert not any("/20ppm/" in k for k in plain)
+
+
+def _mz(mass, z):
+    from msdelta.eval.filtered_retrieval import PROTON
+    return (mass + z * PROTON) / z
+
+
+def test_crossmodal_filtered_report_hand_computed():
+    """Cross-modal filtered evaluation (filtered_retrieval.crossmodal_report, K77-A).
+
+    Candidates (peptide+charge, all z=2) on the circle, neutral masses:
+      c0 0 deg 1000 Da;  c1 90 deg 1200;  c2 180 deg 1400;  c3 270 deg 1600;
+      c4 30 deg 1201.00336 (a decoy exactly one 13C step above c1).
+    Spectra (z=2), truth sp_i -> c_i, measured precursor m/z = theoretical of the truth,
+    except sp1, recorded one isotope high: mz(1200) + 1.00336/2 = mz(c4) exactly.
+      sp0  20 deg: c4 10, c0 20, c1 70, c3 110, c2 160   truth rank 2
+      sp1  80 deg: c1 10, c4 50, c0 80, c2 100, c3 170   truth rank 1
+      sp2 170 deg: c2 10, c1 80, c3 100, c4 140, c0 170  truth rank 1
+      sp3 265 deg: c3 5, c2 85, c0 95, c4 125, c1 175    truth rank 1
+    open:     hit@1 3/4, hit@5 1, MRR (1/2 + 1 + 1 + 1)/4 = 7/8 (= cross_modal_metrics).
+    20ppm:    sp0 keeps only c0 -> hit (net GAIN); sp1 keeps only c4 (c1 is 0.5017 m/z away,
+              tolerance 20e-6 * 601 = 0.012) -> its truth is excluded: miss (net LOSS).
+              F = F_all = {sp1} (one correct candidate per query), Fbar = {sp0, sp2, sp3}.
+              full hit@1 = hit@5 = MRR = 3/4; F: 0; Fbar: 1; net_loss = net_gain = 1/4.
+    iso20ppm: sp1 keeps c1 (k=+1) and c4 (k=0), c1 is closer -> hit; sp0 still only c0.
+              full = 1 on every metric; net_loss 0, net_gain 1/4.
+    open on F: sp1 is a hit -> rescue = 1. open on Fbar: hit@1 2/3, MRR (1/2+1+1)/3 = 5/6.
+    Legacy yHydra windows (neutral mass, no charge check): +-1.1 Da keeps c1 for sp1 ->
+    hit@1 1, nothing outside; legacy 20 ppm excludes it -> 3/4, 1/4 outside.
+    """
+    from msdelta.eval.filtered_retrieval import (crossmodal_filters, crossmodal_flatten,
+                                                 crossmodal_ranks, crossmodal_report)
+    from msdelta.reranking import cross_modal_metrics
+
+    cands = _circle(0, 90, 180, 270, 30).float().numpy()
+    spectra = _circle(20, 80, 170, 265).float().numpy()
+    truth = np.arange(4)
+    mass = np.array([1000.0, 1200.0, 1400.0, 1600.0, 1200.0 + 1.00336])
+    z_c = np.full(5, 2)
+    z_q = np.full(4, 2)
+    mz = _mz(mass[:4], 2)
+    mz[1] += 1.00336 / 2
+    rep = crossmodal_report(spectra, cands, truth, mz, z_q, mass, z_c)
+    flat = crossmodal_flatten(rep)
+    exp = {
+        "open/full": (4, 3 / 4, 1.0, 7 / 8), "open/F": (1, 1.0, 1.0, 1.0),
+        "open/F_all": (1, 1.0, 1.0, 1.0), "open/Fbar": (3, 2 / 3, 1.0, 5 / 6),
+        "20ppm/full": (4, 3 / 4, 3 / 4, 3 / 4), "20ppm/F": (1, 0.0, 0.0, 0.0),
+        "20ppm/Fbar": (3, 1.0, 1.0, 1.0), "iso20ppm/full": (4, 1.0, 1.0, 1.0),
+        "iso20ppm/F": (1, 1.0, 1.0, 1.0), "iso20ppm/Fbar": (3, 1.0, 1.0, 1.0),
+    }
+    for cell, (n, h1, h5, mrr) in exp.items():
+        assert flat[f"crossmodal/{cell}/n"] == n, cell
+        for key, v in (("hit@1", h1), ("hit@5", h5), ("mrr", mrr)):
+            assert flat[f"crossmodal/{cell}/{key}"] == pytest.approx(v), (cell, key)
+    assert flat["crossmodal/20ppm/net_loss"] == pytest.approx(1 / 4)
+    assert flat["crossmodal/20ppm/net_gain"] == pytest.approx(1 / 4)
+    assert flat["crossmodal/iso20ppm/net_loss"] == 0.0
+    assert flat["crossmodal/iso20ppm/net_gain"] == pytest.approx(1 / 4)
+    assert flat["crossmodal/rescue"] == 1.0
+    assert "crossmodal/open/net_loss" not in flat
+    # unfiltered = the existing cross_modal_metrics numbers
+    old = cross_modal_metrics(cands, spectra, truth, np.arange(5))
+    assert flat["crossmodal/open/full/hit@1"] == pytest.approx(old["crossmodal/hit@1"])
+    assert flat["crossmodal/open/full/mrr"] == pytest.approx(old["crossmodal/mrr"])
+    assert flat["crossmodal/open/full/hit@5"] == pytest.approx(old["crossmodal/hit@5"])
+    # legacy yHydra windows through the same ranking
+    f = crossmodal_filters(mz, z_q, mass, z_c)
+    rank, inside, size = crossmodal_ranks(spectra, cands, truth, f["legacy_1.1Da"])
+    assert (inside & (rank == 0)).mean() == 1.0 and inside.all()
+    assert list(size) == [1, 2, 1, 1]
+    rank, inside, _ = crossmodal_ranks(spectra, cands, truth, f["legacy_20ppm"])
+    assert (inside & (rank == 0)).mean() == pytest.approx(3 / 4)
+    assert list(inside) == [True, False, True, True]
+    # the plain filter requires the same charge; candidates without a charge skip that check
+    z_c3 = z_c.copy()
+    z_c3[2] = 3
+    assert not crossmodal_filters(mz, z_q, mass, z_c3)["20ppm"](np.array([2]))[0, 2]
+    assert crossmodal_filters(mz, z_q, mass)["20ppm"](np.array([2]))[0, 2]
+
+
+def test_align_test_filtered_keys_and_skip():
+    """eval_align_test.filtered_metrics: flat keys when rows carry a measured precursor
+    (all theoretical here, so F is empty and 20 ppm changes nothing), {} when they do not."""
+    from datasets import Dataset
+
+    from msdelta.eval.eval_align_test import filtered_metrics
+    from msdelta.rescoring.reranking import peptide_neutral_mass
+
+    peps = ["PEPTIDEK", "PEPTIDEK", "ACDEFGHIK", "ACDEFGHIK", "LLLLMMR", "LLLLMMR"]
+    keys = [(p, 2) for p in peps]
+    cands = list(dict.fromkeys(keys))
+    group = np.array([cands.index(k) for k in keys])
+    spec = _circle(0, 5, 120, 125, 240, 245).float()
+    seq = _circle(2, 122, 242).float()
+    prec = [_mz(peptide_neutral_mass(p), 2) for p in peps]
+    rows = Dataset.from_dict({"peptide": peps, "charge": [2] * 6, "precursor": prec})
+    out = filtered_metrics(rows, keys, cands, group, spec, seq, group)
+    assert out["crossmodal/open/full/hit@1"] == 1.0
+    assert out["crossmodal/20ppm/full/hit@1"] == 1.0
+    assert out["crossmodal/open/F/n"] == 0 and "crossmodal/open/F/hit@1" not in out
+    assert out["teacher_spectrum/20ppm/full/MAP@R"] == pytest.approx(1.0)
+    no_prec = Dataset.from_dict({"peptide": peps, "charge": [2] * 6})
+    assert filtered_metrics(no_prec, keys, cands, group, spec, seq, group) == {}
+    zeros = Dataset.from_dict({"peptide": peps, "charge": [2] * 6, "precursor": [0.0] * 6})
+    assert filtered_metrics(zeros, keys, cands, group, spec, seq, group) == {}
