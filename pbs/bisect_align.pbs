@@ -46,6 +46,7 @@ export PYTHONPATH=$REPO_DIR${PYTHONPATH:+:$PYTHONPATH}
 # Run from a frozen copy of the code (pbs/lib/code_snapshot.sh): branch switches and
 # edits in the checkout cannot affect this job once it has started.
 source "$REPO_DIR/pbs/lib/code_snapshot.sh"
+# Under a ref (pbs/qsub_ref, MSDELTA_CODE_REF) repo-relative reads below are the commit's.
 export OMP_NUM_THREADS=4
 # No W&B, no datasets, no checkpoint: the smallest process that can reproduce the fault.
 export HF_HUB_OFFLINE=1 HF_DATASETS_OFFLINE=1
@@ -59,7 +60,7 @@ for variant in $VARIANTS; do
     mpiexec --envall --pmi=pmix -n "$XPUS_PER_HOST" --ppn "$XPUS_PER_HOST" \
         --cpu-bind depth --depth 8 --hostfile="$PBS_NODEFILE" \
         "$MSDELTA_CODE_DIR/pbs/rank_wrapper.sh" \
-        "$VENV_DIR/bin/python" pbs/bisect_align.py \
+        "$VENV_DIR/bin/python" "${MSDELTA_REF_PREFIX}pbs/bisect_align.py" \
             --variant "$variant" --steps "$STEPS" >"$log" 2>&1
     status=$?
     if grep -q "SURVIVED" "$log" && [[ $status -eq 0 ]]; then

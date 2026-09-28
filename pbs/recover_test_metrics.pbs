@@ -55,6 +55,7 @@ export PYTHONPATH=$REPO_DIR${PYTHONPATH:+:$PYTHONPATH}
 # Run from a frozen copy of the code (pbs/lib/code_snapshot.sh): branch switches and
 # edits in the checkout cannot affect this job once it has started.
 source "$REPO_DIR/pbs/lib/code_snapshot.sh"
+# Under a ref (pbs/qsub_ref, MSDELTA_CODE_REF) repo-relative reads below are the commit's.
 export HF_HOME=${HF_HOME:-$SCRATCH_ROOT/huggingface}
 export HF_HUB_OFFLINE=${HF_HUB_OFFLINE:-1}
 export HF_DATASETS_OFFLINE=${HF_DATASETS_OFFLINE:-1}
@@ -62,7 +63,7 @@ export HF_DATASETS_OFFLINE=${HF_DATASETS_OFFLINE:-1}
 # Which arms need it. Parsed from the same reporter a human would run, so the job can
 # never disagree with the dry run about what is recoverable.
 mapfile -t ARMS < <(
-    "$VENV_DIR/bin/python" sweeps/recover_test_metrics.py "$JOB" --dry-run 2>/dev/null \
+    "$VENV_DIR/bin/python" "${MSDELTA_REF_PREFIX}sweeps/recover_test_metrics.py" "$JOB" --dry-run 2>/dev/null \
         | awk '/^  sweep-/ {print $1}'
 )
 if [[ ${#ARMS[@]} -eq 0 ]]; then

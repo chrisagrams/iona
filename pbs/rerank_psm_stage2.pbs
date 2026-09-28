@@ -31,12 +31,13 @@ export PYTHONPATH=$REPO_DIR${PYTHONPATH:+:$PYTHONPATH}
 # Run from a frozen copy of the code (pbs/lib/code_snapshot.sh): branch switches and
 # edits in the checkout cannot affect this job once it has started.
 source "$REPO_DIR/pbs/lib/code_snapshot.sh"
+# Under a ref (pbs/qsub_ref, MSDELTA_CODE_REF) repo-relative reads below are the commit's.
 export HF_HOME=${HF_HOME:-$SCRATCH_ROOT/huggingface}
 export HF_HUB_OFFLINE=1 HF_DATASETS_OFFLINE=1
 PY="$VENV_DIR/bin/python"
 
 echo "=== $(date -Is) tests"
-"$PY" -m pytest -q -p no:cacheprovider tests/test_rerank_psm.py || { echo "tests failed" >&2; exit 1; }
+"$PY" -m pytest -q -p no:cacheprovider "${MSDELTA_REF_PREFIX}tests/test_rerank_psm.py" || { echo "tests failed" >&2; exit 1; }
 mkdir -p "$BASE/handfeat"
 echo "=== $(date -Is) stage 1b: hand-built features"
 pids=()

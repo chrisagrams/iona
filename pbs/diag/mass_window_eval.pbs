@@ -36,6 +36,9 @@ export PYTHONPATH=$REPO_DIR${PYTHONPATH:+:$PYTHONPATH}
 # Run from a frozen copy of the code (pbs/lib/code_snapshot.sh): branch switches and
 # edits in the checkout cannot affect this job once it has started.
 source "$REPO_DIR/pbs/lib/code_snapshot.sh"
+# Under a ref (pbs/qsub_ref, MSDELTA_CODE_REF) a committed MODELS file is the commit's;
+# one the commit does not have is read from the path given (ad hoc).
+MODELS=$(msdelta_code_path "$MODELS")
 export HF_HOME=${HF_HOME:-$SCRATCH_ROOT/huggingface}
 export HF_HUB_OFFLINE=1 HF_DATASETS_OFFLINE=1
 PY="$REPO_DIR/.venv/bin/python"
