@@ -12,6 +12,7 @@ import torch
 from accelerate.utils import DeepSpeedPlugin
 from transformers import HfArgumentParser, Trainer, set_seed
 
+from msdelta.utils.block_timing import BlockTimingCallback
 from msdelta.utils.callbacks import SidecarCallback, build_callbacks
 from msdelta.models.configuration_msdelta import MSDeltaConfig
 from msdelta.data.data import build_pretraining_datasets, load_pretraining_datasets_from_disk
@@ -156,6 +157,15 @@ def main(argv: list[str] | None = None) -> int:
             retrieval_evaluation_datasets=retrieval_evaluation_datasets,
             include_probes=include_probes,
         )
+        if training_args.block_timing_steps > 0:
+            callbacks.append(
+                BlockTimingCallback(
+                    model,
+                    training_args.block_timing_steps,
+                    training_args.block_timing_start_step,
+                    out_dir / "block_timing.json",
+                )
+            )
         if training_args.probe_execution == "sidecar":
             sidecar_callback = SidecarCallback(out_dir, resolved)
             callbacks.append(sidecar_callback)

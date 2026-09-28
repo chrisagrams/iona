@@ -95,8 +95,19 @@ class MSDeltaTrainingArguments(TrainingArguments):
     denoise_num_workers: int = 4
     denoise_seed: int = 0
     wandb_project: str | None = None
+    # K121-P: opt-in per-block timing (msdelta/utils/block_timing.py). 0 = off (default).
+    block_timing_steps: int = field(
+        default=0,
+        metadata={"help": "Time this many optimizer steps per block and write "
+                          "<output_dir>/block_timing.json; 0 disables it."},
+    )
+    block_timing_start_step: int = field(
+        default=20, metadata={"help": "First optimizer step timed (skip warm-up)."}
+    )
 
     def __post_init__(self):
+        if self.block_timing_steps < 0 or self.block_timing_start_step < 1:
+            raise ValueError("block_timing_steps must be >= 0 and block_timing_start_step >= 1")
         if self.logarithmic_eval_start_step is not None and self.logarithmic_eval_start_step < 1:
             raise ValueError("logarithmic_eval_start_step must be positive")
         if self.probe_batch_size < 1:
