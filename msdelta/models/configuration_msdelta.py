@@ -47,6 +47,8 @@ class MSDeltaConfig(PretrainedConfig):
         pair_tri_attn_heads: int = 2,
         pair_tri_attn_dim: int = 8,
         pair_tri_attn_chunk: int = 32,
+        pair_tri_attn_impl: str = "naive",  # "naive" | "sdpa" (K102)
+        pair_tri_attn_checkpoint_chunks: bool = False,  # K102
         pair_use_writeback: bool = True,
         pair_opm_channels: int = 8,
         pair_single_use_mz: bool = True,
@@ -82,6 +84,8 @@ class MSDeltaConfig(PretrainedConfig):
         self.pair_tri_attn_heads = pair_tri_attn_heads
         self.pair_tri_attn_dim = pair_tri_attn_dim
         self.pair_tri_attn_chunk = pair_tri_attn_chunk
+        self.pair_tri_attn_impl = pair_tri_attn_impl
+        self.pair_tri_attn_checkpoint_chunks = pair_tri_attn_checkpoint_chunks
         self.pair_use_writeback = pair_use_writeback
         self.pair_opm_channels = pair_opm_channels
         self.pair_single_use_mz = pair_single_use_mz
@@ -139,6 +143,8 @@ class MSDeltaConfig(PretrainedConfig):
             for name in ("pair_tri_attn_heads", "pair_tri_attn_dim", "pair_tri_attn_chunk"):
                 if getattr(self, name) <= 0:
                     raise ValueError(f"{name} must be positive")
+            if self.pair_tri_attn_impl not in ("naive", "sdpa"):
+                raise ValueError("pair_tri_attn_impl must be 'naive' or 'sdpa'")
         if self.pair_use_writeback and self.pair_opm_channels <= 0:
             raise ValueError("pair_opm_channels must be positive when pair_use_writeback is set")
         if self.pair_loss_bank_sigma_ppm <= 0:
