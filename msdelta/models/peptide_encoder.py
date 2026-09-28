@@ -406,6 +406,8 @@ class PeptideEncoderModel(PreTrainedModel):
     """PeptideEncoder as a PreTrainedModel. The encoder sits at `sequence_encoder`, so the
     weight names are exactly those of an alignment checkpoint and of the first Hub release."""
 
+    _strict_loading = True   # from_pretrained refuses mismatched weights (K105-S)
+
     config_class = PeptideEncoderConfig
     base_model_prefix = "sequence_encoder"
     main_input_name = "residues"
@@ -441,8 +443,18 @@ class PeptideEncoderModel(PreTrainedModel):
         return torch.cat(out) if out else torch.zeros(0, self.config.embedding_size)
 
     @classmethod
-    def from_pretrained(cls, pretrained_model_name_or_path, *args, **kwargs):
-        """Standard layout via transformers; the two older layouts are read and converted."""
+    def from_pretrained(cls, pretrained_model_name_or_path, *args, strict: bool = True,
+                        allow_missing=(), allow_unexpected=(), **kwargs):
+        """Standard layout via transformers; the two older layouts are read and converted.
+
+        Strict by default on every layout (K94-P / K105-S): a missing, unexpected or
+        mis-shaped weight raises instead of leaving a randomly initialised tensor behind
+        transformers' warning. strict=False opts out on the standard layouts (the older
+        layouts are converted by hand and always checked). `output_loading_info=True`
+        returns (model, info) as transformers does."""
+        from msdelta.models.loading import strict_from_pretrained
+
+        want_info = kwargs.get("output_loading_info", False)
         path = Path(str(pretrained_model_name_or_path))
         if not path.exists():
             from huggingface_hub import snapshot_download
@@ -451,18 +463,22 @@ class PeptideEncoderModel(PreTrainedModel):
         config_file = path / "config.json"
         model_type = (json.loads(config_file.read_text()).get("model_type")
                       if config_file.exists() else None)
-        if model_type == PeptideEncoderConfig.model_type:
-            return super().from_pretrained(str(path), *args, **kwargs)
-        if model_type == LEGACY_MODEL_TYPE:
-            # Same layout, older name: build the config ourselves (transformers would warn about
-            # the model_type mismatch) and let the standard loader read the weights.
-            if kwargs.get("config") is None:
+        if model_type in (PeptideEncoderConfig.model_type, LEGACY_MODEL_TYPE):
+            if model_type == LEGACY_MODEL_TYPE and kwargs.get("config") is None:
+                # Same layout, older name: build the config ourselves (transformers would warn
+                # about the model_type mismatch) and let the standard loader read the weights.
                 raw = json.loads(config_file.read_text())
                 raw["model_type"] = PeptideEncoderConfig.model_type
                 kwargs["config"] = PeptideEncoderConfig.from_dict(raw)
-            return super().from_pretrained(str(path), *args, **kwargs)
-        return cls._from_legacy(path, json.loads(config_file.read_text()) if model_type else None,
-                                num_heads=kwargs.get("num_heads", 8))
+            if not strict:
+                return super().from_pretrained(str(path), *args, **kwargs)
+            return strict_from_pretrained(super().from_pretrained, cls, str(path), *args,
+                                          allow_missing=allow_missing,
+                                          allow_unexpected=allow_unexpected, **kwargs)
+        model = cls._from_legacy(path, json.loads(config_file.read_text()) if model_type else None,
+                                 num_heads=kwargs.get("num_heads", 8))
+        info = {"missing_keys": [], "unexpected_keys": [], "mismatched_keys": [], "error_msgs": []}
+        return (model, info) if want_info else model
 
     @classmethod
     def _from_legacy(cls, path: Path, hub_config: dict | None, num_heads: int = 8) -> "PeptideEncoderModel":

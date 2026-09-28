@@ -25,6 +25,7 @@ from transformers import HfArgumentParser, Trainer, TrainingArguments, set_seed
 
 from msdelta.finetuning.denoise.finetune_denoise import (MemoryProbe, load_description, select_device,
                                       subset_splits)
+from msdelta.models.loading import load_strict
 from msdelta.models.modeling_msdelta import MSDeltaForPreTraining
 from msdelta.models.processing_msdelta import MSDeltaProcessor
 from msdelta.rescoring.reranking import (
@@ -288,7 +289,7 @@ def main(argv: list[str] | None = None) -> int:
             pooling=model_args.pooling, loss=model_args.align_loss,
             temperature=model_args.align_temperature, mse_weight=model_args.mse_weight)
     else:
-        teacher = MSDeltaForPreTraining.from_pretrained(model_args.pretrained_path)
+        teacher = load_strict(MSDeltaForPreTraining, model_args.pretrained_path)
         model = build_alignment_model(
             teacher, pooling=model_args.pooling,
             hidden_size=model_args.sequence_hidden_size,

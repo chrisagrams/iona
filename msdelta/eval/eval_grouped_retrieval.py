@@ -86,6 +86,7 @@ def score_model(path, pooling, rows, groups, experimental, collator, device,
                 batch_size, filter_inputs=None, consensus=None) -> dict:
     from msdelta.finetuning.contrastive.contrastive import (MSDeltaForContrastive, embed_dataset,
                                      retrieval_metrics_topk)
+    from msdelta.models.loading import load_strict
     from msdelta.models.modeling_msdelta import MSDeltaForPreTraining
 
     if path.startswith("binned:"):
@@ -105,7 +106,7 @@ def score_model(path, pooling, rows, groups, experimental, collator, device,
         emb = (x - mean) @ v[:, :int(dims)]
         return _variants(emb, groups, experimental, device, retrieval_metrics_topk,
                          filter_inputs=filter_inputs, consensus=consensus)
-    encoder = MSDeltaForPreTraining.from_pretrained(path)
+    encoder = load_strict(MSDeltaForPreTraining, path)
     # A projection head saved by finetune_contrastive (--projection_dim) is scored both
     # ways: `all/...` from the head output (the loss space) and `pooled_all/...` from the
     # pre-head features. Without a head the two are the same vector, scored once.

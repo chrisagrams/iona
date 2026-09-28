@@ -31,6 +31,7 @@ from msdelta.finetuning.contrastive.contrastive import (GroupBatchSampler, MSDel
                                  retrieval_summary,
                                  subset_by_group)
 from msdelta.finetuning.denoise.finetune_denoise import MemoryProbe, load_description, select_device, subset_splits
+from msdelta.models.loading import check_architecture, load_strict
 from msdelta.models.modeling_msdelta import MSDeltaForPreTraining
 from msdelta.models.processing_msdelta import MSDeltaProcessor
 from msdelta.rescoring.reranking import (AlignmentCollator, REPLICATE_REPO, build_alignment_datasets,
@@ -567,6 +568,7 @@ def main(argv: list[str] | None = None) -> int:
         # build_denoising_model, which learned this the same way.
         from msdelta.models.configuration_msdelta import MSDeltaConfig
         config = MSDeltaConfig.from_pretrained(model_args.pretrained_path)
+        check_architecture(config, model_args.pretrained_path)
         encoder = MSDeltaForPreTraining(config)
         # The reference is a SEPARATE random model with the same config, not a copy of
         # the encoder, only if a KL target is asked for. Regularising a random encoder
@@ -576,8 +578,8 @@ def main(argv: list[str] | None = None) -> int:
         print("[contrastive] RANDOM INIT control: architecture of "
               f"{model_args.pretrained_path}, no pretrained weights", flush=True)
     else:
-        encoder = MSDeltaForPreTraining.from_pretrained(model_args.pretrained_path)
-        reference = (MSDeltaForPreTraining.from_pretrained(model_args.pretrained_path)
+        encoder = load_strict(MSDeltaForPreTraining, model_args.pretrained_path)
+        reference = (load_strict(MSDeltaForPreTraining, model_args.pretrained_path)
                      if model_args.kl_weight > 0 else None)
     model = MSDeltaForContrastive(encoder, reference, pooling=model_args.pooling,
                                   temperature=model_args.temperature,

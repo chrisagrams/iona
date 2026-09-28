@@ -45,6 +45,7 @@ from msdelta.models.configuration_msdelta import MSDeltaConfig, MSDeltaDenoising
 from msdelta.data.data import build_denoising_datasets
 from transformers import Trainer
 from msdelta.finetuning.denoise.denoising import DenoisingTrainer
+from msdelta.models.loading import check_architecture, load_strict
 from msdelta.models.modeling_msdelta import MSDeltaForDenoising, MSDeltaForPreTraining
 from msdelta.models.processing_msdelta import MSDeltaProcessor
 from msdelta.utils.wandb_distributed import init_wandb_run
@@ -382,9 +383,12 @@ def build_denoising_model(
         # then re-initialising would leave any buffer the init does not touch carrying
         # pretrained values, which is a subtler thing to be wrong about than it looks.
         encoder_config = MSDeltaConfig.from_pretrained(pretrained_path)
+        check_architecture(encoder_config, pretrained_path)
         pretrained = MSDeltaForPreTraining(encoder_config)
     else:
-        pretrained = MSDeltaForPreTraining.from_pretrained(pretrained_path)
+        # Strict: every encoder AND intensity-head weight must come from the checkpoint.
+        # The denoising head is built fresh below, outside this load, so needs no allow-list.
+        pretrained = load_strict(MSDeltaForPreTraining, pretrained_path)
     config = MSDeltaDenoisingConfig(
         encoder=copy.deepcopy(pretrained.config if isinstance(pretrained.config, MSDeltaConfig)
                               else MSDeltaConfig(**pretrained.config.to_dict())),

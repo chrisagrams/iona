@@ -15,6 +15,7 @@ from msdelta.data.data import (
     build_retrieval_evaluation_datasets,
 )
 from msdelta.finetuning.denoise.denoising import run_denoising_probe
+from msdelta.models.loading import load_strict
 from msdelta.models.modeling_msdelta import MSDeltaForPreTraining
 from msdelta.models.processing_msdelta import MSDeltaProcessor
 from msdelta.eval.retrieval import run_retrieval_probe
@@ -148,7 +149,7 @@ def main(argv: list[str] | None = None) -> int:
             datasets, processor, evaluation = build_probe_data(
                 cli.probe, data_args, args, processor
             )
-        module = MSDeltaForPreTraining.from_pretrained(cli.checkpoint).to(device)
+        module = load_strict(MSDeltaForPreTraining, cli.checkpoint).to(device)
         destination = out_dir / f"{cli.probe}-probes" / f"step-{cli.step}"
         if cli.probe == "denoise":
             metrics = run_denoising_probe(

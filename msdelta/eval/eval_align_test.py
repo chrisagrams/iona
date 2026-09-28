@@ -86,6 +86,7 @@ def main(argv: list[str] | None = None) -> int:
     from msdelta.finetuning.contrastive.contrastive import retrieval_metrics_topk
     from msdelta.finetuning.alignment.finetune_align import AlignDataArguments, AlignModelArguments
     from msdelta.data.grouped_retrieval import group_ids
+    from msdelta.models.loading import load_strict
     from msdelta.models.modeling_msdelta import MSDeltaForPreTraining
     from msdelta.rescoring.reranking import (AlignmentCollator, PeptideEncoder,
                                    SequenceAlignmentModel, cross_modal_metrics,
@@ -99,7 +100,7 @@ def main(argv: list[str] | None = None) -> int:
         .parse_args_into_dataclasses(args=["--args_file", cli.args_file],
                                      args_file_flag="--args_file",
                                      return_remaining_strings=True)
-    teacher = MSDeltaForPreTraining.from_pretrained(manifest["teacher"])
+    teacher = load_strict(MSDeltaForPreTraining, manifest["teacher"])
     state = load_file(str(Path(cli.run) / "final" / "model.safetensors"))
     student = PeptideEncoder(embedding_size=int(manifest["embedding_size"]),
                              hidden_size=model_args.sequence_hidden_size,

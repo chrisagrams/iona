@@ -52,6 +52,7 @@ def main(argv: list[str] | None = None) -> int:
     from datasets import load_dataset
 
     from msdelta.finetuning.denoise.finetune_denoise import denoise_metrics
+    from msdelta.models.loading import load_strict
     from msdelta.models.modeling_msdelta import MSDeltaForDenoising
     from msdelta.models.processing_msdelta import MSDeltaProcessor
 
@@ -70,7 +71,11 @@ def main(argv: list[str] | None = None) -> int:
         processor = MSDeltaProcessor.from_pretrained(path, max_peaks=cli.max_peaks)
         data = raw.map(lambda e: processor.process_denoising_example(
             e["mz"], e["intensity"], e["noise"]), remove_columns=raw.column_names)
-        model = MSDeltaForDenoising.from_pretrained(path).to(device).eval()
+        # mask_token: frozen out of the graph during denoise training (never read without
+        # mask_positions), and some denoise checkpoints omit it -- as in eval_checkpoint.
+        # (Also MSDeltaForDenoising's class default since K105-S; kept explicit here.)
+        model = load_strict(MSDeltaForDenoising, path,
+                            allow_missing=("msdelta.embed.mask_token",)).to(device).eval()
         per = []           # (n_peaks, logits, labels) per spectrum
         skipped = []
         # FIXED widths, not each spectrum's own length: one shape per call made every
