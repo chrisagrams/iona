@@ -107,6 +107,23 @@ the mask copy and its backward vs the attention kernel; (2) a copy-free FUSED va
 strided expand() view without contiguous(); (3) 4-D with the mask pre-built outside the timed region
 (isolates the copy cost); (4) size sweep N = 200, 256, 512 at small batch (final pretraining likely 512).
 
+### K118-S: the venv's Triton shadows Intel's Triton (open, 2026-09-28)
+Context: Aurora's frameworks module ships Intel's Triton 3.6.0 (with the `intel` GPU backend,
+/opt/aurora/26.26.0/frameworks/aurora_frameworks-2025.3.1/.../site-packages/triton); our .venv has an
+upstream Triton 3.8.0 (nvidia + amd backends only), and the venv comes first on sys.path. So any
+Triton kernel, torch.compile or FlexAttention on the XPU cannot work from the venv as is. Options:
+(a) job-only override: put the system Triton first on the path for those jobs (venv untouched,
+reversible); (b) remove/replace Triton in the venv after checking what needs 3.8; (c) a separate small
+venv for kernel work. Suggestion: (a).
+
+### K119-P: our own fused triangle attention (open, 2026-09-28)
+Cheapest first: (1) FlexAttention (torch.nn.attention.flex_attention) with a score_mod adding
+beta[b,h,j,k] -> compiled fused kernel, fwd+bwd, no bias copy, no stored weights (needs Intel Triton,
+K118; XPU support in this PyTorch uncertain) ~1-2 days; (2) torch.compile of the 5-D math path ~1 day;
+(3) hand-written Triton flash-attention kernel with pair bias + gating ~1-2 weeks; (4) SYCL kernel,
+several weeks. Proposal: after K115 (bf16 check) and K117 (copy cost / size sweep), try K118(a) then (1)
+and (2), one short debug job each; (3) only if they fall short.
+
 ### K96-S: the pretraining loss, and the input-normalisation leak (parked; user wants to explore other losses)
 The pretraining task (msdelta/models/processing_msdelta.py + modeling_msdelta.py):
 - Per spectrum, a random subset of peaks is masked: round(mask_ratio x peaks), at least 1
