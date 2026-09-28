@@ -10,6 +10,14 @@ Status: **parked** = user said to come back later; **open** = waiting on the use
 
 ---
 
+## Your to-do (user asked to be reminded)
+
+- **K63-I** -- review the job-DAG scheduler design (notes/DAG_SPEC.md) and say whether you agree.
+- **C18-C** -- review the MassIVE-KB prep (merged, not run; 18.6% overlap finding; open choices below).
+- **K91-P / K113-P** -- study notes/PAIRFORMER.md (the mass-defect feature: proposal K113-P is to drop it).
+
+---
+
 ## Alignment (peptide encoder) -- parked until the new C models exist
 
 ### K86-A: which 20 ppm number the paper cites for the yHydra comparison (parked 2026-09-28)
@@ -62,12 +70,6 @@ peptide encoder (alignment track), which waits for the new C models; the peptide
 unseen data (nine-species open Hit@1 0.39). Proposal: a new PLAN thread + a design card when
 alignment resumes; meanwhile optionally prepare the digestion/index code.
 
-### K109-S: three older worktrees (open)
-`~/code/msdelta-pr` [pr/finetune], `~/code/msdelta-rerank` [dev_rerank],
-`~/code/msdelta-denoise-pr` [feature/denoise-finetune] predate this work (not agent branches). Keep,
-merge, or retire? (Retiring = git worktree remove after checking for uncommitted files; the branches
-stay.)
-
 ### K110-S: checkpoint cleanup on /flare (open)
 Project disk: 8.6 / 10 TB used (UIC-HPC); ours 3.2 TB, of which runs/ = 2.6 TB. User: see how many
 checkpoints we have and delete the ones that aren't useful. Proposal: an inventory first (per sweep:
@@ -91,6 +93,33 @@ checkout, so its code snapshot contained half-merged, uncommitted files (flagged
 dirty record; results were bit-identical, so no harm this time). Proposal: do merges in a scratch
 worktree, run the tests there, and only fast-forward the main checkout once they pass, so jobs never
 snapshot a half-merged tree.
+
+### K112-C: spectrum-only database search (open, 2026-09-28)
+Context: to compete with MSFragger (a search engine that is GIVEN a protein FASTA, digests it and
+matches observed peaks to theoretical fragment masses), a search that needs only the spectrum encoder:
+give every candidate peptide a reference SPECTRUM and compare embeddings. References can be (1) real
+spectral libraries (consensus spectra of previously observed peptides; MassIVE-KB is one, ~2M human
+precursors) = library search (C25) at scale; (2) PREDICTED spectra (Prosit / MS2PIP / AlphaPeptDeep predict
+intensities for any sequence; we already run Prosit via Oktoberfest) -> covers everything MSFragger can
+search; (3) bare theoretical spectra (fragment masses, flat intensities) -- easy but out of the encoder's
+training distribution. Proposal: (2) as the head-to-head with MSFragger (digest the FASTA, predict,
+embed with the spectrum encoder, search within the precursor window, target-decoy FDR, compare PSMs at
+1% FDR on the same spectra); risk: predicted vs experimental embedding gap (measurable; fixable by
+fine-tuning on predicted/experimental pairs). The A-track cross-modal search (K108-A) can be added later
+as extra evidence. Needs a design card.
+
+### K113-P: drop the Pairformer's separate mass-defect feature (open)
+Context: see K91-P. The raw-difference Fourier features already encode the mass defect (integer
+frequencies give functions of frac(delta) exactly; master's 256 frequencies 1e-3..190 cover many
+scales), so the extra feature is redundant; its only rationale was an untested chemistry hint, and it is
+mis-encoded. Proposal: turn it off in the Stage 0 card and as the Pairformer default.
+
+### K102-P (update): cost of a fused triangle-attention kernel
+Cheapest first: (1) chunk checkpointing (small code change); (2) PyTorch's fused
+scaled_dot_product_attention with the triangle bias as the mask -- ~1 day to try, benefit depends on
+whether the XPU backend fuses masked attention; (3) a Triton kernel (PyTorch XPU supports Triton):
+~1-2 weeks, flash-attention style with pair bias + gating, forward+backward; (4) a hand-written
+SYCL/ESIMD kernel: several weeks, most maintenance. (DeepSpeed's Evoformer attention kernel is CUDA-only.)
 
 ### K96-S: the pretraining loss, and the input-normalisation leak (parked; user wants to explore other losses)
 The pretraining task (msdelta/models/processing_msdelta.py + modeling_msdelta.py):

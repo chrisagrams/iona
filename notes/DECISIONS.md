@@ -85,6 +85,8 @@ IDs carry a track suffix: -C contrastive (spectrum encoder), -A alignment (pepti
 | 2026-09-28 | K91-P | Decide after the user studies notes/PAIRFORMER.md | user |
 | 2026-09-28 | K107-P | Stage 0: download MSConsensus-100M from Gaolaboratory to /flare (fits: 8.6/10 TB used); cap 150 OK for testing (final likely 512); add W&B logging; agent's unsourced choices OK for this test (real runs decide/HP-search them) | user |
 | 2026-09-28 | C18-C | Review the MassIVE-KB prep later (remind) | user |
+| 2026-09-28 | K109-S | Keep the three older worktrees (msdelta-pr, msdelta-rerank, msdelta-denoise-pr) for now | user |
+| 2026-09-28 | K107-P (data) | MSConsensus-100M downloaded to /flare (Gaolaboratory, revision 78b3e74, 190 GB) | user |
 
 ## Settings chosen WITHOUT explicit approval (before this log existed)
 
