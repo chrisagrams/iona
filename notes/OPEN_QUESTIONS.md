@@ -85,6 +85,13 @@ default, or keep source splits); oversize spectra (>512 peaks) dropped (default,
 cap very large groups?; exclude more sources (full psm-rerank, other nine-species splits)?; the
 contrastive trainer needs a new dataset format to read the output (separate card).
 
+### K111-S: never merge inside the main checkout (open, 2026-09-28)
+Context: the DAG trial's scoring job (8875675) started while a merge was in progress in the main
+checkout, so its code snapshot contained half-merged, uncommitted files (flagged by the snapshot's
+dirty record; results were bit-identical, so no harm this time). Proposal: do merges in a scratch
+worktree, run the tests there, and only fast-forward the main checkout once they pass, so jobs never
+snapshot a half-merged tree.
+
 ### K96-S: the pretraining loss, and the input-normalisation leak (parked; user wants to explore other losses)
 The pretraining task (msdelta/models/processing_msdelta.py + modeling_msdelta.py):
 - Per spectrum, a random subset of peaks is masked: round(mask_ratio x peaks), at least 1
