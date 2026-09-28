@@ -1,0 +1,38 @@
+#!/bin/bash -l
+# K115: triangle-attention accuracy under bf16, naive vs SDPA vs all-bf16 (pbs/diag/triattn_bf16_check.py).
+#
+#   qsub -q debug -l select=1 -l walltime=00:30:00 -A UIC-HPC -l filesystems=home:flare \
+#        -v REPO_DIR=$PWD pbs/diag/triattn_bf16_check.pbs
+#
+# One tile. Output: results/raw/diag/triattn_bf16/<jobid>.json (+ .log).
+
+#PBS -N msdelta-tribf16
+#PBS -A UIC-HPC
+#PBS -l filesystems=home:flare
+#PBS -j oe
+#PBS -o pbs/logs/
+
+set -uo pipefail
+REPO_DIR=${REPO_DIR:-${PBS_O_WORKDIR:-$PWD}}
+cd "$REPO_DIR"
+
+set +u
+source /usr/share/lmod/lmod/init/bash
+module load "${FRAMEWORKS_MODULE:-frameworks/2025.3.1}"
+set -u
+export ONEAPI_DEVICE_SELECTOR=level_zero:gpu
+export ZE_FLAT_DEVICE_HIERARCHY=FLAT
+export ZE_AFFINITY_MASK=0
+export OMP_NUM_THREADS=${OMP_NUM_THREADS:-8}
+export PYTHONPATH=$REPO_DIR${PYTHONPATH:+:$PYTHONPATH}
+# Run from a frozen copy of the code (pbs/lib/code_snapshot.sh).
+source "$REPO_DIR/pbs/lib/code_snapshot.sh"
+PY="$REPO_DIR/.venv/bin/python"
+JOB=${PBS_JOBID%%.*}; JOB=${JOB:-local}
+O=results/raw/diag/triattn_bf16; mkdir -p "$O"
+
+echo "=== $(date -Is) triattn bf16 check on $(hostname), job $JOB"
+"$PY" "$MSDELTA_CODE_DIR"/pbs/diag/triattn_bf16_check.py --out "$O/$JOB.json" 2>&1 | tee "$O/$JOB.log"
+rc=${PIPESTATUS[0]}
+echo "=== $(date -Is) done (rc=$rc)"
+exit $rc
