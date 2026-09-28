@@ -29,6 +29,114 @@ Everything below was read from the code. Numbers marked *est.* are computed, not
 `FF(x) = [sin(2π f_k x), cos(2π f_k x)]_{k=1..n}` with fixed (non-learned) log-spaced `f_k`. The
 input is clamped to ±2000 first (`fourier.py`).
 
+## Diagrams
+
+Mermaid diagrams render on GitHub and in VS Code's Markdown preview; the plain-text sketches below
+them read anywhere. Letters a-i refer to the per-layer table in §1.
+
+### D1. Whole encoder
+
+```mermaid
+flowchart TD
+    IN["per peak i: m/z, log-intensity ℓ, padding mask, pretraining mask M"]
+    IN --> TOK["single init  s_i = MLP(ℓ_i) + W_mz·FF(m/z_i)<br/>masked peaks → mask_token"]
+    IN --> FEAT["pair features f_ij<br/>FF(Δm/z) · loss/residue dictionary · 13C isotope · relative ℓ"]
+    TOK --> ZI["pair init  z_ij = W_a s_i + W_b s_j + W_c f_ij"]
+    FEAT --> ZI
+    TOK --> S0(("s  (B,N,h)"))
+    ZI --> Z0(("z  (B,N,N,c_z)"))
+    S0 --> LAYERS["× L layers  (D2)"]
+    Z0 --> LAYERS
+    LAYERS --> LN["final LayerNorm → s_out (B,N,h)"]
+    LN --> H1["pretraining: logit per peak → softmax over masked peaks → KL"]
+    LN --> H2["denoise: per-peak MLP → noise / signal"]
+    LN --> H3["contrastive: mean‖max pooling → MLP → unit vector"]
+```
+
+### D2. One layer (code order; each Δ is added residually)
+
+```mermaid
+flowchart LR
+    subgraph PAIR["pair stack: updates z  (N² × c_z per spectrum)"]
+        direction TB
+        A["a  write-back  s → z<br/>outer product of s_i, s_j"] --> B["b  triangle mult. outgoing<br/>Σ_k a_ik ⊙ b_jk"]
+        B --> C["c  triangle mult. incoming<br/>Σ_k a_ki ⊙ b_kj"]
+        C --> D["d, e  triangle attention<br/>starting / ending  (off by default)"]
+        D --> F["f  pair transition (SwiGLU)"]
+    end
+    subgraph SINGLE["single stack: updates s  (N × h per spectrum)"]
+        direction TB
+        H["h  attention over peaks + pair bias + gate"] --> I["i  single transition (SwiGLU)"]
+    end
+    SIN(("s from previous layer")) --> A
+    F --> G["g  pair bias readout  β_ij per head = W_β LN(z_ij)"]
+    G -->|"bias added to attention scores"| H
+    SIN --> H
+    I --> SOUT(("s to next layer"))
+    F --> ZOUT(("z to next layer"))
+```
+
+`pair_update`: `static` skips b-f (z stays at its init; only each layer's readout g learns);
+`transition` keeps only f; `triangle` runs b, c, f (+ d, e if triangle attention is on).
+
+### D3. What each pair operation lets peak pair (i, j) see
+
+```
+ triangle multiplication, outgoing (b)          triangle multiplication, incoming (c)
+ z_ij ← Σ_k  a(z_ik) ⊙ b(z_jk)                   z_ij ← Σ_k  a(z_ki) ⊙ b(z_kj)
+
+            i ─────────── j                                 i ─────────── j
+             ╲           ╱                                   ▲           ▲
+         z_ik ╲         ╱ z_jk                          z_ki  ╲         ╱  z_kj
+               ╲       ╱                                       ╲       ╱
+                ▼     ▼                                         ╲     ╱
+                  k                                               k
+   edges leaving i and j toward every third peak k   edges arriving at i and j from every k
+
+ e.g. i = y7, j = y5, k = y6:  (y7 − y6) and (y5 − y6) are both residue masses, so the pair
+ (y7, y5) learns it spans two residues via k -- chained losses/residues across a third peak.
+ Cost: for every (i, j) a sum over all k  →  N³ per channel.
+
+
+ triangle attention, starting node (d)          write-back s → z (a)
+ z_ij ← Σ_k softmax_k( q(z_ij)·k(z_ik) + β(z_jk) ) v(z_ik)      z_ij ← W_o ( a(s_i) ⊗ b(s_j) )
+
+            i ─────────── j                        s_i ●───────● s_j
+            │ ╲                                        ╲     ╱
+     attend │  ╲ bias from z_jk                  outer  ╲   ╱  product
+     over k │   ╲                                        ▼ ▼
+            ▼    ▼                                       z_ij
+              k                                   brings what the per-peak stream learned
+   row i attends over its edges z_ik,             into every pair (quadratic, N²)
+   biased by the third edge z_jk (N³ per head)
+   ending node (e) = the same on z transposed
+
+
+ pair → single (g + h): every attention score between peaks i and j gets a learned bias from z_ij
+
+      s_i ─── attention(q_i, k_j) + β(z_ij) ───▶ s_i      (the pair stack steers which peaks
+                                                           each peak listens to)
+```
+
+### D4. Memory and compute at a glance (B = 32 spectra, N = 150 peaks, c_z = 64; §3 has the formulas)
+
+```
+ per-peak state s   B·N·h      = 32·150·512        ≈  2.5 M values     (small)
+ pair state z       B·N²·c_z   = 32·22,500·64      ≈ 46 M  values      ≈ 180 MB fp32 per copy
+ triangle mult.     ~12 copies of z kept for backward per module        ≈ 2.3 GB/module
+                    → ~45 GB for 10 layers without checkpointing (checkpointing required)
+ triangle attn.     attention weights B·N³·H_t kept for backward         ≈ 5.5 GB/module (off by default;
+                    K102 is bounding this)
+ compute            N³ triangle sums dominate only for N ≳ 384; at N = 150 the per-pair Linear
+                    layers cost more (memory traffic dominates step time)
+```
+
+> Note (2026-09-28): the notation table's "Stage-0 value" column shows the SOURCE's settings. After the
+> user's decisions the Stage 0 run uses master's Fourier bank (F = 256 frequencies, 1e-3 to 190) and
+> no mass-defect feature, so D = 2F + K + 2 + 1 = 571 and the z-init / token-embed parameter counts
+> grow slightly; see notes/P1_stage0_card.md.
+
+
 ## 1. Data flow
 
 Inputs per batch, all `(B, N)`:
