@@ -87,13 +87,6 @@ default, or keep source splits); oversize spectra (>512 peaks) dropped (default,
 cap very large groups?; exclude more sources (full psm-rerank, other nine-species splits)?; the
 contrastive trainer needs a new dataset format to read the output (separate card).
 
-### K102-P (update): cost of a fused triangle-attention kernel
-Cheapest first: (1) chunk checkpointing (small code change); (2) PyTorch's fused
-scaled_dot_product_attention with the triangle bias as the mask -- ~1 day to try, benefit depends on
-whether the XPU backend fuses masked attention; (3) a Triton kernel (PyTorch XPU supports Triton):
-~1-2 weeks, flash-attention style with pair bias + gating, forward+backward; (4) a hand-written
-SYCL/ESIMD kernel: several weeks, most maintenance. (DeepSpeed's Evoformer attention kernel is CUDA-only.)
-
 ### K114-P: decoupled pair / single streams (user's architecture suggestion, 2026-09-28)
 Idea (user): run several single-stream attention blocks per pair update, calibrated so they take about
 as long as one (triangle-attention) pair update, and run the two concurrently so the pair stack is not
@@ -101,6 +94,20 @@ a bottleneck. Partly covered by review ablation #7 (ratio only); the parallel ex
 and open points: notes/PAIRFORMER_REVIEW.md ablation #12. Proposal: test the ratio first (sequential,
 compute-matched); build the parallel version only if a larger ratio doesn't hurt quality. Needs a card
 (and code) when Pairformer ablations start.
+
+### K115-P: make fused attention (SDPA) the default for triangle attention? (open, 2026-09-28)
+Context: K102 (branch k102-triattn-memory; benchmark job 8875808, results/raw/diag/triattn_bench/): one
+triangle-attention module, fwd+bwd, bf16, B32 x N150: naive 128 ms / 4.40 GB; naive+chunk checkpointing
+194 ms / 2.84 GB; SDPA 57.5 ms / 2.85 GB; SDPA+checkpointing 69.1 ms / 2.08 GB. XPU fuses it
+(memory-efficient attention kernel, incl. backward). Recommendation: no custom kernel now (remaining
+memory is pair-sized tensors; a kernel could win at most ~10-15% memory, ~20% time). Equivalence was
+tested in fp32 only; under bf16 the naive path does softmax in fp32, SDPA in bf16. Proposal: one short
+bf16 comparison on a debug node, then SDPA default (+ checkpointing when memory-bound).
+
+### K116-P: the no-copy 5-D mask variant (open)
+Context: passing the mask broadcast (5-D) instead of copying it per chunk was fastest (44.6 ms / 2.45 GB
+at B32 N150) but runs on the plain (non-fused) math path; bf16 precision unverified. Include it in the
+bf16 check (K115) or keep it out?
 
 ### K96-S: the pretraining loss, and the input-normalisation leak (parked; user wants to explore other losses)
 The pretraining task (msdelta/models/processing_msdelta.py + modeling_msdelta.py):

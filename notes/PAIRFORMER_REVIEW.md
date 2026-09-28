@@ -41,3 +41,10 @@ Fair evaluation: same data / cap / batch / steps (+ a wall-clock-matched transfo
 pretraining ranked on a mask-ratio-independent score (port of the source's MaskedIntensityCallback,
 small code change); downstream denoise AUROC/AUPRC (linear probe + fine-tune) and contrastive
 MAP@R with/without filter; always report step time, peak memory, FLOPs.
+
+## Update 2026-09-28: triangle-attention memory (K102, benchmark 8875808)
+Finding #2 addressed on branch k102-triattn-memory: flags `pair_tri_attn_checkpoint_chunks` and
+`pair_tri_attn_impl` ("naive" | "sdpa"), both off by default. B32 N150 fwd+bwd bf16 per module: naive
+128 ms / 4.40 GB -> SDPA 57.5 ms / 2.85 GB -> SDPA+checkpointing 69.1 ms / 2.08 GB; XPU uses the fused
+memory-efficient kernel. No custom kernel for now (K115-P / K116-P pending).
+
