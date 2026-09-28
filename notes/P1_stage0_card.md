@@ -1,3 +1,11 @@
+> **Status (2026-09-28):** user decisions applied: Fourier m/z-difference features use MASTER's
+> defaults (256 frequencies, 1e-3 to 190) for both arms, because master's values come from earlier
+> studies; peaks cap 150 is fine for this test (final runs will likely use 512 like the current
+> pretrained models); W&B logging on (pbs/aurora-pretrain.pbs now loads the key); the agent's
+> unsourced choices are fine for this test (real runs will decide or HP-search them); data =
+> Gaolaboratory/MSConsensus-100M, downloading in full to /flare. Still open: K91-P (mass-defect
+> encoding) -- the user will decide after studying notes/PAIRFORMER.md.
+
 # P1 Stage 0: one short debug pretraining run per architecture
 
 > **PROPOSED -- needs user approval.** Nothing on this card has been created, downloaded or
@@ -43,9 +51,9 @@ the commit in `SNAPSHOT.txt`.
 | `attention_probs_dropout_prob` | 0.1 | :2 |
 | `layer_norm_eps` | 1e-5 | not in the file. Source default `msdelta/model/configuration.py:21` |
 | `initializer_range` | 0.02 | not in the file. Source default `configuration.py:22` |
-| `delta_bias_n_freqs` | 64 | :6 |
-| `delta_bias_f_min` | 0.01 | :4 |
-| `delta_bias_f_max` | 1000.0 | :3 |
+| `delta_bias_n_freqs` | **256** (master default; user 2026-09-28: Pairformer adopts master's Fourier settings) | source had 64 (:6) |
+| `delta_bias_f_min` | **1e-3** (master default) | source had 0.01 (:4) |
+| `delta_bias_f_max` | **190.0** (master default) | source had 1000 (:3) |
 | `delta_bias_per_head_hidden` | 32 (unused by the Pairformer) | :7 |
 | `pair_channels` | 64 | `pair_channels` :25 |
 | `pair_transition_expansion` | 2 | :27 |
@@ -134,9 +142,9 @@ have N close to 150.
 {
   "architecture": "pairformer",
   "attention_probs_dropout_prob": 0.1,
-  "delta_bias_f_max": 1000.0,
-  "delta_bias_f_min": 0.01,
-  "delta_bias_n_freqs": 64,
+  "delta_bias_f_max": 190.0,
+  "delta_bias_f_min": 0.001,
+  "delta_bias_n_freqs": 256,
   "delta_bias_per_head_hidden": 32,
   "hidden_dropout_prob": 0.1,
   "hidden_size": 512,

@@ -218,6 +218,11 @@ export no_proxy=${no_proxy:-admin,localhost,*.cm.aurora.alcf.anl.gov,aurora-*,*.
 export no_proxy="$no_proxy,127.0.0.1"
 export NO_PROXY="${NO_PROXY:-$no_proxy},127.0.0.1"
 
+# Credentials at runtime, never through `qsub -v` (world-readable via qstat -f); same as
+# aurora-finetune.pbs. Added 2026-09-28 (K107-P: W&B logging for the Stage 0 runs).
+source "$REPO_DIR/pbs/load_keys.sh"
+[[ -n ${WANDB_API_KEY:-} ]] || echo "WARNING: WANDB_API_KEY not loaded -- W&B logging will fail unless --report_to none (see pbs/load_keys.sh)" >&2
+
 export WANDB_DIR=${WANDB_DIR:-$LOG_DIR}
 export WANDB_RESUME=${WANDB_RESUME:-allow}
 export WANDB_RUN_ID=${WANDB_RUN_ID:-$RUN_NAME}

@@ -47,17 +47,43 @@ Context: built on branch `i2-dag` (tested only on a simulated batch system). Spe
 `notes/DAG_SPEC.md`. First live trial approved (K84-I). You said you would read it and say whether
 you agree with the design.
 
-### K106-S: stop branching? (open, 2026-09-28)
-Context: the extra branches (reorg, p1-pairformer, i2-dag, a-filtered-eval, c25-library-search,
-k94-strict-load, k90-code-ref, c18-massivekb-prep) were created by Claude, one per background
-agent, in separate git worktrees. Two reasons: (1) before per-job code snapshots existed, jobs ran
-code straight from the main checkout, so editing it could break running jobs; (2) several agents
-editing the same checkout at once would overwrite each other's files and mix unrelated half-done
-work into commits. (1) is solved (snapshots); (2) still holds when agents run in parallel.
-Options: (a) keep one branch per parallel agent but MERGE into dev_finetune_02 as soon as its
-tests pass and you've seen the report (no waiting); (b) no branches: agents work one at a time
-directly on dev_finetune_02 (slower, no parallelism); (c) current practice (branches wait for
-explicit approval to merge).
+### K108-A: database search to compete with MSFragger (open, 2026-09-28)
+Context: today we only RESCORE the candidate lists MSFragger produces (reranking). To compete with
+MSFragger directly we need our own database search: spectrum -> candidate peptide SEQUENCES.
+Pieces: (1) a protein database: public (UniProt human reference proteome UP000005640; Swiss-Prot
+~20k proteins, more with isoforms) -- ideally the SAME FASTA + contaminants the lab used for the
+HEK/HCT116 MSFragger search (ask); (2) in-silico digestion with MSFragger-matching settings (enzyme,
+missed cleavages, length range, fixed/variable modifications, charges) -> millions of peptide+charge
+entries (pyteomics is installed); (3) embed every entry with the peptide encoder, plus decoys
+(reversed sequences) for target-decoy FDR; (4) per spectrum: candidates within the precursor window
+MSFragger used, ranked by cosine to the spectrum encoder's embedding; (5) PSMs at 1% FDR vs
+MSFragger on the same spectra (psm-rerank-hek-hct116 contains MSFragger's results). Depends on the
+peptide encoder (alignment track), which waits for the new C models; the peptide encoder is weak on
+unseen data (nine-species open Hit@1 0.39). Proposal: a new PLAN thread + a design card when
+alignment resumes; meanwhile optionally prepare the digestion/index code.
+
+### K109-S: three older worktrees (open)
+`~/code/msdelta-pr` [pr/finetune], `~/code/msdelta-rerank` [dev_rerank],
+`~/code/msdelta-denoise-pr` [feature/denoise-finetune] predate this work (not agent branches). Keep,
+merge, or retire? (Retiring = git worktree remove after checking for uncommitted files; the branches
+stay.)
+
+### K110-S: checkpoint cleanup on /flare (open)
+Project disk: 8.6 / 10 TB used (UIC-HPC); ours 3.2 TB, of which runs/ = 2.6 TB. User: see how many
+checkpoints we have and delete the ones that aren't useful. Proposal: an inventory first (per sweep:
+arms, checkpoint dirs, size, whether its results are scored/committed, whether it is a released or
+reference model), then a deletion card for approval, executed under the deletion protocol (dry run,
+test on a copy, staged).
+
+### C18-C: MassIVE-KB prep -- review later (parked; reminder requested)
+Merged (data/prepare_massive_kb.py, pbs/prepare_massive_kb.pbs, notes/C18_prepare_card.md). NOT run.
+Finding: in a 2,000-spectrum sample, 18.6% have a peptide sequence that is in one of our evaluation
+sets (ms-con-100k val 94, HEK 90, ms-con-100k test 68, human 59, HCT116 50, mouse 27, replicate
+corpus 22, OOD 12, yeast 2 of 2,000) -- the prep script removes them. Maybe ms-contrastive-100k is
+derived from MassIVE-KB (ask Chris). Open choices: split policy (re-split peptide-disjoint by
+default, or keep source splits); oversize spectra (>512 peaks) dropped (default, 4%) or top-512;
+cap very large groups?; exclude more sources (full psm-rerank, other nine-species splits)?; the
+contrastive trainer needs a new dataset format to read the output (separate card).
 
 ### K96-S: the pretraining loss, and the input-normalisation leak (parked; user wants to explore other losses)
 The pretraining task (msdelta/models/processing_msdelta.py + modeling_msdelta.py):
@@ -110,28 +136,6 @@ just below an integer mass (CO, CO2, O) from those just above (H2O, NH3). Inheri
 Options: fix before any comparison (integer frequencies, or feed the signed defect) or run as-is
 and test the fix as an ablation.
 
-### K107-P: approve the Stage 0 card (open, 2026-09-28) -- notes/P1_stage0_card.md
-Context: Stage 0 (user: "we should run it") = one short debug pretraining run of each architecture,
-only to check the Pairformer port trains and to measure step time / memory. Full card:
-notes/P1_stage0_card.md; architecture: notes/PAIRFORMER.md. Arms: Pairformer 512x10, 8 heads, FFN 2048,
-pair/triangle 64, write-back 16, triangle attention off (46.1M params; every pair setting taken
-from the source's pairformer-sweep-50m config, cited by line) vs our msdelta-base-50m transformer
-(49.8M) unchanged. Both: peaks cap 150, 300 steps, global batch 512, lr 1.3e-4 cosine, warmup 11,
-bf16, mask ratio 0.5, seed 0; gradient checkpointing on for the Pairformer. Debug queue, ~25-35 min
-per Pairformer job (estimate). Decisions needed:
-(1) DATA: our pretraining corpus MSConsensus-100M (190 GB) is not in our HF cache (Chris's cache is
-    not readable). Proposal: download a small pinned subset (~2.6 GB: 4 train + 1 validation shard)
-    on the login node, then one debug preprocessing job at cap 150.
-(2) PEAKS CAP 150 DROPS SPECTRA: our processor drops any spectrum with more than 150 peaks (the
-    source instead kept the 150 most intense after a 1% threshold); median spectrum has ~205 peaks,
-    so over half are dropped and the kept set skews to short spectra. Same for both arms, so Stage 0
-    is still fair; matching the source needs a code change (own card). Accept for Stage 0?
-(3) W&B: pbs/aurora-pretrain.pbs does not load the W&B key; add the one standard line
-    (pbs/load_keys.sh) or run with --report_to none.
-(4) Settings the agent had to choose (not in the source): warmup 11 (keeps the source's 3.6%
-    warmup fraction), 300 steps, logging every 10 steps, saves/probes off, transformer micro-batch 32
-    (its standard is 64), which data shards, OOM fallback micro 16 x accum 4. Approve or change.
-(5) K91-P: run with the source's mass-defect encoding (as carded) or fix it first.
 ### K102-P: add per-chunk gradient checkpointing to triangle attention before trying it (open)
 Context: triangle attention stores its attention weights for the backward pass: about
 3.2 x batch x peaks^3 x heads x 4 bytes, ~5.5 GB per module at 32 spectra x 150 peaks x 4 heads

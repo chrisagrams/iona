@@ -80,6 +80,11 @@ IDs carry a track suffix: -C contrastive (spectrum encoder), -A alignment (pepti
 | 2026-09-28 | K103-I | Claude may commit the DAG trial files and run the live trial (done: bd8fa7f; first live tick submitted 8875624) | user |
 | 2026-09-28 | K105-S | Strict loading is the default in the model classes (every caller protected; explicit opt-out); covers K104-S | user |
 | 2026-09-28 | K90-S (addendum) | A resumed job takes the configs of its ORIGINAL run and the code of the commit it was launched from | user |
+| 2026-09-28 | K90-S / K106-S | Merge outstanding agent branches as soon as tests pass (done: 8 branches merged, worktrees removed); jobs run from any commit via pbs/qsub_ref; resume uses the original run's configs + commit | user |
+| 2026-09-28 | P (Fourier) | Pairformer adopts master's Fourier settings (256 freqs, 1e-3 to 190); change later if studied | user |
+| 2026-09-28 | K91-P | Decide after the user studies notes/PAIRFORMER.md | user |
+| 2026-09-28 | K107-P | Stage 0: download MSConsensus-100M from Gaolaboratory to /flare (fits: 8.6/10 TB used); cap 150 OK for testing (final likely 512); add W&B logging; agent's unsourced choices OK for this test (real runs decide/HP-search them) | user |
+| 2026-09-28 | C18-C | Review the MassIVE-KB prep later (remind) | user |
 
 ## Settings chosen WITHOUT explicit approval (before this log existed)
 
