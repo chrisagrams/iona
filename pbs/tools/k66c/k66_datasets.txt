@@ -1,0 +1,6 @@
+# name queue VAR=VALUE   (read when each scale is scored; approved: validation + OOD for selection; test, mouse, human for reporting)
+validation debug SPLIT=validation
+oodval debug-scaling DATA=/lus/flare/projects/UIC-HPC/khuss/msdelta/baselines/nine_oodval20k/prepared
+test debug SPLIT=test
+mouse debug-scaling DATA=/lus/flare/projects/UIC-HPC/khuss/msdelta/baselines/noble_mouse20k/prepared
+human debug DATA=/lus/flare/projects/UIC-HPC/khuss/msdelta/baselines/noble_human20k/prepared

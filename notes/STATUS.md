@@ -24,11 +24,11 @@ JOBS (capacity queue blocked by maintenance: "Insufficient amount of resource: a
 SCORING WATCHERS (background loops in the Claude session -- they DIE if the session restarts)
 ──────────────────────────────────────────────────────────────────────────
   When a training job ends with "=== done: 12/12 arms ok" in pbs/logs/<job>.*.OU they submit scoring.
-  Restart them (from ~/code/msdelta) -- they skip nothing twice only if the scoring dirs are checked first:
-    bash <scratchpad>/k66_pipeline.sh 8875194 400m=8875260 025m=8875263     (val/ood/test/mouse/human, debug)
-    bash <scratchpad>/k66_yeast.sh     (edit JOB map to 400m/025m only; yeast on capacity 3 h)
-  The scripts live in the session scratchpad (/tmp/claude-40253/...). If they are gone, submit by hand
-  for each finished scale s in {400m, 025m}:
+  Restart them (from ~/code/msdelta; scripts saved in the repo, log in $S/logs/k66_pipeline.log):
+    nohup bash pbs/tools/k66c/k66_pipeline.sh 8875194 400m=8875260 025m=8875263 &   (val/ood/test/mouse/human)
+    nohup bash pbs/tools/k66c/k66_yeast.sh &                                          (yeast, capacity 3 h)
+  Only if those jobs finished with "=== done: 12/12 arms ok" and their hp-scale-<s>-* results dirs don't exist yet.
+  If the scripts fail, submit by hand for each finished scale s in {400m, 025m}:
     models file: sweeps/arms/score_hp_scale_<s>.txt  (one line per arm: "<name> <run>/final",
                  runs at $S/runs/sweep-s<s>_ck540k_*-<jobid>)
     qsub -q debug -l select=1 -l walltime=01:00:00 -v MODELS=<file>,SPLIT=validation,OUT_DIR=results/raw/finetune/contrastive/hp-scale-<s>-validation pbs/eval_grouped_retrieval.pbs
