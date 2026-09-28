@@ -143,8 +143,8 @@ def test_checkpoint_drops_saved_attention_weights():
     z = torch.randn(b, n, n, C_Z, generator=g)
     mask = torch.ones(b, n, dtype=torch.bool)
     mask[1, n - 6:] = False
-    naive = _saved_bytes(_module(True, pair_tri_attn_chunk=chunk), z, mask)
-    ckpt = _saved_bytes(_module(True, pair_tri_attn_chunk=chunk,
+    naive = _saved_bytes(_module(True, pair_tri_attn_chunk=chunk, pair_tri_attn_impl="naive"), z, mask)
+    ckpt = _saved_bytes(_module(True, pair_tri_attn_chunk=chunk, pair_tri_attn_impl="naive",
                                 pair_tri_attn_checkpoint_chunks=True), z, mask)
     all_weights = b * n ** 3 * h * 4        # fp32 softmax output over every chunk
     one_chunk = b * chunk * n * n * h * 4
@@ -173,5 +173,5 @@ def test_model_level_equivalence():
 def test_config_validation():
     with pytest.raises(ValueError, match="pair_tri_attn_impl"):
         _config(pair_tri_attn_impl="flash")
-    assert MSDeltaConfig().pair_tri_attn_impl == "naive"
+    assert MSDeltaConfig().pair_tri_attn_impl == "sdpa"  # default since K115
     assert MSDeltaConfig().pair_tri_attn_checkpoint_chunks is False

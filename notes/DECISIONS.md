@@ -92,6 +92,7 @@ IDs carry a track suffix: -C contrastive (spectrum encoder), -A alignment (pepti
 | 2026-09-28 | K112-C | Spectrum-only database search: options = (a) our own intensity-prediction task (predict all intensities from fragment m/z) -> embed -> search; (b) generated consensus spectra; (c) peptides directly once alignment is done. Implication (user): consensus spectra must then matter in our training | user |
 | 2026-09-28 | K111-S | Merge in a scratch worktree, test there, then fast-forward the main checkout; AND close the remaining window (race-free snapshots: git archive of the resolved commit when clean; locked copy when dirty) -- being built on k111-atomic-snapshot | user |
 | 2026-09-28 | K115-P | SDPA should become the default for triangle attention; run the bf16 comparison first (incl. an all-bf16 variant) -- running on branch k115-bf16-check | user |
+| 2026-09-28 | K115-P (done) | bf16 check passed (job 8875855): SDPA at least as accurate as the naive bf16 path; pair_tri_attn_impl default = "sdpa" | user |
 
 ## Settings chosen WITHOUT explicit approval (before this log existed)
 

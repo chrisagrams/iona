@@ -48,3 +48,10 @@ Finding #2 addressed on branch k102-triattn-memory: flags `pair_tri_attn_checkpo
 128 ms / 4.40 GB -> SDPA 57.5 ms / 2.85 GB -> SDPA+checkpointing 69.1 ms / 2.08 GB; XPU uses the fused
 memory-efficient kernel. No custom kernel for now (K115-P / K116-P pending).
 
+## Update 2026-09-28: bf16 check (K115, job 8875855) -> SDPA is the default
+Relative L2 error vs an fp32 reference at B32 N150 (output / dz / worst param grad): naive bf16 autocast
+5.1e-3 / 5.1e-3 / 6.4e-3; SDPA 4-D 5.1e-3 / 5.1e-3 / 6.6e-3 (0.47x the time, 0.65x the peak memory);
+5-D math path 5.1e-3 / 5.1e-3 / 7.1e-3 (worse with peaked attention); all-bf16 dz ~20% worse. Every
+autocast variant sits at the ~5e-3 bf16 floor of the projections; the kernel choice is below it.
+`pair_tri_attn_impl` now defaults to "sdpa" (user K115). Checkpointing is numerically identical.
+
