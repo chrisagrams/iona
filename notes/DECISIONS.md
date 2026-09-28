@@ -90,6 +90,7 @@ IDs carry a track suffix: -C contrastive (spectrum encoder), -A alignment (pepti
 | 2026-09-28 | K91-P / K113-P | Drop the Pairformer's separate mass-defect feature for now (default off; Stage 0 card updated) | user |
 | 2026-09-28 | K102-P | Try (1) chunk checkpointing and (2) PyTorch fused scaled_dot_product_attention for triangle attention first; then decide whether a custom kernel is worth it | user |
 | 2026-09-28 | K112-C | Spectrum-only database search: options = (a) our own intensity-prediction task (predict all intensities from fragment m/z) -> embed -> search; (b) generated consensus spectra; (c) peptides directly once alignment is done. Implication (user): consensus spectra must then matter in our training | user |
+| 2026-09-28 | K111-S | Merge in a scratch worktree, test there, then fast-forward the main checkout; AND close the remaining window (race-free snapshots: git archive of the resolved commit when clean; locked copy when dirty) -- being built on k111-atomic-snapshot | user |
 
 ## Settings chosen WITHOUT explicit approval (before this log existed)
 

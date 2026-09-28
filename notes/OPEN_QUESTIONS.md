@@ -87,13 +87,6 @@ default, or keep source splits); oversize spectra (>512 peaks) dropped (default,
 cap very large groups?; exclude more sources (full psm-rerank, other nine-species splits)?; the
 contrastive trainer needs a new dataset format to read the output (separate card).
 
-### K111-S: never merge inside the main checkout (open, 2026-09-28)
-Context: the DAG trial's scoring job (8875675) started while a merge was in progress in the main
-checkout, so its code snapshot contained half-merged, uncommitted files (flagged by the snapshot's
-dirty record; results were bit-identical, so no harm this time). Proposal: do merges in a scratch
-worktree, run the tests there, and only fast-forward the main checkout once they pass, so jobs never
-snapshot a half-merged tree.
-
 ### K102-P (update): cost of a fused triangle-attention kernel
 Cheapest first: (1) chunk checkpointing (small code change); (2) PyTorch's fused
 scaled_dot_product_attention with the triangle bias as the mask -- ~1 day to try, benefit depends on
