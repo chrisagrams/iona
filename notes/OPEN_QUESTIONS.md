@@ -124,6 +124,19 @@ K118; XPU support in this PyTorch uncertain) ~1-2 days; (2) torch.compile of the
 several weeks. Proposal: after K115 (bf16 check) and K117 (copy cost / size sweep), try K118(a) then (1)
 and (2), one short debug job each; (3) only if they fall short.
 
+### K121-P: per-block speed profile in Stage 0 (open, 2026-09-28)
+Context: we have no per-block forward/backward timing of OUR Pairformer on XPU (only the source's
+0.569 steps/s and "triangle mult. = 87% of step time", and our per-module triangle-attention benchmark).
+K114 (single blocks per pair update) must be calibrated on it. Proposal: in Stage 0, turn on an opt-in
+profiler for a few steps (being prepared, off by default) -> time per block: embed, write-back, triangle
+mult out/in, pair transition, bias readout, single attention, single transition.
+
+### C26-C: what is needed for the spectrum-only database search card (open)
+(1) Which intensity predictor: the user's "predict all intensities from m/z" model (does one exist yet?
+is it Chris's msdelta-intensity work?), our pretrained model with every peak masked, or Prosit as a
+stand-in; (2) the FASTA (ideally the one the lab gave MSFragger for HEK/HCT116); (3) which runs and
+MSFragger's settings (precursor tolerance, enzyme, modifications) for the comparison.
+
 ### K96-S: the pretraining loss, and the input-normalisation leak (parked; user wants to explore other losses)
 The pretraining task (msdelta/models/processing_msdelta.py + modeling_msdelta.py):
 - Per spectrum, a random subset of peaks is masked: round(mask_ratio x peaks), at least 1
