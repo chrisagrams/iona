@@ -1,4 +1,10 @@
-"""Hugging Face-native MSDelta model implementations."""
+"""Hugging Face-native MSDelta model implementations.
+
+``MSDeltaModel`` builds the transformer encoder by default; ``config.architecture ==
+"pairformer"`` builds the Pairformer encoder from ``pairformer.py`` in its place, behind the
+same forward signature and the same ``embed`` / ``bias_module`` / ``blocks`` / ``norm``
+attributes, so every head and entry point below works with either.
+"""
 
 from __future__ import annotations
 
@@ -32,6 +38,13 @@ class MSDeltaForPreTrainingOutput(ModelOutput):
 
 class ScalarInputLinear(nn.Linear):
     """Linear layer that retains PyTorch's fan-in-aware initialization."""
+
+
+class ZeroInitLinear(nn.Linear):
+    """Linear layer initialised to zero, for residual readouts that must start as no-ops.
+
+    Used only by the Pairformer (``pairformer.OuterProductMean``).
+    """
 
 
 @dataclass
@@ -176,10 +189,15 @@ class MSDeltaPreTrainedModel(PreTrainedModel):
     base_model_prefix = "msdelta"
     main_input_name = "mz"
     supports_gradient_checkpointing = True
-    _no_split_modules = ["EncoderBlock"]
+    _no_split_modules = ["EncoderBlock", "PairformerSingleBlock", "PairLayer"]
 
     def _init_weights(self, module: nn.Module) -> None:
         if isinstance(module, ScalarInputLinear):
+            return
+        if isinstance(module, ZeroInitLinear):
+            module.weight.data.zero_()
+            if module.bias is not None:
+                module.bias.data.zero_()
             return
         if isinstance(module, nn.Linear):
             module.weight.data.normal_(mean=0.0, std=self.config.initializer_range)
@@ -197,9 +215,17 @@ class MSDeltaModel(MSDeltaPreTrainedModel):
 
     def __init__(self, config: MSDeltaConfig):
         super().__init__(config)
-        self.embed = PeakEmbed(config)
-        self.bias_module = DeltaMZBias(config)
-        self.blocks = nn.ModuleList([EncoderBlock(config) for _ in range(config.num_hidden_layers)])
+        if getattr(config, "architecture", "transformer") == "pairformer":
+            # Imported here: pairformer.py imports PeakEmbed from this module.
+            from .pairformer import build_pairformer
+
+            build_pairformer(self, config)
+        else:
+            self.embed = PeakEmbed(config)
+            self.bias_module = DeltaMZBias(config)
+            self.blocks = nn.ModuleList(
+                [EncoderBlock(config) for _ in range(config.num_hidden_layers)]
+            )
         self.norm = nn.LayerNorm(config.hidden_size, eps=config.layer_norm_eps)
         self.gradient_checkpointing = False
         self.post_init()
@@ -225,16 +251,23 @@ class MSDeltaModel(MSDeltaPreTrainedModel):
             raise ValueError("mask_positions must have the same shape as mz")
         padding_mask = ~attention_mask.bool()
 
-        hidden_states = self.embed(log_intensity, mask_positions)
-        bias = self.bias_module(mz)
+        if getattr(self.config, "architecture", "transformer") == "pairformer":
+            from .pairformer import encode_pairformer
 
-        for block in self.blocks:
-            if self.gradient_checkpointing and self.training:
-                hidden_states = self._gradient_checkpointing_func(
-                    block.__call__, hidden_states, bias, padding_mask
-                )
-            else:
-                hidden_states = block(hidden_states, bias, padding_mask)
+            hidden_states = encode_pairformer(
+                self, mz, log_intensity, attention_mask, mask_positions
+            )
+        else:
+            hidden_states = self.embed(log_intensity, mask_positions)
+            bias = self.bias_module(mz)
+
+            for block in self.blocks:
+                if self.gradient_checkpointing and self.training:
+                    hidden_states = self._gradient_checkpointing_func(
+                        block.__call__, hidden_states, bias, padding_mask
+                    )
+                else:
+                    hidden_states = block(hidden_states, bias, padding_mask)
         hidden_states = self.norm(hidden_states)
 
         if not return_dict:

@@ -1,6 +1,17 @@
-"""Configuration for MSDelta models."""
+"""Configuration for MSDelta models.
+
+``MSDeltaConfig.architecture`` selects the spectrum encoder: ``"transformer"`` (the default,
+and what every checkpoint written before the field existed loads as) or ``"pairformer"``
+(the AlphaFold-3-style single + pair encoder in ``pairformer.py``). The ``pair_*`` fields are
+read only by the Pairformer. A transformer config ignores them and leaves them (and
+``architecture`` itself) out of ``to_dict()``, so its ``config.json``, its ``repr`` and every
+run manifest built from ``to_dict()`` are byte-for-byte what they were before these fields
+existed; a config file without them loads as the transformer.
+"""
 
 from __future__ import annotations
+
+from typing import Any
 
 from transformers import PretrainedConfig
 
@@ -24,6 +35,29 @@ class MSDeltaConfig(PretrainedConfig):
         delta_bias_per_head_hidden: int = 32,
         delta_bias_f_min: float = 1e-3,
         delta_bias_f_max: float = 190.0,
+        architecture: str = "transformer",
+        # Pairformer settings (ignored when architecture == "transformer"). The defaults are
+        # deliberately small -- test-sized, not an experiment choice. Pair tensors are
+        # O(B * peaks^2 * pair_channels); see the pairformer module docstring for the cost.
+        pair_channels: int = 16,
+        pair_transition_expansion: int = 2,
+        pair_tri_channels: int = 16,
+        pair_update: str = "triangle",
+        pair_use_triangle_attention: bool = False,
+        pair_tri_attn_heads: int = 2,
+        pair_tri_attn_dim: int = 8,
+        pair_tri_attn_chunk: int = 32,
+        pair_use_writeback: bool = True,
+        pair_opm_channels: int = 8,
+        pair_single_use_mz: bool = True,
+        pair_use_intensity: bool = True,
+        pair_use_mass_defect: bool = True,
+        pair_mass_defect_n_freqs: int = 16,
+        pair_use_loss_bank: bool = True,
+        pair_loss_bank_sigma_ppm: float = 20.0,
+        pair_use_isotope: bool = True,
+        pair_dropout: float = 0.0,
+        pair_bias_scale: float | None = None,
         **kwargs,
     ):
         super().__init__(**kwargs)
@@ -39,7 +73,35 @@ class MSDeltaConfig(PretrainedConfig):
         self.delta_bias_per_head_hidden = delta_bias_per_head_hidden
         self.delta_bias_f_min = delta_bias_f_min
         self.delta_bias_f_max = delta_bias_f_max
+        self.architecture = architecture
+        self.pair_channels = pair_channels
+        self.pair_transition_expansion = pair_transition_expansion
+        self.pair_tri_channels = pair_tri_channels
+        self.pair_update = pair_update
+        self.pair_use_triangle_attention = pair_use_triangle_attention
+        self.pair_tri_attn_heads = pair_tri_attn_heads
+        self.pair_tri_attn_dim = pair_tri_attn_dim
+        self.pair_tri_attn_chunk = pair_tri_attn_chunk
+        self.pair_use_writeback = pair_use_writeback
+        self.pair_opm_channels = pair_opm_channels
+        self.pair_single_use_mz = pair_single_use_mz
+        self.pair_use_intensity = pair_use_intensity
+        self.pair_use_mass_defect = pair_use_mass_defect
+        self.pair_mass_defect_n_freqs = pair_mass_defect_n_freqs
+        self.pair_use_loss_bank = pair_use_loss_bank
+        self.pair_loss_bank_sigma_ppm = pair_loss_bank_sigma_ppm
+        self.pair_use_isotope = pair_use_isotope
+        self.pair_dropout = pair_dropout
+        self.pair_bias_scale = pair_bias_scale
         self._validate()
+
+    def to_dict(self) -> dict[str, Any]:
+        output = super().to_dict()
+        if output.get("architecture", "transformer") == "transformer":
+            output.pop("architecture", None)
+            for key in [k for k in output if k.startswith("pair_")]:
+                del output[key]
+        return output
 
     def _validate(self) -> None:
         if self.hidden_size <= 0:
@@ -59,6 +121,32 @@ class MSDeltaConfig(PretrainedConfig):
                 raise ValueError(f"{name} must be positive")
         if not 0 < self.delta_bias_f_min < self.delta_bias_f_max:
             raise ValueError("delta_bias_f_min and delta_bias_f_max must satisfy 0 < min < max")
+        if self.architecture not in ("transformer", "pairformer"):
+            raise ValueError("architecture must be 'transformer' or 'pairformer'")
+        if self.architecture == "pairformer":
+            self._validate_pairformer()
+
+    def _validate_pairformer(self) -> None:
+        for name in ("pair_channels", "pair_transition_expansion", "pair_tri_channels",
+                     "pair_mass_defect_n_freqs"):
+            if getattr(self, name) <= 0:
+                raise ValueError(f"{name} must be positive")
+        if self.pair_update not in ("static", "transition", "triangle"):
+            raise ValueError("pair_update must be 'static', 'transition' or 'triangle'")
+        if self.pair_use_triangle_attention:
+            if self.pair_update != "triangle":
+                raise ValueError("pair_use_triangle_attention needs pair_update='triangle'")
+            for name in ("pair_tri_attn_heads", "pair_tri_attn_dim", "pair_tri_attn_chunk"):
+                if getattr(self, name) <= 0:
+                    raise ValueError(f"{name} must be positive")
+        if self.pair_use_writeback and self.pair_opm_channels <= 0:
+            raise ValueError("pair_opm_channels must be positive when pair_use_writeback is set")
+        if self.pair_loss_bank_sigma_ppm <= 0:
+            raise ValueError("pair_loss_bank_sigma_ppm must be positive")
+        if not 0.0 <= self.pair_dropout < 1.0:
+            raise ValueError("pair_dropout must be in [0, 1)")
+        if self.pair_bias_scale is not None and self.pair_bias_scale <= 0:
+            raise ValueError("pair_bias_scale must be positive when set")
 
 
 class MSDeltaDenoisingConfig(PretrainedConfig):
