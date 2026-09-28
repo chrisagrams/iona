@@ -87,14 +87,15 @@ names = [l.split()[0] for l in Path(models).read_text().splitlines()
 # Standard since 2026-09-27: exp MAP@R without a filter, with 20 ppm and isotope-tolerant
 # 20 ppm filters, on the queries the 20 ppm filter passes (Fbar) and fails (F).
 # lib: library search (C25), experimental queries vs consensus-only library, Hit@1
-# unfiltered / 20 ppm / iso 20 ppm and unfiltered MRR; dashes when not scored.
+# unfiltered / 20 ppm / iso 20 ppm, unfiltered MRR and median rank of the true library
+# entry (whole library); dashes when not scored.
 def g(m, k):
     v = m.get(k)
     return f"{v:7.4f}" if isinstance(v, (int, float)) else f"{'-':>7s}"
 print(f"{'model':38s} {'all':>7s} {'exp':>7s} {'Hit@1':>7s} {'queries':>7s} | "
       f"{'20ppm':>7s} {'iso':>7s} | F: {'open':>7s} {'20ppm':>7s} {'iso':>7s} | "
       f"Fbar: {'open':>7s} {'20ppm':>7s} | {'F n':>6s} {'loss':>6s} {'rescue':>6s} | "
-      f"lib: {'open':>7s} {'20ppm':>7s} {'iso':>7s} {'MRR':>7s}")
+      f"lib: {'open':>7s} {'20ppm':>7s} {'iso':>7s} {'MRR':>7s} {'medR':>7s}")
 for n in names:
     f = out / f"{n}.json"
     if not f.exists():
@@ -107,6 +108,6 @@ for n in names:
           f"Fbar: {g(m, e + 'open/Fbar/MAP@R')} {g(m, e + '20ppm/Fbar/MAP@R')} | "
           f"{int(m.get(e + 'open/F/n', 0)):6d} {g(m, e + '20ppm/net_loss')[1:]} {g(m, e + 'rescue')[1:]} | "
           f"lib: {g(m, 'library/Hit@1')} {g(m, 'library/20ppm/full/Hit@1')} "
-          f"{g(m, 'library/iso20ppm/full/Hit@1')} {g(m, 'library/MRR')}")
+          f"{g(m, 'library/iso20ppm/full/Hit@1')} {g(m, 'library/MRR')} {g(m, 'library/rank_median')}")
 EOF
 exit $failed

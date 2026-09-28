@@ -12,13 +12,17 @@ filter allows (no top-k cap). Ties are counted AGAINST the query (a library entr
 same similarity as the correct one ranks ahead of it), so degenerate embeddings cannot
 look good. A correct entry the filter excludes is a miss (rank = inf, reciprocal rank 0).
 
-  Hit@1, Hit@5  correct entry at rank <= 1 / <= 5.
-  MRR           mean of 1/rank.
-  MAP@R         with R = 1 (one correct entry), the project's MAP@R (hits within the top R,
-                msdelta.finetuning.contrastive.contrastive) reduces to Hit@1, and is reported
-                under that name only for column compatibility. The uncapped average
-                precision (the MAP@100 definition) reduces to 1/rank, i.e. MRR truncated at
-                rank 100; with exact ranks we report MRR instead.
+  Hit@1, Hit@5  correct entry at rank <= 1 / <= 5 (over all queries; excluded = miss).
+  MRR           mean of 1/rank (excluded contributes 0).
+  rank stats    (K97-C) R = exact rank of the correct entry among the WHOLE library, or,
+                under a filter, among the filter-allowed candidates. rank_{mean,median,p90,
+                p99,max} are over the FOUND queries only (the filter kept the correct entry),
+                so excluded queries cannot poison them; `excluded` counts the rest.
+                Percentiles use linear interpolation (numpy default). frac_rank_le_{1,5,10,
+                100} is over ALL queries of the subset (excluded = not <= k), so
+                frac_rank_le_1 == Hit@1.
+(No MAP@R: with one correct entry it is just Hit@1 -- dropped, K97-C.) Ties count as
+misses (K98-C). Only on data that has consensus spectra (K99-C).
 
 Filtered split (project rule, notes/PLAN.md Rules; msdelta.eval.filtered_retrieval): every
 number without a filter (`open`), with a 20 ppm filter and an isotope-tolerant 20 ppm filter,
@@ -30,8 +34,11 @@ filtered_retrieval. On ms-contrastive-100k the precursors are theoretical, so ex
 and consensus precursors of one group agree and F is (almost) empty there.
 
 Keys (flat, for the per-model metrics JSON):
-  library/{Hit@1,Hit@5,MRR,MAP@R,queries,unscorable,library_size}
-  library/{open,20ppm,iso20ppm}/{full,F,Fbar}/{Hit@1,Hit@5,MRR,n}   (metrics omitted when n=0)
+  library/{Hit@1,Hit@5,MRR,queries,unscorable,library_size}
+  library/rank_{mean,median,p90,p99,max}, library/frac_rank_le_{1,5,10,100}   (unfiltered)
+  library/{open,20ppm,iso20ppm}/{full,F,Fbar}/{Hit@1,Hit@5,MRR,n,excluded,
+      rank_{mean,median,p90,p99,max},frac_rank_le_{1,5,10,100}}
+      (metrics omitted when n=0; rank_* omitted when no query in the cell was found)
   library/{20ppm,iso20ppm}/{net_loss,net_gain}, library/rescue       (rescue only when F nonempty)
 """
 from __future__ import annotations
@@ -43,6 +50,8 @@ from msdelta.eval.filtered_retrieval import FILTERS, make_filters
 
 SUBSETS = ("full", "F", "Fbar")
 METRICS = ("Hit@1", "Hit@5", "MRR")
+RANK_KS = (1, 5, 10, 100)
+RANK_STATS = tuple(f"rank_{s}" for s in ("mean", "median", "p90", "p99", "max"))
 
 
 def library_ranks(q_emb: torch.Tensor, q_groups: torch.Tensor, lib_emb: torch.Tensor,
@@ -68,8 +77,22 @@ def _summ(ranks: torch.Tensor, mask: torch.Tensor) -> dict:
     if not c:
         return {"n": 0, **{m: None for m in METRICS}}
     r = ranks[mask]
-    return {"n": c, "Hit@1": float((r <= 1).float().mean()),
-            "Hit@5": float((r <= 5).float().mean()), "MRR": float((1.0 / r).mean())}
+    out = {"n": c, "Hit@1": float((r <= 1).float().mean()),
+           "Hit@5": float((r <= 5).float().mean()), "MRR": float((1.0 / r).mean())}
+    found = r[torch.isfinite(r)].double().cpu().numpy()
+    out["excluded"] = c - len(found)
+    out |= {f"frac_rank_le_{k}": float((r <= k).float().mean()) for k in RANK_KS}
+    if len(found):
+        out |= {"rank_mean": float(found.mean()), "rank_median": float(np.median(found)),
+                "rank_p90": float(np.percentile(found, 90)),
+                "rank_p99": float(np.percentile(found, 99)), "rank_max": float(found.max())}
+    return out
+
+
+def _extras(cell: dict) -> dict:
+    """The rank-statistic entries of a _summ cell that are present."""
+    keys = ("excluded", *(f"frac_rank_le_{k}" for k in RANK_KS), *RANK_STATS)
+    return {k: float(cell[k]) for k in keys if k in cell}
 
 
 def library_report(embeddings, groups, experimental, consensus, precursor=None, charge=None,
@@ -108,7 +131,7 @@ def library_report(embeddings, groups, experimental, consensus, precursor=None, 
     ranks = {w: library_ranks(qe, qg, le, lg, fn, chunk=chunk) for w, fn in filters.items()}
     top = _summ(ranks["open"], torch.ones(len(q_idx), dtype=torch.bool, device=dev))
     out |= {f"library/{m}": top[m] for m in METRICS}
-    out["library/MAP@R"] = top["Hit@1"]          # R = 1: MAP@R == Hit@1 (module docstring)
+    out |= {f"library/{k}": v for k, v in _extras(top).items() if k != "excluded"}
     if precursor is None:
         return out
 
@@ -124,6 +147,7 @@ def library_report(embeddings, groups, experimental, consensus, precursor=None, 
             for m in METRICS:
                 if cell[m] is not None:
                     out[f"library/{w}/{s}/{m}"] = cell[m]
+            out |= {f"library/{w}/{s}/{k}": v for k, v in _extras(cell).items()}
         if w != "open":
             hit = ranks[w] <= 1
             out[f"library/{w}/net_loss"] = float((open_hit & ~hit).sum()) / nf

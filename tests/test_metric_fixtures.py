@@ -278,11 +278,17 @@ def test_library_search_hand_computed():
       h      50 /  70 / 170              3           c2 only        1           1
       u      group 3 has no consensus: unscorable, excluded (6 queries scored)
 
-    open:  Hit@1 = 3/6, Hit@5 = 1, MRR = (1 + 1/2 + 1 + 1/2 + 1 + 1/3)/6 = 13/18,
-           MAP@R (R=1) = Hit@1 = 1/2.
+    open:  Hit@1 = 3/6, Hit@5 = 1, MRR = (1 + 1/2 + 1 + 1/2 + 1 + 1/3)/6 = 13/18.
+           Ranks sorted 1,1,1,2,2,3: mean 10/6, median (1+2)/2 = 1.5, max 3;
+           p90 (linear, position 0.9*5 = 4.5 between 2 and 3) = 2.5, p99 (4.95) = 2.95;
+           frac_rank_le_1 = 1/2, le_5 = le_10 = le_100 = 1; excluded 0.
     F = {a} (20 ppm excludes its correct entry), Fbar = the other 5.
-      open  F: Hit@1 1 (so rescue = 1);  Fbar: Hit@1 2/5, MRR (1/2+1+1/2+1+1/3)/5 = 2/3.
+      open  F: Hit@1 1 (so rescue = 1);  Fbar: Hit@1 2/5, MRR (1/2+1+1/2+1+1/3)/5 = 2/3,
+            ranks 1,1,2,2,3: mean 9/5, median 2, p90 (position 3.6) = 2.6, max 3.
       20ppm full: Hit@1 = MRR = 5/6; F: Hit@1 = MRR = 0; Fbar: 1.
+            Rank stats over the 5 FOUND queries (all rank 1): mean = median = max = 1;
+            excluded 1 (a); frac_rank_le_100 = 5/6 (over all 6). F: excluded 1, no rank
+            stats (nothing found), frac_rank_le_1 = 0.
             net_loss = 1/6 (a), net_gain = 3/6 (b, e, h).
       iso20ppm: a's +1 isotope step is allowed -> every rank 1: Hit@1 = MRR = 1 on full,
             F and Fbar; net_loss 0, net_gain 1/2.
@@ -294,7 +300,16 @@ def test_library_search_hand_computed():
     expected = {
         "library/queries": 6, "library/unscorable": 1, "library/library_size": 3,
         "library/Hit@1": 1 / 2, "library/Hit@5": 1.0, "library/MRR": 13 / 18,
-        "library/MAP@R": 1 / 2,
+        "library/rank_mean": 10 / 6, "library/rank_median": 1.5, "library/rank_p90": 2.5,
+        "library/rank_p99": 2.95, "library/rank_max": 3, "library/frac_rank_le_1": 1 / 2,
+        "library/frac_rank_le_5": 1.0, "library/frac_rank_le_100": 1.0,
+        "library/open/full/excluded": 0, "library/open/full/rank_median": 1.5,
+        "library/open/Fbar/rank_mean": 9 / 5, "library/open/Fbar/rank_median": 2,
+        "library/open/Fbar/rank_p90": 2.6, "library/open/Fbar/rank_max": 3,
+        "library/20ppm/full/excluded": 1, "library/20ppm/full/rank_mean": 1.0,
+        "library/20ppm/full/rank_median": 1.0, "library/20ppm/full/rank_max": 1.0,
+        "library/20ppm/full/frac_rank_le_100": 5 / 6, "library/20ppm/F/excluded": 1,
+        "library/20ppm/F/frac_rank_le_1": 0.0, "library/iso20ppm/full/excluded": 0,
         "library/open/full/n": 6, "library/open/F/n": 1, "library/open/Fbar/n": 5,
         "library/open/full/MRR": 13 / 18, "library/open/F/Hit@1": 1.0,
         "library/open/Fbar/Hit@1": 2 / 5, "library/open/Fbar/MRR": 2 / 3,
@@ -310,6 +325,7 @@ def test_library_search_hand_computed():
     }
     for key, value in expected.items():
         assert out[key] == pytest.approx(value, abs=1e-6), key
+    assert "library/20ppm/F/rank_mean" not in out and "library/MAP@R" not in out
     # without precursors: only the unfiltered numbers
     plain = library_report(emb, groups, experimental, consensus)
     assert plain["library/MRR"] == pytest.approx(13 / 18, abs=1e-6)
