@@ -211,13 +211,16 @@ class TestEntryPoints:
             load_weights(target, path)
 
     def test_denoise_checkpoint_mask_token_allowance(self, tmp_path, tiny_denoising_config):
-        """eval_denoise_length's allow-list: the frozen, never-read mask token only."""
+        """The frozen, never-read mask token may be absent from a denoise checkpoint (a
+        class default of MSDeltaForDenoising since K105-S); nothing else may."""
         torch.manual_seed(0)
         path = _save(MSDeltaForDenoising(tiny_denoising_config), tmp_path / "den")
         _edit_weights(path, lambda s: s.pop("msdelta.embed.mask_token"))
+        load_strict(MSDeltaForDenoising, path)
+        load_strict(MSDeltaForDenoising, path, allow_missing=("msdelta.embed.mask_token",))
+        _edit_weights(path, lambda s: s.pop(_encoder_key(s)))
         with pytest.raises(CheckpointMismatchError):
             load_strict(MSDeltaForDenoising, path)
-        load_strict(MSDeltaForDenoising, path, allow_missing=("msdelta.embed.mask_token",))
 
     def test_contrastive_final_encoder_loads(self, tmp_path):
         """finetune_contrastive saves the inner MSDeltaForPreTraining as final/; every
@@ -239,15 +242,98 @@ class TestEntryPoints:
         with pytest.raises(CheckpointMismatchError, match="missing"):
             PeptideEncoderModel.from_pretrained(path)
 
-    def test_no_unguarded_model_loads_remain(self):
-        """Every MSDelta model load in the package goes through load_strict. A new bare
-        `MSDeltaFor*.from_pretrained(` call would bring back the silent-random failure."""
-        offenders = []
-        for py in (REPO / "msdelta").rglob("*.py"):
-            for n, line in enumerate(py.read_text().splitlines(), 1):
-                if re.search(r"MSDelta(For\w+|Model)\.from_pretrained\(", line):
-                    offenders.append(f"{py.relative_to(REPO)}:{n}: {line.strip()}")
-        assert not offenders, "\n".join(offenders)
+    def test_load_strict_forwards_call_site_allow_lists(self, pretrained):
+        """load_strict on our (strict-by-default) classes is a thin wrapper: the call
+        site's allow-list must reach the class's own check, not be pre-empted by it."""
+        _edit_weights(pretrained, lambda s: [s.pop(k) for k in list(s)
+                                             if k.startswith("intensity_head.")])
+        load_strict(MSDeltaForPreTraining, pretrained, allow_missing=("intensity_head.*",))
+
+
+# --- strict is the DEFAULT of the classes themselves (K105-S) -------------------------------
+
+class TestStrictByDefault:
+    """Bare `from_pretrained` -- what pbs/ scripts and outside code call -- is strict."""
+
+    def test_bare_from_pretrained_refuses_missing_key(self, pretrained):
+        _edit_weights(pretrained, lambda s: s.pop(_encoder_key(s)))
+        with pytest.raises(CheckpointMismatchError, match="missing"):
+            MSDeltaForPreTraining.from_pretrained(str(pretrained))
+
+    def test_bare_from_pretrained_refuses_foreign_architecture(self, pretrained):
+        _edit_config(pretrained, architecture="pairformer")
+        with pytest.raises(CheckpointMismatchError, match="pairformer"):
+            MSDeltaForPreTraining.from_pretrained(str(pretrained))
+
+    def test_bare_from_pretrained_refuses_unexpected_key(self, pretrained):
+        _edit_weights(pretrained, lambda s: s.__setitem__("extra.w", torch.zeros(2)))
+        with pytest.raises(CheckpointMismatchError, match="extra.w"):
+            MSDeltaForPreTraining.from_pretrained(str(pretrained))
+
+    def test_old_import_path_is_strict_too(self, pretrained):
+        """pbs/ scripts import from the pre-reorganisation alias modules."""
+        from msdelta.modeling_msdelta import MSDeltaForPreTraining as Old
+        _edit_weights(pretrained, lambda s: s.pop(_encoder_key(s)))
+        with pytest.raises(CheckpointMismatchError):
+            Old.from_pretrained(str(pretrained))
+
+    def test_strict_false_opts_out(self, pretrained):
+        _edit_weights(pretrained, lambda s: s.pop(_encoder_key(s)))
+        model = MSDeltaForPreTraining.from_pretrained(str(pretrained), strict=False)
+        assert isinstance(model, MSDeltaForPreTraining)
+        model, info = MSDeltaForPreTraining.from_pretrained(str(pretrained), strict=False,
+                                                            output_loading_info=True)
+        assert len(info["missing_keys"]) == 1
+
+    def test_per_call_allow_list(self, pretrained):
+        _edit_weights(pretrained, lambda s: [s.pop(k) for k in list(s)
+                                             if k.startswith("intensity_head.")])
+        MSDeltaForPreTraining.from_pretrained(str(pretrained), allow_missing=("intensity_head.*",))
+
+    def test_output_loading_info_still_works(self, pretrained):
+        model, info = MSDeltaForPreTraining.from_pretrained(str(pretrained),
+                                                            output_loading_info=True)
+        assert isinstance(model, MSDeltaForPreTraining) and not info["missing_keys"]
+
+    def test_denoise_class_allows_only_mask_token(self, tmp_path, tiny_denoising_config):
+        torch.manual_seed(0)
+        path = _save(MSDeltaForDenoising(tiny_denoising_config), tmp_path / "den")
+        _edit_weights(path, lambda s: s.pop("msdelta.embed.mask_token"))
+        MSDeltaForDenoising.from_pretrained(str(path))          # class default allowance
+        _edit_weights(path, lambda s: s.pop(next(k for k in s if k.startswith("denoising_head."))))
+        with pytest.raises(CheckpointMismatchError, match="denoising_head"):
+            MSDeltaForDenoising.from_pretrained(str(path))
+
+    def test_pretraining_class_does_not_allow_mask_token(self, pretrained):
+        _edit_weights(pretrained, lambda s: s.pop("msdelta.embed.mask_token"))
+        with pytest.raises(CheckpointMismatchError, match="mask_token"):
+            MSDeltaForPreTraining.from_pretrained(str(pretrained))
+
+    def test_retrieval_round_trip(self, tmp_path, tiny_config):
+        from msdelta.models.configuration_msdelta import MSDeltaRetrievalConfig
+        from msdelta.models.modeling_msdelta import MSDeltaForRetrieval
+        torch.manual_seed(0)
+        model = MSDeltaForRetrieval(MSDeltaRetrievalConfig(encoder=tiny_config,
+                                                           projection_hidden_size=16,
+                                                           embedding_size=8))
+        path = _save(model, tmp_path / "ret")
+        assert _same_weights(MSDeltaForRetrieval.from_pretrained(str(path)), model)
+
+    def test_save_ships_the_strict_loader_with_remote_code(self, pretrained):
+        """register_for_auto_class copies modeling_msdelta.py and its relative imports into
+        every saved checkpoint; loading.py must travel with it or the copy cannot import."""
+        assert (pretrained / "loading.py").is_file()
+        assert (pretrained / "modeling_msdelta.py").is_file()
+
+    def test_peptide_encoder_strict_false(self, tmp_path):
+        from msdelta.models.peptide_encoder import PeptideEncoderConfig, PeptideEncoderModel
+        torch.manual_seed(0)
+        cfg = PeptideEncoderConfig(embedding_size=16, hidden_size=32, num_layers=1, num_heads=4)
+        path = _save(PeptideEncoderModel(cfg), tmp_path / "pep")
+        _edit_weights(path, lambda s: s.pop(next(k for k in s if ".encoder.layers.0." in k)))
+        with pytest.raises(CheckpointMismatchError):
+            PeptideEncoderModel.from_pretrained(path)
+        PeptideEncoderModel.from_pretrained(path, strict=False)
 
 
 # --- real checkpoints (CPU, 25-400M params; skipped where the paths are absent) ------------
@@ -265,6 +351,18 @@ def test_real_spectrum_checkpoints_load(path):
         pytest.skip(f"not readable: {path}")
     model = load_strict(MSDeltaForPreTraining, path)
     assert sum(p.numel() for p in model.parameters()) > 1_000_000
+    bare = MSDeltaForPreTraining.from_pretrained(str(path))      # the default is strict too
+    assert _same_weights(bare, model)
+
+
+def test_real_checkpoint_into_wrong_class_is_refused():
+    """A real pretraining checkpoint read as a bare MSDeltaModel leaves its intensity head
+    unused: refused by default."""
+    if not os.access(REAL_PRETRAINED / "model.safetensors", os.R_OK):
+        pytest.skip(f"not readable: {REAL_PRETRAINED}")
+    from msdelta.models.modeling_msdelta import MSDeltaModel
+    with pytest.raises(CheckpointMismatchError, match="intensity_head"):
+        MSDeltaModel.from_pretrained(str(REAL_PRETRAINED))
 
 
 def test_real_peptide_encoder_loads(monkeypatch):

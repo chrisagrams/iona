@@ -20,6 +20,7 @@ from .configuration_msdelta import (
     MSDeltaRetrievalConfig,
 )
 from .fourier import FourierFeatures
+from .loading import strict_from_pretrained
 
 
 @dataclass
@@ -177,6 +178,30 @@ class MSDeltaPreTrainedModel(PreTrainedModel):
     main_input_name = "mz"
     supports_gradient_checkpointing = True
     _no_split_modules = ["EncoderBlock"]
+    # Strict loading by default (K94-P / K105-S). transformers only WARNS when checkpoint keys
+    # are missing or unexpected and leaves the missing ones randomly initialised; a Pairformer
+    # checkpoint read by transformer-only code came back mostly random that way and was
+    # evaluated as if trained. Here any missing / unexpected / wrong-shape key, or a
+    # config.architecture this code cannot build, raises CheckpointMismatchError.
+    _strict_loading = True
+    # Keys a checkpoint of this class may legitimately lack (fnmatch patterns), in addition
+    # to any per-call `allow_missing`. Keep narrow; see MSDeltaForDenoising.
+    _strict_allow_missing: tuple[str, ...] = ()
+
+    @classmethod
+    def from_pretrained(cls, pretrained_model_name_or_path, *model_args, strict: bool = True,
+                        allow_missing=(), allow_unexpected=(), **kwargs):
+        """transformers' from_pretrained, refusing any weight or architecture mismatch.
+
+        strict=False restores transformers' warn-and-continue behaviour (opt-out, for
+        deliberate partial loads). allow_missing / allow_unexpected: fnmatch patterns of
+        keys this call legitimately does not receive / does not use."""
+        if not strict:
+            return super().from_pretrained(pretrained_model_name_or_path, *model_args, **kwargs)
+        return strict_from_pretrained(
+            super().from_pretrained, cls, pretrained_model_name_or_path, *model_args,
+            allow_missing=tuple(cls._strict_allow_missing) + tuple(allow_missing),
+            allow_unexpected=tuple(allow_unexpected), **kwargs)
 
     def _init_weights(self, module: nn.Module) -> None:
         if isinstance(module, ScalarInputLinear):
@@ -356,6 +381,10 @@ class MSDeltaForDenoising(MSDeltaPreTrainedModel):
     """MSDelta encoder with a peak-level noise classifier."""
 
     config_class: type[PretrainedConfig] | None = MSDeltaDenoisingConfig
+    # The mask token is frozen out of the graph during denoise training (it is only read
+    # when mask_positions is given, which denoising never does) and some denoise
+    # checkpoints omit it. Its value never reaches an output, so its absence is harmless.
+    _strict_allow_missing = ("msdelta.embed.mask_token",)
 
     def __init__(
         self,

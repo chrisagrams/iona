@@ -73,6 +73,7 @@ def main(argv: list[str] | None = None) -> int:
             e["mz"], e["intensity"], e["noise"]), remove_columns=raw.column_names)
         # mask_token: frozen out of the graph during denoise training (never read without
         # mask_positions), and some denoise checkpoints omit it -- as in eval_checkpoint.
+        # (Also MSDeltaForDenoising's class default since K105-S; kept explicit here.)
         model = load_strict(MSDeltaForDenoising, path,
                             allow_missing=("msdelta.embed.mask_token",)).to(device).eval()
         per = []           # (n_peaks, logits, labels) per spectrum

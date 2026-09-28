@@ -4,8 +4,10 @@
 the missing ones are left at their random initialisation and loading carries on. That is how
 a Pairformer checkpoint (config.architecture = "pairformer") read by code that only knows the
 transformer produced a mostly random transformer (41 missing / 143 unexpected keys) that was
-then evaluated as if trained. Every place our fine-tuning / evaluation code loads a model from
-a path goes through `load_strict`, which turns that warning into an error.
+then evaluated as if trained. Our model classes' own `from_pretrained` turns that
+warning into an error by default (K105-S; opt out per call with `strict=False`), so every
+caller -- package code, pbs/ scripts, outside code importing msdelta -- is protected.
+`load_strict` is the explicit spelling used at our call sites and works for any model class.
 
 Allow-lists are per call site and name exactly the keys a site legitimately does not get from
 the checkpoint (fnmatch patterns, matched against the full key). Keep them narrow: an
@@ -93,14 +95,12 @@ def check_keys(missing: Iterable[str] = (), unexpected: Iterable[str] = (),
     raise error("\n".join(lines))
 
 
-def load_strict(cls: type[M], path, *, allow_missing: Iterable[str] = (),
-                allow_unexpected: Iterable[str] = (), **kwargs) -> M:
-    """`cls.from_pretrained(path, **kwargs)`, failing loudly on any weight/config mismatch.
-
-    allow_missing / allow_unexpected: fnmatch patterns for keys this call site legitimately
-    does not receive from / does not use from the checkpoint. Everything else must match.
-    """
-    kwargs.pop("output_loading_info", None)
+def strict_from_pretrained(loader, cls, path, *args, allow_missing: Iterable[str] = (),
+                           allow_unexpected: Iterable[str] = (),
+                           output_loading_info: bool = False, **kwargs):
+    """Run `loader` (an UNCHECKED from_pretrained, e.g. transformers' own) and refuse any
+    mismatch. The body of the strict-by-default `from_pretrained` overrides (K105-S) and of
+    `load_strict` for classes without one. Returns what from_pretrained would return."""
     source = str(path)
     # Refuse a foreign architecture BEFORE building anything: the wrong encoder may not even
     # fail to build, it just gets the wrong weights.
@@ -113,7 +113,7 @@ def load_strict(cls: type[M], path, *, allow_missing: Iterable[str] = (),
             config = None
     if config is not None and not isinstance(config, (str, Path)):
         check_architecture(config, source)
-    loaded = cls.from_pretrained(path, output_loading_info=True, **kwargs)
+    loaded = loader(path, *args, output_loading_info=True, **kwargs)
     if not (isinstance(loaded, tuple) and len(loaded) == 2 and isinstance(loaded[1], dict)):
         raise TypeError(f"{cls.__name__}.from_pretrained did not return loading info; "
                         f"cannot verify {source}")
@@ -125,4 +125,25 @@ def load_strict(cls: type[M], path, *, allow_missing: Iterable[str] = (),
     check_keys(info.get("missing_keys") or (), info.get("unexpected_keys") or (),
                info.get("mismatched_keys") or (), allow_missing=allow_missing,
                allow_unexpected=allow_unexpected, source=source)
-    return model
+    return (model, info) if output_loading_info else model
+
+
+def load_strict(cls: type[M], path, *, allow_missing: Iterable[str] = (),
+                allow_unexpected: Iterable[str] = (), **kwargs) -> M:
+    """`cls.from_pretrained(path, **kwargs)`, failing loudly on any weight/config mismatch.
+
+    Our model classes are strict by default now (K105-S), so for them this is a thin wrapper
+    that forwards the allow-lists; it is kept because (a) it is the one spelling that is
+    strict for ANY PreTrainedModel, ours or not, and (b) the call sites read as a statement
+    that the load is checked, which survives a future `strict=False` default flip.
+
+    allow_missing / allow_unexpected: fnmatch patterns for keys this call site legitimately
+    does not receive from / does not use from the checkpoint. Everything else must match.
+    """
+    kwargs.pop("output_loading_info", None)
+    kwargs.pop("strict", None)
+    if getattr(cls, "_strict_loading", False):
+        return cls.from_pretrained(path, allow_missing=allow_missing,
+                                   allow_unexpected=allow_unexpected, **kwargs)
+    return strict_from_pretrained(cls.from_pretrained, cls, path, allow_missing=allow_missing,
+                                  allow_unexpected=allow_unexpected, **kwargs)
