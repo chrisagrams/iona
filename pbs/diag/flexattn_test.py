@@ -275,7 +275,8 @@ def guarded(record: dict, key: str, fn, *args, **kwargs):
 
 def step_imports(dev):
     import triton
-    info = dict(triton_version=triton.__version__, triton_file=triton.__file__)
+    info = dict(triton_version=triton.__version__, triton_file=triton.__file__,
+                triton_realpath=os.path.realpath(triton.__file__))
     bdir = Path(triton.__file__).parent / "backends"
     info["triton_backends"] = sorted(p.name for p in bdir.iterdir()) if bdir.is_dir() else []
     info["intel_backend_present"] = (bdir / "intel").is_dir()
@@ -293,7 +294,7 @@ def step_imports(dev):
     info["flex_attention_module"] = fa_mod.__file__
     info["torch_version"] = torch.__version__
     info["device"] = str(dev)
-    print(f"[flex] triton {info['triton_version']} from {info['triton_file']}; "
+    print(f"[flex] triton {info['triton_version']} from {info['triton_realpath']}; "
           f"backends {info['triton_backends']}; driver {info.get('active_driver')}", flush=True)
     return info
 

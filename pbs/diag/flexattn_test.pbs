@@ -1,0 +1,54 @@
+#!/bin/bash -l
+# K119: FlexAttention (compiled flex_attention) for triangle attention on XPU, vs the SDPA path:
+# imports + trivial triton kernel, correctness (outputs and grads, fp32/bf16), bench B 8/32 x
+# N 100/150 (pbs/diag/flexattn_test.py).
+#
+#   qsub -q debug -l select=1 -l walltime=01:00:00 -A UIC-HPC -l filesystems=home:flare \
+#        -v REPO_DIR=$PWD pbs/diag/flexattn_test.pbs
+#
+# One tile. Output: results/raw/diag/flexattn/<jobid>.json (+ .log).
+#
+# Intel Triton, FOR THIS JOB ONLY: the .venv's upstream triton 3.8.0 has no intel backend and
+# shadows the frameworks module's triton 3.6.0 (which has backends/intel). flexattn_test.py,
+# before importing torch, symlinks ONLY that triton package (+ its dist-info) into a temp dir
+# and puts it first on sys.path and PYTHONPATH (so inductor's compile workers match). Nothing
+# in the venv is modified. MSDELTA_SYSTEM_TRITON=0 disables the shim (to reproduce the
+# failure with the venv's triton); MSDELTA_SYSTEM_TRITON_SITE overrides the directory.
+
+#PBS -N msdelta-k119flex
+#PBS -A UIC-HPC
+#PBS -l filesystems=home:flare
+#PBS -j oe
+#PBS -o pbs/logs/
+
+set -uo pipefail
+REPO_DIR=${REPO_DIR:-${PBS_O_WORKDIR:-$PWD}}
+cd "$REPO_DIR"
+
+set +u
+source /usr/share/lmod/lmod/init/bash
+module load "${FRAMEWORKS_MODULE:-frameworks/2025.3.1}"
+set -u
+export ONEAPI_DEVICE_SELECTOR=level_zero:gpu
+export ZE_FLAT_DEVICE_HIERARCHY=FLAT
+export ZE_AFFINITY_MASK=0
+export OMP_NUM_THREADS=${OMP_NUM_THREADS:-8}
+export PYTHONPATH=$REPO_DIR${PYTHONPATH:+:$PYTHONPATH}
+# Run from a frozen copy of the code (pbs/lib/code_snapshot.sh).
+source "$REPO_DIR/pbs/lib/code_snapshot.sh"
+PY="$REPO_DIR/.venv/bin/python"
+JOB=${PBS_JOBID%%.*}; JOB=${JOB:-local}
+O=results/raw/diag/flexattn; mkdir -p "$O"
+# Job-local compile caches: never mix kernels built by the venv's triton 3.8 into ~/.triton.
+export TRITON_CACHE_DIR=${TMPDIR:-/tmp}/msdelta-k119-$JOB/triton
+export TORCHINDUCTOR_CACHE_DIR=${TMPDIR:-/tmp}/msdelta-k119-$JOB/inductor
+mkdir -p "$TRITON_CACHE_DIR" "$TORCHINDUCTOR_CACHE_DIR"
+export MSDELTA_SYSTEM_TRITON=${MSDELTA_SYSTEM_TRITON:-1}
+
+echo "=== $(date -Is) K119 flex attention test on $(hostname), job $JOB"
+# shellcheck disable=SC2086
+"$PY" "$MSDELTA_CODE_DIR"/pbs/diag/flexattn_test.py --out "$O/$JOB.json" \
+    ${FLEX_ARGS:-} 2>&1 | tee "$O/$JOB.log"
+rc=${PIPESTATUS[0]}
+echo "=== $(date -Is) done (rc=$rc)"
+exit $rc
