@@ -95,10 +95,17 @@ and open points: notes/PAIRFORMER_REVIEW.md ablation #12. Proposal: test the rat
 compute-matched); build the parallel version only if a larger ratio doesn't hurt quality. Needs a card
 (and code) when Pairformer ablations start.
 
-### K116-P: the no-copy 5-D mask variant (open)
-Context: passing the mask broadcast (5-D) instead of copying it per chunk was fastest (44.6 ms / 2.45 GB
-at B32 N150) but runs on the plain (non-fused) math path; bf16 precision unverified. Include it in the
-bf16 check (K115) or keep it out?
+### K116-P / K117-P: which SDPA call layout for triangle attention (open, 2026-09-28)
+Context: triangle attention shares one bias beta_jk across every row i. The 4-D SDPA call (fused
+kernel) needs the bias COPIED per row in a chunk (+ summing the copies' gradients back in backward);
+the 5-D call passes it broadcast (no copy) but Intel's fused kernel rejects 5-D, so it runs PyTorch's
+plain math path (stores the chunk's attention weights). Benchmark 8875808 (fwd+bwd, bf16), 4-D vs 5-D:
+B8N100 6.3 vs 6.2 ms; B8N150 14.3 vs 11.0; B32N100 18.2 vs 15.0; B32N150 57.5 vs 44.6 (5-D ~20% faster,
+growing with size up to N=150; unknown beyond). Fastest is best only if accuracy (K115 bf16 check,
+running) and memory are fine. K117-P proposal (one ~30 min debug job): (1) profiler breakdown -- time of
+the mask copy and its backward vs the attention kernel; (2) a copy-free FUSED variant: 4-D mask as a
+strided expand() view without contiguous(); (3) 4-D with the mask pre-built outside the timed region
+(isolates the copy cost); (4) size sweep N = 200, 256, 512 at small batch (final pretraining likely 512).
 
 ### K96-S: the pretraining loss, and the input-normalisation leak (parked; user wants to explore other losses)
 The pretraining task (msdelta/models/processing_msdelta.py + modeling_msdelta.py):
