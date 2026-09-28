@@ -23,6 +23,14 @@ set -euo pipefail
 REPO_DIR=${REPO_DIR:-${PBS_O_WORKDIR:-$PWD}}
 VENV_DIR=${VENV_DIR:-$REPO_DIR/.venv}
 ARGS_FILE=${ARGS_FILE:?set ARGS_FILE to an MSDelta training args file}
+# Under a ref (pbs/qsub_ref, MSDELTA_CODE_REF): snapshot first, so that a committed
+# ARGS_FILE is the commit's (and may exist only there); one the commit does not have is
+# read from the path given (ad hoc). The later `source` only re-applies PYTHONPATH.
+if [[ -n ${MSDELTA_CODE_REF:-} ]]; then
+    SCRATCH_ROOT=${SCRATCH_ROOT:-/lus/flare/projects/${PROJECT:-UIC-HPC}/$USER/msdelta}
+    source "$REPO_DIR/pbs/lib/code_snapshot.sh"
+    ARGS_FILE=$(msdelta_code_path "${ARGS_FILE#"$REPO_DIR"/}")
+fi
 DATASET_CACHE_DIR=${DATASET_CACHE_DIR:?set DATASET_CACHE_DIR to a shared filesystem path}
 PREPROCESSED_DATASET_DIR=${PREPROCESSED_DATASET_DIR:-$DATASET_CACHE_DIR/msdelta-preprocessed}
 
@@ -52,9 +60,6 @@ export PYTHONPATH=$REPO_DIR${PYTHONPATH:+:$PYTHONPATH}
 # Run from a frozen copy of the code (pbs/lib/code_snapshot.sh): branch switches and
 # edits in the checkout cannot affect this job once it has started.
 source "$REPO_DIR/pbs/lib/code_snapshot.sh"
-# Under a ref (pbs/qsub_ref, MSDELTA_CODE_REF) a committed ARGS_FILE is the commit's; one
-# the commit does not have is read from the path given (ad hoc).
-[[ -z ${MSDELTA_CODE_REF:-} ]] || ARGS_FILE=$(msdelta_code_path "${ARGS_FILE#"$REPO_DIR"/}")
 export OMP_NUM_THREADS=${OMP_NUM_THREADS:-1}
 export MKL_NUM_THREADS=${MKL_NUM_THREADS:-1}
 export OPENBLAS_NUM_THREADS=${OPENBLAS_NUM_THREADS:-1}

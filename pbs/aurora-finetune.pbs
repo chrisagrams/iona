@@ -31,6 +31,14 @@ VENV_DIR=${VENV_DIR:-$REPO_DIR/.venv}
 PROJECT=${PROJECT:-UIC-HPC}
 SCRATCH_ROOT=${SCRATCH_ROOT:-/lus/flare/projects/$PROJECT/$USER/msdelta}
 ARGS_FILE=${ARGS_FILE:?set ARGS_FILE to a denoise finetune args file}
+# Under a ref (pbs/qsub_ref, MSDELTA_CODE_REF): snapshot first, so that a committed
+# ARGS_FILE is the commit's (and may exist only there); one the commit does not have is
+# read from the path given (ad hoc). The later `source` only re-applies PYTHONPATH.
+if [[ -n ${MSDELTA_CODE_REF:-} ]]; then
+    SCRATCH_ROOT=${SCRATCH_ROOT:-/lus/flare/projects/${PROJECT:-UIC-HPC}/$USER/msdelta}
+    source "$REPO_DIR/pbs/lib/code_snapshot.sh"
+    ARGS_FILE=$(msdelta_code_path "${ARGS_FILE#"$REPO_DIR"/}")
+fi
 # 12, not 8: Aurora is 6 Max 1550 GPUs x 2 tiles, and FLAT hierarchy exposes all twelve.
 # aurora-pretrain.pbs defaults to 8 because it reserves tiles 4,5 and 10,11 for the probe
 # sidecars; this job has none, so using 8 would idle a third of the node.
@@ -107,9 +115,6 @@ export PYTHONPATH=$REPO_DIR${PYTHONPATH:+:$PYTHONPATH}
 # Run from a frozen copy of the code (pbs/lib/code_snapshot.sh): branch switches and
 # edits in the checkout cannot affect this job once it has started.
 source "$REPO_DIR/pbs/lib/code_snapshot.sh"
-# Under a ref (pbs/qsub_ref, MSDELTA_CODE_REF) a committed ARGS_FILE is the commit's; one
-# the commit does not have is read from the path given (ad hoc).
-[[ -z ${MSDELTA_CODE_REF:-} ]] || ARGS_FILE=$(msdelta_code_path "${ARGS_FILE#"$REPO_DIR"/}")
 # Probes: dtype, index-range and finiteness checks, and -- the useful part --
 # a device synchronise at each stage, so an asynchronous GPU fault is reported
 # where it was caused rather than dozens of steps later. Set MSDELTA_PROBES=1 on
