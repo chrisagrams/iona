@@ -1888,3 +1888,36 @@ K53 (lr follow-up, same-mass, 3 seeds):   lr1e-4 ref .868 / .724;  lr8e-4 .869 /
    being seen in training; once they are, KL matters little (.893 at KL 10 vs .899 at KL 0).
 3. So consensus training only pays if the use case searches against consensus spectra (a spectral library).
    Proposal (not decided): keep experimental-only as the default; revisit for library-search evaluations.
+
+---
+
+## C23 / K66-C per-scale search: 100m and 200m (jobs 8875262, 8875261; scored 2026-09-28 06:16-11:00 UTC). 400m / 25m pending (queue blocked by maintenance)
+
+Single-dataset recipe (SupCon + same-mass batches, t 0.002, KL 10, 3 epochs, final pretraining checkpoint 540,423),
+4 settings x 3 seeds per scale. Experimental MAP@R, mean ± half range over seeds; mouse/human/yeast are
+unseen species (measured precursors); "mouse F" = queries the 20 ppm filter fails; library search on
+validation (consensus-only library): Hit@1 and median rank of the true entry.
+
+    100m: setting            val          OOD          test   mouse  human  yeast | mouse F  yeast 20ppm/iso | val lib Hit@1 (median rank)
+        lr4e-4_p170k2    0.902±0.000 0.768±0.007 0.903  0.856  0.895  0.566 | 0.813    0.922/0.796    | 0.885 (1.0)
+        lr2e-4_p128k2    0.900±0.002 0.760±0.007 0.900  0.856  0.896  0.547 | 0.811    0.910/0.778    | 0.815 (1.0)
+        lr4e-4_p128k2    0.898±0.001 0.758±0.004 0.900  0.855  0.895  0.571 | 0.811    0.923/0.799    | 0.867 (1.0)
+        lr8e-4_p128k2    0.880±0.001 0.773±0.024 0.883  0.844  0.890  0.637 | 0.801    0.952/0.850    | 0.824 (1.0)
+    200m: setting            val          OOD          test   mouse  human  yeast | mouse F  yeast 20ppm/iso | val lib Hit@1 (median rank)
+        lr4e-4_p170k2    0.909±0.000 0.802±0.028 0.912  0.861  0.898  0.628 | 0.817    0.951/0.847    | 0.920 (1.0)
+        lr4e-4_p128k2    0.907±0.001 0.792±0.011 0.908  0.857  0.897  0.603 | 0.813    0.945/0.836    | 0.915 (1.0)
+        lr2e-4_p128k2    0.905±0.001 0.818±0.004 0.909  0.859  0.898  0.662 | 0.814    0.965/0.871    | 0.900 (1.0)
+        lr8e-4_p128k2    0.891±0.002 0.715±0.014 0.891  0.848  0.893  0.546 | 0.805    0.919/0.796    | 0.906 (1.0)
+
+Observations (no decision -- selection is the user's call once all four scales are in):
+1. By VALIDATION (the selection metric) lr 4e-4 + 170 x 2 leads at both scales, by 0.002-0.004 (above the
+   ±0.001 seed spread at 100m, borderline at 200m); lr 8e-4 is clearly worst in-distribution at both.
+2. Validation and the unseen sets disagree: OOD / yeast prefer lr 8e-4 at 100m and lr 2e-4 at 200m. OOD
+   seed spread is large (up to ±0.028), so single OOD differences under ~0.03 are not reliable.
+3. Scale helps: 200m beats 100m on every set for the lead setting (val .909 vs .902, OOD .802 vs .768,
+   yeast .628 vs .566); both beat 50m's best (val .886, OOD .784).
+4. Yeast (far OOD, expected -- user) stays at .55-.66 open. On yeast the plain 20 ppm filter (.91-.97) BEATS
+   the isotope-tolerant one (.78-.87): yeast's recorded precursors show ~no isotope errors, so widening the
+   window only adds wrong candidates (cf. mouse/human, where iso wins).
+5. Library search (consensus-only library, validation): Hit@1 .82-.92, median rank 1 everywhere; ranking of
+   settings roughly follows validation MAP@R at 200m but not at 100m (lr 2e-4: .815 vs lr 4e-4: .867-.885).
