@@ -35,6 +35,7 @@ DECISIONS.md for what the user approves).
 9. symmetric vs directional pair representation (code)
 10. AF-style init (code, low priority)
 11. precursor features (code + data; leakage/double-counting caveats; always report MAP@R without the filter)
+12. (user, 2026-09-28, K114-P) **Decoupled / parallel streams:** several single blocks per pair update, calibrated so K single blocks take about as long as one pair update, and run CONCURRENTLY (single stream uses the latest pair state z(m) while z(m+1) is computed), so the triangle ops are off the single stream's critical path. Related to #7 (pair updates in fewer layers) but adds the parallel execution. Open points: one-update staleness in both directions (bias read by the single stream, s read by the write-back); where parallelism comes from (two streams on one tile overlap only partially -- triangle ops are memory-bound at N=150; two tiles = model parallel with an s + bias (B x heads x N x N) exchange per round); K from measured step times (pair cost ~N³ vs single ~N²). Cheap first step: the RATIO alone (K single blocks per pair update, sequential), compute-matched (#3); build the parallel version only if a larger K does not hurt quality.
 
 Fair evaluation: same data / cap / batch / steps (+ a wall-clock-matched transformer), ≥2 seeds;
 pretraining ranked on a mask-ratio-independent score (port of the source's MaskedIntensityCallback,

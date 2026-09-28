@@ -94,6 +94,14 @@ whether the XPU backend fuses masked attention; (3) a Triton kernel (PyTorch XPU
 ~1-2 weeks, flash-attention style with pair bias + gating, forward+backward; (4) a hand-written
 SYCL/ESIMD kernel: several weeks, most maintenance. (DeepSpeed's Evoformer attention kernel is CUDA-only.)
 
+### K114-P: decoupled pair / single streams (user's architecture suggestion, 2026-09-28)
+Idea (user): run several single-stream attention blocks per pair update, calibrated so they take about
+as long as one (triangle-attention) pair update, and run the two concurrently so the pair stack is not
+a bottleneck. Partly covered by review ablation #7 (ratio only); the parallel execution is new. Details
+and open points: notes/PAIRFORMER_REVIEW.md ablation #12. Proposal: test the ratio first (sequential,
+compute-matched); build the parallel version only if a larger ratio doesn't hurt quality. Needs a card
+(and code) when Pairformer ablations start.
+
 ### K96-S: the pretraining loss, and the input-normalisation leak (parked; user wants to explore other losses)
 The pretraining task (msdelta/models/processing_msdelta.py + modeling_msdelta.py):
 - Per spectrum, a random subset of peaks is masked: round(mask_ratio x peaks), at least 1
