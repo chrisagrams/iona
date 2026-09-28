@@ -16,6 +16,12 @@ twice from that pass, `all` (consensus + 3 replicates, R=3) and `experimental` (
 replicates only, R=2), so the two variants are over identical embeddings. Peptides in the
 replicate corpus (what the models trained on) are excluded -- see grouped_retrieval.
 
+LIBRARY SEARCH (C25, on by default when the data has experimental AND consensus rows;
+`--no-library` to skip): from the same embeddings, experimental queries against a
+consensus-only library, one correct entry per query -- keys `library/...`, with and
+without precursor filters (msdelta.eval.library_search). Skipped with a note on data with
+no consensus rows (mouse / human / yeast / OOD).
+
 --models is a text file, one `name path [pooling]` per line; pooling defaults to mean+max,
 which every contrastive run in this project used (RUN.md records it).
 """
@@ -77,7 +83,7 @@ def binned_embeddings(rows, width: float, max_mz: float = 2000.0) -> torch.Tenso
 
 
 def score_model(path, pooling, rows, groups, experimental, collator, device,
-                batch_size, filter_inputs=None) -> dict:
+                batch_size, filter_inputs=None, consensus=None) -> dict:
     from msdelta.finetuning.contrastive.contrastive import (MSDeltaForContrastive, embed_dataset,
                                      retrieval_metrics_topk)
     from msdelta.models.modeling_msdelta import MSDeltaForPreTraining
@@ -85,7 +91,7 @@ def score_model(path, pooling, rows, groups, experimental, collator, device,
     if path.startswith("binned:"):
         emb = binned_embeddings(rows, float(path.split(":", 1)[1]))
         return _variants(emb, groups, experimental, device, retrieval_metrics_topk,
-                         filter_inputs=filter_inputs)
+                         filter_inputs=filter_inputs, consensus=consensus)
     if path.startswith("pca:"):
         # pca:<bin width>:<dims>:<prepared TRAIN sample dir> -- PCA fitted on train
         # spectra only, test spectra projected; cosine retrieval in the PCA space.
@@ -98,7 +104,7 @@ def score_model(path, pooling, rows, groups, experimental, collator, device,
         x = torch.nn.functional.normalize(binned_embeddings(rows, float(width)), dim=-1)
         emb = (x - mean) @ v[:, :int(dims)]
         return _variants(emb, groups, experimental, device, retrieval_metrics_topk,
-                         filter_inputs=filter_inputs)
+                         filter_inputs=filter_inputs, consensus=consensus)
     encoder = MSDeltaForPreTraining.from_pretrained(path)
     # A projection head saved by finetune_contrastive (--projection_dim) is scored both
     # ways: `all/...` from the head output (the loss space) and `pooled_all/...` from the
@@ -124,7 +130,8 @@ def score_model(path, pooling, rows, groups, experimental, collator, device,
             out |= {prefix + k: v for k, v in
                     _variants(emb, groups, experimental, device,
                               retrieval_metrics_topk,
-                              filter_inputs=filter_inputs).items()}
+                              filter_inputs=filter_inputs,
+                              consensus=consensus).items()}
     finally:
         del model, encoder
         if device.type == "xpu":
@@ -132,14 +139,19 @@ def score_model(path, pooling, rows, groups, experimental, collator, device,
     return out
 
 
-def _variants(emb, groups, experimental, device, metric, filter_inputs=None) -> dict:
+def _variants(emb, groups, experimental, device, metric, filter_inputs=None,
+              consensus=None) -> dict:
     """`all` (consensus + replicates) and `experimental` (replicates only), same pass.
 
     With filter_inputs = (precursor m/z, charge) per row, the experimental variant is also
     scored with and without a precursor filter, on the queries the filter passes and fails
     (msdelta.eval.filtered_retrieval; standard since 2026-09-27): keys
     `experimental/{open,20ppm,iso20ppm}/{full,F,Fbar,F_all}/{MAP@R,Hit@1,n}`, net loss/gain
-    and `experimental/rescue`."""
+    and `experimental/rescue`.
+
+    With consensus = bool mask of the consensus rows, also library search (experimental
+    queries, consensus-only library; msdelta.eval.library_search): keys `library/...`,
+    filtered too when filter_inputs is given. Existing keys are unaffected."""
     out = {}
     for variant, mask in (("all", np.ones(len(groups), dtype=bool)),
                           ("experimental", experimental)):
@@ -152,6 +164,11 @@ def _variants(emb, groups, experimental, device, metric, filter_inputs=None) -> 
         report = filtered_report(emb[m], groups[experimental], prec[experimental],
                                  charge[experimental], device=device)
         out |= flatten(report, "experimental")
+    if consensus is not None:
+        from msdelta.eval.library_search import library_report
+        prec, charge = filter_inputs if filter_inputs is not None else (None, None)
+        out |= library_report(emb, groups, experimental, consensus, prec, charge,
+                              device=device)
     return out
 
 
@@ -180,6 +197,13 @@ def score(cli) -> int:
                          np.asarray(rows["charge"], dtype=np.int64))
     elif cli.filters:
         print("[score] no `precursor` column: filtered metrics skipped", flush=True)
+    consensus = np.array([s == "consensus" for s in rows["source"]])
+    if not cli.library:
+        consensus = None
+    elif not (consensus.any() and experimental.any()):
+        print("[score] no consensus rows (or no experimental rows): library search "
+              "skipped", flush=True)
+        consensus = None
     collator = ContrastiveCollator(max_peptide_length=64, pad_spectra_to=cli.max_peaks)
     out_dir = Path(cli.out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -190,7 +214,8 @@ def score(cli) -> int:
             continue
         t0 = time.time()
         metrics = score_model(path, pooling, rows, groups, experimental, collator,
-                              device, cli.batch_size, filter_inputs=filter_inputs)
+                              device, cli.batch_size, filter_inputs=filter_inputs,
+                              consensus=consensus)
         target.write_text(json.dumps({"name": name, "path": path, "pooling": pooling,
                                       "data": cli.data, "metrics": metrics}, indent=1))
         print(f"  {name}: all MAP@R {metrics.get('all/MAP@R', float('nan')):.4f}  "
@@ -199,6 +224,9 @@ def score(cli) -> int:
                  f"iso20ppm {metrics.get('experimental/iso20ppm/full/MAP@R', float('nan')):.4f}  "
                  f"F {int(metrics.get('experimental/open/F/n', 0))}  "
                  if filter_inputs is not None else "")
+              + (f"library Hit@1 {metrics.get('library/Hit@1', float('nan')):.4f}  "
+                 f"MRR {metrics.get('library/MRR', float('nan')):.4f}  "
+                 if consensus is not None else "")
               + f"({time.time() - t0:.0f}s)", flush=True)
     return 0
 
@@ -228,6 +256,9 @@ def main(argv: list[str] | None = None) -> int:
     s.add_argument("--batch-size", type=int, default=16)
     s.add_argument("--no-filters", dest="filters", action="store_false",
                    help="skip the with/without precursor-filter metrics (on by default)")
+    s.add_argument("--no-library", dest="library", action="store_false",
+                   help="skip library search (experimental queries vs consensus-only "
+                        "library; on by default when the data has consensus rows)")
     cli = ap.parse_args(argv)
     return prepare(cli) if cli.cmd == "prepare" else score(cli)
 

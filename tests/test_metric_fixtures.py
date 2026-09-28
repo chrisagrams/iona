@@ -244,3 +244,103 @@ def test_filtered_metrics_pass_fail_split():
     # without precursor inputs, no filtered keys (old behaviour)
     plain = _variants(emb, g, np.ones(12, dtype=bool), torch.device("cpu"), retrieval_metrics_topk)
     assert not any("/20ppm/" in k for k in plain)
+
+
+def _library_fixture():
+    """Library search fixture (C25): 3 groups x (2 experimental + 1 consensus), plus one
+    experimental query of a 4th group with NO consensus (unscorable). Charge 2 throughout.
+
+      library (consensus)  c0 = 0 deg (500 m/z), c1 = 120 (600), c2 = 240 (700)
+      queries  group 0     a = 10  (500 + 1.00336/2: one isotope high), b = 70  (500)
+               group 1     d = 125 (600),  e = 200 (600)
+               group 2     f = 250 (700),  h = 50  (700)
+               group 3     u = 300 (800)   no consensus -> unscorable
+    """
+    angles = [10, 70, 0, 125, 200, 120, 250, 50, 240, 300]
+    groups = np.array([0, 0, 0, 1, 1, 1, 2, 2, 2, 3])
+    source = ["e", "e", "c", "e", "e", "c", "e", "e", "c", "e"]
+    prec = np.array([500 + 1.00336 / 2, 500, 500, 600, 600, 600, 700, 700, 700, 800])
+    experimental = np.array([s == "e" for s in source])
+    return _circle(*angles), groups, experimental, ~experimental, prec, np.full(10, 2)
+
+
+def test_library_search_hand_computed():
+    """Experimental queries vs the consensus-only library (msdelta.eval.library_search).
+    Only c0, c1, c2 are ranked (experimental spectra are never library entries, consensus
+    never queries), so each query's rank is read off its distances to c0/c1/c2:
+
+      query  distances c0 / c1 / c2      open rank   20ppm allows   20ppm rank  iso rank
+      a      10 / 110 / 130              1           nothing (+1 iso) inf       1
+      b      70 /  50 / 170              2           c0 only        1           1
+      d     125 /   5 / 115              1           c1 only        1           1
+      e     160 /  80 /  40              2           c1 only        1           1
+      f     110 / 130 /  10              1           c2 only        1           1
+      h      50 /  70 / 170              3           c2 only        1           1
+      u      group 3 has no consensus: unscorable, excluded (6 queries scored)
+
+    open:  Hit@1 = 3/6, Hit@5 = 1, MRR = (1 + 1/2 + 1 + 1/2 + 1 + 1/3)/6 = 13/18,
+           MAP@R (R=1) = Hit@1 = 1/2.
+    F = {a} (20 ppm excludes its correct entry), Fbar = the other 5.
+      open  F: Hit@1 1 (so rescue = 1);  Fbar: Hit@1 2/5, MRR (1/2+1+1/2+1+1/3)/5 = 2/3.
+      20ppm full: Hit@1 = MRR = 5/6; F: Hit@1 = MRR = 0; Fbar: 1.
+            net_loss = 1/6 (a), net_gain = 3/6 (b, e, h).
+      iso20ppm: a's +1 isotope step is allowed -> every rank 1: Hit@1 = MRR = 1 on full,
+            F and Fbar; net_loss 0, net_gain 1/2.
+    """
+    from msdelta.eval.library_search import library_report
+
+    emb, groups, experimental, consensus, prec, z = _library_fixture()
+    out = library_report(emb, groups, experimental, consensus, prec, z, chunk=4)
+    expected = {
+        "library/queries": 6, "library/unscorable": 1, "library/library_size": 3,
+        "library/Hit@1": 1 / 2, "library/Hit@5": 1.0, "library/MRR": 13 / 18,
+        "library/MAP@R": 1 / 2,
+        "library/open/full/n": 6, "library/open/F/n": 1, "library/open/Fbar/n": 5,
+        "library/open/full/MRR": 13 / 18, "library/open/F/Hit@1": 1.0,
+        "library/open/Fbar/Hit@1": 2 / 5, "library/open/Fbar/MRR": 2 / 3,
+        "library/rescue": 1.0,
+        "library/20ppm/full/Hit@1": 5 / 6, "library/20ppm/full/MRR": 5 / 6,
+        "library/20ppm/full/Hit@5": 5 / 6,
+        "library/20ppm/F/Hit@1": 0.0, "library/20ppm/F/MRR": 0.0,
+        "library/20ppm/Fbar/Hit@1": 1.0, "library/20ppm/Fbar/MRR": 1.0,
+        "library/20ppm/net_loss": 1 / 6, "library/20ppm/net_gain": 1 / 2,
+        "library/iso20ppm/full/Hit@1": 1.0, "library/iso20ppm/full/MRR": 1.0,
+        "library/iso20ppm/F/Hit@1": 1.0, "library/iso20ppm/Fbar/Hit@1": 1.0,
+        "library/iso20ppm/net_loss": 0.0, "library/iso20ppm/net_gain": 1 / 2,
+    }
+    for key, value in expected.items():
+        assert out[key] == pytest.approx(value, abs=1e-6), key
+    # without precursors: only the unfiltered numbers
+    plain = library_report(emb, groups, experimental, consensus)
+    assert plain["library/MRR"] == pytest.approx(13 / 18, abs=1e-6)
+    assert not any("/20ppm/" in k or "/open/" in k for k in plain)
+
+
+def test_library_ties_count_against_the_query():
+    """A library entry tied with the correct one ranks ahead of it: identical vectors
+    everywhere give rank 2 of 2, Hit@1 = 0, MRR = 1/2."""
+    from msdelta.eval.library_search import library_report
+
+    emb = torch.ones(4, 3)
+    out = library_report(emb, [0, 0, 1, 1], [True, False, True, False],
+                         [False, True, False, True])
+    assert out["library/Hit@1"] == 0.0 and out["library/MRR"] == pytest.approx(0.5)
+
+
+def test_library_mode_leaves_existing_keys_unchanged():
+    """_variants with the library mode on adds only `library/...` keys: every `all/` and
+    `experimental/` key (filtered ones included) is identical to the run without it."""
+    from msdelta.eval.eval_grouped_retrieval import _variants
+
+    emb, groups, experimental, consensus, prec, z = _library_fixture()
+    emb = emb + 0.05 * torch.randn(len(emb), 2, generator=torch.Generator().manual_seed(0))
+    cpu = torch.device("cpu")
+    base = _variants(emb, groups, experimental, cpu, retrieval_metrics_topk,
+                     filter_inputs=(prec, z))
+    lib = _variants(emb, groups, experimental, cpu, retrieval_metrics_topk,
+                    filter_inputs=(prec, z), consensus=consensus)
+    assert not any(k.startswith("library/") for k in base)
+    assert {k: v for k, v in lib.items() if not k.startswith("library/")} == base
+    assert any(k.startswith("all/") for k in base)
+    assert any(k.startswith("experimental/20ppm/") for k in base)
+    assert "library/iso20ppm/full/Hit@1" in lib
