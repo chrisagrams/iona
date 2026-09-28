@@ -15,8 +15,8 @@ from datasets import concatenate_datasets, load_from_disk
 from transformers import HfArgumentParser
 
 from iona.data import load_spectrum_datasets
-from iona.finetune_align import AlignDataArguments, AlignModelArguments
-from iona.finetune_denoise import subset_splits
+from iona.finetune.align import AlignDataArguments, AlignModelArguments
+from iona.finetune.denoise import subset_splits
 from iona.modeling_iona import IonaForPreTraining
 from iona.processing_iona import IonaProcessor
 from iona.reranking import attach_teacher_embeddings

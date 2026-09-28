@@ -19,7 +19,7 @@ from safetensors.torch import load_file
 from transformers import HfArgumentParser
 
 from iona.data import group_ids
-from iona.finetune_align import AlignDataArguments, AlignModelArguments
+from iona.finetune.align import AlignDataArguments, AlignModelArguments
 from iona.modeling_iona import IonaForPreTraining
 from iona.reranking import (
     AlignmentCollator,

@@ -16,7 +16,7 @@ from datasets import load_from_disk
 from transformers import HfArgumentParser, Trainer, TrainingArguments, set_seed
 
 from iona.data import load_spectrum_datasets, peptide_key
-from iona.finetune_denoise import subset_splits
+from iona.finetune.denoise import subset_splits
 from iona.modeling_iona import IonaForPreTraining
 from iona.processing_iona import IonaProcessor
 from iona.reranking import (

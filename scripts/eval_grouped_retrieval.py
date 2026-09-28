@@ -22,7 +22,7 @@ from datasets import load_dataset, load_from_disk
 
 from iona.contrastive import IonaForContrastive, embed_dataset
 from iona.data import build_grouped_split, corpus_peptides, group_ids
-from iona.finetune_contrastive import ContrastiveCollator
+from iona.finetune.contrastive import ContrastiveCollator
 from iona.modeling_iona import IonaForPreTraining
 from iona.processing_iona import IonaProcessor
 from iona.retrieval import retrieval_metrics

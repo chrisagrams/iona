@@ -29,12 +29,12 @@ ARGS_FILE=${ARGS_FILE:?set ARGS_FILE to a finetune args file}
 PRETRAINED_PATH=${PRETRAINED_PATH:?set PRETRAINED_PATH to the checkpoint to fine-tune from}
 # All 12 tiles of an Aurora node.
 XPUS_PER_HOST=${XPUS_PER_HOST:-12}
-MODULE=${MODULE:-iona.finetune_denoise}
+MODULE=${MODULE:-iona.finetune.denoise}
 [[ $ARGS_FILE == /* ]] || ARGS_FILE=$REPO_DIR/$ARGS_FILE
 [[ -f $ARGS_FILE ]]    || { echo "args file not found: $ARGS_FILE" >&2; exit 2; }
 [[ -x $VENV_DIR/bin/python ]] || { echo "no venv at $VENV_DIR" >&2; exit 2; }
 
-TASK=${TASK:-$(basename "${MODULE#*finetune_}")}
+TASK=${TASK:-${MODULE##*.}}
 RUN_PREFIX=${RUN_PREFIX:-v2_}
 RUN_NAME=${RUN_NAME:-$TASK-ft-$(basename "$(dirname "$ARGS_FILE")")}
 [[ $RUN_NAME == "$RUN_PREFIX"* ]] || RUN_NAME=$RUN_PREFIX$RUN_NAME
