@@ -50,7 +50,8 @@ DONE RECENTLY
 NEXT
 ──────────────────────────────────────────────────────────────────────────
   [ ] K66-C 400m / 25m -> scoring -> full comparison + proposal to the user (winner per scale)
-  [ ] Stage 0 (Pairformer vs transformer sanity run): preprocessing at cap 150, then the run
+  [ ] Stage 0 (Pairformer vs transformer sanity run): prepared on branch stage0-prep (runbook
+      notes/P1_stage0_runbook.md there; worktree ~/code/msdelta-stage0); merge pending K122-S; submit after maintenance
   [ ] then the winning C recipe on every pretraining checkpoint (card)
   [ ] alignment resumes on the new C models (caveats list)
 

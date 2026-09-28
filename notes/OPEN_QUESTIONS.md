@@ -137,6 +137,16 @@ is it Chris's msdelta-intensity work?), our pretrained model with every peak mas
 stand-in; (2) the FASTA (ideally the one the lab gave MSFragger for HEK/HCT116); (3) which runs and
 MSFragger's settings (precursor tolerance, enzyme, modifications) for the comparison.
 
+### K122-S: profiling hook in master's pretraining code (open, 2026-09-28)
+Context: Stage 0 prep (branch stage0-prep: 67ae52b, cde0905) adds an opt-in per-block timer
+(`--block_timing_steps N`, off by default; msdelta/utils/block_timing.py) that is wired into
+msdelta/pretraining/train.py and training_args.py -- master's pretraining code, which the user asked not
+to change. Tests show identical loss/gradients when on and no effect when off. Options: (a) merge as is;
+(b) merge everything except the train.py wiring and profile Stage 0 another way; (c) keep the branch
+unmerged until decided. Stage 0 facts: 72% of spectra exceed 150 peaks and are dropped (median 207);
+~280k train / 70k validation remain; transformer 49.81M, Pairformer 46.33M params; runbook
+notes/P1_stage0_runbook.md (on the branch).
+
 ### K96-S: the pretraining loss, and the input-normalisation leak (parked; user wants to explore other losses)
 The pretraining task (msdelta/models/processing_msdelta.py + modeling_msdelta.py):
 - Per spectrum, a random subset of peaks is masked: round(mask_ratio x peaks), at least 1
