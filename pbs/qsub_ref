@@ -1,0 +1,106 @@
+#!/bin/bash
+# Submit a PBS job that runs the code of a COMMIT (branch, tag or sha) instead of this
+# checkout's working tree -- e.g. an unmerged branch -- without checking it out or merging.
+#
+#   pbs/qsub_ref <ref> [qsub args...] <pbs script>
+#   pbs/qsub_ref c25-library-search -q debug -l select=1 -l walltime=00:30:00 \
+#       -v MODELS=sweeps/arms/x.txt,SPLIT=validation pbs/eval_grouped_retrieval.pbs
+#
+# What it does (notes/DAG_SPEC.md section 9, "Running code from a commit"):
+#   1. resolves <ref> to a full sha NOW (a branch that moves after submission does not
+#      change the job);
+#   2. takes the PBS script FROM THAT COMMIT (`git show <sha>:<script>`) and submits that
+#      copy, kept at $SCRATCH_ROOT/code-refs/submit/<sha12>-<name>.pbs -- PBS copies the
+#      script at submission, so the job's own text is the commit's too;
+#   3. runs qsub from this checkout with -v MSDELTA_CODE_REF=<sha>,MSDELTA_CODE_REF_NAME=<ref>,
+#      REPO_DIR=<this checkout> merged into the single -v you passed (qsub -v splits on commas).
+# The job's pbs/lib/code_snapshot.sh then builds its snapshot with `git archive <sha>`.
+# Outputs (results/, pbs/logs, ./runs) land in THIS checkout, exactly as a plain qsub from
+# here; SNAPSHOT.txt, the job_finish notification and the eval JSONs record the sha.
+#
+# Refused: a <ref> that is not a commit here, a script the commit does not have, and a
+# script that takes no code snapshot (it would run the checkout and ignore the ref).
+# Warned: a script from before K90 (no MSDELTA_CODE_REF in it): its code comes from the
+# commit, but repo-relative files it reads by path (tests/..., sweeps/..., configs/...) come
+# from the checkout.
+#
+# QSUB overrides the submit command (tests use QSUB=echo). Never pass secrets with -v.
+set -euo pipefail
+
+usage() { sed -n '2,7p' "$0" | sed 's/^# \{0,1\}//' >&2; exit 2; }
+(( $# >= 2 )) || usage
+
+REPO_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
+QSUB=${QSUB:-qsub}
+SCRATCH_ROOT=${SCRATCH_ROOT:-/lus/flare/projects/${PROJECT:-UIC-HPC}/$USER/msdelta}
+
+ref=$1; shift
+script=${!#}
+qargs=("${@:1:$#-1}")
+
+sha=$(git -C "$REPO_DIR" rev-parse --verify --quiet "${ref}^{commit}") \
+    || { echo "qsub_ref: '$ref' is not a commit in $REPO_DIR" >&2; exit 2; }
+
+# The script's path inside the repository.
+if [[ $script == /* ]]; then
+    abs=$script
+else
+    abs=$PWD/$script
+fi
+abs=$(realpath -m "$abs")
+[[ $abs == "$REPO_DIR"/* ]] \
+    || { echo "qsub_ref: $script is not inside the checkout $REPO_DIR" >&2; exit 2; }
+rel=${abs#"$REPO_DIR"/}
+git -C "$REPO_DIR" cat-file -e "$sha:$rel" 2>/dev/null \
+    || { echo "qsub_ref: $rel does not exist at $ref (${sha:0:12})" >&2; exit 2; }
+
+submit_dir=$SCRATCH_ROOT/code-refs/submit
+mkdir -p "$submit_dir"
+copy=$submit_dir/${sha:0:12}-$(basename "$rel")
+git -C "$REPO_DIR" show "$sha:$rel" > "$copy.tmp.$$" && mv -f "$copy.tmp.$$" "$copy"
+
+if ! grep -q 'pbs/lib/code_snapshot.sh' "$copy"; then
+    echo "qsub_ref: $rel at ${sha:0:12} takes no code snapshot (pbs/lib/code_snapshot.sh)," >&2
+    echo "  so it would run the checkout and ignore the ref. Not submitted." >&2
+    exit 2
+fi
+if ! grep -q 'MSDELTA_CODE_REF' "$copy"; then
+    echo "qsub_ref: WARNING: $rel at ${sha:0:12} predates MSDELTA_CODE_REF (K90). Its Python" >&2
+    echo "  comes from the commit, but repo-relative files it reads by path (tests/, sweeps/," >&2
+    echo "  configs/) come from the checkout $REPO_DIR." >&2
+fi
+if ! grep -q 'MSDELTA_CODE_REF' "$REPO_DIR/pbs/lib/code_snapshot.sh"; then
+    echo "qsub_ref: this checkout's pbs/lib/code_snapshot.sh does not know MSDELTA_CODE_REF" >&2
+    exit 2
+fi
+
+# Merge every -v into one, then add ours. A ref name with a comma or '=' cannot travel in
+# -v; the sha always can.
+vars=()
+rest=()
+user_repo_dir=
+for (( i = 0; i < ${#qargs[@]}; i++ )); do
+    a=${qargs[$i]}
+    if [[ $a == -v ]]; then
+        (( i + 1 < ${#qargs[@]} )) || { echo "qsub_ref: -v needs a value" >&2; exit 2; }
+        i=$(( i + 1 )); vars+=("${qargs[$i]}")
+    elif [[ $a == -v?* ]]; then
+        vars+=("${a#-v}")
+    else
+        rest+=("$a")
+    fi
+done
+joined=$(IFS=,; echo "${vars[*]:-}")
+if [[ ,$joined, =~ ,(MSDELTA_CODE_REF|MSDELTA_CODE_REF_NAME|MSDELTA_CODE_REUSE|MSDELTA_NO_SNAPSHOT)(=|,) ]]; then
+    echo "qsub_ref: do not pass ${BASH_REMATCH[1]} yourself" >&2; exit 2
+fi
+[[ ,$joined, =~ ,REPO_DIR= ]] && user_repo_dir=1
+ours="MSDELTA_CODE_REF=$sha"
+[[ $ref =~ [,=[:space:]] ]] || ours+=",MSDELTA_CODE_REF_NAME=$ref"
+[[ -n $user_repo_dir ]] || ours+=",REPO_DIR=$REPO_DIR"
+all=${joined:+$joined,}$ours
+
+echo "qsub_ref: $ref = ${sha:0:12}; script $rel from that commit -> $copy" >&2
+echo "qsub_ref: outputs land in $REPO_DIR" >&2
+cd "$REPO_DIR"
+exec $QSUB "${rest[@]}" -v "$all" "$copy"
