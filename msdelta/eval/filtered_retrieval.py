@@ -47,25 +47,34 @@ FILTERS = ("open", "20ppm", "iso20ppm")
 SUBSETS = ("full", "F", "Fbar", "F_all")
 
 
-def make_filters(prec: torch.Tensor, charge: torch.Tensor, ppm: float = PPM, iso_k=ISO_K) -> dict:
-    """Allowed-gallery functions q -> bool[len(q), n] on measured precursor m/z."""
-    n = len(prec)
+def make_filters(prec: torch.Tensor, charge: torch.Tensor, ppm: float = PPM, iso_k=ISO_K,
+                 gallery_prec: torch.Tensor | None = None,
+                 gallery_charge: torch.Tensor | None = None) -> dict:
+    """Allowed-gallery functions q -> bool[len(q), n] on measured precursor m/z.
+
+    q indexes the QUERY arrays (prec, charge). The gallery is the same set of spectra unless
+    gallery_prec / gallery_charge are given (library search: experimental queries against a
+    separate consensus library); n is the gallery size."""
+    g_prec = prec if gallery_prec is None else gallery_prec
+    g_charge = charge if gallery_charge is None else gallery_charge
+    n = len(g_prec)
 
     def open_(q):
         return torch.ones(len(q), n, dtype=torch.bool, device=prec.device)
 
     def ppm_(q):
         tol = ppm * 1e-6 * prec[q, None]
-        return (charge[q, None] == charge[None]) & ((prec[q, None] - prec[None]).abs() <= tol)
+        return ((charge[q, None] == g_charge[None])
+                & ((prec[q, None] - g_prec[None]).abs() <= tol))
 
     def iso_(q):
         tol = ppm * 1e-6 * prec[q, None]
-        d = prec[q, None] - prec[None]
+        d = prec[q, None] - g_prec[None]
         step = ISOTOPE / charge[q, None].double()
         ok = torch.zeros(len(q), n, dtype=torch.bool, device=prec.device)
         for k in iso_k:
             ok |= (d - k * step).abs() <= tol
-        return ok & (charge[q, None] == charge[None])
+        return ok & (charge[q, None] == g_charge[None])
 
     return {"open": open_, "20ppm": ppm_, "iso20ppm": iso_}
 
