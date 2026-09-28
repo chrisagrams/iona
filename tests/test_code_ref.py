@@ -232,6 +232,7 @@ class TestNoRefUnchanged:
         assert out.returncode == 0, out.stderr
         snap = tmp_path / "s/code-snapshots/123"
         assert fields(snap / "SNAPSHOT.txt")["dirty"].startswith("no")
+        assert fields(snap / "SNAPSHOT.txt")["mode"] == "git-archive (clean HEAD)"
         assert not (snap / "uncommitted.diff").exists()
 
 
@@ -449,5 +450,318 @@ class TestSweepResume:
                               SKIP_GRID_CHECK="1")
         assert out.returncode == 0, text
         assert "resume OLD" not in text
-        assert fields(tmp_path / "s/code-snapshots/NEW/SNAPSHOT.txt")["mode"].startswith("working")
+        new = fields(tmp_path / "s/code-snapshots/NEW/SNAPSHOT.txt")
+        # the checkout's code (rsync of a dirty tree, or git archive of a clean HEAD), not a ref
+        assert new["mode"] in ("working-tree (rsync)", "git-archive (clean HEAD)")
+        assert "ref" not in new
         assert len(self._slots(out.stdout)) > len(self.ARMS)
+
+
+# ---------------------------------------------------------------------------------------------
+# K111: race-free snapshot of the checkout (no ref). A clean tree is `git archive` of the HEAD
+# sha resolved first; a dirty tree is rsynced under a SHARED flock that pbs/checkout_ff takes
+# EXCLUSIVELY while it fast-forwards.
+
+CHECKOUT_FF = REPO / "pbs/checkout_ff"
+# The last commit before K111: its code_snapshot.sh is the rsync-only reference.
+PRE_K111 = "a797659158588f099df9fab696dc9f55bff36ede"
+NEXT = {  # a fast-forward of FIRST: changes, adds and deletes code files
+    "msdelta/__init__.py": "VERSION = 'next'\n",
+    "msdelta/new_module.py": "NEW = 1\n",
+    "tests/test_x.py": "def test_x(): assert True\n",
+}
+GIT_ENV = {"GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@t",
+           "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@t"}
+
+
+@pytest.fixture
+def clean(tmp_path):
+    """A clean checkout on `main` (= commit A) with branch `next` (= B) one fast-forward
+    ahead; .gitignore'd __pycache__ and pbs/logs files lying around, as in the real one."""
+    root = tmp_path / "clean"
+    root.mkdir()
+    git(root, "init", "-q", "-b", "main")
+    write(root, {**FIRST, ".gitignore": "__pycache__/\n*.py[oc]\npbs/logs/\n"})
+    git(root, "add", "-A", "-f")
+    git(root, "commit", "-q", "-m", "A")
+    a = git(root, "rev-parse", "HEAD")
+    git(root, "checkout", "-q", "-b", "next")
+    write(root, NEXT)
+    (root / "sweeps/make_x.py").unlink()
+    git(root, "add", "-A")
+    git(root, "commit", "-q", "-m", "B")
+    b = git(root, "rev-parse", "HEAD")
+    git(root, "checkout", "-q", "main")
+    write(root, {"msdelta/__pycache__/x.cpython-312.pyc": "bytecode",
+                 "pbs/logs/new.log": "log\n"})
+    assert git(root, "status", "--porcelain") == ""
+    return root, a, b
+
+
+def commit_code(root: Path, sha: str, tmp: Path) -> dict[str, bytes]:
+    """The code files of commit `sha`, as the snapshot must hold them."""
+    out = tmp / f"expect-{sha[:8]}"
+    wt = tmp / f"wt-{sha[:8]}"
+    if not out.exists():
+        git(root, "worktree", "add", "-q", "--detach", str(wt), sha)
+        r = snapshot(wt, out, script=_pre_k111(tmp))       # rsync of a clean checkout of sha
+        assert r.returncode == 0, r.stderr
+        git(root, "worktree", "remove", "--force", str(wt))
+    t = tree(out / "code-snapshots/123")
+    t.pop("SNAPSHOT.txt")
+    return t
+
+
+def _pre_k111(tmp: Path) -> Path:
+    path = tmp / "pre_k111_code_snapshot.sh"
+    if not path.exists():
+        try:
+            text = subprocess.run(["git", "-C", str(REPO), "show",
+                                   f"{PRE_K111}:pbs/lib/code_snapshot.sh"],
+                                  check=True, capture_output=True, text=True).stdout
+        except subprocess.CalledProcessError:
+            pytest.skip("pre-K111 commit not in this clone")
+        path.write_text(text)
+    return path
+
+
+def lock_of(root: Path) -> Path:
+    return root / ".git/msdelta-checkout.lock"
+
+
+def code_of(snap: Path, pycache: bool = True) -> dict[str, bytes]:
+    t = tree(snap)
+    t.pop("SNAPSHOT.txt")
+    return t if pycache else {k: v for k, v in t.items() if "__pycache__" not in k}
+
+
+class TestAtomicSnapshot:
+    def test_clean_tree_is_git_archive_of_head_with_the_rsync_file_set(self, clean, tmp_path):
+        root, a, _ = clean
+        old = snapshot(root, tmp_path / "old", script=_pre_k111(tmp_path))
+        new = snapshot(root, tmp_path / "new")
+        assert old.returncode == new.returncode == 0, old.stderr + new.stderr
+        f = fields(tmp_path / "new/code-snapshots/123/SNAPSHOT.txt")
+        assert f["mode"] == "git-archive (clean HEAD)"
+        assert f["commit"] == a and f["branch"] == "main" and f["dirty"].startswith("no")
+        # exactly the files (and bytes) the pre-K111 rsync copied from the same clean tree,
+        # except __pycache__: its exclude rule never matched before K111 (fixed; see below)
+        assert "msdelta/__pycache__/x.cpython-312.pyc" in code_of(tmp_path / "old/code-snapshots/123")
+        assert code_of(tmp_path / "new/code-snapshots/123") == \
+            code_of(tmp_path / "old/code-snapshots/123", pycache=False)
+        # the log line and PYTHONPATH are unchanged
+        norm = lambda s, d: s.replace(str(tmp_path / d), "<SCRATCH>")
+        assert norm(old.stdout, "old") == norm(new.stdout, "new")
+        # SNAPSHOT.txt: the same lines, only `mode:` (and `taken:`) differ
+        keep = lambda p: [l for l in p.read_text().splitlines()
+                          if not l.startswith(("taken:", "mode:"))]
+        assert keep(tmp_path / "old/code-snapshots/123/SNAPSHOT.txt") == \
+            keep(tmp_path / "new/code-snapshots/123/SNAPSHOT.txt")
+        assert not lock_of(root).exists()          # a clean snapshot takes no lock
+
+    def test_clean_tree_file_set_matches_rsync_on_the_bigger_fixture(self, repo, tmp_path):
+        """The FIRST/second fixture with its dirty edits undone: every include/exclude rule
+        (pbs/logs, baselines_wip non-code, data/ subdirs and docs, notes/) agrees."""
+        root, _, second = repo
+        (root / "msdelta/untracked.py").unlink()
+        git(root, "checkout", "-q", "--", "msdelta/__init__.py")
+        old = snapshot(root, tmp_path / "old", script=_pre_k111(tmp_path))
+        new = snapshot(root, tmp_path / "new")
+        assert old.returncode == new.returncode == 0
+        assert fields(tmp_path / "new/code-snapshots/123/SNAPSHOT.txt")["commit"] == second
+        assert code_of(tmp_path / "new/code-snapshots/123") == \
+            code_of(tmp_path / "old/code-snapshots/123")
+
+    def test_dirty_tree_is_rsynced_under_the_shared_lock(self, clean, tmp_path):
+        root, a, _ = clean
+        (root / "msdelta/__init__.py").write_text("VERSION = 'edited'\n")
+        lock = lock_of(root)
+        report = tmp_path / "lockstate"
+        hook = (f'[ "$1" = rsync-copied ] || exit 0\n'
+                f'flock -n -x {lock} true && echo x-free >> {report} || echo x-held >> {report}\n'
+                f'flock -n -s {lock} true && echo s-free >> {report} || echo s-held >> {report}\n')
+        out = snapshot(root, tmp_path / "s", {"MSDELTA_SNAPSHOT_TEST_HOOK": hook})
+        assert out.returncode == 0, out.stderr
+        assert report.read_text().split() == ["x-held", "s-free"]   # shared, held during copy
+        snap = tmp_path / "s/code-snapshots/123"
+        f = fields(snap / "SNAPSHOT.txt")
+        assert f["mode"] == "working-tree (rsync)" and f["commit"] == a
+        assert f["dirty"].startswith("yes")
+        assert (snap / "msdelta/__init__.py").read_text() == "VERSION = 'edited'\n"
+        assert "+VERSION = 'edited'" in (snap / "uncommitted.diff").read_text()
+        assert not (snap / "msdelta/__pycache__").exists()      # rsync now drops it too
+        # released when the snapshot is done
+        assert subprocess.run(["flock", "-n", "-x", str(lock), "true"]).returncode == 0
+
+    def test_untracked_code_file_counts_as_dirty(self, clean, tmp_path):
+        root, _, _ = clean
+        (root / "msdelta/adhoc.py").write_text("x\n")
+        out = snapshot(root, tmp_path / "s")
+        assert out.returncode == 0, out.stderr
+        snap = tmp_path / "s/code-snapshots/123"
+        assert fields(snap / "SNAPSHOT.txt")["mode"] == "working-tree (rsync)"
+        assert (snap / "msdelta/adhoc.py").exists()
+
+    def test_fast_forward_during_a_clean_snapshot_gives_exactly_one_commit(self, clean, tmp_path):
+        """The checkout is fast-forwarded A -> B after HEAD was resolved and before the copy:
+        the snapshot is exactly A's code, recorded as A."""
+        root, a, b = clean
+        hook = f'[ "$1" = clean-resolved ] && git -C {root} merge -q --ff-only next'
+        out = snapshot(root, tmp_path / "s", {"MSDELTA_SNAPSHOT_TEST_HOOK": hook, **GIT_ENV})
+        assert out.returncode == 0, out.stderr
+        assert git(root, "rev-parse", "HEAD") == b             # the race really happened
+        snap = tmp_path / "s/code-snapshots/123"
+        f = fields(snap / "SNAPSHOT.txt")
+        assert f["commit"] == a and f["mode"] == "git-archive (clean HEAD)"
+        assert code_of(snap) == commit_code(root, a, tmp_path)
+        assert code_of(snap) != commit_code(root, b, tmp_path)
+
+    def test_concurrent_locked_checkout_changes_never_mix(self, clean, tmp_path):
+        """Stress: the checkout flips A <-> B under the exclusive lock (as pbs/checkout_ff
+        does) while snapshots run; every snapshot is exactly the commit it records."""
+        import threading
+        import time
+        root, a, b = clean
+        expect = {a: commit_code(root, a, tmp_path), b: commit_code(root, b, tmp_path)}
+        stop = threading.Event()
+
+        def flip():
+            target = [b, a]
+            i = 0
+            while not stop.is_set():
+                subprocess.run(["flock", "-x", str(lock_of(root)), "git", "-C", str(root),
+                                "reset", "-q", "--hard", target[i % 2]], capture_output=True)
+                i += 1
+                time.sleep(0.03)
+
+        t = threading.Thread(target=flip)
+        t.start()
+        try:
+            results = []
+            for k in range(12):
+                out = snapshot(root, tmp_path / "s", {"PBS_JOBID": f"j{k}"})
+                results.append(out)
+        finally:
+            stop.set()
+            t.join()
+        for k, out in enumerate(results):
+            assert out.returncode == 0, out.stderr
+            snap = tmp_path / f"s/code-snapshots/j{k}"
+            f = fields(snap / "SNAPSHOT.txt")
+            assert f["commit"] in expect
+            assert code_of(snap) == expect[f["commit"]], (k, f)
+
+    def test_dirty_head_moving_during_the_copy_is_retried_once(self, clean, tmp_path):
+        root, _, _ = clean
+        (root / "msdelta/__init__.py").write_text("VERSION = 'edited'\n")
+        marker = tmp_path / "moved"
+        hook = (f'[ "$1" = rsync-copied ] && [ ! -e {marker} ] || exit 0\n'
+                f'touch {marker}; git -C {root} commit -q --allow-empty -m moved')
+        out = snapshot(root, tmp_path / "s", {"MSDELTA_SNAPSHOT_TEST_HOOK": hook, **GIT_ENV})
+        assert out.returncode == 0, out.stderr
+        assert "moved from" in out.stderr and "copying again" in out.stderr
+        f = fields(tmp_path / "s/code-snapshots/123/SNAPSHOT.txt")
+        assert f["commit"] == git(root, "rev-parse", "HEAD")    # the second, stable copy
+
+    def test_dirty_head_moving_twice_fails_loudly(self, clean, tmp_path):
+        root, _, _ = clean
+        (root / "msdelta/__init__.py").write_text("VERSION = 'edited'\n")
+        hook = f'[ "$1" = rsync-copied ] && git -C {root} commit -q --allow-empty -m moved'
+        out = snapshot(root, tmp_path / "s", {"MSDELTA_SNAPSHOT_TEST_HOOK": hook, **GIT_ENV})
+        assert out.returncode == 3
+        assert "HEAD moved twice" in out.stderr
+        assert "PP=" not in out.stdout
+
+    def test_dirty_snapshot_waits_for_the_exclusive_lock_then_gives_up(self, clean, tmp_path):
+        root, _, _ = clean
+        lock_of(root).touch()
+        holder = subprocess.Popen(["flock", "-x", str(lock_of(root)), "sleep", "20"])
+        try:
+            import time
+            for _ in range(100):      # wait until the holder has the lock
+                if subprocess.run(["flock", "-n", "-s", str(lock_of(root)), "true"]).returncode:
+                    break
+                time.sleep(0.05)
+            # a clean tree needs no lock
+            ok = snapshot(root, tmp_path / "c", {"MSDELTA_SNAPSHOT_LOCK_TIMEOUT": "1"})
+            assert ok.returncode == 0, ok.stderr
+            (root / "msdelta/__init__.py").write_text("VERSION = 'edited'\n")
+            out = snapshot(root, tmp_path / "d", {"MSDELTA_SNAPSHOT_LOCK_TIMEOUT": "1"})
+            assert out.returncode == 3
+            assert "no shared lock" in out.stderr
+        finally:
+            holder.kill()
+            holder.wait()
+
+
+def checkout_ff(*args: str, script: Path = CHECKOUT_FF, env: dict | None = None, cwd=None):
+    return subprocess.run(["bash", str(script), *args], capture_output=True, text=True,
+                          env={**os.environ, **GIT_ENV, **(env or {})}, cwd=cwd)
+
+
+class TestCheckoutFF:
+    def test_fast_forwards_holding_the_exclusive_lock(self, clean, tmp_path):
+        root, a, b = clean
+        seen = tmp_path / "seen"
+        hook = root / ".git/hooks/post-merge"
+        hook.write_text(f"#!/bin/bash\nflock -n -s {lock_of(root)} true; echo $? > {seen}\n")
+        hook.chmod(0o755)
+        out = checkout_ff("-C", str(root), "next")
+        assert out.returncode == 0, out.stderr
+        assert git(root, "rev-parse", "HEAD") == b
+        assert git(root, "rev-parse", "--abbrev-ref", "HEAD") == "main"
+        assert seen.read_text().strip() == "1"        # no shared lock possible during the ff
+        assert f"{a[:12]} -> {b[:12]}" in out.stdout
+        assert subprocess.run(["flock", "-n", "-x", str(lock_of(root)), "true"]).returncode == 0
+
+    def test_refuses_a_dirty_checkout(self, clean, tmp_path):
+        root, a, _ = clean
+        (root / "msdelta/__init__.py").write_text("VERSION = 'edited'\n")
+        out = checkout_ff("-C", str(root), "next")
+        assert out.returncode == 2
+        assert "uncommitted changes" in out.stderr and "msdelta/__init__.py" in out.stderr
+        assert git(root, "rev-parse", "HEAD") == a
+
+    def test_waits_for_a_shared_holder_then_gives_up(self, clean, tmp_path):
+        import time
+        root, a, _ = clean
+        lock_of(root).touch()
+        holder = subprocess.Popen(["flock", "-s", str(lock_of(root)), "sleep", "20"])
+        try:
+            for _ in range(100):
+                if subprocess.run(["flock", "-n", "-x", str(lock_of(root)), "true"]).returncode:
+                    break
+                time.sleep(0.05)
+            out = checkout_ff("-C", str(root), "next", env={"CHECKOUT_FF_TIMEOUT": "1"})
+            assert out.returncode == 3 and "no exclusive lock" in out.stderr
+            assert git(root, "rev-parse", "HEAD") == a
+        finally:
+            holder.kill()
+            holder.wait()
+
+    def test_not_a_fast_forward_and_unknown_branch(self, clean, tmp_path):
+        root, a, _ = clean
+        git(root, "checkout", "-q", "-b", "side", a)
+        write(root, {"msdelta/side.py": "s\n"})
+        git(root, "add", "-A")
+        git(root, "commit", "-q", "-m", "side")
+        git(root, "checkout", "-q", "main")
+        out = checkout_ff("-C", str(root), "side")
+        assert out.returncode == 0                      # main is behind side: a real ff
+        out = checkout_ff("-C", str(root), "next")      # diverged now
+        assert out.returncode == 1 and "not a fast-forward" in out.stderr
+        out = checkout_ff("-C", str(root), "nosuch")
+        assert out.returncode == 2 and "is not a commit" in out.stderr
+
+    def test_default_target_is_the_main_worktree(self, clean, tmp_path):
+        """Run from a scratch worktree (the K111 procedure) with no -C: the MAIN checkout
+        is fast-forwarded, not the worktree the script lives in."""
+        root, a, b = clean
+        scratch = tmp_path / "merge-wt"
+        git(root, "worktree", "add", "-q", "--detach", str(scratch), a)
+        (scratch / "pbs").mkdir(exist_ok=True)
+        shutil.copy(CHECKOUT_FF, scratch / "pbs/checkout_ff")
+        out = checkout_ff("next", script=scratch / "pbs/checkout_ff", cwd=scratch)
+        assert out.returncode == 0, out.stderr
+        assert git(root, "rev-parse", "HEAD") == b
+        assert git(scratch, "rev-parse", "HEAD") == a

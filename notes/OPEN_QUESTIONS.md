@@ -93,6 +93,9 @@ checkout, so its code snapshot contained half-merged, uncommitted files (flagged
 dirty record; results were bit-identical, so no harm this time). Proposal: do merges in a scratch
 worktree, run the tests there, and only fast-forward the main checkout once they pass, so jobs never
 snapshot a half-merged tree.
+Implementation (branch k111-atomic-snapshot, not merged): a clean tree is snapshotted with `git archive`
+of the HEAD sha (no mixing possible), a dirty one with rsync under a shared flock; `pbs/checkout_ff`
+fast-forwards the main checkout under the exclusive lock. Procedure: notes/DAG_SPEC.md section 9.
 
 ### K102-P (update): cost of a fused triangle-attention kernel
 Cheapest first: (1) chunk checkpointing (small code change); (2) PyTorch's fused

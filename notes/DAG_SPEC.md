@@ -108,10 +108,13 @@ R15 **Secrets / site rules** -- never pass secrets through the batch system's va
 ## 9. Running code from a commit (K90)
 
 Every job runs from a per-job code snapshot (`pbs/lib/code_snapshot.sh`,
-`$SCRATCH_ROOT/code-snapshots/<job>/`). Normally that is an rsync of the checkout's working
-tree; `SNAPSHOT.txt` records the full commit sha, `mode: working-tree (rsync)`, a
-`dirty: yes|no` flag and the dirty files, and a dirty snapshot also holds `uncommitted.diff`
-(`git diff HEAD --binary` of the code paths), so any job can be rebuilt as commit (+ patch).
+`$SCRATCH_ROOT/code-snapshots/<job>/`) of the checkout it was submitted from. HEAD is
+resolved to a full sha first; if the code paths are clean, the snapshot is `git archive` of
+that sha (`mode: git-archive (clean HEAD)`), otherwise an rsync of the working tree
+(`mode: working-tree (rsync)`) taken under a shared lock (K111, below). `SNAPSHOT.txt`
+records the full commit sha, the mode, a `dirty: yes|no` flag and the dirty files, and a
+dirty snapshot also holds `uncommitted.diff` (`git diff HEAD --binary` of the code paths),
+so any job can be rebuilt as commit (+ patch).
 
 To run ANY commit -- e.g. an unmerged branch -- without checking it out or merging:
 
@@ -156,3 +159,37 @@ itself, reused as is (`MSDELTA_CODE_REUSE`, logged with `!!!`). `RESUME_CONFIGS=
 `RESUME_CODE=current` restore the old behaviour (e.g. jobs from before snapshots existed).
 Before K90 a resume re-read SWEEP_ROOT from the checkout, re-ran the grid check and ran
 the checkout's current working tree.
+
+### Updating the main checkout (K111)
+
+Never merge (or check out another branch) inside the main checkout: jobs starting at that
+moment snapshot it. Instead:
+
+    git worktree add ../msdelta-merge dev_finetune_02   # scratch worktree of the target branch
+    cd ../msdelta-merge && git merge <feature branch>   # resolve conflicts here
+    <run the tests here>                                # e.g. pytest tests/test_code_ref.py ...
+    pbs/checkout_ff dev_finetune_02                     # fast-forward the main checkout
+    git worktree remove ../msdelta-merge
+
+`pbs/checkout_ff [-C <checkout>] <branch>` (default: the repository's main worktree, also
+when run from the scratch worktree) refuses a main checkout with uncommitted changes to
+tracked files or a merge in progress, takes the EXCLUSIVE flock on
+`<git common dir>/msdelta-checkout.lock` (waits `CHECKOUT_FF_TIMEOUT`, default 120 s, exit 3
+if not obtained) and runs `git merge --ff-only <branch>` (exit 1 if it is not a fast-forward).
+
+Why it is race-free:
+- **Clean checkout** (the normal case once merges go through checkout_ff): the snapshot is
+  `git archive <sha>` of the sha resolved BEFORE anything is copied (and re-read after the
+  status check). Archive reads committed objects, so a fast-forward running meanwhile cannot
+  produce a mix; the job gets exactly the old or exactly the new commit, and records which.
+  It takes no lock.
+- **Dirty checkout**: rsync of the working tree while holding the lock SHARED
+  (`MSDELTA_SNAPSHOT_LOCK_TIMEOUT`, default 600 s, exit 3 if not obtained); checkout_ff cannot
+  run during the copy and vice versa. HEAD is read before and after the copy; if it moved
+  (a checkout change made WITHOUT checkout_ff), the copy is redone once, then the job fails.
+- Remaining gap: a `git merge`, `git checkout`, `git reset` or editor save done by hand in
+  the main checkout takes no lock. On a clean tree it is still harmless (archive of a sha);
+  on a dirty tree a change that does not move HEAD (checkout of files, an edit) during the
+  rsync is not detected -- as before K111. The lock needs a flock-coherent filesystem
+  (Lustre mounted with `flock`, as /home and /lus/flare are on Aurora).
+

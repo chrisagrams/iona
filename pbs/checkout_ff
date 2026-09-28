@@ -1,0 +1,84 @@
+#!/bin/bash
+# Fast-forward the MAIN checkout to a branch that was merged and tested elsewhere (K111), without
+# racing the code snapshot of a job starting at that moment.
+#
+#   pbs/checkout_ff [-C <checkout>] <branch>
+#
+# The K111 merge procedure (notes/DAG_SPEC.md section 9, "Updating the main checkout"):
+#   git worktree add ../msdelta-merge <target branch>   # scratch worktree, never the main one
+#   (in it) git merge <feature branch>; run the tests
+#   pbs/checkout_ff <target branch>                      # the main checkout jumps to the result
+#
+# What it does:
+#   1. finds the main checkout (the repository's main worktree; -C overrides) and refuses if
+#      it has uncommitted changes to tracked files (a fast-forward would carry them along,
+#      and jobs would snapshot commit + changes);
+#   2. takes the EXCLUSIVE flock on <git common dir>/msdelta-checkout.lock, waiting at most
+#      CHECKOUT_FF_TIMEOUT seconds (default 120). pbs/lib/code_snapshot.sh holds the same
+#      lock SHARED while it rsyncs a dirty working tree, so the two never overlap (a clean
+#      tree is snapshotted with git archive of a sha and needs no lock);
+#   3. re-checks, then runs `git -C <checkout> merge --ff-only <branch>` (never a real merge).
+# Exit codes: 0 done (or already up to date), 1 the merge failed (e.g. not a fast-forward),
+# 2 refused (usage, dirty checkout, unknown branch), 3 lock not obtained.
+set -euo pipefail
+
+usage() { sed -n '5p' "$0" | sed 's/^# \{0,1\}//' >&2; exit 2; }
+
+checkout=""
+if [[ ${1:-} == -C ]]; then
+    (( $# >= 2 )) || usage
+    checkout=$2; shift 2
+fi
+(( $# == 1 )) || usage
+branch=$1
+[[ $branch != -* ]] || usage
+
+here=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
+if [[ -z $checkout ]]; then
+    checkout=$(git -C "$here" worktree list --porcelain | sed -n '1s/^worktree //p')
+fi
+[[ -n $checkout && -d $checkout ]] || { echo "checkout_ff: no checkout at '$checkout'" >&2; exit 2; }
+checkout=$(cd "$checkout" && pwd)
+gcd=$(cd "$checkout" && cd "$(git rev-parse --git-common-dir)" && pwd)
+lock=$gcd/msdelta-checkout.lock
+
+if ! git -C "$checkout" rev-parse --verify --quiet "${branch}^{commit}" >/dev/null; then
+    echo "checkout_ff: '$branch' is not a commit in $checkout" >&2
+    exit 2
+fi
+
+dirty() { git -C "$checkout" status --porcelain --untracked-files=no; }
+refuse_if_dirty() {
+    local d
+    d=$(dirty)
+    if [[ -n $d ]]; then
+        echo "checkout_ff: $checkout has uncommitted changes; refusing to fast-forward:" >&2
+        printf '%s\n' "$d" | sed 's/^/    /' >&2
+        exit 2
+    fi
+    if [[ -e $(git -C "$checkout" rev-parse --git-path MERGE_HEAD) ]]; then
+        echo "checkout_ff: a merge is in progress in $checkout; refusing" >&2
+        exit 2
+    fi
+}
+refuse_if_dirty
+
+exec {lock_fd}>>"$lock"
+timeout=${CHECKOUT_FF_TIMEOUT:-120}
+if ! flock -x -w "$timeout" "$lock_fd"; then
+    echo "checkout_ff: no exclusive lock on $lock within ${timeout}s (a job's code snapshot" \
+         "is copying a dirty tree?); nothing changed" >&2
+    exit 3
+fi
+refuse_if_dirty      # again, under the lock
+
+before=$(git -C "$checkout" rev-parse HEAD)
+# The lock is held by this shell's descriptor; git (and anything it leaves running, e.g. an
+# auto gc) does not inherit it, so the lock ends exactly when this script does.
+if ! git -C "$checkout" merge --ff-only "$branch" {lock_fd}>&-; then
+    echo "checkout_ff: git merge --ff-only $branch failed in $checkout (not a fast-forward?)" >&2
+    exit 1
+fi
+after=$(git -C "$checkout" rev-parse HEAD)
+echo "checkout_ff: $checkout $(git -C "$checkout" rev-parse --abbrev-ref HEAD):" \
+     "${before:0:12} -> ${after:0:12}"
