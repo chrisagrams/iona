@@ -13,6 +13,16 @@ Spectra are embedded by the teacher named in the cache MANIFEST (the exact embed
 student was trained to hit); candidates by the student in RUN/final. Reported: Hit@1,
 Hit@5, MRR over spectra (cross_modal_metrics), plus the teacher's own spectrum->spectrum
 MAP@R on the same rows as a reference point.
+
+Standard filtered evaluation (K77-A; msdelta.eval.filtered_retrieval.crossmodal_report), ON by
+default, `--no-filters` to skip: the cross-modal numbers again without a precursor filter,
+with a plain 20 ppm filter and with an isotope-tolerant one (measured precursor m/z of the
+query spectrum vs the candidate peptide's theoretical m/z at the query's charge, same
+charge), on all queries, Fbar, F (= F_all: one correct candidate per query), plus
+net_loss/net_gain and rescue -- keys `crossmodal/{open,20ppm,iso20ppm}/{full,F,Fbar,F_all}/
+{n,hit@1,hit@5,mrr}`, `crossmodal/{20ppm,iso20ppm}/{net_loss,net_gain}`, `crossmodal/rescue`;
+the teacher reference likewise as `teacher_spectrum/{filter}/{subset}/...`. Rows without a
+complete measured `precursor` column: filtered keys skipped with a note. Old keys unchanged.
 """
 
 from __future__ import annotations
@@ -23,6 +33,34 @@ from pathlib import Path
 
 import numpy as np
 import torch
+
+
+def filtered_metrics(rows, keys, candidates, spectrum_group, spectrum_emb, sequence_emb,
+                     teacher_groups, device=None) -> dict[str, float]:
+    """Flat filtered keys (module docstring), or {} with a printed note when the rows carry
+    no complete measured precursor or a candidate's mass cannot be computed."""
+    from msdelta.eval.filtered_retrieval import (crossmodal_flatten, crossmodal_report,
+                                                 filtered_report, flatten, measured_precursor)
+    from msdelta.rescoring.reranking import peptide_neutral_mass
+
+    prec = measured_precursor(rows["precursor"] if "precursor" in rows.column_names else None)
+    if prec is None:
+        print("[align-test] no complete measured `precursor` column: filtered metrics skipped",
+              flush=True)
+        return {}
+    try:
+        cand_mass = [peptide_neutral_mass(p) for p, _ in candidates]
+    except KeyError as err:
+        print(f"[align-test] candidate mass unavailable ({err!r}): filtered metrics skipped",
+              flush=True)
+        return {}
+    q_charge = np.array([c for _, c in keys])
+    report = crossmodal_report(np.asarray(spectrum_emb), np.asarray(sequence_emb),
+                               spectrum_group, prec, q_charge, cand_mass,
+                               cand_charge=[c for _, c in candidates])
+    out = crossmodal_flatten(report, "crossmodal")
+    teacher = filtered_report(spectrum_emb, teacher_groups, prec, q_charge, device=device)
+    return out | flatten(teacher, "teacher_spectrum")
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -37,6 +75,8 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--save-embeddings", default="",
                     help="also write spectrum/candidate embeddings + keys (.npz) for "
                          "external comparisons (baselines_wip/yhydra_crossmodal.py)")
+    ap.add_argument("--no-filters", dest="filters", action="store_false",
+                    help="skip the with/without precursor-filter metrics (on by default)")
     cli = ap.parse_args(argv)
 
     from datasets import load_from_disk
@@ -115,6 +155,9 @@ def main(argv: list[str] | None = None) -> int:
                                   np.arange(len(candidates)))
     teacher_ref = retrieval_metrics_topk(spectrum_emb, group_ids(rows), device=device)
     metrics |= {f"teacher_spectrum/{k}": v for k, v in teacher_ref.items()}
+    if cli.filters:
+        metrics |= filtered_metrics(rows, keys, candidates, spectrum_group, spectrum_emb,
+                                    sequence_emb, group_ids(rows), device)
     out = {"run": cli.run, "cache": cli.cache, "teacher": manifest["teacher"],
            "data": cli.data, "n_spectra": len(features), "n_candidates": len(candidates),
            "metrics": metrics}
