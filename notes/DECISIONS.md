@@ -61,6 +61,12 @@ IDs carry a track suffix: -C contrastive (spectrum encoder), -A alignment (pepti
 | 2026-09-28 | K55-C | Which filtered number to headline: decide later | user |
 | 2026-09-28 | K77-A | A8 / mass-aware peptide encoder follow-up: later, once the new C models exist | user |
 | 2026-09-28 | K63-I | User will read the DAG build and confirm later (remind); write a spec sheet so it can be generalised into a feature later | user |
+| 2026-09-28 | K84-I | First live trial of the DAG scheduler: merge i2-dag into dev_finetune_02 and run the 2-node trial (smoke then scoring), ticks by hand | user |
+| 2026-09-28 | K92-P | Absolute m/z in the Pairformer tokens is NOT a problem: if including it improves the model, that is an improvement (the control arm may still be run) | user |
+| 2026-09-28 | K94-P | Make fine-tuning loaders fail when checkpoint weights are missing (no silent random init) | user |
+| 2026-09-28 | K96-S | Input-normalisation leak: revisit later (OPEN_QUESTIONS.md) | user |
+| 2026-09-28 | Pairformer ablations | In principle (each still needs a card): #2 m/z control OK, #3 matched params vs matched compute -- very important, #4 pair input features OK, #5 peaks cap OK, #6 pair width OK, #8 triangle attention: find how to make it win; #11 precursor features: make the model work with AND without them | user |
+| 2026-09-28 | K63-I etc. | Open questions are logged in notes/OPEN_QUESTIONS.md with full context; K86-K91 parked there | user |
 
 ## Settings chosen WITHOUT explicit approval (before this log existed)
 
