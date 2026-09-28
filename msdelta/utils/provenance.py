@@ -1,9 +1,10 @@
 """Which code produced an output: the job's code snapshot (pbs/lib/code_snapshot.sh).
 
 `code_provenance()` reads $MSDELTA_CODE_DIR/SNAPSHOT.txt and returns its `commit`,
-`branch`, `ref`, `mode` and `dirty` fields (mode is `git-archive` when the job ran a commit
-via pbs/qsub_ref, dirty then "n/a"; `working-tree` when it ran the checkout's working tree,
-dirty then whether that tree had uncommitted code changes). Empty dict outside a snapshot.
+`branch`, `ref`, `mode` and `dirty` fields (mode is `git-archive` when the job ran a commit:
+via pbs/qsub_ref (with `ref`, dirty then "n/a"), or the checkout's clean HEAD (K111, no `ref`,
+dirty False); `working-tree` when it ran the checkout's dirty working tree (rsync), dirty then
+whether that tree had uncommitted code changes). Empty dict outside a snapshot.
 """
 
 from __future__ import annotations
