@@ -150,6 +150,9 @@ test on a copy, staged).
 Merged (data/prepare_massive_kb.py, pbs/prepare_massive_kb.pbs, notes/C18_prepare_card.md). Dry run
 (2 shards, card defaults) queued 2026-09-29. Before the FULL run, confirm the open choices below
 (the dry run does not commit us to them).
+Dry run 8877152 (2026-09-29) passed its checks: 184,712 rows in 155,352 peptide groups (~1.19 spectra per group,
+so most groups are singletons, which give a contrastive loss no positives -- K133-C: should the full run
+require >= 2 spectra per group?); 40,027 spectra (18,476 sequences) removed for overlap with eval sets.
 Finding: in a 2,000-spectrum sample, 18.6% have a peptide sequence that is in one of our evaluation
 sets (ms-con-100k val 94, HEK 90, ms-con-100k test 68, human 59, HCT116 50, mouse 27, replicate
 corpus 22, OOD 12, yeast 2 of 2,000) -- the prep script removes them. Maybe ms-contrastive-100k is
