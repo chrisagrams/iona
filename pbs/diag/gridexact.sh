@@ -11,7 +11,7 @@ export PYTHONPATH=/home/khuss/code/msdelta
 export HF_HOME=/lus/flare/projects/UIC-HPC/khuss/msdelta/huggingface
 export HF_HUB_OFFLINE=1 HF_DATASETS_OFFLINE=1
 export OMP_NUM_THREADS=4 MKL_NUM_THREADS=4 MSDELTA_XPUS_PER_HOST=1 MSDELTA_WORLD_SIZE=1
-export CCL_PROCESS_LAUNCHER=pmix CCL_ATL_TRANSPORT=mpi CCL_KVS_MODE=mpi
+export CCL_PROCESS_LAUNCHER=pmix CCL_ATL_TRANSPORT=mpi CCL_KVS_MODE=${CCL_KVS_MODE:-pmi}  # K138-I: "mpi" breaks on the 2026-09 stack
 export FI_MR_CACHE_MONITOR=userfaultfd FI_CXI_DEFAULT_CQ_SIZE=131072
 export FI_CXI_OFLOW_BUF_SIZE=8388608 FI_CXI_CQ_FILL_PERCENT=20
 export ZES_ENABLE_SYSMAN=1          # <- the launcher sets this; nothing of mine did

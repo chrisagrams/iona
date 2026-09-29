@@ -30,3 +30,10 @@ def test_no_script_loads_frameworks_directly():
     offenders = [str(p.relative_to(ROOT)) for p in _scripts()
                  if re.search(r"^[^#\n]*module load[^\n]*frameworks", p.read_text(), re.M)]
     assert not offenders, f"load the environment via pbs/lib/load_frameworks.sh instead: {offenders}"
+
+
+def test_no_script_forces_ccl_kvs_mode_mpi():
+    # K138-I: CCL_KVS_MODE=mpi makes oneCCL call MPI before MPI_Init on the 2026-09 stack (rank 0 dies at setup).
+    offenders = [str(p.relative_to(ROOT)) for p in _scripts()
+                 if p.name != "ddp_smoke.pbs" and re.search(r"CCL_KVS_MODE=mpi\b|CCL_KVS_MODE:-mpi\b", p.read_text())]
+    assert not offenders, f"CCL_KVS_MODE must default to pmi: {offenders}"

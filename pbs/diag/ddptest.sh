@@ -6,7 +6,7 @@ export ONEAPI_DEVICE_SELECTOR=level_zero:gpu ZE_FLAT_DEVICE_HIERARCHY=FLAT ZE_AF
 export PYTHONPATH=/home/khuss/code/msdelta HF_HUB_OFFLINE=1 HF_DATASETS_OFFLINE=1
 export HF_HOME=/lus/flare/projects/UIC-HPC/khuss/msdelta/huggingface
 export OMP_NUM_THREADS=4 MSDELTA_XPUS_PER_HOST=1 MSDELTA_WORLD_SIZE=1
-export CCL_PROCESS_LAUNCHER=pmix CCL_ATL_TRANSPORT=mpi CCL_KVS_MODE=mpi
+export CCL_PROCESS_LAUNCHER=pmix CCL_ATL_TRANSPORT=mpi CCL_KVS_MODE=${CCL_KVS_MODE:-pmi}  # K138-I: "mpi" breaks on the 2026-09 stack
 unset CCL_ZE_IPC CCL_ZE_IPC_EXCHANGE
 export MASTER_ADDR=$(hostname) MASTER_PORT=29511
 C200=/flare/UIC-HPC/khuss/msdelta/pretrained/msdelta-200m-production-01-checkpoint-192799
