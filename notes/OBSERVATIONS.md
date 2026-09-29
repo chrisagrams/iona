@@ -1958,3 +1958,15 @@ set (F n = 0), so the filtered-failure columns are empty; filter passes = all qu
 - Experimental-only MAP@R is unchanged across arms (val 0.861-0.873, test 0.867-0.879), as in C20.
 - Validation and test agree on the ranking (K3 KL0 >= K3 > K4 >> reference). Selection by validation only.
 - As before, 20 ppm beats isotope-tolerant 20 ppm here.
+
+## K141-P: the flat Stage 0 transformer is the transformer's normal early plateau (2026-09-29)
+
+W&B CS_Pharm/msdelta-pretrain, run msdelta-50m-production-01 (master's recipe, warmup 2000): loss 0.97 -> 0.93
+and FLAT to step ~650 with grad norm 0.03-0.05, then breaks through (0.89 @700, 0.52 @1000, 0.43 @1200).
+Stage 0 transformer (8878340): flat 0.83 for all 300 steps, grad norm ~0.03 -- the same plateau; 300 steps
+never reach the break-through. The Pairformer leaves its plateau early (0.90 -> 0.32 in 300 steps), as Chris's
+msdelta-pairformer-50m did (10.5 -> 0.48 by step 400). So Stage 0 measured "time to leave the plateau", not
+quality: comparisons need runs well past the break-through, normalised for FLOPs/time (K144 step 1).
+Setup differences from master (not the cause, but to fix for real comparisons): warmup 11 vs 2000, 300 steps,
+cap 150 peaks, no DeepSpeed / torch_compile, global batch 512.
+

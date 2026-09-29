@@ -10,6 +10,9 @@
 Implements `notes/P1_stage0_card.md` (approved 2026-09-28, with the user decisions in its Status
 block). **Nothing here has been submitted.** Aurora was in maintenance when this was prepared.
 
+> 2026-09-29: P-thread runs log to W&B **CS_Pharm/pairformer_pretrain** (user). Without WANDB_ENTITY the key's
+> personal entity (kelhus2-uic) is used -- the first Stage 0 runs landed in kelhus2-uic/msdelta-pretrain.
+
 ## What is prepared
 
 | item | where |
@@ -88,7 +91,7 @@ PRE=$(qsub -A UIC-HPC -q debug -l select=1 -l walltime=01:00:00 -l filesystems=h
 # 2. The two arms, 1 node x 8 tiles, micro 32 x accum 2 = global 512, probes off.
 #    Pairformer first; the transformer waits for it (afterok), so only one job runs at a time
 #    and a Pairformer failure (e.g. OOM -> card fallback MICRO_BATCH_SIZE=16 for BOTH) stops T.
-V=CHECKPOINT_DIR=/lus/flare/projects/UIC-HPC/khuss/msdelta/runs/p1-stage0,HF_HOME=/lus/flare/projects/UIC-HPC/khuss/msdelta/huggingface,PREPROCESSED_DATASET_DIR=$D/preprocessed,XPUS_PER_HOST=8,MICRO_BATCH_SIZE=32,GLOBAL_BATCH_SIZE=512,PROBE_EXECUTION=off
+V=CHECKPOINT_DIR=/lus/flare/projects/UIC-HPC/khuss/msdelta/runs/p1-stage0,HF_HOME=/lus/flare/projects/UIC-HPC/khuss/msdelta/huggingface,PREPROCESSED_DATASET_DIR=$D/preprocessed,XPUS_PER_HOST=8,MICRO_BATCH_SIZE=32,GLOBAL_BATCH_SIZE=512,PROBE_EXECUTION=off,CCL_KVS_MODE=pmi,WANDB_ENTITY=CS_Pharm
 P=$(qsub -A UIC-HPC -q debug -l select=1 -l place=scatter -l walltime=01:00:00 -l filesystems=home:flare \
   -j oe -o /lus/flare/projects/UIC-HPC/khuss/msdelta/runs/p1-stage0/pbs-logs -W depend=afterok:$PRE \
   -v ARGS_FILE=configs/stage0/pairformer/training.args,$V pbs/aurora-pretrain.pbs); echo "$P"

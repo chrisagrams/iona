@@ -29,7 +29,7 @@
 --save_strategy no
 --remove_unused_columns false
 --report_to wandb
---wandb_project msdelta-pretrain
+--wandb_project pairformer_pretrain
 --probe_execution off
 --bias_curve_steps 0
 --probe_steps 0

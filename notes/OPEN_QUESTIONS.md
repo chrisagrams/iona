@@ -116,13 +116,6 @@ THE selection metric; experimental-only MAP@R is only a guard (reject an arm who
 the seed spread). Question: keep the guard, or select on library Hit@1 alone and just report MAP@R?
 (b) sampler oversampling vs loss weighting: pros/cons given in chat 2026-09-29; approved card uses the sampler.
 
-### K141-P: Stage 0 transformer arm barely learned (open, 2026-09-29)
-Stage 0 both arms finished (300 steps, same lr 1.3e-4, cap 150): Pairformer 8878234 loss 0.90 -> 0.32 (eval 0.317),
-22 min; transformer 8878340 loss 0.88 -> 0.83 flat from step ~30, grad norm ~0.03 throughout, 3 min. Either a
-real early-training difference or a setup problem in the transformer arm (config/init/lr for this size).
-Proposal: compare with the production transformer's first 300 steps (W&B) and check the arm's config
-before reading anything into it.
-
 ### K143-I: bigger allocations / queues (open, 2026-09-29)
 Checked `qstat -Qf` + ALCF "Running jobs on Aurora":
 - capacity: 1-16 NODES per job, walltime up to 168 h (7 days), 2 running + 5 queued per user, 512 nodes total.
@@ -137,29 +130,6 @@ Proposal: no prod allocation for current work; use multi-node capacity jobs and 
 makes sense only for production-scale pretraining (e.g. Pairformer at 100m+/full MSConsensus, MassIVE-KB),
 which would need a larger allocation request. K142-C: 400m 8878459 will likely hit its 14 h walltime --
 future capacity jobs should ask for more (limit is 168 h).
-
-### K144-P: Pairformer search plan -- approve before I write the card (open, 2026-09-29)
-Goal (user): the architecture + input features that beat the transformer at matched compute, then scale.
-Proposed order: (0) make the comparison trustworthy: explain the flat Stage 0 transformer (K141) and use a
-longer, compute-matched protocol (same wall-clock or FLOPs budget, loss vs time curves, not 300 steps);
-(1) screen the big design questions from PAIRFORMER_REVIEW at small size, 2 seeds: pair update type
-(#1), the absolute-m/z confound (#2), decoupled streams (#12, K114-P), pair width / peaks cap (#5, #6);
-(2) input features (#4: Fourier-only vs leave-one-out, sigma 10 vs 20 ppm, precursor #11);
-(3) speed work only for the surviving design (K117 bench = K130, K118/K119 kernels);
-(4) winner vs transformer at 2-3 sizes, downstream probes (denoise AUROC, contrastive MAP@R / library);
-(5) real pretraining (allocation, K143). Each step gets its own card.
-
-### K145-C: where do the other 25m checkpoints come from? (open, 2026-09-29)
-25m is back in the all-checkpoint run, but /flare has only msdelta-25m-production-01-checkpoint-540423.
-Chris's runs msdelta-25m-production-01 / msdelta-base-25m-production-01 (cgrams/msdelta-runs, S25) may
-have the 10k/120k/220k/330k/430k rungs -- ask Chris, or I look on the Hub (read-only) if you OK it.
-
-### K146-I: next-eval queue test (open, 2026-09-29)
-Probe job 8879772 (pbs/diag/queue_probe.pbs, 5 min) is ACCEPTED by next-eval but cannot start: "Not Running:
-Insufficient amount of resource: at_queue". next-eval has one node (x4007c1s5b0n0, state-unknown), 15 other jobs
-queued, none running; ALCF docs say no nodes are assigned to it since the 2026-09-28 rollout. Its image is the
-pre-rollout test image (compute_aurora_test_20260924). Not usable for now. Keep the probe queued as a canary,
-or qdel it? Same probe could test legacy-reg (old image, currently no nodes either).
 
 ### K130-P: K117 copy-cost bench -- settings to approve before submission (open, 2026-09-29)
 Script merged (8e726a6): pbs/diag/triattn_copy_bench.{py,pbs}, tests/test_triattn_copy_bench.py. NOT run.
