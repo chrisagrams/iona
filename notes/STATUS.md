@@ -27,10 +27,10 @@ JOBS
   [ ] 8876833  K66-C 25m  training (10 h), capacity, running since ~03:20
   watchers running detached (setsid) on aurora-uan-0010: pbs/tools/k66c/k66_pipeline.sh, k66_yeast.sh;
   logs $S/logs/k66_pipeline.log (+ .nohup). If the login node restarts: rerun them with 400m=8876832 025m=8876833 (yeast: K66_JOB_400M=8876832 K66_JOB_025M=8876833)
-  [ ] 8877117  K114 per-block Pairformer profiler (debug)
-  [ ] 8877118  K119 FlexAttention test (debug-scaling)
-  [ ] 8877125 / 8877126  K100 library search on C20 models, validation / test -> results/raw/finetune/contrastive/c20-{validation,test}-lib
-  FEEDER (detached; aurora-uan-0010): pbs/tools/feeder.sh pbs/tools/feeder_plans/k127_batch.txt, log $S/logs/feeder_k127.log,
+  [x] 8877117  K114 profiler (partial; runtime abort after OOM, K128-P)
+  [x] 8877118  K119 FlexAttention test aborted (K128-P)
+  [x] 8877125 / 8877126  K100 library search on C20 models, validation / test -> results/raw/finetune/contrastive/c20-{validation,test}-lib
+  C18 dry run 8877152 ok. FEEDER finished (all submitted or blocked) (was detached; aurora-uan-0010): pbs/tools/feeder.sh pbs/tools/feeder_plans/k127_batch.txt, log $S/logs/feeder_k127.log,
     state $S/feeder/k127_batch/ (one file per job: job ID or BLOCKED). Submits as the per-user queued limit allows:
     c18_dryrun -> stage0_pre -> stage0_pairformer (after pre ok) -> stage0_transformer (after pairformer ok).
     Restart after a login-node restart (idempotent; never double-submits):
@@ -71,7 +71,8 @@ NEXT
   [ ] K117 copy-cost bench: merged (8e726a6), NOT run -- waiting on K130-P settings approval
   [ ] K110 checkpoint inventory (read-only) -> notes/K110_checkpoint_inventory.md, deletion card for approval
   [ ] C18 dry run results -> confirm the open choices before the full run
-  [ ] Stage 0 (merged in f1b06b2, runbook notes/P1_stage0_runbook.md) -> results
+  [ ] Stage 0: preprocessing done (8877174); Pairformer arm failed at start (8877187, telegraf missing),
+      transformer arm not submitted -- blocked on K132-I
   [ ] K66-C 400m / 25m -> scoring -> full comparison + proposal to the user (winner per scale)
   [ ] then the winning C recipe on every pretraining checkpoint (card)
   [ ] alignment resumes on the new C models (caveats list)
