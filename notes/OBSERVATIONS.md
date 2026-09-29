@@ -1939,3 +1939,22 @@ cases before that are complete. Missing: pairformer_triattn B=32 N=150 (gc on), 
   (B=32 N=150: 54.6 -> 7.4 GB). Without it, B=32 fits only up to N=150 (no triattn) / N=100
   (triattn); N=512 does not fit even with gc at B=32.
 
+
+## K100-C: library search on the C20 models (validation 8877125, test 8877126; 2026-09-29)
+
+Raw: results/raw/finetune/contrastive/c20-{validation,test}-lib/. Experimental queries vs a consensus-only
+library, one correct entry per query; ties count as misses. No query fails the precursor filter on this
+set (F n = 0), so the filtered-failure columns are empty; filter passes = all queries.
+
+| arm (3 seeds) | val Hit@1 open / 20 ppm / iso 20 ppm | test Hit@1 open / 20 ppm / iso 20 ppm |
+|---|---|---|
+| cons K3 KL0 | 0.939-0.940 / 0.997 / 0.992 | 0.942-0.943 / 0.997-0.998 / 0.993 |
+| cons K3     | 0.936 / 0.997 / 0.991 | 0.939 / 0.997 / 0.991 |
+| cons K4     | 0.930-0.931 / 0.996 / 0.988-0.990 | 0.933-0.935 / 0.996 / 0.989-0.990 |
+| same-mass reference | 0.703-0.730 / 0.983-0.988 / 0.952-0.964 | 0.709-0.732 / 0.981-0.986 / 0.948-0.960 |
+
+- Consensus in training lifts unfiltered library Hit@1 by ~0.21-0.23; with the 20 ppm filter the gap
+  shrinks to ~0.01 (the filter removes most wrong candidates for the reference model).
+- Experimental-only MAP@R is unchanged across arms (val 0.861-0.873, test 0.867-0.879), as in C20.
+- Validation and test agree on the ranking (K3 KL0 >= K3 > K4 >> reference). Selection by validation only.
+- As before, 20 ppm beats isotope-tolerant 20 ppm here.
