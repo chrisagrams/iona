@@ -13,7 +13,6 @@ Status: **parked** = user said to come back later; **open** = waiting on the use
 ## Your to-do (user asked to be reminded)
 
 - **K63-I** -- review the job-DAG scheduler design (notes/DAG_SPEC.md) and say whether you agree.
-- **C18-C** -- review the MassIVE-KB prep (merged, not run; 18.6% overlap finding; open choices below).
 - Study notes/PAIRFORMER.md (mass-defect feature already dropped, K91/K113).
 
 ---
@@ -70,15 +69,17 @@ peptide encoder (alignment track), which waits for the new C models; the peptide
 unseen data (nine-species open Hit@1 0.39). Proposal: a new PLAN thread + a design card when
 alignment resumes; meanwhile optionally prepare the digestion/index code.
 
-### K110-S: checkpoint cleanup on /flare (open)
+### K110-S: checkpoint cleanup on /flare (inventory running 2026-09-29; deletion needs per-tier approval)
 Project disk: 8.6 / 10 TB used (UIC-HPC); ours 3.2 TB, of which runs/ = 2.6 TB. User: see how many
 checkpoints we have and delete the ones that aren't useful. Proposal: an inventory first (per sweep:
 arms, checkpoint dirs, size, whether its results are scored/committed, whether it is a released or
 reference model), then a deletion card for approval, executed under the deletion protocol (dry run,
 test on a copy, staged).
 
-### C18-C: MassIVE-KB prep -- review later (parked; reminder requested)
-Merged (data/prepare_massive_kb.py, pbs/prepare_massive_kb.pbs, notes/C18_prepare_card.md). NOT run.
+### C18-C: MassIVE-KB prep (green light 2026-09-29: dry run queued with the card's defaults)
+Merged (data/prepare_massive_kb.py, pbs/prepare_massive_kb.pbs, notes/C18_prepare_card.md). Dry run
+(2 shards, card defaults) queued 2026-09-29. Before the FULL run, confirm the open choices below
+(the dry run does not commit us to them).
 Finding: in a 2,000-spectrum sample, 18.6% have a peptide sequence that is in one of our evaluation
 sets (ms-con-100k val 94, HEK 90, ms-con-100k test 68, human 59, HCT116 50, mouse 27, replicate
 corpus 22, OOD 12, yeast 2 of 2,000) -- the prep script removes them. Maybe ms-contrastive-100k is
@@ -95,7 +96,7 @@ and open points: notes/PAIRFORMER_REVIEW.md ablation #12. Proposal: test the rat
 compute-matched); build the parallel version only if a larger ratio doesn't hurt quality. Needs a card
 (and code) when Pairformer ablations start.
 
-### K116-P / K117-P: which SDPA call layout for triangle attention (open, 2026-09-28)
+### K116-P / K117-P: which SDPA call layout for triangle attention (K117 bench approved 2026-09-29, being written; K116 open)
 Context: triangle attention shares one bias beta_jk across every row i. The 4-D SDPA call (fused
 kernel) needs the bias COPIED per row in a chunk (+ summing the copies' gradients back in backward);
 the 5-D call passes it broadcast (no copy) but Intel's fused kernel rejects 5-D, so it runs PyTorch's
@@ -130,16 +131,6 @@ is it Chris's msdelta-intensity work?), our pretrained model with every peak mas
 stand-in; (2) the FASTA (ideally the one the lab gave MSFragger for HEK/HCT116); (3) which runs and
 MSFragger's settings (precursor tolerance, enzyme, modifications) for the comparison.
 
-### K122-S: profiling hook in master's pretraining code (open, 2026-09-28)
-Context: Stage 0 prep (branch stage0-prep: 67ae52b, cde0905) adds an opt-in per-block timer
-(`--block_timing_steps N`, off by default; msdelta/utils/block_timing.py) that is wired into
-msdelta/pretraining/train.py and training_args.py -- master's pretraining code, which the user asked not
-to change. Tests show identical loss/gradients when on and no effect when off. Update: with the standalone K114 profiler (pbs/diag, no train.py change) the hook is not needed; proposal: (b). Options: (a) merge as is;
-(b) merge everything except the train.py wiring and profile Stage 0 another way; (c) keep the branch
-unmerged until decided. Stage 0 facts: 72% of spectra exceed 150 peaks and are dropped (median 207);
-~280k train / 70k validation remain; transformer 49.81M, Pairformer 46.33M params; runbook
-notes/P1_stage0_runbook.md (on the branch).
-
 ### K96-S: the pretraining loss, and the input-normalisation leak (parked; user wants to explore other losses)
 The pretraining task (msdelta/models/processing_msdelta.py + modeling_msdelta.py):
 - Per spectrum, a random subset of peaks is masked: round(mask_ratio x peaks), at least 1
@@ -162,20 +153,6 @@ full spectrum with visible peaks given, ranking losses, or predicting absolute i
 
 ## Contrastive (spectrum encoder)
 
-### K100-C: run the library-search evaluation on C20 now? (open; terminology clarified 2026-09-28)
-Three different search settings (all "identify the peptide behind a spectrum"):
-- replicate retrieval (our current contrastive metric): query spectrum vs other EXPERIMENTAL spectra;
-  several correct answers (the same peptide's other replicates).
-- spectral LIBRARY search (C25): query spectrum vs a library of CONSENSUS spectra, one per
-  peptide+charge; exactly one correct answer; the peptide is read off the matched entry.
-- DATABASE search (what search engines like MSFragger do): query spectrum vs candidate PEPTIDE
-  SEQUENCES (from a protein database), scored against theoretical/predicted spectra; our analogue is
-  the alignment cross-modal evaluation (spectrum encoder vs peptide encoder).
-Library search is close to replicate retrieval but not the same: the gallery is one clean consensus
-per peptide instead of several noisy replicates, and there is exactly one correct entry (so Hit@k
-and rank statistics, not MAP@R). Code is ready (branch c25-library-search). Question: approve
-scoring the C20 models (validation, test) with it now, running from that branch (K90-S mechanism,
-once built) without merging?
 ### K85-P: the first Pairformer vs transformer comparison run (open; see K91-K95 and the review)
 Context: `notes/P1_card_draft.md` (branch p1-pairformer) drafts a short debug pretraining run
 comparing the ported Pairformer with our transformer at ~50M parameters (loss curves, step time).

@@ -102,6 +102,14 @@ IDs carry a track suffix: -C contrastive (spectrum encoder), -A alignment (pepti
 | 2026-09-29 | K124-C | Resubmit the K66-C 400m / 25m training (same card). Final IDs 8876832 (400m), 8876833 (25m); a first afterok-chained attempt (8876824/25) was deleted by PBS because the full-suite validation job exits 1 on the 4 known failures although validation passed (e2e+golden 10/10, device 11/11, 897 passed) | user |
 | 2026-09-29 | K125-S | Move to the new frameworks/2026.1.0 venv when it no longer risks comparison issues within a task (i.e. between experiment phases) -- schedule it then (PLAN I3) | user |
 | 2026-09-29 | K126-S | Fix the 4 long-standing test failures. Turned out to be a false positive in the TEST (the scripts export all variables on one line); test fixed, suite fully green (901 passed) | user |
+| 2026-09-29 | K127-S | Merge k114-k119-prep and stage0-prep into dev_finetune_02 now (done: f1b06b2; 919 passed, 36 skipped) | user |
+| 2026-09-29 | K122-S | Option (b): stage0-prep merged WITHOUT the train.py/training_args.py block-timing hook (block_timing.py + its test dropped); K114's standalone profiler covers per-block timing | user |
+| 2026-09-29 | K100-C | Run library search on the C20 models (validation 8877125, test 8877126; new OUT_DIRs c20-{validation,test}-lib because the old C20 JSONs predate library metrics and would be skipped) | user |
+| 2026-09-29 | K117-P | Run the copy-cost / layout / size-sweep bench (script being written on k117-prep) | user |
+| 2026-09-29 | C18-C | Green light: run the MassIVE-KB dry run (2 shards) as in notes/C18_prepare_card.md | user |
+| 2026-09-29 | K110-S | Do the checkpoint inventory now (read-only; deletion only after per-tier approval + deletion protocol) | user |
+| 2026-09-29 | Stage 0 | Submit per runbook (preprocess -> Pairformer -> transformer); submitted sequentially by pbs/tools/feeder.sh because held jobs count toward the per-user queued limit | user |
+| 2026-09-29 | K114/K119 | Submitted: K114 profiler 8877117 (debug), K119 FlexAttention test 8877118 (debug-scaling) | user |
 
 ## Settings chosen WITHOUT explicit approval (before this log existed)
 
