@@ -110,6 +110,12 @@ run needs its own card; these must be settled first:
 Size (rough): ~31 checkpoints x 3 seeds = ~93 runs; 12 runs per node-job -> ~8 capacity jobs of 10-14 h,
 2 at a time -> ~2-3 days of queue, plus scoring.
 
+### K139-C follow-up: decision rule and weighting method (open, 2026-09-29)
+User: "(c) isn't library search the main metric?" -- Yes: in the approved rule library Hit@1 (validation) is
+THE selection metric; experimental-only MAP@R is only a guard (reject an arm whose MAP@R falls by more than
+the seed spread). Question: keep the guard, or select on library Hit@1 alone and just report MAP@R?
+(b) sampler oversampling vs loss weighting: pros/cons given in chat 2026-09-29; approved card uses the sampler.
+
 ### K130-P: K117 copy-cost bench -- settings to approve before submission (open, 2026-09-29)
 Script merged (8e726a6): pbs/diag/triattn_copy_bench.{py,pbs}, tests/test_triattn_copy_bench.py. NOT run.
 Command: `qsub -q debug -l select=1 -l walltime=01:00:00 -A UIC-HPC -l filesystems=home:flare -v REPO_DIR=$PWD pbs/diag/triattn_copy_bench.pbs`
