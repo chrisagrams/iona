@@ -1,0 +1,14 @@
+#!/bin/bash -l
+#PBS -N idle-debug
+#PBS -A UIC-HPC
+#PBS -l select=1
+#PBS -l walltime=00:45:00
+#PBS -l filesystems=home:flare
+#PBS -j oe
+#PBS -o pbs/logs/
+# Holds a node for interactive debugging (ssh to exec_host). Also records what an mpiexec-launched rank sees.
+REPO_DIR=${REPO_DIR:-${PBS_O_WORKDIR:-$PWD}}
+source "$REPO_DIR/pbs/lib/load_frameworks.sh"
+echo "job TMPDIR=$TMPDIR (${#TMPDIR} chars)"
+mpiexec --envall --pmi=pmix -n 2 --ppn 2 bash -c 'echo "rank ${PMIX_RANK} TMPDIR=$TMPDIR (${#TMPDIR} chars)"; '"$REPO_DIR"'/.venv/bin/python -c "import tempfile,multiprocessing.util as u; print(\"gettempdir\", tempfile.gettempdir()); print(\"pymp\", u.get_temp_dir())"'
+sleep 2700

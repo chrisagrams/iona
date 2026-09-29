@@ -271,6 +271,14 @@ exec mpiexec \
             echo "Aurora launcher did not provide PMIX_RANK, PALS_RANKID, or PMI_RANK" >&2
             exit 2
         fi
+        # K138-I: PALS gives each rank TMPDIR=/var/tmp/pbs.<job>/<uuid>/tmp (109 chars), over the 108-char
+        # AF_UNIX limit, so DataLoader workers crash ("AF_UNIX path too long"). Use a short node-local dir.
+        TMPDIR=${TMPDIR:-/tmp}
+        if (( ${#TMPDIR} > 60 )); then
+            job_short=${PBS_JOBID:-job}
+            export TMPDIR="/tmp/msdelta-${job_short%%.*}-$RANK"
+            mkdir -p "$TMPDIR"
+        fi
         export WORLD_SIZE="$MSDELTA_WORLD_SIZE"
         export LOCAL_RANK="${PALS_LOCAL_RANKID:-${MPI_LOCALRANKID:-$((RANK % MSDELTA_XPUS_PER_HOST))}}"
         export LOCAL_WORLD_SIZE="$MSDELTA_XPUS_PER_HOST"
