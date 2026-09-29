@@ -23,9 +23,9 @@ BRANCHES / CHECKOUTS
 
 JOBS
 ──────────────────────────────────────────────────────────────────────────
-  [ ] 8876832  K66-C 400m training (14 h), capacity, running since ~03:20
-  [ ] 8876833  K66-C 25m  training (10 h), capacity, running since ~03:20
-  [ ] 8878032  K136-C 50m lr4e-4_p170k2 x 3 seeds (capacity 10 h); scoring by feeder plan k136_score
+  [!] 8876832  K66-C 400m: HUNG since 03:23 (TMPDIR/AF_UNIX bug, never trained) -- needs qdel + resubmit (K140-S)
+  [!] 8876833  K66-C 25m: never trained, killed at walltime 10 h -- resubmit (K140-S)
+  [!] 8878032  K136-C 50m: HUNG (same bug) -- needs qdel + resubmit; scoring feeder k136_score will mark it BLOCKED
       (log $S/logs/feeder_k136.log; restart: setsid nohup pbs/tools/feeder.sh pbs/tools/feeder_plans/k136_score.txt >> $S/logs/feeder_k136.log 2>&1 < /dev/null &)
   watchers running detached (setsid) on aurora-uan-0010: pbs/tools/k66c/k66_pipeline.sh, k66_yeast.sh;
   logs $S/logs/k66_pipeline.log (+ .nohup). If the login node restarts: rerun them with 400m=8876832 025m=8876833 (yeast: K66_JOB_400M=8876832 K66_JOB_025M=8876833)

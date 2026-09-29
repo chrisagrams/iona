@@ -116,6 +116,14 @@ THE selection metric; experimental-only MAP@R is only a guard (reject an arm who
 the seed spread). Question: keep the guard, or select on library Hit@1 alone and just report MAP@R?
 (b) sampler oversampling vs loss weighting: pros/cons given in chat 2026-09-29; approved card uses the sampler.
 
+### K140-S: hung jobs + resubmission after the TMPDIR fix (open, 2026-09-29)
+K66-C 400m (8876832, running since 03:20, 11 h+ of 14 h) and K136 50m (8878032) are hung (AF_UNIX crash, no
+training). Claude's qdel was blocked by the permission classifier: please `qdel 8876832 8878032` (or allow it).
+Then, once C27 smoke 8878345 confirms the fix on the sweep path: resubmit the same approved cards --
+K66-C 400m (14 h) and 25m (10 h), K136 50m (10 h) -- plus C27 (12 arms, 10 h). Capacity allows 2 running at a
+time: order? Proposal: 400m + 25m first (they gate the four-scale comparison), then K136 + C27 (could share
+one node: 3 + 12 arms > 12 tiles, so two jobs).
+
 ### K130-P: K117 copy-cost bench -- settings to approve before submission (open, 2026-09-29)
 Script merged (8e726a6): pbs/diag/triattn_copy_bench.{py,pbs}, tests/test_triattn_copy_bench.py. NOT run.
 Command: `qsub -q debug -l select=1 -l walltime=01:00:00 -A UIC-HPC -l filesystems=home:flare -v REPO_DIR=$PWD pbs/diag/triattn_copy_bench.pbs`
