@@ -110,16 +110,6 @@ run needs its own card; these must be settled first:
 Size (rough): ~31 checkpoints x 3 seeds = ~93 runs; 12 runs per node-job -> ~8 capacity jobs of 10-14 h,
 2 at a time -> ~2-3 days of queue, plus scoring.
 
-### K138-I: Stage 0 Pairformer arm failed again, now at DDP setup (open, 2026-09-29)
-8877949 (after the telegraf fix; telegraf itself worked): ranks 1-7 fail in DDP's
-_verify_params_across_processes with "DistNetworkError: Failed to recv, got 0 bytes" (connection to the
-rendezvous store on rank 0 closed), then PALS kills rank 0 (SIGTERM); rank 0 logged no error. ~2 min in,
-before the first step. aurora-pretrain.pbs has not run successfully since the 2026-09 update (and possibly
-never on this branch with xccl + 8 tiles). Transformer arm again BLOCKED (not submitted). Proposed debug
-(needs OK): one debug job running the transformer arm (is it Pairformer-specific?) with
-TORCH_DISTRIBUTED_DEBUG=DETAIL and CCL_LOG_LEVEL=info; if both fail, a 2-rank torch.distributed smoke with
-the same launcher. Side note: the W&B key in .keys logs in as kelhus2 (kelhus2-uic).
-
 ### K130-P: K117 copy-cost bench -- settings to approve before submission (open, 2026-09-29)
 Script merged (8e726a6): pbs/diag/triattn_copy_bench.{py,pbs}, tests/test_triattn_copy_bench.py. NOT run.
 Command: `qsub -q debug -l select=1 -l walltime=01:00:00 -A UIC-HPC -l filesystems=home:flare -v REPO_DIR=$PWD pbs/diag/triattn_copy_bench.pbs`
