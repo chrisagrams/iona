@@ -1,4 +1,4 @@
-# C27-C card (DRAFT, needs approval): weight the consensus spectrum more heavily in training
+# C27-C card (APPROVED 2026-09-29): weight the consensus spectrum more heavily in training
 
 Status: APPROVED as drafted 2026-09-29 ("Yes run your proposal"). Implementation on branch c27-prep.
 
