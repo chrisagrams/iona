@@ -1,0 +1,1 @@
+C27 ARM (C27-C, notes/C27_consensus_weight_card.md): cons_w1 (--include_consensus true --consensus_weight 1), seed 2. Otherwise sweep-hp50b s050m_ck540k_lr4e-4_p128k2_seed2 (K53 50m, lr 4e-4, P128xK2, checkpoint 540,423). sweeps/make_c27.py.

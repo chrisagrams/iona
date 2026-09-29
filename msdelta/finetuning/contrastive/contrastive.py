@@ -60,7 +60,8 @@ class GroupBatchSampler(Sampler[list[int]]):
     def __init__(self, groups, groups_per_batch: int = 12, replicates: int = 4,
                  seed: int = 0, drop_last: bool = True, group_masses=None,
                  mass_jitter: float = 1.0, random_fraction: float = 0.0,
-                 random_mix: str = "within"):
+                 random_mix: str = "within", consensus_mask=None,
+                 consensus_weight: float = 1.0):
         # C19 (same-mass batches): with group_masses (neutral mass per group id), each epoch
         # sorts the groups by mass + uniform(+-mass_jitter Da), cuts them into consecutive
         # blocks of groups_per_batch and shuffles the blocks, so a batch's negatives are
@@ -105,9 +106,44 @@ class GroupBatchSampler(Sampler[list[int]]):
         self.members: dict[int, np.ndarray] = {
             int(k): members for k, members in zip(keys, np.split(order, starts[1:]))}
         self.epoch = 0
+        # C27 (consensus weighting): consensus_mask marks the consensus row(s) per ROW
+        # (same length as groups). With consensus_weight w != 1 the K members of a group
+        # are drawn WITHOUT replacement, each consensus row with weight w and each
+        # experimental row with weight 1 (successive sampling, via Efraimidis-Spirakis
+        # keys Exp(1)/weight: the K smallest keys, in order). w = inf gives the consensus
+        # key 0, so it is always drawn and the other K-1 are uniform over the rest.
+        # w == 1 takes the ORIGINAL code path untouched, so default batches stay
+        # bit-identical to every run before C27.
+        consensus_weight = float(consensus_weight)
+        if not consensus_weight > 0:     # also rejects nan
+            raise ValueError(f"consensus_weight must be > 0 (inf allowed), not {consensus_weight}")
+        self.consensus_weight = consensus_weight
+        self.member_weights: dict[int, np.ndarray] | None = None
+        if consensus_weight != 1.0:
+            if consensus_mask is None:
+                raise ValueError("consensus_weight != 1 needs consensus_mask (train with "
+                                 "--include_consensus true)")
+            mask = np.asarray(consensus_mask, dtype=bool)
+            if mask.shape != groups.shape:
+                raise ValueError(f"consensus_mask has {mask.shape} rows, groups {groups.shape}")
+            if not mask.any():
+                raise ValueError("consensus_weight != 1 but no row is marked as consensus")
+            self.member_weights = {
+                k: np.where(mask[members], consensus_weight, 1.0)
+                for k, members in self.members.items()}
 
     def __len__(self) -> int:
         return max(len(self.members) // self.groups_per_batch, 1)
+
+    def _draw(self, rng, group: int) -> np.ndarray:
+        """K members of one group. Uniform (the original draw) unless consensus-weighted."""
+        pool = self.members[group]
+        if self.member_weights is None or len(pool) < self.replicates:
+            # Groups smaller than K keep the original with-replacement uniform draw.
+            return rng.choice(pool, size=self.replicates,
+                              replace=len(pool) < self.replicates)
+        keys = rng.exponential(size=len(pool)) / self.member_weights[group]
+        return pool[np.argsort(keys, kind="stable")[:self.replicates]]
 
     def set_epoch(self, epoch: int) -> None:
         self.epoch = epoch
@@ -135,9 +171,7 @@ class GroupBatchSampler(Sampler[list[int]]):
                            self.groups_per_batch):
             batch: list[int] = []
             for group in order[start : start + self.groups_per_batch]:
-                pool = self.members[int(group)]
-                take = rng.choice(pool, size=self.replicates,
-                                  replace=len(pool) < self.replicates)
+                take = self._draw(rng, int(group))
                 batch.extend(int(i) for i in take)
             yield batch
         # Advance regardless of whether anyone calls set_epoch. See the class docstring.

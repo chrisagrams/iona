@@ -152,6 +152,14 @@ class ContrastiveDataArguments:
                           "member. Off by default because a consensus is built FROM "
                           "the replicates, so pairing it with them is partly pairing "
                           "a spectrum with its own average."})
+    consensus_weight: float = field(
+        default=1.0,
+        metadata={"help": "C27, with --include_consensus: the PK sampler draws a group's K "
+                          "members WITHOUT replacement, the consensus with this weight and "
+                          "each experimental spectrum with weight 1. 1.0 = uniform, exactly "
+                          "the sampler before C27; 'inf' = the consensus is always drawn "
+                          "plus K-1 experimental spectra uniformly. Must be > 0; any value "
+                          "other than 1 without --include_consensus is an error."})
     exclude_replicate_peptides: bool = field(
         default=True,
         metadata={"help": "grouped only: drop peptides that appear anywhere in "
@@ -337,6 +345,7 @@ class ContrastiveTrainer(Trainer):
                  mass_jitter=1.0, random_group_fraction=0.0, random_mix="within",
                  encoder_lr_scale=1.0, layer_mix_lr=None,
                  pair_loss=False, pairs_per_batch=8, positive_fraction=0.5,
+                 consensus_mask=None, consensus_weight=1.0,
                  **kwargs):
         super().__init__(*args, **kwargs)
         self.groups = groups
@@ -353,6 +362,8 @@ class ContrastiveTrainer(Trainer):
         self.pair_loss = pair_loss
         self.pairs_per_batch = pairs_per_batch
         self.positive_fraction = positive_fraction
+        self.consensus_mask = consensus_mask
+        self.consensus_weight = consensus_weight
 
     def create_optimizer(self):
         """Encoder and readout in separate groups, so one can move slower than the other.
@@ -425,7 +436,9 @@ class ContrastiveTrainer(Trainer):
                                         group_masses=self.group_masses,
                                         mass_jitter=self.mass_jitter,
                                         random_fraction=self.random_group_fraction,
-                                        random_mix=self.random_mix)
+                                        random_mix=self.random_mix,
+                                        consensus_mask=self.consensus_mask,
+                                        consensus_weight=self.consensus_weight)
         self._batch_sampler = sampler          # SamplerEpochCallback sets its epoch
         return DataLoader(self.train_dataset, batch_sampler=sampler,
                           collate_fn=self.data_collator,
@@ -498,6 +511,29 @@ class ContrastiveTrainer(Trainer):
         return (outputs["loss"], outputs) if return_outputs else outputs["loss"]
 
 
+def check_consensus_weight(data_args, pair_loss: bool = False) -> None:
+    """C27: --consensus_weight is only meaningful for the PK sampler over grouped data with
+    the consensus included. Refuse anything else rather than silently ignore it."""
+    w = float(data_args.consensus_weight)
+    if not w > 0:
+        raise ValueError(f"--consensus_weight must be > 0 (inf allowed), not {w}")
+    if w == 1.0:
+        return
+    if not data_args.include_consensus or data_args.dataset_format != "grouped":
+        raise ValueError(f"--consensus_weight {w} needs --dataset_format grouped and "
+                         f"--include_consensus true (there is no consensus row to weight)")
+    if pair_loss:
+        raise ValueError("--consensus_weight is implemented in the PK sampler only, not the "
+                         "pair sampler (--pair_loss)")
+
+
+def consensus_rows(train, data_args):
+    """Boolean per train row: is it the consensus spectrum? None when not weighting."""
+    if float(data_args.consensus_weight) == 1.0:
+        return None
+    return np.asarray(train["source"]) == "consensus"
+
+
 def load_contrastive_datasets(data_args, processor) -> dict:
     """train + validation for either corpus format. See ContrastiveDataArguments."""
     from msdelta import grouped_retrieval as gr
@@ -551,6 +587,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     model_args, data_args, training_args = parser.parse_args_into_dataclasses(
         args=argv, args_file_flag="--args_file")
+    check_consensus_weight(data_args, pair_loss=model_args.pair_loss)
     out_dir = Path(training_args.output_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     if training_args.wandb_project:
@@ -613,6 +650,10 @@ def main(argv: list[str] | None = None) -> int:
         f"Batches are {data_args.groups_per_batch} groups x {data_args.replicates} "
         f"replicates. pooling={model_args.pooling}, embedding "
         f"{embedding_size(encoder, model_args.pooling)}, seed {training_args.seed}.")
+    if data_args.include_consensus:
+        description += (f" Consensus spectrum included, consensus_weight="
+                        f"{data_args.consensus_weight} (sampled without replacement, "
+                        f"experimental spectra weight 1).")
     if training_args.run_description:
         description = f"{training_args.run_description} -- {description}"
 
@@ -683,7 +724,9 @@ def main(argv: list[str] | None = None) -> int:
                           if model_args.pooling == "layer_mix" else None),
             pair_loss=model_args.pair_loss,
             pairs_per_batch=data_args.pairs_per_batch,
-            positive_fraction=data_args.positive_fraction)
+            positive_fraction=data_args.positive_fraction,
+            consensus_mask=consensus_rows(datasets["train"], data_args),
+            consensus_weight=data_args.consensus_weight)
         trainer.add_callback(MemoryProbe(every=50))
         trainer.add_callback(SamplerEpochCallback(trainer))
         trainer.add_callback(SaveEncoderCallback(model, processor))
