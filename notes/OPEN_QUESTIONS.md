@@ -154,6 +154,13 @@ longer, compute-matched protocol (same wall-clock or FLOPs budget, loss vs time 
 Chris's runs msdelta-25m-production-01 / msdelta-base-25m-production-01 (cgrams/msdelta-runs, S25) may
 have the 10k/120k/220k/330k/430k rungs -- ask Chris, or I look on the Hub (read-only) if you OK it.
 
+### K146-I: next-eval queue test (open, 2026-09-29)
+Probe job 8879772 (pbs/diag/queue_probe.pbs, 5 min) is ACCEPTED by next-eval but cannot start: "Not Running:
+Insufficient amount of resource: at_queue". next-eval has one node (x4007c1s5b0n0, state-unknown), 15 other jobs
+queued, none running; ALCF docs say no nodes are assigned to it since the 2026-09-28 rollout. Its image is the
+pre-rollout test image (compute_aurora_test_20260924). Not usable for now. Keep the probe queued as a canary,
+or qdel it? Same probe could test legacy-reg (old image, currently no nodes either).
+
 ### K130-P: K117 copy-cost bench -- settings to approve before submission (open, 2026-09-29)
 Script merged (8e726a6): pbs/diag/triattn_copy_bench.{py,pbs}, tests/test_triattn_copy_bench.py. NOT run.
 Command: `qsub -q debug -l select=1 -l walltime=01:00:00 -A UIC-HPC -l filesystems=home:flare -v REPO_DIR=$PWD pbs/diag/triattn_copy_bench.pbs`

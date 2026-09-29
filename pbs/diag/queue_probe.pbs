@@ -1,0 +1,13 @@
+#!/bin/bash -l
+#PBS -N queue-probe
+#PBS -A UIC-HPC
+#PBS -l select=1
+#PBS -l walltime=00:05:00
+#PBS -l filesystems=home:flare
+#PBS -j oe
+#PBS -o pbs/logs/
+# K146-I: does a queue accept and run our jobs? Prints the node, image and whether our env loads.
+#   qsub -q <queue> -v REPO_DIR=$PWD pbs/diag/queue_probe.pbs
+REPO_DIR=${REPO_DIR:-${PBS_O_WORKDIR:-$PWD}}
+echo "queue=$PBS_QUEUE host=$(hostname) os=$(grep PRETTY /etc/os-release)"
+source "$REPO_DIR/pbs/lib/load_frameworks.sh" && "$REPO_DIR/.venv/bin/python" -c "import torch; print('torch', torch.__version__, 'xpus', torch.xpu.device_count())"
