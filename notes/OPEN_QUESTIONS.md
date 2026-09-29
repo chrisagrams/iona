@@ -123,6 +123,21 @@ real early-training difference or a setup problem in the transformer arm (config
 Proposal: compare with the production transformer's first 300 steps (W&B) and check the arm's config
 before reading anything into it.
 
+### K143-I: bigger allocations / queues (open, 2026-09-29)
+Checked `qstat -Qf` + ALCF "Running jobs on Aurora":
+- capacity: 1-16 NODES per job, walltime up to 168 h (7 days), 2 running + 5 queued per user, 512 nodes total.
+  We have been submitting select=1 with 10-14 h walltimes. aurora-finetune-sweep.pbs already spreads arms over
+  several nodes (12 arms per node), so e.g. the all-checkpoint C run (~90 arms) fits in ONE 8-node capacity job.
+- prod (routes to small/medium/large): minimum 256 nodes; 10 running per project. UIC-HPC balance 9,265
+  node-hours (2,521 used); one 256-node hour = 256 node-hours, so a 24 h prod job would use 2/3 of it.
+- legacy / legacy-reg (the new queue): runs the OLD node image (bkc compute_aurora_legacy_20251010), open to
+  all, up to 2,413 nodes, 24 h; right now no nodes carry the legacy label (like next-eval after the rollout).
+  Useful only as a fallback to the pre-update stack; our env now works on the new image.
+Proposal: no prod allocation for current work; use multi-node capacity jobs and longer walltimes. Prod
+makes sense only for production-scale pretraining (e.g. Pairformer at 100m+/full MSConsensus, MassIVE-KB),
+which would need a larger allocation request. K142-C: 400m 8878459 will likely hit its 14 h walltime --
+future capacity jobs should ask for more (limit is 168 h).
+
 ### K130-P: K117 copy-cost bench -- settings to approve before submission (open, 2026-09-29)
 Script merged (8e726a6): pbs/diag/triattn_copy_bench.{py,pbs}, tests/test_triattn_copy_bench.py. NOT run.
 Command: `qsub -q debug -l select=1 -l walltime=01:00:00 -A UIC-HPC -l filesystems=home:flare -v REPO_DIR=$PWD pbs/diag/triattn_copy_bench.pbs`
