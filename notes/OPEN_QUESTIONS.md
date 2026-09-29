@@ -91,24 +91,6 @@ K119's abort wrote a 2 GB core file into ~/code/msdelta (the job's working direc
 small quota). Proposal: `ulimit -c 0` in pbs/lib/load_frameworks.sh (every job sources it), or
 redirect cores to $S/cores/ for jobs where we want them. Nothing changed yet.
 
-### K132-I: Stage 0 blocked -- aurora-pretrain.pbs requires telegraf, which isn't installed (open, 2026-09-29)
-Stage 0 preprocessing (8877174) succeeded; the Pairformer arm (8877187) stopped after 14 s: local rank 0 checks
-`command -v telegraf`, prints "telegraf is required for Aurora XPU metrics" and exits 2, and PALS kills the
-other ranks (job exit 143). The feeder then marked the transformer arm BLOCKED (not submitted). No training ran.
-Background: master's commit 3ad425c (Chris, 2026-09-09) makes aurora-pretrain.pbs start a telegraf daemon on
-each node that runs `xpu-smi dump` and serves the metrics to W&B (the card's peak-memory measurement relies on
-it). None of our runs has used aurora-pretrain.pbs since that commit (the K66/C sweeps use other scripts), so
-this was never exercised here -- my Stage 0 prep missed it. telegraf is not on the login node's PATH, in the
-26.26.0 or 26.181.0 PE, or in the module tree; whether xpu-smi exists on compute nodes is unchecked.
-Options (need your pick):
-- (a) put a telegraf binary (single static binary, InfluxData release) in $S/tools/bin and add it to PATH via
-  the job's -v; first a 5-min debug job checks telegraf + `xpu-smi dump` on a compute node. No code change.
-- (b) add an opt-out (e.g. MSDELTA_XPU_METRICS=off) to aurora-pretrain.pbs -- changes master's working script;
-  peak memory would then have to come from torch's allocator stats instead.
-- (c) ask Chris how he runs it (maybe he has telegraf installed in his environment).
-Recommendation: (a), with (c) in parallel. Resubmitting later: delete $S/feeder/k127_batch/stage0_{pairformer,transformer}
-and restart the feeder (preprocessing output is reused).
-
 ### K130-P: K117 copy-cost bench -- settings to approve before submission (open, 2026-09-29)
 Script merged (8e726a6): pbs/diag/triattn_copy_bench.{py,pbs}, tests/test_triattn_copy_bench.py. NOT run.
 Command: `qsub -q debug -l select=1 -l walltime=01:00:00 -A UIC-HPC -l filesystems=home:flare -v REPO_DIR=$PWD pbs/diag/triattn_copy_bench.pbs`
@@ -150,9 +132,10 @@ test on a copy, staged).
 Merged (data/prepare_massive_kb.py, pbs/prepare_massive_kb.pbs, notes/C18_prepare_card.md). Dry run
 (2 shards, card defaults) queued 2026-09-29. Before the FULL run, confirm the open choices below
 (the dry run does not commit us to them).
-Dry run 8877152 (2026-09-29) passed its checks: 184,712 rows in 155,352 peptide groups (~1.19 spectra per group,
-so most groups are singletons, which give a contrastive loss no positives -- K133-C: should the full run
-require >= 2 spectra per group?); 40,027 spectra (18,476 sequences) removed for overlap with eval sets.
+Dry run 8877152 (2026-09-29) passed its checks: 184,712 rows in 155,352 peptide groups (~1.19 spectra per group).
+K133-C (withdrawn): that group-size figure is meaningless -- the source (massive_kb_v1_shuffled) is shuffled and
+the dry run read 2 shards per split = 0.78% of train rows, so a peptide's spectra are mostly outside the
+sample. Real group sizes come from the full run's manifest histogram; 40,027 spectra (18,476 sequences) removed for overlap with eval sets.
 Finding: in a 2,000-spectrum sample, 18.6% have a peptide sequence that is in one of our evaluation
 sets (ms-con-100k val 94, HEK 90, ms-con-100k test 68, human 59, HCT116 50, mouse 27, replicate
 corpus 22, OOD 12, yeast 2 of 2,000) -- the prep script removes them. Maybe ms-contrastive-100k is

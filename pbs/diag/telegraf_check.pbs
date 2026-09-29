@@ -1,0 +1,49 @@
+#!/bin/bash -l
+#PBS -N msdelta-k132-telegraf
+#PBS -A UIC-HPC
+#PBS -l select=1
+#PBS -l walltime=00:10:00
+#PBS -l filesystems=home:flare
+#PBS -q debug
+#PBS -j oe
+#PBS -o pbs/logs/
+# K132-I: can aurora-pretrain.pbs's XPU metrics start on a compute node? Same environment steps as that
+# script (load_frameworks.sh, module load xpu-smi), then: telegraf on PATH, `xpu-smi dump` works, telegraf
+# with pbs/xpu-telegraf.conf serves /metrics with the xpu_* fields W&B reads. No training.
+#   qsub -v REPO_DIR=$PWD pbs/diag/telegraf_check.pbs
+
+REPO_DIR=${REPO_DIR:-${PBS_O_WORKDIR:-$PWD}}
+source "$REPO_DIR/pbs/lib/load_frameworks.sh"
+module load xpu-smi
+set -uo pipefail
+cd "$REPO_DIR"
+fail=0
+check() { if "$@"; then echo "[ok]   $*"; else echo "[FAIL] $*"; fail=1; fi; }
+
+echo "=== $(date -Is) K132 telegraf check on $(hostname), job ${PBS_JOBID:-}"
+check command -v telegraf
+check command -v xpu-smi
+telegraf --version
+timeout 20 xpu-smi dump -d -1 -m 0 1 2 5 -n 2 || { echo "[FAIL] xpu-smi dump"; fail=1; }
+
+export MSDELTA_XPU_METRICS_PORT=9274
+LOG=${TMPDIR:-/tmp}/telegraf-$$.log
+telegraf --config pbs/xpu-telegraf.conf > "$LOG" 2>&1 &
+pid=$!
+metrics=""
+for _ in $(seq 1 30); do
+    sleep 2
+    metrics=$(curl -sf "http://127.0.0.1:${MSDELTA_XPU_METRICS_PORT}/metrics" | grep '^xpu_' || true)
+    [[ -n $metrics ]] && break
+done
+kill "$pid" 2>/dev/null; wait "$pid" 2>/dev/null
+if [[ -n $metrics ]]; then
+    echo "[ok]   /metrics serves $(wc -l <<<"$metrics") xpu_* lines, e.g.:"; head -8 <<<"$metrics"
+    for field in utilization_percent memory_utilization_percent power_watts frequency_mhz; do
+        grep -q "xpu_$field" <<<"$metrics" && echo "[ok]   xpu_$field" || { echo "[FAIL] xpu_$field missing"; fail=1; }
+    done
+else
+    echo "[FAIL] no xpu_* metrics within 60 s; telegraf log:"; tail -20 "$LOG"; fail=1
+fi
+echo "=== $(date -Is) done (fail=$fail)"
+exit $fail
