@@ -68,7 +68,7 @@ NEXT
 ──────────────────────────────────────────────────────────────────────────
   [ ] K114 / K119 results -> write up, K118/K119 follow-ups for the user
   [ ] K100 results (C20 library search) -> OBSERVATIONS
-  [ ] K117 copy-cost bench: being written on branch k117-prep; add to the feeder plan once tested
+  [ ] K117 copy-cost bench: merged (8e726a6), NOT run -- waiting on K130-P settings approval
   [ ] K110 checkpoint inventory (read-only) -> notes/K110_checkpoint_inventory.md, deletion card for approval
   [ ] C18 dry run results -> confirm the open choices before the full run
   [ ] Stage 0 (merged in f1b06b2, runbook notes/P1_stage0_runbook.md) -> results

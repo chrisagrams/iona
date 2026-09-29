@@ -91,6 +91,32 @@ K119's abort wrote a 2 GB core file into ~/code/msdelta (the job's working direc
 small quota). Proposal: `ulimit -c 0` in pbs/lib/load_frameworks.sh (every job sources it), or
 redirect cores to $S/cores/ for jobs where we want them. Nothing changed yet.
 
+### K130-P: K117 copy-cost bench -- settings to approve before submission (open, 2026-09-29)
+Script merged (8e726a6): pbs/diag/triattn_copy_bench.{py,pbs}, tests/test_triattn_copy_bench.py. NOT run.
+Command: `qsub -q debug -l select=1 -l walltime=01:00:00 -A UIC-HPC -l filesystems=home:flare -v REPO_DIR=$PWD pbs/diag/triattn_copy_bench.pbs`
+(~10-15 min expected; stops starting new sizes at 40 min). Dims c_z 64, 4 heads x 16, chunk 32, bf16 autocast.
+Variants: `current` (model's SDPA path), `sdpa5d` (sdpa_flatten=False, the K116 point), `hview` (chunk rows
+into SDPA's head dim, stride-0 expanded mask, no copy), `cached` (current layout, masks prebuilt outside the
+timed region). Settings the writing agent chose (all CLI flags):
+- K130a batch sizes 2 and 8 at every N (200/256/512).
+- K130b "agrees" = rel. L2 error vs the fp32 naive reference <= max(1.25 x current's error, 1e-4) on output,
+  dz and every parameter gradient (encodes K115's "no less accurate than current").
+- K130c accuracy on both inits of triattn_bf16_check (normal, "sharp"); timing on normal init, starting module only.
+- K130d timing = 1 warm-up + median of 5 steps; fwd timed with grad enabled; profiler records 2 steps.
+- K130e `naive` off by default (available via --variants).
+- K130f fp32 reference = naive path with per-chunk checkpointing (same numbers, fits at N=512).
+- K130g `cached`: prebuilt masks still require grad (gradient flows as in the real path; one shared tensor
+  adds a grad-accumulation sum, reported separately).
+- K130h job exits 1 on any non-OOM error in accuracy/timing (so an XPU rejection of hview's stride-0 mask
+  fails the job though the JSON is complete); profiler failures are non-fatal.
+- K130i raw profiler traces saved only for B=2 N=200.
+- K130j output in results/raw/diag/triattn_copy_bench/ (like the other benches).
+
+### K131-P: K117 bench -- uncertainties (open, 2026-09-29)
+- K131a the XPU profiler attribution (kernels -> launching op via correlation ID) could not be tested on the
+  login node; if the job reports `basis: cpu_self` or large unattributed time, re-classify offline from the traces.
+- K131b the stage-0 configs have triangle attention OFF; the bench uses their dims with the code's sdpa default.
+
 ### K110-S: checkpoint cleanup on /flare (inventory done 2026-09-29: notes/K110_checkpoint_inventory.md; open)
 Decide per tier (K110a..K110k in the card). Biggest: K110a old-run intermediate checkpoints 1,055 GiB (or
 K110a-lite, optimizer/rng states only, 781 GiB); K110b recent-run checkpoints 417 GiB; K110f crashed FT19
