@@ -335,6 +335,7 @@ The paper was submitted 2026-09-26 on branch `dev_finetune` (frozen). Current wo
 
 **Later / waiting on a decision**
 - Alignment caveats (Design decisions → Alignment → Caveats), incl. A8's open-retrieval collapse and a student for the single-stage encoder. User asked to be reminded.
+- C27 consensus weighted more heavily in training (oversampled as the canonical member) -> library search; card notes/C27_consensus_weight_card.md (K139-C).
 - C18 (MassIVE-KB / more diverse training data; precursor mass + charge as inputs), S25 (25m everywhere), C16 check, C12.
 - Reranking (R3-R5) has had no new work since 2026-09-25.
 

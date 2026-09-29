@@ -111,6 +111,9 @@ IDs carry a track suffix: -C contrastive (spectrum encoder), -A alignment (pepti
 | 2026-09-29 | Stage 0 | Submit per runbook (preprocess -> Pairformer -> transformer); submitted sequentially by pbs/tools/feeder.sh because held jobs count toward the per-user queued limit | user |
 | 2026-09-29 | K114/K119 | Submitted: K114 profiler 8877117 (debug), K119 FlexAttention test 8877118 (debug-scaling) | user |
 | 2026-09-29 | K132-I | (a) telegraf 1.40.1 (official static binary, sha256 verified against the release notes) at $S/tools/bin/telegraf, linked from ~/.local/bin (on PATH via ~/.profile), so master's aurora-pretrain.pbs is unchanged; compute-node check 8877940: xpu-smi + telegraf serve /metrics (memory %, power, frequency; GPU utilization is N/A from xpu-smi 1.2.43, not needed). (c) master checked: it does `module use /soft/modulefiles; module load daos frameworks xpu-smi` and never provides telegraf -- Chris must have his own on PATH. Stage 0 Pairformer arm resubmitted: 8877949 (transformer follows via the feeder) | user |
+| 2026-09-29 | K136-C | Run the missing 50m cell lr 4e-4 + P170xK2 (3 seeds, K66-C card otherwise): job 8878032 (capacity 10 h); scoring via feeder plan k136_score (same sets as K66-C + yeast) | user |
+| 2026-09-29 | K137-C | No 25m in the all-checkpoint run for now (user wrote "K136-C", meaning the 25m question) | user |
+| 2026-09-29 | C27-C | Consider a training where the consensus is weighted more heavily (oversampled, "more canonical"); test at 50m with library search vs current methods -> card notes/C27_consensus_weight_card.md (draft, settings K139-C need approval) | user |
 
 ## Settings chosen WITHOUT explicit approval (before this log existed)
 

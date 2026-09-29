@@ -99,12 +99,32 @@ run needs its own card; these must be settled first:
   borderline at 200m), or one recipe for all scales? OOD/yeast disagree with validation.
 - K135-C consensus in training (C20): not in the K66 grid. It leaves experimental MAP@R unchanged but lifts
   library Hit@1 by ~0.2 (K100). Include it in the final recipe (then it is untested at the K66 settings)?
-- K136-C 50m: searched earlier with a different design (C23 one-factor + C21); the P170xK2 cell was not run
-  at 50m as far as the notes show. Fill it, or use 50m's own best (lr 4e-4 P128xK2)?
-- K137-C checkpoints: on /flare 50m 8, 100m 7, 200m 7, 400m 8, but 25m only 540,423. Download the other
-  25m checkpoints from the Hub (if they exist), or 25m final only?
+- K136-C decided: run it (8878032). K137-C decided: no 25m for now.
+- K135-C cost (answered 2026-09-29): per run, consensus costs about the same (steps are set by groups, batch
+  size unchanged; C20's job ran 7.5 h vs 6.1 h for its reference, different packing). The cost is extra runs:
+  (1) consensus variant at the final checkpoint of each scale (50/100/200/400m x 3 seeds = 12 runs, ~1-2
+  capacity jobs, <= 14 h, + scoring); (2) consensus on every checkpoint = the all-checkpoint run twice
+  (~90 more runs, ~8 capacity jobs, +2-3 days). Proposal: decide the consensus variant with C27 at 50m
+  first, then run every checkpoint ONCE in the chosen variant; the K66-C finals stay the experimental-only
+  version (final checkpoint only).
 Size (rough): ~31 checkpoints x 3 seeds = ~93 runs; 12 runs per node-job -> ~8 capacity jobs of 10-14 h,
 2 at a time -> ~2-3 days of queue, plus scoring.
+
+### K138-I: Stage 0 Pairformer arm failed again, now at DDP setup (open, 2026-09-29)
+8877949 (after the telegraf fix; telegraf itself worked): ranks 1-7 fail in DDP's
+_verify_params_across_processes with "DistNetworkError: Failed to recv, got 0 bytes" (connection to the
+rendezvous store on rank 0 closed), then PALS kills rank 0 (SIGTERM); rank 0 logged no error. ~2 min in,
+before the first step. aurora-pretrain.pbs has not run successfully since the 2026-09 update (and possibly
+never on this branch with xccl + 8 tiles). Transformer arm again BLOCKED (not submitted). Proposed debug
+(needs OK): one debug job running the transformer arm (is it Pairformer-specific?) with
+TORCH_DISTRIBUTED_DEBUG=DETAIL and CCL_LOG_LEVEL=info; if both fail, a 2-rank torch.distributed smoke with
+the same launcher. Side note: the W&B key in .keys logs in as kelhus2 (kelhus2-uic).
+
+### K139-C: C27 consensus-weighting card -- settings (open, 2026-09-29)
+notes/C27_consensus_weight_card.md: --consensus_weight w (sampler, without replacement); arms at 50m:
+cons_w1, cons_w3, cons_always, cons_w3_kl0 x 3 seeds (one node) + ref_exp = existing K53 runs 8873825
+re-scored; library search is the target metric. Needs: arms/weights, sampler vs loss weighting, decision
+rule, seeds.
 
 ### K130-P: K117 copy-cost bench -- settings to approve before submission (open, 2026-09-29)
 Script merged (8e726a6): pbs/diag/triattn_copy_bench.{py,pbs}, tests/test_triattn_copy_bench.py. NOT run.
