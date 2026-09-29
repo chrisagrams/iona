@@ -1,0 +1,39 @@
+#!/bin/bash -l
+#PBS -N k138-ddp-smoke
+#PBS -A UIC-HPC
+#PBS -l select=1
+#PBS -l place=scatter
+#PBS -l walltime=00:20:00
+#PBS -l filesystems=home:flare
+#PBS -j oe
+#PBS -o pbs/logs/
+# K138-I: 8-rank xccl DDP smoke with aurora-pretrain.pbs's launch environment, three variants:
+#   A as aurora-pretrain (CCL_KVS_MODE=mpi, no MPI_Init)   B same + mpi4py import   C CCL_KVS_MODE=pmi
+#   qsub -q debug -v REPO_DIR=$PWD pbs/diag/ddp_smoke.pbs
+REPO_DIR=${REPO_DIR:-${PBS_O_WORKDIR:-$PWD}}
+source "$REPO_DIR/pbs/lib/load_frameworks.sh"
+set -uo pipefail
+cd "$REPO_DIR"
+PY=$REPO_DIR/.venv/bin/python
+export CCL_PROCESS_LAUNCHER=pmix CCL_ATL_TRANSPORT=mpi
+export FI_MR_CACHE_MONITOR=${FI_MR_CACHE_MONITOR:-userfaultfd}
+unset CCL_ZE_IPC CCL_ZE_IPC_EXCHANGE
+export ZE_FLAT_DEVICE_HIERARCHY=FLAT ONEAPI_DEVICE_SELECTOR=level_zero:gpu ZE_AFFINITY_MASK=0,1,2,3,6,7,8,9
+export MASTER_ADDR=$(head -n 1 "$PBS_NODEFILE") WORLD_SIZE=8
+rc_all=0
+run() {  # name, extra env...
+    local name=$1; shift
+    echo "=== $(date -Is) variant $name: $*"
+    env "$@" MASTER_PORT=$((29500 + RANDOM % 1000)) timeout 300 mpiexec --envall --pmi=pmix -n 8 --ppn 8 \
+        --cpu-bind list:4-7:8-11:12-15:16-19:56-59:60-63:64-67:68-71 \
+        bash -c 'export RANK=${PMIX_RANK:-${PALS_RANKID}} LOCAL_RANK=${PALS_LOCAL_RANKID:-${PMIX_RANK}}; exec "$@"' bash \
+        "$PY" pbs/diag/ddp_smoke.py 2>&1 | grep -v "cpubind\|UserWarning\|warnings.warn" | tail -40
+    local rc=${PIPESTATUS[0]}
+    echo "=== variant $name rc=$rc"
+    [[ $rc == 0 ]] || rc_all=1
+}
+run A_kvs_mpi CCL_KVS_MODE=mpi
+run B_kvs_mpi_mpi4py CCL_KVS_MODE=mpi SMOKE_MPI4PY=1
+run C_kvs_pmi CCL_KVS_MODE=pmi
+echo "=== $(date -Is) done"
+exit $rc_all
