@@ -30,6 +30,14 @@ if (( _lf_rc != 0 )) || ! module is-loaded "${_lf_mod}" 2>/dev/null; then
     (( _lf_had_u )) && set -u
     return 3 2>/dev/null || exit 3
 fi
-echo "=== environment: ${_lf_mod} ($(module -t list 2>&1 | grep -E '^(oneapi|mpich|frameworks)' | tr '\n' ' '))"
+# K138-I (2026-09-29): mpiexec (PALS) gives each rank TMPDIR=$TMPDIR/<uuid>/tmp. With PBS's job TMPDIR
+# (/var/tmp/pbs.<full job id>, 68 chars) that is 109 chars, over the 108-char AF_UNIX socket limit, so
+# DataLoader workers crash ("OSError: AF_UNIX path too long") and every mpiexec-launched run hangs.
+# A short job TMPDIR keeps rank paths ~57 chars. Only inside PBS jobs, only when TMPDIR is long.
+if [[ -n ${PBS_JOBID:-} && ${#TMPDIR} -gt 40 ]]; then
+    export TMPDIR=/tmp/pbs-${PBS_JOBID%%.*}
+    mkdir -p "$TMPDIR"
+fi
+echo "=== environment: ${_lf_mod} ($(module -t list 2>&1 | grep -E '^(oneapi|mpich|frameworks)' | tr '\n' ' ')); TMPDIR=${TMPDIR:-unset}"
 (( _lf_had_u )) && set -u
 unset _lf_had_u _lf_mod _lf_rc
