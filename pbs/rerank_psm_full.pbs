@@ -30,7 +30,7 @@ mkdir -p "$BASE/rows" "$BASE/handfeat" "$BASE/logs"
 
 set +u
 source /usr/share/lmod/lmod/init/bash
-module load "${FRAMEWORKS_MODULE:-frameworks/2025.3.1}"
+source "${REPO_DIR:-${PBS_O_WORKDIR:-$PWD}}/pbs/lib/load_frameworks.sh"
 source "$REPO_DIR/pbs/load_keys.sh"
 set -u
 [[ -n ${HF_TOKEN:-} ]] || { echo "HF_TOKEN not loaded" >&2; exit 2; }

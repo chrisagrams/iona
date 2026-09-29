@@ -30,7 +30,7 @@ SAVE_VECTORS=${SAVE_VECTORS-1}     # R5; SAVE_VECTORS= (empty) to skip
 
 set +u
 source /usr/share/lmod/lmod/init/bash
-module load "${FRAMEWORKS_MODULE:-frameworks/2025.3.1}"
+source "${REPO_DIR:-${PBS_O_WORKDIR:-$PWD}}/pbs/lib/load_frameworks.sh"
 source "$REPO_DIR/pbs/load_keys.sh"
 set -u
 export ONEAPI_DEVICE_SELECTOR=level_zero:gpu

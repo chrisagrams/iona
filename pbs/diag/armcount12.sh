@@ -3,7 +3,7 @@
 # Host RAM is the only resource genuinely shared by all twelve processes, and it is the
 # remaining candidate after card placement was ruled out.
 cd /home/khuss/code/msdelta
-source /usr/share/lmod/lmod/init/bash 2>/dev/null; module load frameworks/2025.3.1 2>/dev/null
+source "${REPO_DIR:-${PBS_O_WORKDIR:-$PWD}}/pbs/lib/load_frameworks.sh"
 export ONEAPI_DEVICE_SELECTOR=level_zero:gpu ZE_FLAT_DEVICE_HIERARCHY=FLAT
 export PYTHONPATH=/home/khuss/code/msdelta
 export HF_HUB_OFFLINE=1 HF_DATASETS_OFFLINE=1 HF_HOME=/lus/flare/projects/UIC-HPC/khuss/msdelta/huggingface

@@ -71,7 +71,7 @@ TOTAL_XPUS=$((NUM_HOSTS * XPUS_PER_HOST))
 
 set +u
 source /usr/share/lmod/lmod/init/bash
-module load "${FRAMEWORKS_MODULE:-frameworks/2025.3.1}"
+source "${REPO_DIR:-${PBS_O_WORKDIR:-$PWD}}/pbs/lib/load_frameworks.sh"
 set -u
 
 # Level Zero only, flat hierarchy. The module now defaults ONEAPI_DEVICE_SELECTOR to

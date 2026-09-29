@@ -14,7 +14,7 @@
 # The launch follows the ALCF Aurora PyTorch DDP guidance:
 # https://docs.alcf.anl.gov/aurora/data-science/frameworks/pytorch/
 
-module load frameworks
+source "${REPO_DIR:-${PBS_O_WORKDIR:-$PWD}}/pbs/lib/load_frameworks.sh"
 module load xpu-smi
 
 set -euo pipefail

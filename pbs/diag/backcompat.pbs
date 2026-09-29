@@ -9,7 +9,7 @@
 set -uo pipefail
 REPO_DIR=${REPO_DIR:?set REPO_DIR}; OLD=${OLD_REPO:-/home/khuss/code/msdelta}; cd $REPO_DIR
 S=/lus/flare/projects/UIC-HPC/khuss/msdelta
-set +u; source /usr/share/lmod/lmod/init/bash; module load frameworks/2025.3.1; set -u
+source "${REPO_DIR:-${PBS_O_WORKDIR:-$PWD}}/pbs/lib/load_frameworks.sh"
 export ONEAPI_DEVICE_SELECTOR=level_zero:gpu ZE_FLAT_DEVICE_HIERARCHY=FLAT ZE_AFFINITY_MASK=0 PYTHONPATH=$REPO_DIR OMP_NUM_THREADS=16
 export HF_HOME=$S/huggingface HF_HUB_OFFLINE=1 HF_DATASETS_OFFLINE=1
 PY=$OLD/.venv/bin/python

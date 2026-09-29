@@ -17,7 +17,7 @@ cd "$REPO_DIR"
 VENV_DIR=${VENV_DIR:-$REPO_DIR/.venv}
 set +u
 source /usr/share/lmod/lmod/init/bash
-module load "${FRAMEWORKS_MODULE:-frameworks/2025.3.1}"
+source "${REPO_DIR:-${PBS_O_WORKDIR:-$PWD}}/pbs/lib/load_frameworks.sh"
 set -u
 export HF_HOME=${HF_HOME:-/lus/flare/projects/UIC-HPC/$USER/msdelta/huggingface}
 export HF_HUB_OFFLINE=1 HF_DATASETS_OFFLINE=1

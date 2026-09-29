@@ -34,7 +34,7 @@ IDS=$(for r in $RUNS; do echo -n "${r##*/},"; done); IDS=${IDS%,}
 PARTS=${PARTS:-"all nodeeplc"}; SETS=${SETS:-ms+ms2r}
 NDL8=${LAB8/lab8/nodeeplc8}; NMP8=${LAB8/lab8/noms2pip8}; SRO8=${LAB8/lab8/searchonly8}
 mkdir -p $RES
-set +u; source /usr/share/lmod/lmod/init/bash; module load frameworks/2025.3.1; set -u
+source "${REPO_DIR:-${PBS_O_WORKDIR:-$PWD}}/pbs/lib/load_frameworks.sh"
 export ONEAPI_DEVICE_SELECTOR=level_zero:gpu ZE_FLAT_DEVICE_HIERARCHY=FLAT ZE_AFFINITY_MASK=0
 export OMP_NUM_THREADS=32 PYTHONPATH=$REPO HF_HOME=$SC/huggingface HF_HUB_OFFLINE=1
 PY=$REPO/.venv/bin/python

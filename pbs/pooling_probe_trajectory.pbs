@@ -41,7 +41,7 @@ SCRATCH=/lus/flare/projects/UIC-HPC/$USER/msdelta
 
 set +u
 source /usr/share/lmod/lmod/init/bash
-module load "${FRAMEWORKS_MODULE:-frameworks/2025.3.1}"
+source "${REPO_DIR:-${PBS_O_WORKDIR:-$PWD}}/pbs/lib/load_frameworks.sh"
 set -u
 export ONEAPI_DEVICE_SELECTOR=level_zero:gpu
 export ZE_FLAT_DEVICE_HIERARCHY=FLAT

@@ -384,7 +384,7 @@ NUM_NODES=${#NODES[@]}
 if [[ -z ${DRY_RUN:-} ]]; then
 set +u
 source /usr/share/lmod/lmod/init/bash
-module load "${FRAMEWORKS_MODULE:-frameworks/2025.3.1}"
+source "${REPO_DIR:-${PBS_O_WORKDIR:-$PWD}}/pbs/lib/load_frameworks.sh"
 set -u
 fi
 

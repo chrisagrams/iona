@@ -11,7 +11,7 @@ cd /home/khuss/code/msdelta
 S=/lus/flare/projects/UIC-HPC/khuss/msdelta
 C=${C11_DIR:-$S/baselines/c11_cap20}; G=$S/baselines/gleams
 RUNS=${RUNS:-"0718-5 05032011-7 09122011-5 HEK-0628-5 HEK-U100ug-0408-5 HEK-U100ug-V2-5 Xiaomu_HCT116WholeCell_HILIC15_120min_10ul Xiaomu_HCT116WholeCell_HILIC14_120min_10ul"}
-set +u; source /usr/share/lmod/lmod/init/bash; module load frameworks/2025.3.1; set -u
+source "${REPO_DIR:-${PBS_O_WORKDIR:-$PWD}}/pbs/lib/load_frameworks.sh"
 export ONEAPI_DEVICE_SELECTOR=level_zero:gpu ZE_FLAT_DEVICE_HIERARCHY=FLAT PYTHONPATH=$PWD OMP_NUM_THREADS=8
 export HF_HOME=$S/huggingface HF_HUB_OFFLINE=1 HF_DATASETS_OFFLINE=1
 PY=.venv/bin/python

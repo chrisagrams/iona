@@ -7,8 +7,7 @@
 #   -v ARGS_FILE=configs/msdelta-base-200m/training.args,DATASET_CACHE_DIR=/flare/PROJECT/hf/datasets \
 #   pbs/aurora-preprocess.pbs
 
-module load frameworks
-
+source "${REPO_DIR:-${PBS_O_WORKDIR:-$PWD}}/pbs/lib/load_frameworks.sh"
 # Level Zero, before any python runs. This job never touches a GPU, but
 # msdelta.preprocess pulls in torch through msdelta.data, and importing torch on
 # an Aurora compute node without the flat hierarchy and an affinity mask

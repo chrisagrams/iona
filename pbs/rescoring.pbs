@@ -26,7 +26,7 @@ SPLIT=${SPLIT:-validation}
 
 set +u
 source /usr/share/lmod/lmod/init/bash
-module load "${FRAMEWORKS_MODULE:-frameworks/2025.3.1}"
+source "${REPO_DIR:-${PBS_O_WORKDIR:-$PWD}}/pbs/lib/load_frameworks.sh"
 set -u
 # Level Zero settings, the same ones every other launcher here sets before running
 # python. This job is CPU work, but importing torch still initialises XPU, and on a

@@ -2,7 +2,7 @@
 # Two concurrent 200m arms: on the SAME card (tiles 0,1) vs DIFFERENT cards (tiles 0,2).
 # If the shared-HBM story is right, same-card faults and different-card does not.
 cd /home/khuss/code/msdelta
-source /usr/share/lmod/lmod/init/bash 2>/dev/null; module load frameworks/2025.3.1 2>/dev/null
+source "${REPO_DIR:-${PBS_O_WORKDIR:-$PWD}}/pbs/lib/load_frameworks.sh"
 export ONEAPI_DEVICE_SELECTOR=level_zero:gpu ZE_FLAT_DEVICE_HIERARCHY=FLAT
 export PYTHONPATH=/home/khuss/code/msdelta
 export HF_HUB_OFFLINE=1 HF_DATASETS_OFFLINE=1 HF_HOME=/lus/flare/projects/UIC-HPC/khuss/msdelta/huggingface

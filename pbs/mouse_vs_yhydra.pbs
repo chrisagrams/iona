@@ -16,7 +16,7 @@ D=${D:-$SC/baselines/mouse_noble}
 YE=$SC/baselines/yhydra
 OUT=results/raw/finetune/align/mouse_yhydra; mkdir -p $OUT
 PE=$SC/shelf/portable_eval/mouse
-set +u; source /usr/share/lmod/lmod/init/bash; module load frameworks/2025.3.1; set -u
+source "${REPO_DIR:-${PBS_O_WORKDIR:-$PWD}}/pbs/lib/load_frameworks.sh"
 source pbs/load_keys.sh
 export ONEAPI_DEVICE_SELECTOR=level_zero:gpu ZE_FLAT_DEVICE_HIERARCHY=FLAT ZE_AFFINITY_MASK=0
 export PYTHONPATH=$REPO HF_HOME=$SC/huggingface OMP_NUM_THREADS=16
