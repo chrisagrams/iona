@@ -1,0 +1,43 @@
+#!/bin/bash -l
+# K114: per-block forward/backward time and peak memory, Pairformer (Stage 0 config, +/- triangle
+# attention) vs transformer 50m, B 8/32 x N 100/150/256/512 (pbs/diag/pairformer_profile.py).
+#
+#   qsub -q debug -l select=1 -l walltime=00:45:00 -A UIC-HPC -l filesystems=home:flare \
+#        -v REPO_DIR=$PWD pbs/diag/pairformer_profile.pbs
+#
+# One tile. Output: results/raw/diag/pairformer_profile/<jobid>.json (+ .log). Extra script
+# arguments (e.g. --models transformer --peaks 100,150) can be passed with -v PROFILE_ARGS=...
+
+#PBS -N msdelta-k114prof
+#PBS -A UIC-HPC
+#PBS -l filesystems=home:flare
+#PBS -j oe
+#PBS -o pbs/logs/
+
+set -uo pipefail
+REPO_DIR=${REPO_DIR:-${PBS_O_WORKDIR:-$PWD}}
+cd "$REPO_DIR"
+
+set +u
+source /usr/share/lmod/lmod/init/bash
+module load "${FRAMEWORKS_MODULE:-frameworks/2025.3.1}"
+set -u
+export ONEAPI_DEVICE_SELECTOR=level_zero:gpu
+export ZE_FLAT_DEVICE_HIERARCHY=FLAT
+export ZE_AFFINITY_MASK=0
+export OMP_NUM_THREADS=${OMP_NUM_THREADS:-8}
+export PYTHONPATH=$REPO_DIR${PYTHONPATH:+:$PYTHONPATH}
+# Run from a frozen copy of the code (pbs/lib/code_snapshot.sh).
+source "$REPO_DIR/pbs/lib/code_snapshot.sh"
+PY="$REPO_DIR/.venv/bin/python"
+JOB=${PBS_JOBID%%.*}; JOB=${JOB:-local}
+O=results/raw/diag/pairformer_profile; mkdir -p "$O"
+
+echo "=== $(date -Is) K114 pairformer profile on $(hostname), job $JOB"
+# configs/ is read from the checkout (cwd), as for every job; the snapshot has the code.
+# shellcheck disable=SC2086
+"$PY" "$MSDELTA_CODE_DIR"/pbs/diag/pairformer_profile.py --out "$O/$JOB.json" \
+    ${PROFILE_ARGS:-} 2>&1 | tee "$O/$JOB.log"
+rc=${PIPESTATUS[0]}
+echo "=== $(date -Is) done (rc=$rc)"
+exit $rc
