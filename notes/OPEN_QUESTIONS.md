@@ -140,14 +140,6 @@ unmerged until decided. Stage 0 facts: 72% of spectra exceed 150 peaks and are d
 ~280k train / 70k validation remain; transformer 49.81M, Pairformer 46.33M params; runbook
 notes/P1_stage0_runbook.md (on the branch).
 
-### K126-S: fix the 4 long-standing test failures (open, 2026-09-29)
-Context: tests/test_configs.py has failed on the same 4 checks for days: ms2r_crossover.pbs, rerank_handoff.pbs,
-rerank_psm_r4.pbs and rerank_psm_stage2.pbs import torch but never export the Level Zero variables
-(ZE_FLAT_DEVICE_HIERARCHY etc.) that every other GPU script sets -- a real defect (those jobs can bind tiles
-wrongly), and it makes the full-suite job always exit 1. That is why chaining the K66-C resubmission on
-`afterok` of the validation job got the training jobs deleted (2026-09-29). Proposal: add the standard exports
-to those 4 scripts (small, mechanical) so the suite is green and exit codes are meaningful again.
-
 ### K96-S: the pretraining loss, and the input-normalisation leak (parked; user wants to explore other losses)
 The pretraining task (msdelta/models/processing_msdelta.py + modeling_msdelta.py):
 - Per spectrum, a random subset of peaks is masked: round(mask_ratio x peaks), at least 1
