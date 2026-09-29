@@ -1,0 +1,13 @@
+# C27-C finals (job 8878582)
+s050m_ck540k_cons_always_seed0 /lus/flare/projects/UIC-HPC/khuss/msdelta/runs/sweep-s050m_ck540k_cons_always_seed0-8878582/final
+s050m_ck540k_cons_always_seed1 /lus/flare/projects/UIC-HPC/khuss/msdelta/runs/sweep-s050m_ck540k_cons_always_seed1-8878582/final
+s050m_ck540k_cons_always_seed2 /lus/flare/projects/UIC-HPC/khuss/msdelta/runs/sweep-s050m_ck540k_cons_always_seed2-8878582/final
+s050m_ck540k_cons_w1_seed0 /lus/flare/projects/UIC-HPC/khuss/msdelta/runs/sweep-s050m_ck540k_cons_w1_seed0-8878582/final
+s050m_ck540k_cons_w1_seed1 /lus/flare/projects/UIC-HPC/khuss/msdelta/runs/sweep-s050m_ck540k_cons_w1_seed1-8878582/final
+s050m_ck540k_cons_w1_seed2 /lus/flare/projects/UIC-HPC/khuss/msdelta/runs/sweep-s050m_ck540k_cons_w1_seed2-8878582/final
+s050m_ck540k_cons_w3_kl0_seed0 /lus/flare/projects/UIC-HPC/khuss/msdelta/runs/sweep-s050m_ck540k_cons_w3_kl0_seed0-8878582/final
+s050m_ck540k_cons_w3_kl0_seed1 /lus/flare/projects/UIC-HPC/khuss/msdelta/runs/sweep-s050m_ck540k_cons_w3_kl0_seed1-8878582/final
+s050m_ck540k_cons_w3_kl0_seed2 /lus/flare/projects/UIC-HPC/khuss/msdelta/runs/sweep-s050m_ck540k_cons_w3_kl0_seed2-8878582/final
+s050m_ck540k_cons_w3_seed0 /lus/flare/projects/UIC-HPC/khuss/msdelta/runs/sweep-s050m_ck540k_cons_w3_seed0-8878582/final
+s050m_ck540k_cons_w3_seed1 /lus/flare/projects/UIC-HPC/khuss/msdelta/runs/sweep-s050m_ck540k_cons_w3_seed1-8878582/final
+s050m_ck540k_cons_w3_seed2 /lus/flare/projects/UIC-HPC/khuss/msdelta/runs/sweep-s050m_ck540k_cons_w3_seed2-8878582/final
