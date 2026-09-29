@@ -1,7 +1,6 @@
 # C27-C card (DRAFT, needs approval): weight the consensus spectrum more heavily in training
 
-Status: draft 2026-09-29, NOT approved, nothing implemented or submitted. Every setting below is a
-proposal (K139-C); the user picks.
+Status: APPROVED as drafted 2026-09-29 ("Yes run your proposal"). Implementation on branch c27-prep.
 
 ## Question
 Does making the consensus spectrum the "canonical" member of each group -- sampling it more often, as if

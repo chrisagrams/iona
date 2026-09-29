@@ -114,6 +114,8 @@ IDs carry a track suffix: -C contrastive (spectrum encoder), -A alignment (pepti
 | 2026-09-29 | K136-C | Run the missing 50m cell lr 4e-4 + P170xK2 (3 seeds, K66-C card otherwise): job 8878032 (capacity 10 h); scoring via feeder plan k136_score (same sets as K66-C + yeast) | user |
 | 2026-09-29 | K137-C | No 25m in the all-checkpoint run for now (user wrote "K136-C", meaning the 25m question) | user |
 | 2026-09-29 | C27-C | Consider a training where the consensus is weighted more heavily (oversampled, "more canonical"); test at 50m with library search vs current methods -> card notes/C27_consensus_weight_card.md (draft, settings K139-C need approval) | user |
+| 2026-09-29 | C27-C / K139-C | "Yes run your proposal": card notes/C27_consensus_weight_card.md approved as drafted -- sampler weighting (--consensus_weight, without replacement), 50m arms cons_w1 / cons_w3 / cons_always / cons_w3_kl0 x 3 seeds, ref_exp = K53 runs 8873825 re-scored, decision rule = best validation library Hit@1 provided validation experimental MAP@R drops by no more than the seed spread; debug smoke first. Implementation on branch c27-prep | user |
+| 2026-09-29 | K138-I | Keep running (debug) jobs until the Stage 0 DDP failure is understood: first pair 8878109 (Pairformer, debug) + 8878110 (transformer, debug-scaling), 20 min, TORCH_DISTRIBUTED_DEBUG=INFO, TORCH_CPP_LOG_LEVEL=INFO, CCL_LOG_LEVEL=info, output $S/runs/k138 | user |
 
 ## Settings chosen WITHOUT explicit approval (before this log existed)
 

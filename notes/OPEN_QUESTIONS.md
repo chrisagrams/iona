@@ -120,12 +120,6 @@ never on this branch with xccl + 8 tiles). Transformer arm again BLOCKED (not su
 TORCH_DISTRIBUTED_DEBUG=DETAIL and CCL_LOG_LEVEL=info; if both fail, a 2-rank torch.distributed smoke with
 the same launcher. Side note: the W&B key in .keys logs in as kelhus2 (kelhus2-uic).
 
-### K139-C: C27 consensus-weighting card -- settings (open, 2026-09-29)
-notes/C27_consensus_weight_card.md: --consensus_weight w (sampler, without replacement); arms at 50m:
-cons_w1, cons_w3, cons_always, cons_w3_kl0 x 3 seeds (one node) + ref_exp = existing K53 runs 8873825
-re-scored; library search is the target metric. Needs: arms/weights, sampler vs loss weighting, decision
-rule, seeds.
-
 ### K130-P: K117 copy-cost bench -- settings to approve before submission (open, 2026-09-29)
 Script merged (8e726a6): pbs/diag/triattn_copy_bench.{py,pbs}, tests/test_triattn_copy_bench.py. NOT run.
 Command: `qsub -q debug -l select=1 -l walltime=01:00:00 -A UIC-HPC -l filesystems=home:flare -v REPO_DIR=$PWD pbs/diag/triattn_copy_bench.pbs`
