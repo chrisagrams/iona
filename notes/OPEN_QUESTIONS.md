@@ -91,6 +91,21 @@ K119's abort wrote a 2 GB core file into ~/code/msdelta (the job's working direc
 small quota). Proposal: `ulimit -c 0` in pbs/lib/load_frameworks.sh (every job sources it), or
 redirect cores to $S/cores/ for jobs where we want them. Nothing changed yet.
 
+### K134-C..K137-C: before "winning C recipe on every pretraining checkpoint" (open, 2026-09-29)
+Context: K66-C per-scale search = 4 settings x 3 seeds at the final checkpoint (540,423). 100m/200m scored;
+400m (8876832) and 25m (8876833) training, scoring automatic afterwards (yeast ~3 h more). The all-checkpoint
+run needs its own card; these must be settled first:
+- K134-C selection rule: pick per scale by validation (lr 4e-4 P170xK2 leads at 100m/200m by 0.002-0.004,
+  borderline at 200m), or one recipe for all scales? OOD/yeast disagree with validation.
+- K135-C consensus in training (C20): not in the K66 grid. It leaves experimental MAP@R unchanged but lifts
+  library Hit@1 by ~0.2 (K100). Include it in the final recipe (then it is untested at the K66 settings)?
+- K136-C 50m: searched earlier with a different design (C23 one-factor + C21); the P170xK2 cell was not run
+  at 50m as far as the notes show. Fill it, or use 50m's own best (lr 4e-4 P128xK2)?
+- K137-C checkpoints: on /flare 50m 8, 100m 7, 200m 7, 400m 8, but 25m only 540,423. Download the other
+  25m checkpoints from the Hub (if they exist), or 25m final only?
+Size (rough): ~31 checkpoints x 3 seeds = ~93 runs; 12 runs per node-job -> ~8 capacity jobs of 10-14 h,
+2 at a time -> ~2-3 days of queue, plus scoring.
+
 ### K130-P: K117 copy-cost bench -- settings to approve before submission (open, 2026-09-29)
 Script merged (8e726a6): pbs/diag/triattn_copy_bench.{py,pbs}, tests/test_triattn_copy_bench.py. NOT run.
 Command: `qsub -q debug -l select=1 -l walltime=01:00:00 -A UIC-HPC -l filesystems=home:flare -v REPO_DIR=$PWD pbs/diag/triattn_copy_bench.pbs`
