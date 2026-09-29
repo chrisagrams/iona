@@ -138,6 +138,22 @@ makes sense only for production-scale pretraining (e.g. Pairformer at 100m+/full
 which would need a larger allocation request. K142-C: 400m 8878459 will likely hit its 14 h walltime --
 future capacity jobs should ask for more (limit is 168 h).
 
+### K144-P: Pairformer search plan -- approve before I write the card (open, 2026-09-29)
+Goal (user): the architecture + input features that beat the transformer at matched compute, then scale.
+Proposed order: (0) make the comparison trustworthy: explain the flat Stage 0 transformer (K141) and use a
+longer, compute-matched protocol (same wall-clock or FLOPs budget, loss vs time curves, not 300 steps);
+(1) screen the big design questions from PAIRFORMER_REVIEW at small size, 2 seeds: pair update type
+(#1), the absolute-m/z confound (#2), decoupled streams (#12, K114-P), pair width / peaks cap (#5, #6);
+(2) input features (#4: Fourier-only vs leave-one-out, sigma 10 vs 20 ppm, precursor #11);
+(3) speed work only for the surviving design (K117 bench = K130, K118/K119 kernels);
+(4) winner vs transformer at 2-3 sizes, downstream probes (denoise AUROC, contrastive MAP@R / library);
+(5) real pretraining (allocation, K143). Each step gets its own card.
+
+### K145-C: where do the other 25m checkpoints come from? (open, 2026-09-29)
+25m is back in the all-checkpoint run, but /flare has only msdelta-25m-production-01-checkpoint-540423.
+Chris's runs msdelta-25m-production-01 / msdelta-base-25m-production-01 (cgrams/msdelta-runs, S25) may
+have the 10k/120k/220k/330k/430k rungs -- ask Chris, or I look on the Hub (read-only) if you OK it.
+
 ### K130-P: K117 copy-cost bench -- settings to approve before submission (open, 2026-09-29)
 Script merged (8e726a6): pbs/diag/triattn_copy_bench.{py,pbs}, tests/test_triattn_copy_bench.py. NOT run.
 Command: `qsub -q debug -l select=1 -l walltime=01:00:00 -A UIC-HPC -l filesystems=home:flare -v REPO_DIR=$PWD pbs/diag/triattn_copy_bench.pbs`
