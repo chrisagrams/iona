@@ -91,7 +91,11 @@ K119's abort wrote a 2 GB core file into ~/code/msdelta (the job's working direc
 small quota). Proposal: `ulimit -c 0` in pbs/lib/load_frameworks.sh (every job sources it), or
 redirect cores to $S/cores/ for jobs where we want them. Nothing changed yet.
 
-### K110-S: checkpoint cleanup on /flare (inventory running 2026-09-29; deletion needs per-tier approval)
+### K110-S: checkpoint cleanup on /flare (inventory done 2026-09-29: notes/K110_checkpoint_inventory.md; open)
+Decide per tier (K110a..K110k in the card). Biggest: K110a old-run intermediate checkpoints 1,055 GiB (or
+K110a-lite, optimizer/rng states only, 781 GiB); K110b recent-run checkpoints 417 GiB; K110f crashed FT19
+runs 328 GiB. Also: runs/quarantine/checkpoint-13800 (origin unknown); K110c / part of K110d wait for
+C20 scoring. Scratch measures 3.57 TiB (not 3.2 TB). Nothing deleted; deletion protocol applies.
 Project disk: 8.6 / 10 TB used (UIC-HPC); ours 3.2 TB, of which runs/ = 2.6 TB. User: see how many
 checkpoints we have and delete the ones that aren't useful. Proposal: an inventory first (per sweep:
 arms, checkpoint dirs, size, whether its results are scored/committed, whether it is a released or
