@@ -140,6 +140,26 @@ unmerged until decided. Stage 0 facts: 72% of spectra exceed 150 peaks and are d
 ~280k train / 70k validation remain; transformer 49.81M, Pairformer 46.33M params; runbook
 notes/P1_stage0_runbook.md (on the branch).
 
+### K123-I: validate the fixed environment on a compute node (open, 2026-09-29)
+Context: Aurora's 2026-09 update (new OS, GPU driver Agama 1146, default PE 26.181.0 / PyTorch 2.13) broke
+our job environment; fixed by pbs/lib/load_frameworks.sh (old PE 26.26.0, rebuilt for the new image;
+b85c7b2), verified only on the login node. Proposal: one debug job running our existing end-to-end +
+golden suites (pbs/run_e2e.pbs SUITE=all, ~5 min: every entry point incl. training + resume, and outputs
+vs the frozen references -> catches numeric changes from the new driver) and the device suite
+(tests/gpu). Everything else waits on it.
+
+### K124-C: resubmit the held K66-C 400m / 25m training jobs (open)
+Context: 8875260 (400m) and 8875263 (25m) are HELD (qhold, 2026-09-29) because PBS stored their script at
+submission, i.e. the OLD module loading, which now fails at startup. They must be deleted and resubmitted
+(same approved card K66-C, same configs) with the fixed scripts after K123 passes; they lose their queue
+position either way.
+
+### K125-S: move to the new frameworks/2026.1.0 (PyTorch 2.13) at some point? (open, low urgency)
+Context: PE 26.26.0 is kept "rebuilt for the new image", but the new default is where fixes land. Moving
+means a new venv on frameworks/2026.1.0, re-running the test suites (golden references may shift) and
+re-validating throughput; results across the switch would need a comparability check. Suggest: not now;
+revisit when a run needs something only 2.13 has, or if ALCF deprecates 26.26.0.
+
 ### K96-S: the pretraining loss, and the input-normalisation leak (parked; user wants to explore other losses)
 The pretraining task (msdelta/models/processing_msdelta.py + modeling_msdelta.py):
 - Per spectrum, a random subset of peaks is masked: round(mask_ratio x peaks), at least 1

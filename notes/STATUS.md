@@ -4,7 +4,13 @@ What is true right now. Overwritten, not appended: before changing it, copy the 
 `status-history/`. Questions: `PLAN.md`; results: `OBSERVATIONS.md`; decisions: `DECISIONS.md`;
 waiting on the user: `OPEN_QUESTIONS.md` (top: "Your to-do").
 
-Last updated: 2026-09-28 ~12:30 UTC (Aurora maintenance; this session may restart).
+Last updated: 2026-09-29 ~02:00 UTC (after Aurora's 2026-09 major update).
+
+SYSTEM CHANGE (2026-09 update): new OS image (SLES 15 SP7, kernel 6.4, GPU driver Agama 1146); default PE is
+now 26.181.0 (oneAPI 2026.1, frameworks/2026.1.0 = PyTorch 2.13). Our .venv (frameworks/2025.3.1) needs the
+old PE 26.26.0: every job script now sources pbs/lib/load_frameworks.sh (b85c7b2). On the login node run
+python as: bash -c 'REPO_DIR=$PWD; source pbs/lib/load_frameworks.sh >/dev/null; .venv/bin/python ...'.
+Not yet validated on a compute node (K123-I).
 
 ```
 BRANCHES / CHECKOUTS
@@ -16,8 +22,8 @@ BRANCHES / CHECKOUTS
 
 JOBS (capacity queue blocked by maintenance: "Insufficient amount of resource: at_queue")
 ──────────────────────────────────────────────────────────────────────────
-  [ ] 8875260  K66-C 400m training (12 arms, 14 h walltime)   queued since 2026-09-27 23:37
-  [ ] 8875263  K66-C 25m  training (12 arms, 10 h walltime)   queued since 2026-09-27 23:37
+  [>] 8875260  K66-C 400m training  HELD (carries the old, now-failing module load) -> resubmit (K124-C)
+  [>] 8875263  K66-C 25m  training  HELD (same)
   [x] K66-C 100m, 200m: trained + scored on validation / oodval / test / mouse / human / yeast
       results/raw/finetune/contrastive/hp-scale-{100m,200m}-{...}/
 
