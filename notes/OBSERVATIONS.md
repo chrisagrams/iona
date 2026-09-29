@@ -1921,3 +1921,21 @@ Observations (no decision -- selection is the user's call once all four scales a
    window only adds wrong candidates (cf. mouse/human, where iso wins).
 5. Library search (consensus-only library, validation): Hit@1 .82-.92, median rank 1 everywhere; ranking of
    settings roughly follows validation MAP@R at 200m but not at 100m (lr 2e-4: .815 vs lr 4e-4: .867-.885).
+
+## K114-P: per-block Pairformer time (job 8877117, 2026-09-29; stage-0 config, 1 tile, bf16)
+
+Raw: results/raw/diag/pairformer_profile/8877117.{json,log}. The job aborted (GPU page fault in the
+compute runtime right after an OOM case, rc 134) during `pairformer_triattn` B=32 N=150; the 13
+cases before that are complete. Missing: pairformer_triattn B=32 N=150 (gc on), N=256, N=512.
+
+- Without triangle attention, the two triangle multiplications are ~2/3 of the step
+  (b_trimul_out 33-37%, c_trimul_in 32-34%); writeback ~8-9%, pair transition ~8-9%; the single
+  stream (attention + transition) is only 3-5%.
+- With triangle attention (SDPA): the two triangle attentions take ~45% (22% + 23%) and the step
+  roughly doubles (B=32 N=100: 555 -> 1066 ms; B=8 N=150: 310 -> 669 ms).
+- One pair update costs 5-27 single-stream blocks (grows with N): N=100 ~5-13, N=150 ~10-26,
+  N=256 ~25 (no triattn).
+- Gradient checkpointing (gc on) costs +33-36% step time and cuts peak memory 7-8x
+  (B=32 N=150: 54.6 -> 7.4 GB). Without it, B=32 fits only up to N=150 (no triattn) / N=100
+  (triattn); N=512 does not fit even with gc at B=32.
+

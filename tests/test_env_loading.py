@@ -3,6 +3,7 @@
 After the update a bare `module load frameworks` picks frameworks/2026.1.0 (PyTorch 2.13; our .venv is
 built on 2025.3.1) and `module load frameworks/2025.3.1` fails on top of the new default PE, so no script
 may load the frameworks module directly."""
+import os
 import re
 from pathlib import Path
 
@@ -11,9 +12,13 @@ HELPER = ROOT / "pbs" / "lib" / "load_frameworks.sh"
 
 
 def _scripts():
-    for p in ROOT.rglob("*"):
-        if p.suffix in (".pbs", ".sh") and p.is_file() and ".venv" not in p.parts and p != HELPER:
-            yield p
+    # Skip hidden dirs (.venv, .git, agent worktrees under .claude/) and results/ (large, no scripts).
+    for dirpath, dirnames, filenames in os.walk(ROOT):
+        dirnames[:] = [d for d in dirnames if not d.startswith(".") and d != "results"]
+        for name in filenames:
+            p = Path(dirpath) / name
+            if p.suffix in (".pbs", ".sh") and p.is_file() and p != HELPER:
+                yield p
 
 
 def test_helper_exists_and_pins_the_old_stack():

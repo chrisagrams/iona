@@ -69,6 +69,28 @@ peptide encoder (alignment track), which waits for the new C models; the peptide
 unseen data (nine-species open Hit@1 0.39). Proposal: a new PLAN thread + a design card when
 alignment resumes; meanwhile optionally prepare the digestion/index code.
 
+### K128-P: K119 FlexAttention test aborted before any result (open, 2026-09-29)
+Job 8877118 (debug-scaling, x4208c0s0b0n0) exited 134 after 70 s. torch saw the XPU fine; the crash came
+when Triton's Intel backend built and loaded its SYCL launcher (the job-only shim to the frameworks
+module's triton 3.6.0): `terminate ... sycl::exception: No device of requested type available`. So the
+compiled path never ran and no JSON was written (log: results/raw/diag/flexattn/8877118.log; 2 GB core
+moved to $S/diag/k119/). Likely suspects: the launcher's SYCL runtime not matching the job's device
+selection (ONEAPI_DEVICE_SELECTOR=level_zero:gpu + ZE_AFFINITY_MASK=0 + FLAT) or the SYCL runtime
+it links after the 2026-09 image change. Proposed follow-up (needs approval): one debug job that
+(1) runs each test case in its own subprocess so a crash keeps earlier results, (2) retries the
+compiled case with ONEAPI_DEVICE_SELECTOR unset / =level_zero:0 and with SYCL_UR_TRACE=1, and
+(3) logs `ldd` of the compiled launcher. Or park until the frameworks/2026.1.0 move (K125-S), whose
+PyTorch 2.13 ships its own XPU Triton.
+Related: K114 (8877117) also aborted in the runtime -- `Segmentation fault from GPU ... NotPresent`,
+`Abort ... intel-compute-runtime-25.18 .../drm_neo.cpp` -- right after an OOM case; 13 of its cases
+are saved (OBSERVATIONS). Both aborts are in the old PE's compute runtime on the new driver. Proposal:
+rerun the 3 missing K114 cases, each in its own process, together with the K119 retry.
+
+### K129-I: core dumps land in the repo on /home (open, 2026-09-29)
+K119's abort wrote a 2 GB core file into ~/code/msdelta (the job's working directory; /home has a
+small quota). Proposal: `ulimit -c 0` in pbs/lib/load_frameworks.sh (every job sources it), or
+redirect cores to $S/cores/ for jobs where we want them. Nothing changed yet.
+
 ### K110-S: checkpoint cleanup on /flare (inventory running 2026-09-29; deletion needs per-tier approval)
 Project disk: 8.6 / 10 TB used (UIC-HPC); ours 3.2 TB, of which runs/ = 2.6 TB. User: see how many
 checkpoints we have and delete the ones that aren't useful. Proposal: an inventory first (per sweep:
