@@ -1,0 +1,3 @@
+s050m_ck540k_lr4e-4_p170k2_seed0
+s050m_ck540k_lr4e-4_p170k2_seed1
+s050m_ck540k_lr4e-4_p170k2_seed2
