@@ -1,5 +1,7 @@
 # Project notes
 
+**Getting back into the project? Read `PRIMER.md` (orientation) then `NARRATIVE.md` (story + direction), then `STATUS.md`.**
+
 Five files, one job each. If something doesn't fit exactly one of them, it goes nowhere
 until it does.
 
