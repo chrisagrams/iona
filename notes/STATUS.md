@@ -25,6 +25,8 @@ JOBS
 ──────────────────────────────────────────────────────────────────────────
   [ ] 8876832  K66-C 400m training (14 h), capacity, running since ~03:20
   [ ] 8876833  K66-C 25m  training (10 h), capacity, running since ~03:20
+  [ ] 8878032  K136-C 50m lr4e-4_p170k2 x 3 seeds (capacity 10 h); scoring by feeder plan k136_score
+      (log $S/logs/feeder_k136.log; restart: setsid nohup pbs/tools/feeder.sh pbs/tools/feeder_plans/k136_score.txt >> $S/logs/feeder_k136.log 2>&1 < /dev/null &)
   watchers running detached (setsid) on aurora-uan-0010: pbs/tools/k66c/k66_pipeline.sh, k66_yeast.sh;
   logs $S/logs/k66_pipeline.log (+ .nohup). If the login node restarts: rerun them with 400m=8876832 025m=8876833 (yeast: K66_JOB_400M=8876832 K66_JOB_025M=8876833)
   [x] 8877117  K114 profiler (partial; runtime abort after OOM, K128-P)
@@ -71,10 +73,11 @@ NEXT
   [ ] K117 copy-cost bench: merged (8e726a6), NOT run -- waiting on K130-P settings approval
   [ ] K110 checkpoint inventory (read-only) -> notes/K110_checkpoint_inventory.md, deletion card for approval
   [ ] C18 dry run results -> confirm the open choices before the full run
-  [ ] Stage 0: preprocessing done (8877174); Pairformer arm resubmitted 8877949 after the telegraf fix (K132-I;
-      first attempt 8877187 failed at start); transformer arm follows via the feeder (running again)
+  [ ] Stage 0: preprocessing done (8877174); Pairformer arm failed twice: 8877187 (telegraf, fixed K132-I),
+      8877949 (DDP setup, K138-I open); transformer arm not submitted
   [ ] K66-C 400m / 25m -> scoring -> full comparison + proposal to the user (winner per scale)
-  [ ] then the winning C recipe on every pretraining checkpoint (card)
+  [ ] C27 consensus-weighting card (draft; K139-C) -> 50m run
+  [ ] then the winning C recipe on every pretraining checkpoint (card; no 25m, K137)
   [ ] alignment resumes on the new C models (caveats list)
 
 REMINDERS FOR THE USER
