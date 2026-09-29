@@ -35,14 +35,18 @@ Keep this under a page. Append a line per chapter change; details live in OBSERV
   more heavily, 50m, 12 arms), **K136** (missing 50m cell) queued.
 - Found: capacity allows **16 nodes / 7 days per job** — the next big runs go as single multi-node jobs.
 
-## 5. Where we're going
-1. **Pick the C recipe** (you): per-scale winner (K134), consensus or not (K135, informed by C27).
-2. **Scaling curve for C:** winning recipe on every pretraining checkpoint × every scale (no 25m) —
-   one multi-node capacity job, ~14 h. → answers "does C scale with size and pretraining?"
-3. **Alignment (A)** resumes on the new C models (caveats list waiting).
-4. **Pairformer (P2):** matched comparison with the transformer once Stage 0 is understood.
-5. Later: MassIVE-KB training data (C18), spectrum-only database search (C26), rescoring (R3-R5),
-   move to the new PyTorch stack between phases (I3).
+## 5. Where we're going — two threads
+**Thread C (contrastive → downstream):**
+1. Fix the recipe: per-scale HPs (K66-C, K136) + consensus (C20) + consensus weighting (C27). You pick (K134/K135).
+2. Scale it: every pretraining checkpoint × every scale **including 25m** (one multi-node capacity job).
+3. Evaluate: **library search is the main metric**; also re-collect the paper's result set.
+4. Downstream: alignment (A), then reranking (R).
+
+**Thread P (architecture):**
+1. Find the Pairformer design + input features that beat the transformer **at matched compute**.
+2. Then scale it and run real pretraining (likely needs a bigger allocation, K143).
+
+Later: MassIVE-KB data (C18), spectrum-only database search (C26), new PyTorch stack between phases (I3).
 
 ## Branch map
 `master` (Chris, untouched) · `dev_finetune` (paper, frozen) · `dev_finetune_02` (all current work; side
