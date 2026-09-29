@@ -71,8 +71,8 @@ NEXT
   [ ] K117 copy-cost bench: merged (8e726a6), NOT run -- waiting on K130-P settings approval
   [ ] K110 checkpoint inventory (read-only) -> notes/K110_checkpoint_inventory.md, deletion card for approval
   [ ] C18 dry run results -> confirm the open choices before the full run
-  [ ] Stage 0: preprocessing done (8877174); Pairformer arm failed at start (8877187, telegraf missing),
-      transformer arm not submitted -- blocked on K132-I
+  [ ] Stage 0: preprocessing done (8877174); Pairformer arm resubmitted 8877949 after the telegraf fix (K132-I;
+      first attempt 8877187 failed at start); transformer arm follows via the feeder (running again)
   [ ] K66-C 400m / 25m -> scoring -> full comparison + proposal to the user (winner per scale)
   [ ] then the winning C recipe on every pretraining checkpoint (card)
   [ ] alignment resumes on the new C models (caveats list)
