@@ -127,9 +127,17 @@ class TestPBSScripts:
             env={**os.environ, "PYTHONPATH": str(REPO), "HF_HUB_OFFLINE": "1"})
         if "True" not in probe.stdout:
             pytest.skip(f"{modules[0]} does not import torch")
+        # An export line may set several variables at once
+        # (`export ONEAPI_DEVICE_SELECTOR=... ZE_FLAT_DEVICE_HIERARCHY=FLAT ZE_AFFINITY_MASK=0`);
+        # checking for the literal "export VARIABLE" flagged four correct scripts for weeks.
+        exported = set()
+        for line in text.splitlines():
+            line = line.split("#", 1)[0].strip()
+            if line.startswith("export "):
+                exported.update(re.findall(r"\b([A-Z_][A-Z0-9_]*)=", line[len("export "):]))
         for variable in ("ONEAPI_DEVICE_SELECTOR", "ZE_FLAT_DEVICE_HIERARCHY",
                          "ZE_AFFINITY_MASK"):
-            assert f"export {variable}" in text, f"{script.name} never exports {variable}"
+            assert variable in exported, f"{script.name} never exports {variable}"
 
     def test_valid_bash(self, script):
         subprocess.run(["bash", "-n", str(script)], check=True, capture_output=True)
