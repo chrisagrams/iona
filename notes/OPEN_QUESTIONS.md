@@ -116,13 +116,12 @@ THE selection metric; experimental-only MAP@R is only a guard (reject an arm who
 the seed spread). Question: keep the guard, or select on library Hit@1 alone and just report MAP@R?
 (b) sampler oversampling vs loss weighting: pros/cons given in chat 2026-09-29; approved card uses the sampler.
 
-### K140-S: hung jobs + resubmission after the TMPDIR fix (open, 2026-09-29)
-K66-C 400m (8876832, running since 03:20, 11 h+ of 14 h) and K136 50m (8878032) are hung (AF_UNIX crash, no
-training). Claude's qdel was blocked by the permission classifier: please `qdel 8876832 8878032` (or allow it).
-Then, once C27 smoke 8878345 confirms the fix on the sweep path: resubmit the same approved cards --
-K66-C 400m (14 h) and 25m (10 h), K136 50m (10 h) -- plus C27 (12 arms, 10 h). Capacity allows 2 running at a
-time: order? Proposal: 400m + 25m first (they gate the four-scale comparison), then K136 + C27 (could share
-one node: 3 + 12 arms > 12 tiles, so two jobs).
+### K141-P: Stage 0 transformer arm barely learned (open, 2026-09-29)
+Stage 0 both arms finished (300 steps, same lr 1.3e-4, cap 150): Pairformer 8878234 loss 0.90 -> 0.32 (eval 0.317),
+22 min; transformer 8878340 loss 0.88 -> 0.83 flat from step ~30, grad norm ~0.03 throughout, 3 min. Either a
+real early-training difference or a setup problem in the transformer arm (config/init/lr for this size).
+Proposal: compare with the production transformer's first 300 steps (W&B) and check the arm's config
+before reading anything into it.
 
 ### K130-P: K117 copy-cost bench -- settings to approve before submission (open, 2026-09-29)
 Script merged (8e726a6): pbs/diag/triattn_copy_bench.{py,pbs}, tests/test_triattn_copy_bench.py. NOT run.

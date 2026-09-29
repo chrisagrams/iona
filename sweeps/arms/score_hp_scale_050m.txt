@@ -1,4 +1,4 @@
-# K136-C 50m lr4e-4_p170k2 finals (job 8878032)
-s050m_ck540k_lr4e-4_p170k2_seed0 /lus/flare/projects/UIC-HPC/khuss/msdelta/runs/sweep-s050m_ck540k_lr4e-4_p170k2_seed0-8878032/final
-s050m_ck540k_lr4e-4_p170k2_seed1 /lus/flare/projects/UIC-HPC/khuss/msdelta/runs/sweep-s050m_ck540k_lr4e-4_p170k2_seed1-8878032/final
-s050m_ck540k_lr4e-4_p170k2_seed2 /lus/flare/projects/UIC-HPC/khuss/msdelta/runs/sweep-s050m_ck540k_lr4e-4_p170k2_seed2-8878032/final
+# K136-C 50m lr4e-4_p170k2 finals (job 8878464)
+s050m_ck540k_lr4e-4_p170k2_seed0 /lus/flare/projects/UIC-HPC/khuss/msdelta/runs/sweep-s050m_ck540k_lr4e-4_p170k2_seed0-8878464/final
+s050m_ck540k_lr4e-4_p170k2_seed1 /lus/flare/projects/UIC-HPC/khuss/msdelta/runs/sweep-s050m_ck540k_lr4e-4_p170k2_seed1-8878464/final
+s050m_ck540k_lr4e-4_p170k2_seed2 /lus/flare/projects/UIC-HPC/khuss/msdelta/runs/sweep-s050m_ck540k_lr4e-4_p170k2_seed2-8878464/final

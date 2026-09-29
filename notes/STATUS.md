@@ -4,7 +4,8 @@ What is true right now. Overwritten, not appended: before changing it, copy the 
 `status-history/`. Questions: `PLAN.md`; results: `OBSERVATIONS.md`; decisions: `DECISIONS.md`;
 waiting on the user: `OPEN_QUESTIONS.md` (top: "Your to-do").
 
-Last updated: 2026-09-29 ~06:00 UTC.
+Last updated: 2026-09-29 ~15:10 UTC. LAUNCHER FIXES (K138-I): short job TMPDIR in load_frameworks.sh;
+CCL_KVS_MODE defaults to pmi in every launcher. Before these, every mpiexec-launched training since the update hung.
 
 SYSTEM CHANGE (2026-09 update): new OS image (SLES 15 SP7, kernel 6.4, GPU driver Agama 1146); default PE is
 now 26.181.0 (oneAPI 2026.1, frameworks/2026.1.0 = PyTorch 2.13). Our .venv (frameworks/2025.3.1) needs the
@@ -23,9 +24,10 @@ BRANCHES / CHECKOUTS
 
 JOBS
 ──────────────────────────────────────────────────────────────────────────
-  [!] 8876832  K66-C 400m: HUNG since 03:23 (TMPDIR/AF_UNIX bug, never trained) -- needs qdel + resubmit (K140-S)
-  [!] 8876833  K66-C 25m: never trained, killed at walltime 10 h -- resubmit (K140-S)
-  [!] 8878032  K136-C 50m: HUNG (same bug) -- needs qdel + resubmit; scoring feeder k136_score will mark it BLOCKED
+  [ ] 8878459  K66-C 400m (resubmitted after the launcher fixes; 8876832 never trained)
+  [ ] 8878461  K66-C 25m  (resubmitted; 8876833 never trained)
+  watchers restarted for 400m=8878459 025m=8878461
+  [ ] 8878464  K136-C 50m (resubmitted; 8878032 never trained); scoring feeder k136_score repointed
       (log $S/logs/feeder_k136.log; restart: setsid nohup pbs/tools/feeder.sh pbs/tools/feeder_plans/k136_score.txt >> $S/logs/feeder_k136.log 2>&1 < /dev/null &)
   watchers running detached (setsid) on aurora-uan-0010: pbs/tools/k66c/k66_pipeline.sh, k66_yeast.sh;
   logs $S/logs/k66_pipeline.log (+ .nohup). If the login node restarts: rerun them with 400m=8876832 025m=8876833 (yeast: K66_JOB_400M=8876832 K66_JOB_025M=8876833)
@@ -73,8 +75,7 @@ NEXT
   [ ] K117 copy-cost bench: merged (8e726a6), NOT run -- waiting on K130-P settings approval
   [ ] K110 checkpoint inventory (read-only) -> notes/K110_checkpoint_inventory.md, deletion card for approval
   [ ] C18 dry run results -> confirm the open choices before the full run
-  [ ] Stage 0: preprocessing done (8877174); Pairformer arm 8878133 (after fixes K132-I telegraf, K138-I
-      CCL_KVS_MODE=pmi); transformer follows via feeder k127_batch
+  [x] Stage 0 done: Pairformer 8878234 (loss .90->.32), transformer 8878340 (flat .83, K141-P)
   [ ] K66-C 400m / 25m -> scoring -> full comparison + proposal to the user (winner per scale)
   [ ] C27 consensus-weighting card (draft; K139-C) -> 50m run
   [ ] then the winning C recipe on every pretraining checkpoint (card; no 25m, K137)
