@@ -10,7 +10,7 @@ SYSTEM CHANGE (2026-09 update): new OS image (SLES 15 SP7, kernel 6.4, GPU drive
 now 26.181.0 (oneAPI 2026.1, frameworks/2026.1.0 = PyTorch 2.13). Our .venv (frameworks/2025.3.1) needs the
 old PE 26.26.0: every job script now sources pbs/lib/load_frameworks.sh (b85c7b2). On the login node run
 python as: bash -c 'REPO_DIR=$PWD; source pbs/lib/load_frameworks.sh >/dev/null; .venv/bin/python ...'.
-Validated on a compute node: e2e + golden 10/10 (job 8876790); full suite 8876791.
+Validated on a compute node: e2e + golden 10/10 (job 8876790); full suite 8876791: 897 passed + the 4 known failures; device suite 11/11.
 
 ```
 BRANCHES / CHECKOUTS
@@ -22,10 +22,10 @@ BRANCHES / CHECKOUTS
 
 JOBS (capacity queue blocked by maintenance: "Insufficient amount of resource: at_queue")
 ──────────────────────────────────────────────────────────────────────────
-  [ ] 8876824  K66-C 400m training (14 h)  resubmitted 2026-09-29, afterok on validation jobs 8876790 + 8876791
-  [ ] 8876825  K66-C 25m  training (10 h)  same
+  [ ] 8876832  K66-C 400m training (14 h)  resubmitted 2026-09-29 02:38 (the afterok-chained 8876824/25 were
+  [ ] 8876833  K66-C 25m  training (10 h)   deleted by PBS: the full-suite job exits 1 on the 4 known failures)
   watchers running detached (setsid) on aurora-uan-0010: pbs/tools/k66c/k66_pipeline.sh, k66_yeast.sh;
-  logs $S/logs/k66_pipeline.log (+ .nohup). If the login node restarts: rerun them with 400m=8876824 025m=8876825
+  logs $S/logs/k66_pipeline.log (+ .nohup). If the login node restarts: rerun them with 400m=8876832 025m=8876833 (yeast: K66_JOB_400M=8876832 K66_JOB_025M=8876833)
   [x] K66-C 100m, 200m: trained + scored on validation / oodval / test / mouse / human / yeast
       results/raw/finetune/contrastive/hp-scale-{100m,200m}-{...}/
 

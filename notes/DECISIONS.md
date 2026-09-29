@@ -99,7 +99,7 @@ IDs carry a track suffix: -C contrastive (spectrum encoder), -A alignment (pepti
 | 2026-09-28 | K114-P | Run a profiling job to get per-block Pairformer speed numbers (standalone pbs/diag script; prepared now, submitted after maintenance) | user |
 | 2026-09-28 | K119-P | Run the FlexAttention support test on XPU (job-only Intel Triton path; prepared now, submitted after maintenance) | user |
 | 2026-09-29 | K123-I | Validate the fixed environment on a compute node (e2e+golden 8876790: 10/10 passed; full suite incl. device 8876791 running) | user |
-| 2026-09-29 | K124-C | Resubmit the K66-C 400m / 25m training (same card): 8876824 (400m), 8876825 (25m), chained afterok on the validation jobs; old held jobs 8875260/8875263 deleted | user |
+| 2026-09-29 | K124-C | Resubmit the K66-C 400m / 25m training (same card). Final IDs 8876832 (400m), 8876833 (25m); a first afterok-chained attempt (8876824/25) was deleted by PBS because the full-suite validation job exits 1 on the 4 known failures although validation passed (e2e+golden 10/10, device 11/11, 897 passed) | user |
 | 2026-09-29 | K125-S | Move to the new frameworks/2026.1.0 venv when it no longer risks comparison issues within a task (i.e. between experiment phases) -- schedule it then (PLAN I3) | user |
 
 ## Settings chosen WITHOUT explicit approval (before this log existed)
