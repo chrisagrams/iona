@@ -2057,3 +2057,26 @@ filtered columns are full = pass.
 20 ppm MAP@R 0.992-0.996, iso20 0.977-0.989 across all arms. lr 4e-4 with P170 x K2 is best at every scale
 (margins 0.002-0.004 over the next arm, above the seed spread); lr 8e-4 is worst everywhere. Raw:
 results/raw/finetune/contrastive/hp-scale-<scale>-<split>/. Other splits (test, oodval, mouse, human, yeast) scored, not yet tabulated.
+
+## K154-P width profile (job 8880628, B=32 N=150, one tile, bf16, k=1, 2026-09-30)
+Per layer, forward+backward (ms): single block = attention 3.1 + transition 1.6 = 4.7.
+| layout | write-back | tri-mul | transition | readout+glue | pair update | step (gc off) | peak GB | step w/ tri-attn (gc on) vs without (gc on) |
+|---|---|---|---|---|---|---|---|---|
+| 64/64/16, both tri-mul, materialised write-back (old) | 9.9 | 45.5 + 42.6 | 10.5 | 7.0 | 115.5 | 1241 | 54.7 | 3813 vs 1670 |
+| 64/64/16, outgoing, factored | 4.7 | 42.3 | 9.6 | 8.3 | 64.9 | 732 | 34.2 | 3178 vs 995 |
+| 32/32/16, outgoing, factored | 2.7 | 20.9 | 4.9 | 5.0 | 33.5 | 418 | 18.9 | 2549 vs 561 |
+| 16/16/16, outgoing, factored | 1.9 | 12.1 | 3.2 | 3.6 | 20.8 | 288 | 11.2 | 2294 vs 382 |
+Pair update / single block: 25x (old) -> 14x -> 7x (32) -> 4.4x (16). The factored write-back is 2.1x faster
+than the materialised one at the same widths. Triangle attention (4 heads x 16, fixed) does not shrink with
+c_z: at 32 it makes the step 4.5x slower (gc on). Raw: results/raw/diag/width_profile/8880628_*.json.
+
+## K66-C / K136-C: library search (the main metric) per scale, validation, unfiltered Hit@1 (mean of 3 seeds +- half range)
+| scale | lr2e-4 P128 | lr4e-4 P128 | lr4e-4 P170 | lr8e-4 P128 |
+|---|---|---|---|---|
+| 25m | .702+-.018 | .726+-.014 | .708+-.065 | **.775+-.040** |
+| 50m | - | - | .875+-.012 | - |
+| 100m | .815+-.037 | .867+-.014 | **.885+-.008** | .824+-.020 |
+| 200m | .900+-.007 | .915+-.009 | **.920+-.003** | .906+-.009 |
+| 400m | .926+-.006 | **.946+-.003** | .940+-.005 | .938+-.006 |
+20 ppm filtered library Hit@1 0.974-0.997, isotope-tolerant 0.929-0.992. Library Hit@1 is far noisier across seeds
+than experimental MAP@R. Same raw files as above (library/* keys).
