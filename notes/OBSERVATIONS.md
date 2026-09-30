@@ -2133,3 +2133,18 @@ eval_mlm (digest 89e46099fdba, as 8880677): 0.0907.
 | Pairformer k5 | 0.0926 | 50 min |
 | transformer 50m (interpolated 10k-50k) | ~0.096 | - |
 Pair updates on every layer buy 0.002 over two updates for 1.4x the wall time. Raw: results/raw/diag/eval_mlm/p2-k1-8880726.json.
+
+## K66-C / K136-C final-checkpoint arms on the other sets (mean of 3 seeds, experimental MAP@R, unfiltered)
+| set | scale | lr2e-4 P128 | lr4e-4 P128 | lr4e-4 P170 | lr8e-4 P128 |
+|---|---|---|---|---|---|
+| test | 25m / 100m / 200m / 400m | .870 / .900 / .909 / .920 | .871 / .900 / .908 / .921 | **.875 / .903 / .912 / .923** | .849 / .883 / .891 / .910 |
+| mouse | 25m / 100m / 200m / 400m | .839 / .856 / .859 / .867 | .837 / .855 / .857 / .867 | **.842 / .856 / .861 / .869** | .822 / .844 / .848 / .859 |
+| human | 25m / 100m / 200m / 400m | .883 / .896 / .898 / .901 | .885 / .895 / .897 / .902 | .886 / .895 / .898 / .902 | .880 / .890 / .893 / .898 |
+| oodval (8 species) | 25m / 100m / 200m / 400m | .786 / .760 / .818 / .777 | .781 / .758 / .792 / .772 | .794 / .768 / .802 / .767 | .762 / .773 / .715 / .784 |
+| yeast | 25m / 100m / 200m / 400m | .728 / .547 / .662 / .598 | .727 / .571 / .603 / .623 | .736 / .566 / .628 / .606 | .707 / .637 / .546 / .648 |
+50m P170: test .892, mouse .851, human .893, oodval .777, yeast .624. Library Hit@1 on test (the library exists only
+for ms-contrastive-100k): 400m .925 / .944 / .938 / .936, 200m .898 / .914 / .917 / .905 (same arm order).
+Test, mouse and human agree with validation (P170 best or tied, scale helps). The two out-of-distribution
+species sets do NOT: no arm wins consistently, scale does not help (yeast: 25m .73 vs 400m .60-.65), and the
+spread between arms is large. So the recipe choice is supported in-distribution only; OOD behaviour is an open
+question (it echoes the earlier "OOD/yeast disagree with validation" note in K134).
