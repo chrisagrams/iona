@@ -237,6 +237,14 @@ full spectrum with visible peaks given, ranking losses, or predicting absolute i
 
 ## Contrastive (spectrum encoder)
 
+### K158-C (open) -- the with-consensus model set: which consensus setting, and go?
+Without-consensus set: finals of all 5 scales (K66/K136, done) + 26 non-final checkpoints of 50m/100m/200m/400m
+(K155, job 8880712, running) x 3 seeds. With consensus only 50m-final models exist (C20 at the old recipe, C27
+at lr 4e-4 P128). Proposal: lr 4e-4 P170xK2 + --include_consensus true --consensus_weight 1 (C27 "w1": library
+Hit@1 0.947 like every consensus arm, smallest experimental MAP@R loss -0.012) on all 31 checkpoints (26 + the
+5 finals incl. 25m) x 3 seeds = 93 arms; one capacity job (~5 nodes, ~17 h, ~80-90 node-h) after a debug smoke;
+scored on the same six sets. Caveat: lr and batch were tuned without consensus. Needs: the setting (w1?) and go.
+
 ### K85-P: the first Pairformer vs transformer comparison run (open; see K91-K95 and the review)
 Context: `notes/P1_card_draft.md` (branch p1-pairformer) drafts a short debug pretraining run
 comparing the ported Pairformer with our transformer at ~50M parameters (loss curves, step time).
