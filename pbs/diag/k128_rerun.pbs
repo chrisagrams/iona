@@ -1,0 +1,57 @@
+#!/bin/bash -l
+#PBS -N k128-rerun
+#PBS -A UIC-HPC
+#PBS -l select=1
+#PBS -l walltime=01:00:00
+#PBS -l filesystems=home:flare
+#PBS -j oe
+#PBS -o pbs/logs/
+# K128-P (approved 2026-09-30): rerun what crashed, EACH CASE IN ITS OWN PROCESS so one abort keeps the rest.
+#  1. K114 (8877117) missing cases: pairformer_triattn, B=32, N=150 / 256 / 512 (one process per N).
+#  2. K119 (8877118) FlexAttention test, which aborted in Triton's SYCL launcher ("No device of requested
+#     type available"): variants (a) as before, (b) ONEAPI_DEVICE_SELECTOR=level_zero:0, (c) selector unset,
+#     each with SYCL_UR_TRACE=1 for (a); plus `ldd` of the compiled launcher .so files it leaves behind.
+#   qsub -q debug -v REPO_DIR=$PWD pbs/diag/k128_rerun.pbs
+REPO_DIR=${REPO_DIR:-${PBS_O_WORKDIR:-$PWD}}
+cd "$REPO_DIR"
+source "$REPO_DIR/pbs/lib/load_frameworks.sh"
+set -uo pipefail
+export ZE_FLAT_DEVICE_HIERARCHY=FLAT ZE_AFFINITY_MASK=0 OMP_NUM_THREADS=${OMP_NUM_THREADS:-8}
+export PYTHONPATH=$REPO_DIR${PYTHONPATH:+:$PYTHONPATH}
+source "$REPO_DIR/pbs/lib/code_snapshot.sh"
+PY="$REPO_DIR/.venv/bin/python"
+JOB=${PBS_JOBID%%.*}; JOB=${JOB:-local}
+P=results/raw/diag/pairformer_profile; F=results/raw/diag/flexattn; mkdir -p "$P" "$F"
+declare -A RC
+
+for n in 150 256 512; do
+    echo "=== $(date -Is) K114 pairformer_triattn B=32 N=$n"
+    ONEAPI_DEVICE_SELECTOR=level_zero:gpu timeout 900 "$PY" "$MSDELTA_CODE_DIR"/pbs/diag/pairformer_profile.py \
+        --out "$P/${JOB}_triattn_b32_n$n.json" --models pairformer_triattn --batches 32 --peaks $n \
+        2>&1 | tee "$P/${JOB}_triattn_b32_n$n.log" | grep -E "^\[profile\]|Error|Abort"
+    RC[k114_n$n]=${PIPESTATUS[0]}
+done
+
+export MSDELTA_SYSTEM_TRITON=1
+for v in a_default b_level_zero0 c_unset; do
+    echo "=== $(date -Is) K119 variant $v"
+    cache=${TMPDIR:-/tmp}/k128-$JOB-$v
+    mkdir -p "$cache/triton" "$cache/inductor"
+    case $v in
+        a_default)     sel=level_zero:gpu; extra=(SYCL_UR_TRACE=1) ;;
+        b_level_zero0) sel=level_zero:0;   extra=() ;;
+        c_unset)       sel=;               extra=() ;;
+    esac
+    ( [[ -n $sel ]] && export ONEAPI_DEVICE_SELECTOR=$sel || unset ONEAPI_DEVICE_SELECTOR
+      export TRITON_CACHE_DIR=$cache/triton TORCHINDUCTOR_CACHE_DIR=$cache/inductor
+      env "${extra[@]}" timeout 900 "$PY" "$MSDELTA_CODE_DIR"/pbs/diag/flexattn_test.py \
+          --out "$F/${JOB}_$v.json" > "$F/${JOB}_$v.log" 2>&1 )
+    RC[k119_$v]=$?
+    grep -E "terminate|what\(\)|No device|^\[|Error" "$F/${JOB}_$v.log" | grep -v "^\[env\]" | tail -8
+    for so in $(find "$cache/triton" -name "*.so" 2>/dev/null | head -3); do
+        echo "--- ldd $so"; ldd "$so" | grep -iE "sycl|ur_|ze_|level|mpi|not found"
+    done
+done
+echo "=== $(date -Is) summary"
+for k in "${!RC[@]}"; do echo "  $k rc=${RC[$k]}"; done
+exit 0
