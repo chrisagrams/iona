@@ -2123,3 +2123,13 @@ eval_mlm on the P2 validation set (identical mask and input digests to the trans
 In-training eval (random masks) ended at 0.0923. So at the same step of the same LR schedule the k5 Pairformer is
 slightly below the transformer (by ~0.003-0.004; the transformer value is interpolated, and the cap-150 caveat
 applies). Raw: results/raw/diag/eval_mlm/p2-k5-8880727.json; run $S/runs/p2/p2-cz32-k5-8880727.
+
+## K156-P P2 k=1 (job 8880726), same masks (2026-09-30)
+p2-cz32-k1 (45.57M params, pair update every layer), 23,387 steps, 16 nodes, 68.3 min wall (~18 node-h), exit 0.
+eval_mlm (digest 89e46099fdba, as 8880677): 0.0907.
+| model | eval loss @ 23,387 | wall (16 nodes) |
+|---|---|---|
+| Pairformer k1 | 0.0907 | 68 min |
+| Pairformer k5 | 0.0926 | 50 min |
+| transformer 50m (interpolated 10k-50k) | ~0.096 | - |
+Pair updates on every layer buy 0.002 over two updates for 1.4x the wall time. Raw: results/raw/diag/eval_mlm/p2-k1-8880726.json.
