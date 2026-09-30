@@ -2134,6 +2134,19 @@ eval_mlm (digest 89e46099fdba, as 8880677): 0.0907.
 | transformer 50m (interpolated 10k-50k) | ~0.096 | - |
 Pair updates on every layer buy 0.002 over two updates for 1.4x the wall time. Raw: results/raw/diag/eval_mlm/p2-k1-8880726.json.
 
+## K156-P P2 tri-attn (job 8880728): no gain per step, 2.1x the cost (2026-09-30)
+p2-cz32-k1-triattn (k1 + triangle attention), 23,387 steps, 16 nodes, train 136 min (~37 node-h), exit 0.
+In-training eval (trainer masks, same validation split) at the end, all three P2 arms:
+| arm | final in-training eval | eval_mlm (digest 89e46099fdba) | train time (16 nodes) |
+|---|---|---|---|
+| k1 | 0.0910 | 0.0907 | 64 min |
+| k5 | 0.0923 | 0.0926 | 46 min |
+| k1 + tri-attn | 0.0929 | NaN (bug, see TODO) | 136 min |
+Tri-attn led early (6k: 0.154 vs 0.158), tied at 10k, and fell behind from 12k (16k: 0.1089 vs 0.1067).
+-> Not useful at this size/budget: worst of the three per step, 2.1x k1's time. eval_mlm returned NaN on its
+final (8881426) though training eval was finite -- likely a masking/padding edge case in triangle attention at
+eval_mlm's batch shapes; to fix before any tri-attn number is trusted from eval_mlm.
+
 ## K66-C / K136-C final-checkpoint arms on the other sets (mean of 3 seeds, experimental MAP@R, unfiltered)
 | set | scale | lr2e-4 P128 | lr4e-4 P128 | lr4e-4 P170 | lr8e-4 P128 |
 |---|---|---|---|---|---|

@@ -915,3 +915,5 @@ Recall@K is the fraction of QUERIES with at least one hit in the top K. Document
   without WANDB_ENTITY the three smoke runs (p2smoke-p2-cz32-*-8880669) went to the user's personal entity
   kelhus2-uic/pairformer_pretrain. Find what overrides WANDB_MODE; the user decides whether to delete those runs.
   -> DELETED 2026-09-30 on the user's request (DECISIONS "W&B cleanup"); the WANDB_MODE override is still to find.
+
+- K156-P: eval_mlm gives NaN for the tri-attn P2 final (8881426) while the in-training eval is finite (0.0929); find the NaN (likely all-masked rows in triangle attention at eval_mlm batch shapes).
