@@ -33,6 +33,7 @@ EXCL=${EXCL:-$SCRATCH_ROOT/data/massive-kb-exclusion}
 SHARDS=${SHARDS:-0}            # first N shards per split; 0 = all
 LIMIT=${LIMIT:-0}              # first N rows per shard; 0 = all
 WORKERS=${WORKERS:-64}
+MAX_PEAKS=${MAX_PEAKS:-512}      # C18 (user 2026-09-30): keep spectra whole -> MAX_PEAKS=1000000; loaders drop/trim
 IL_FLAG=${IL_FLAG:---il-collapse}
 SPLIT_POLICY=${SPLIT_POLICY:-peptide}
 RESUME=${RESUME:-}
@@ -70,7 +71,7 @@ cat "$EXCL/exclusion_counts.json"
 
 echo "=== $(date -Is) prepare -> $OUT (shards=$SHARDS limit=$LIMIT workers=$WORKERS)"
 "$PY" "$SCRIPT" prepare --out "$OUT" --exclusion "$EXCL" \
-    --shards "$SHARDS" --limit "$LIMIT" --workers "$WORKERS" \
+    --shards "$SHARDS" --limit "$LIMIT" --workers "$WORKERS" --max-peaks "$MAX_PEAKS" \
     "$IL_FLAG" --split-policy "$SPLIT_POLICY" ${RESUME:+--resume}
 status=$?
 [[ $status -eq 0 ]] || { echo "prepare exited $status" >&2; exit "$status"; }
