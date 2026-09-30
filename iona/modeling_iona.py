@@ -121,8 +121,7 @@ class BiasedMHA(nn.Module):
     def forward(
         self,
         hidden_states: Tensor,
-        bias: Tensor,
-        padding_mask: Tensor,
+        attention_bias: Tensor,
     ) -> Tensor:
         batch_size, n_peaks, _ = hidden_states.shape
         qkv = self.qkv(hidden_states).reshape(batch_size, n_peaks, 3, self.n_heads, self.d_head)
@@ -130,7 +129,6 @@ class BiasedMHA(nn.Module):
         query = query.transpose(1, 2)
         key = key.transpose(1, 2)
         value = value.transpose(1, 2)
-        attention_bias = bias.masked_fill(padding_mask[:, None, None, :], float("-inf"))
 
         context = F.scaled_dot_product_attention(
             query,
@@ -160,10 +158,9 @@ class EncoderBlock(nn.Module):
     def forward(
         self,
         hidden_states: Tensor,
-        bias: Tensor,
-        padding_mask: Tensor,
+        attention_bias: Tensor,
     ) -> Tensor:
-        attention_output = self.attn(self.norm1(hidden_states), bias, padding_mask)
+        attention_output = self.attn(self.norm1(hidden_states), attention_bias)
         hidden_states = hidden_states + attention_output
         hidden_states = hidden_states + self.ffn(self.norm2(hidden_states))
         return hidden_states
@@ -226,15 +223,18 @@ class IonaModel(IonaPreTrainedModel):
         padding_mask = ~attention_mask.bool()
 
         hidden_states = self.embed(log_intensity, mask_positions)
-        bias = self.bias_module(mz)
+        # Mask padded keys once so every layer shares one bias tensor instead of saving its own copy.
+        attention_bias = self.bias_module(mz).masked_fill(
+            padding_mask[:, None, None, :], float("-inf")
+        )
 
         for block in self.blocks:
             if self.gradient_checkpointing and self.training:
                 hidden_states = self._gradient_checkpointing_func(
-                    block.__call__, hidden_states, bias, padding_mask
+                    block.__call__, hidden_states, attention_bias
                 )
             else:
-                hidden_states = block(hidden_states, bias, padding_mask)
+                hidden_states = block(hidden_states, attention_bias)
         hidden_states = self.norm(hidden_states)
 
         if not return_dict:
