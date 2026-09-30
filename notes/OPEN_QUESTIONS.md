@@ -130,6 +130,12 @@ delta_bias_n_freqs (pair-feature init, once). Not yet in code: fewer peaks in th
 peaks), sparse pairs, low-rank pair, shared pair weights across updates. Proposal: a speed-only profiling
 screen first (no training), then a short training card for the cheapest settings.
 
+### K157-P: is the P2 validation shard held out from the production transformers? (open, 2026-09-30)
+The P2 validation set is validation-00000-of-00004 of Gaolaboratory/MSConsensus-100M (rev 78b3e74). The
+Pairformer comparison assumes the production transformers never trained on it (they trained on the same
+dataset's train split, per the K132 check of master). Confirm with Chris that the validation split was held out
+in the production runs; if not, the transformer's numbers on it are optimistic.
+
 ### K110-S: checkpoint cleanup on /flare (f, g, a-lite DELETED 2026-09-30; rest open)
 Confirm: delete the remaining checkpoint WEIGHTS of the K110a runs too (only finals kept)? K110b/c/d/h/i/j open.
 Decide per tier (K110a..K110k in the card). Biggest: K110a old-run intermediate checkpoints 1,055 GiB (or
