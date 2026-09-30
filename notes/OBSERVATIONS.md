@@ -2027,3 +2027,16 @@ K117 supplement, B=32 (job 8880031): train step (fwd+bwd) hview 1.01x (N=150) / 
 1.08x; peak memory hview 2.85 vs 2.85 GB (N=150) and 3.58 vs 5.54 GB (N=200). -> sdpa_view (= hview) made the
 default 2026-09-30 (only B=8 N=256 was slower, 0.98x). Note: sdpa5d is 1.25x at B=32 N=150 but slower at
 N=200 forward and failed the accuracy rule at B=8 N=256 -- not adopted.
+
+## K114-P validation: decoupled streams on the GPU (job 8880138, 2026-09-30; stage-0 Pairformer, B=32, N=150, 1 tile)
+
+Step time (fwd+bwd) vs k = pair_update_every (lag 0 unless noted):
+    no tri-attn (gc off):  k1 1240 ms | k2 684 (x0.55) | k3 574 (x0.46) | k5 347 (x0.28) | k10 239 (x0.19)
+    tri-attn (gc on):      k1 3809 ms | k2 1986 (x0.52) | k3 1623 (x0.43) | k5 892 (x0.23) | k10 528 (x0.14)
+    lag 1 drops one update (k2 lag1 = k3 lag0 timing; k5 lag1 = k10). All variants ran; tri-attn at k1 needs gc.
+Cost model fitted from these: step ~= S + u x P, u = number of pair updates.
+    no tri-attn: S (10 single blocks + rest) ~131 ms, P ~108 ms per pair update -> one pair update ~ 0.8x the
+    WHOLE 10-block single stack (~10-25 single blocks).  tri-attn: S ~164 ms, P ~364 ms per update (~2.2x the
+    whole single stack).
+-> Time-balancing single vs pair work ("two singles per pair op") would need k >= 10 at this size; the pair
+   update is ~25x (no tri-attn) to ~60x+ (tri-attn) a single block, not 2x. Raw: results/raw/diag/decoupled_profile/.
