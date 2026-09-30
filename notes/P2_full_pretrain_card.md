@@ -4,8 +4,8 @@
 W&B `CS_Pharm/pairformer_pretrain`. Baseline = the existing transformer production logs (K141): no new
 transformer runs. Comparisons are normalised for FLOPs/time afterwards (K144).
 
-**Gate:** the intensity-leak audit (K147) must pass first. Chris's Pairformer runs reached loss 0.014 / 0.0012
-vs 0.061 for the transformer: consistent with the leak his branch had.
+**Gate:** the intensity-leak audit (K147) must pass first. The earlier Pairformer runs (the user's) reached loss 0.014 / 0.0012
+vs 0.061 for the transformer: consistent with the leak the source branch had (loss scales differ, see K147 correction).
 
 **Fixed (from decisions):** current feature set (Fourier Δm/z, loss bank σ 10 ppm, isotope, relative
 intensity with masked stand-in, no mass defect); same precursor decision as the transformer; master's

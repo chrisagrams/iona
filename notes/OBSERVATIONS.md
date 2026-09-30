@@ -1964,7 +1964,7 @@ set (F n = 0), so the filtered-failure columns are empty; filter passes = all qu
 W&B CS_Pharm/msdelta-pretrain, run msdelta-50m-production-01 (master's recipe, warmup 2000): loss 0.97 -> 0.93
 and FLAT to step ~650 with grad norm 0.03-0.05, then breaks through (0.89 @700, 0.52 @1000, 0.43 @1200).
 Stage 0 transformer (8878340): flat 0.83 for all 300 steps, grad norm ~0.03 -- the same plateau; 300 steps
-never reach the break-through. The Pairformer leaves its plateau early (0.90 -> 0.32 in 300 steps), as Chris's
+never reach the break-through. The Pairformer leaves its plateau early (0.90 -> 0.32 in 300 steps), as the user's earlier
 msdelta-pairformer-50m did (10.5 -> 0.48 by step 400). So Stage 0 measured "time to leave the plateau", not
 quality: comparisons need runs well past the break-through, normalised for FLOPs/time (K144 step 1).
 Setup differences from master (not the cause, but to fix for real comparisons): warmup 11 vs 2000, 300 steps,

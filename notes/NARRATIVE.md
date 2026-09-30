@@ -19,7 +19,7 @@ Keep this under a page. Append a line per chapter change; details live in OBSERV
 - **Evaluation upgraded:** every number with/without precursor filter (none / 20 ppm / isotope-tolerant),
   on filter passes and failures; library search; unseen species (mouse, human, yeast, 8-species OOD).
 - **Infra:** per-job code snapshots, run-from-commit, job DAG, strict checkpoint loading, package reorg.
-- **Pairformer (P1):** ported, reviewed, profiled (triangle multiplications dominate; SDPA default).
+- **Pairformer (P1):** the user's earlier design (branch `sweep/pairformer-aurora`, W&B runs incl. `pairformer_pretrain`) ported, reviewed, profiled (triangle multiplications dominate; SDPA default).
 
 ## 3. The per-scale search, and the Aurora update (2026-09-28 → 29)
 - **K66-C:** 4 settings × 3 seeds at every scale, final checkpoint. 100m/200m: lr 4e-4 + 170×2 leads on
