@@ -1,0 +1,6 @@
+--processor_name_or_path configs/stage0/pairformer
+--max_peaks 150
+--dataset_repo_id /lus/flare/projects/UIC-HPC/khuss/msdelta/data/p2-cap150-half/raw
+--dataset_train_split train
+--dataset_validation_split validation
+--preprocessing_num_workers 96
