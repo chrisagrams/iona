@@ -215,7 +215,10 @@ source "$REPO_DIR/pbs/lib/code_snapshot.sh"
 # K162-P: compiled runs need Intel Triton. The .venv's upstream triton has no intel backend and shadows the
 # frameworks module's triton (backends/intel), so link ONLY that package (+ dist-info) into a job-local dir put
 # first on PYTHONPATH (inherited by inductor's compile workers); nothing in the venv changes. As K119/K128.
-if [[ $TORCH_COMPILE == 1 ]]; then
+if [[ $TORCH_COMPILE == 1 ]] && ! "$VENV_DIR/bin/python" -c \
+        'import os, triton; raise SystemExit(0 if os.path.isdir(os.path.dirname(triton.__file__) + "/backends/intel") else 1)' \
+        2>/dev/null; then
+    # K167-I: only for a venv whose triton lacks the intel backend (the 2025.3.1 .venv); .venv-2026 needs none.
     SYSTEM_TRITON_SITE=${SYSTEM_TRITON_SITE:-/opt/aurora/26.26.0/frameworks/aurora_frameworks-2025.3.1/lib/python3.12/site-packages}
     TRITON_SHIM=$RUN_DIR/triton-shim-$JOB_ID
     mkdir -p "$TRITON_SHIM"
@@ -223,9 +226,12 @@ if [[ $TORCH_COMPILE == 1 ]]; then
         ln -sfn "$f" "$TRITON_SHIM/$(basename "$f")"
     done
     export PYTHONPATH=$TRITON_SHIM:$PYTHONPATH
+    echo "torch.compile: Intel triton from $SYSTEM_TRITON_SITE (shim $TRITON_SHIM)"
+fi
+if [[ $TORCH_COMPILE == 1 ]]; then
     export TRITON_CACHE_DIR=${TRITON_CACHE_DIR:-/tmp/msdelta-triton-$JOB_ID}
     export TORCHINDUCTOR_CACHE_DIR=${TORCHINDUCTOR_CACHE_DIR:-/tmp/msdelta-inductor-$JOB_ID}
-    echo "torch.compile on: Intel triton from $SYSTEM_TRITON_SITE (shim $TRITON_SHIM), ONEAPI_DEVICE_SELECTOR unset"
+    echo "torch.compile on: venv $VENV_DIR, ONEAPI_DEVICE_SELECTOR=${ONEAPI_DEVICE_SELECTOR:-<unset>}"
 fi
 export MASTER_ADDR=${MASTER_ADDR:-$(head -n 1 "$NODE_LIST")}
 export MASTER_PORT=${MASTER_PORT:-29500}
