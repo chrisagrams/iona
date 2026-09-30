@@ -161,7 +161,8 @@ timed region). Settings the writing agent chose (all CLI flags):
   login node; if the job reports `basis: cpu_self` or large unattributed time, re-classify offline from the traces.
 - K131b the stage-0 configs have triangle attention OFF; the bench uses their dims with the code's sdpa default.
 
-### K110-S: checkpoint cleanup on /flare (inventory done 2026-09-29: notes/K110_checkpoint_inventory.md; open)
+### K110-S: checkpoint cleanup on /flare (f, g, a-lite DELETED 2026-09-30; rest open)
+Confirm: delete the remaining checkpoint WEIGHTS of the K110a runs too (only finals kept)? K110b/c/d/h/i/j open.
 Decide per tier (K110a..K110k in the card). Biggest: K110a old-run intermediate checkpoints 1,055 GiB (or
 K110a-lite, optimizer/rng states only, 781 GiB); K110b recent-run checkpoints 417 GiB; K110f crashed FT19
 runs 328 GiB. Also: runs/quarantine/checkpoint-13800 (origin unknown); K110c / part of K110d wait for
