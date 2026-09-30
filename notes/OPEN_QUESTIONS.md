@@ -244,6 +244,15 @@ checkpoints, 21 50m arms not started). With consensus: the remaining ~69 twins (
 go forward with consensus ("we probably will then go forward with the consensus runs"), so the likely alternative
 is consensus-only on the remaining checkpoints and K155 left paused.
 
+### K166-P (open) -- more pair updates / deeper Pairformer: which arms?
+User: "here we're only doing 2 pairwise updates, I want to see what happens when there are more" and "Can we try an
+intermediate model with 14 layers where k=7 and so we have 2 pair updates?" Done so far (P2 recipe, 10 layers,
+hidden 512): k5 = 2 updates 0.0926, k1 = 10 updates 0.0907. Proposal (P2 recipe otherwise: c_z 32, outgoing,
+factored write-back, no tri-attn, 23,387 steps, same data/masks, eval_mlm; 2 nodes x micro 24; torch.compile if
+K167-I validates): A = 14 layers k7 (2 updates, the user's); B = 15 layers k5 (3 updates); C = 20 layers k5 (4 updates).
+A isolates "more single layers at the same pair cost"; B/C add pair updates at the k5 spacing. ~2-4 node-h each.
+Needs: which arms, and whether a 14-layer transformer baseline is wanted for matched comparison.
+
 ### K85-P: the first Pairformer vs transformer comparison run (open; see K91-K95 and the review)
 Context: `notes/P1_card_draft.md` (branch p1-pairformer) drafts a short debug pretraining run
 comparing the ported Pairformer with our transformer at ~50M parameters (loss curves, step time).
