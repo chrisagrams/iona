@@ -139,6 +139,8 @@ IDs carry a track suffix: -C contrastive (spectrum encoder), -A alignment (pepti
 | 2026-09-30 | K150-P | Optimise the Pairformer BEFORE the 0.5-epoch comparison runs (preprocessing continues) | user |
 | 2026-09-30 | K129-I | Core dumps off in every job (ulimit -c 0 in load_frameworks.sh; opt-out MSDELTA_CORE_DUMPS=1) | user |
 | 2026-09-30 | K110-S | Approved and DONE (deletion protocol: lists rebuilt + re-verified live -- no final/, unreferenced, job not live, K110f reruns exist; dry run; tested on a copy; staged live): K110g 123 dirs (12 GiB; runs/allocfix kept -- referenced by pbs/diag/allocfix.sh), K110f 25 crashed runs (328 GiB), K110a-lite 4,836 optimizer/scheduler/rng/global_step items in checkpoints of 262 old finished runs (781 GiB; weights and finals kept). Lists + logs: $S/k110-logs/. Project 8.75/10 TB after. Still open: full K110a (delete those checkpoints' weights too -- user said "we would only need the models"; to confirm), K110b/c/d/h/i/j | user |
+| 2026-09-30 | C18-C | Full prep: clean (peptide-disjoint) splits; KEEP oversize spectra whole (MAX_PEAKS=1000000; loaders drop/trim if needed); no group cap yet -- look at group-size statistics first. Job 8879991 | user |
+| 2026-09-30 | K117-P | Run the copy-cost bench (job 8879977) | user |
 
 ## Settings chosen WITHOUT explicit approval (before this log existed)
 
