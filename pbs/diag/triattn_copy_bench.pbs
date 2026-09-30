@@ -35,7 +35,12 @@ JOB=${PBS_JOBID%%.*}; JOB=${JOB:-local}
 O=results/raw/diag/triattn_copy_bench; mkdir -p "$O"
 
 echo "=== $(date -Is) triattn copy bench on $(hostname), job $JOB"
-"$PY" "$MSDELTA_CODE_DIR"/pbs/diag/triattn_copy_bench.py --out "$O/$JOB.json" ${BENCH_ARGS:-} 2>&1 | tee "$O/$JOB.log"
+# qsub -v cannot carry commas: BENCH_BATCHES / BENCH_PEAKS use "+" between values (e.g. BENCH_PEAKS=150+200).
+ARGS=()
+[[ -n ${BENCH_BATCHES:-} ]] && ARGS+=(--batches "${BENCH_BATCHES//+/,}")
+[[ -n ${BENCH_PEAKS:-} ]] && ARGS+=(--peaks "${BENCH_PEAKS//+/,}")
+[[ -n ${BENCH_TRACE:-} ]] && ARGS+=(--trace-sizes "${BENCH_TRACE//+/,}")
+"$PY" "$MSDELTA_CODE_DIR"/pbs/diag/triattn_copy_bench.py --out "$O/$JOB.json" "${ARGS[@]}" 2>&1 | tee "$O/$JOB.log"
 rc=${PIPESTATUS[0]}
 echo "=== $(date -Is) done (rc=$rc)"
 exit $rc
