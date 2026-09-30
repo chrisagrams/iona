@@ -29,7 +29,7 @@ O=results/raw/diag/k172_overlap; mkdir -p "$O"
 echo "=== $(date -Is) python $PY ($("$PY" -c 'import torch; print(torch.__version__)' 2>/dev/null))"
 timeout 3300 "$PY" "$MSDELTA_CODE_DIR"/pbs/diag/k172_overlap.py --out "$O/$JOB.json" \
     --config "$REPO_DIR/configs/p2/p2-cz32-k5/config.json" \
-    --batch 24 --peaks 150 --ks 5,7 --layers 10,14 --warmup 5 --reps 20 \
+    --batch 24 --peaks 150 --ks "${K172_KS:-1,2,3,5,7}" --layers "${K172_LAYERS:-10,14}" --warmup 5 --reps 20 \
     2>&1 | tee "$O/$JOB.log" | grep -E "^\[k172\]|Error|Traceback"
 echo "=== $(date -Is) done"
 exit 0
