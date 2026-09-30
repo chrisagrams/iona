@@ -142,6 +142,9 @@ IDs carry a track suffix: -C contrastive (spectrum encoder), -A alignment (pepti
 | 2026-09-30 | C18-C | Full prep: clean (peptide-disjoint) splits; KEEP oversize spectra whole (MAX_PEAKS=1000000; loaders drop/trim if needed); no group cap yet -- look at group-size statistics first. Job 8879991 | user |
 | 2026-09-30 | K117-P | Run the copy-cost bench (job 8879977) | user |
 | 2026-09-30 | K130-P | Bench settings approved; batch sizes checked against master: master configs micro 64/tile (transformer; PBS default global 512), the production transformer runs logged micro 2 x accum 4, the Pairformer branch (exp_pairformer) and Stage 0 use micro 32 (Chris also ran 8). The bench's B=2,8 miss 32 -> supplementary run B=32, N=150/200 (N>=256 at B=32 OOMs with tri-attn, K114) | user |
+| 2026-09-30 | K130-P | Use the batch size of the best pretraining run: best Pairformer run on W&B (CS_Pharm/pairformer_pretrain pf-baseline, eval 0.060) used micro 32 -> the B=32 supplement (8880031) is the relevant one; best transformer run (400m production, eval 0.054) used micro 1 x accum 4 | user |
+| 2026-09-30 | K117-P | Adopt the copy-free triangle-attention layout as the default (agent on branch k117-adopt) | user |
+| 2026-09-30 | K114-P | Decoupled streams WILL be implemented (agent on branch decoupled-streams; knobs default to the current model); checking whether triangle attention is worth it stays important | user |
 
 ## Settings chosen WITHOUT explicit approval (before this log existed)
 
