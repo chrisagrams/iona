@@ -244,6 +244,16 @@ checkpoints, 21 50m arms not started). With consensus: the remaining ~69 twins (
 go forward with consensus ("we probably will then go forward with the consensus runs"), so the likely alternative
 is consensus-only on the remaining checkpoints and K155 left paused.
 
+### K172-P (open) -- make the two streams actually run in parallel
+User (K169): "the entire point we do this is to run the two streams in parallel." Current state: the code has
+pair_update_every (k) and pair_bias_lag (K114), and lag 1 removes the dependency so the pair update COULD overlap the
+single blocks, but concurrent execution is NOT implemented (pairformer.py "What true concurrency would still
+need"); every P2 run used lag 0 and ran the two streams one after the other. Proposal: (1) implement same-tile
+two-stream execution at lag 1 (side XPU stream per round, events, record_stream; check XPU overlaps kernels incl.
+backward), CPU/equivalence tests on login; (2) debug-node timing: k5 lag 1 overlapped vs sequential, micro 24;
+(3) if it overlaps, a P2-length k5 lag-1 run to measure the loss cost of the one-round-stale bias. Balance target:
+pair update time ~= k single layers (k ~7 at large per-tile batch, K169). Needs: go-ahead.
+
 ### K166-P (open) -- more pair updates / deeper Pairformer: which arms?
 User: "here we're only doing 2 pairwise updates, I want to see what happens when there are more" and "Can we try an
 intermediate model with 14 layers where k=7 and so we have 2 pair updates?" Done so far (P2 recipe, 10 layers,
