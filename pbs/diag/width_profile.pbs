@@ -1,0 +1,39 @@
+#!/bin/bash -l
+#PBS -N k154-widths
+#PBS -A UIC-HPC
+#PBS -l select=1
+#PBS -l walltime=01:00:00
+#PBS -l filesystems=home:flare
+#PBS -j oe
+#PBS -o pbs/logs/
+# K154-P (user 2026-09-30: "pick the width based on the cost of pair pass vs single pass with the new
+# parameters"): per-block profile of the stage-0 Pairformer (k=1, so every layer has one pair update and
+# one single block) at B=32 N=150, without and with triangle attention, for
+#   c_z = c_t in {16, 32, 64}, c_o = 16, outgoing triangle multiplication only, factored write-back
+#   + the old layout (64/64/16, both triangle multiplications, materialised write-back) as the reference.
+# One process per setting. Diagnostic only, no training.   qsub -q debug -v REPO_DIR=$PWD pbs/diag/width_profile.pbs
+REPO_DIR=${REPO_DIR:-${PBS_O_WORKDIR:-$PWD}}
+cd "$REPO_DIR"
+source "$REPO_DIR/pbs/lib/load_frameworks.sh"
+set -uo pipefail
+export ONEAPI_DEVICE_SELECTOR=level_zero:gpu ZE_FLAT_DEVICE_HIERARCHY=FLAT ZE_AFFINITY_MASK=0
+export OMP_NUM_THREADS=${OMP_NUM_THREADS:-8} PYTHONPATH=$REPO_DIR${PYTHONPATH:+:$PYTHONPATH}
+source "$REPO_DIR/pbs/lib/code_snapshot.sh"
+PY="$REPO_DIR/.venv/bin/python"
+JOB=${PBS_JOBID%%.*}; JOB=${JOB:-local}
+O=results/raw/diag/width_profile; mkdir -p "$O"
+declare -A SPECS=(
+  [ref64_both]='{"pair_channels": 64, "pair_tri_channels": 64, "pair_opm_channels": 16, "pair_tri_mul": "both", "pair_writeback_impl": "materialize"}'
+  [cz64_out]='{"pair_channels": 64, "pair_tri_channels": 64, "pair_opm_channels": 16, "pair_tri_mul": "outgoing"}'
+  [cz32_out]='{"pair_channels": 32, "pair_tri_channels": 32, "pair_opm_channels": 16, "pair_tri_mul": "outgoing"}'
+  [cz16_out]='{"pair_channels": 16, "pair_tri_channels": 16, "pair_opm_channels": 16, "pair_tri_mul": "outgoing"}'
+)
+for tag in ref64_both cz64_out cz32_out cz16_out; do
+    echo "=== $(date -Is) $tag"
+    timeout 720 "$PY" "$MSDELTA_CODE_DIR"/pbs/diag/pairformer_profile.py --out "$O/${JOB}_$tag.json" \
+        --models pairformer,pairformer_triattn --batches 32 --peaks 150 \
+        --pair-config-overrides "${SPECS[$tag]}" \
+        2>&1 | tee "$O/${JOB}_$tag.log" | grep -E "^\[profile\].*(ok|oom|error)"
+done
+echo "=== $(date -Is) done"
+exit 0
