@@ -1,6 +1,6 @@
 # Project notes
 
-**Getting back into the project? Read `PRIMER.md` (orientation) then `NARRATIVE.md` (story + direction), then `STATUS.md`.**
+**Getting back into the project? Read `PRIMER.md` (orientation) then `NARRATIVE.md` (story + direction), then `STATUS.md`. How we work (for any agent): `AGENT_PLAYBOOK.md`.**
 
 Five files, one job each. If something doesn't fit exactly one of them, it goes nowhere
 until it does.
