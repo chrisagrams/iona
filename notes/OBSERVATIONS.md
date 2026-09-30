@@ -2147,6 +2147,28 @@ Tri-attn led early (6k: 0.154 vs 0.158), tied at 10k, and fell behind from 12k (
 final (8881426) though training eval was finite -- likely a masking/padding edge case in triangle attention at
 eval_mlm's batch shapes; to fix before any tri-attn number is trusted from eval_mlm.
 
+## K167-I torch.compile works on frameworks/2026.1.0: k5 2.0x faster per step (held debug node 8882085, 2026-09-30)
+.venv-2026 (torch 2.13, Intel triton_xpu 3.7.2), one node, tiles 2-11 (10 ranks), micro 24, global 480 (2 accumulation
+steps), P2 configs, step time over steps 150-300. Raw: $S/runs/k168/k168c/summary.txt.
+| arm | eager | compiled | first step (compile) |
+|---|---|---|---|
+| k5, pad to 150 | 0.313 s | 0.153 s (2.05x) | 106 s vs 7 s |
+| k5, pad to longest (production) | 0.313 s | - | 5 s |
+| k1, pad to 150 | (old env: ~0.75 s equivalent) | 0.267 s (~2.8x) | 119 s |
+Fixed padding (pad_to_multiple_of 150 = one shape) costs nothing eager at cap 150. Earlier failures: 2025.3.1 .venv's
+upstream triton (no intel backend), then IGC crashes with the shim (K162); on 2026.1.0 both gone. Not yet checked:
+compiled vs eager loss curves agree (numerics), and multi-node compiled runs.
+
+## K168-C 400m consensus seed-0 crash = out of GPU memory surfacing as a page fault (2026-09-30)
+Held node 8882085, tiles 0-1 = one card, xpu-smi trace. As-is (trimmed GradCache chunks): card memory climbs to 95.9 GB
+(~65 GB on the crashing tile, limit 64) and the run faults at the first evaluation (Python stack: prediction_step ->
+SupCon loss), then the card drops to 30 GB = the untrimmed run alone. Untrimmed (--gradcache_trim_padding false): ~30 GB
+but 82 s/step vs ~30 (2.7x slower). Cause: trimming cuts each chunk to its own longest spectrum, so the allocator keeps
+one cached block per chunk width the seed happened to draw; consensus spectra are longer, seed 0 draws a bad mix, and
+the evaluation's allocations on top exceed the tile (XPU reports it as "Segmentation fault from GPU ... NotPresent"
+instead of OOM, as in FT7). Fix (memory only, numerics unchanged): free the XPU cache before every evaluation
+(EvaluationCacheCallback registered in finetune_contrastive + before the post-training evaluation). Retest running.
+
 ## K66-C / K136-C final-checkpoint arms on the other sets (mean of 3 seeds, experimental MAP@R, unfiltered)
 | set | scale | lr2e-4 P128 | lr4e-4 P128 | lr4e-4 P170 | lr8e-4 P128 |
 |---|---|---|---|---|---|
