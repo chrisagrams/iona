@@ -191,22 +191,13 @@ PY
     )
     echo "resuming latest checkpoint: $RESUME_FROM_CHECKPOINT"
 fi
-TORCH_COMPILE=${TORCH_COMPILE:-true}
-if [[ $TORCH_COMPILE != true && $TORCH_COMPILE != false ]]; then
-    echo "TORCH_COMPILE must be true or false" >&2
-    exit 2
-fi
 TORCHINDUCTOR_CACHE_DIR=${TORCHINDUCTOR_CACHE_DIR:-/tmp/torchinductor-$USER}
 DDP_ARGS_FILE=$RUN_DIR/training-ddp.args
 awk '
     $1 != "--deepspeed" &&
-    $1 != "--torch_compile" &&
     $1 != "--logging_nan_inf_filter"
 ' "$ARGS_FILE" >"$DDP_ARGS_FILE"
-printf '%s\n' \
-    "--torch_compile $TORCH_COMPILE" \
-    '--logging_nan_inf_filter false' \
-    >>"$DDP_ARGS_FILE"
+printf '%s\n' '--logging_nan_inf_filter false' >>"$DDP_ARGS_FILE"
 
 cd "$REPO_DIR"
 NODE_LIST=$RUN_DIR/pbs-nodes
@@ -289,7 +280,7 @@ fi
 echo "$(date -Is) job=${PBS_JOBID:-local} hosts=$NUM_HOSTS xpus_per_host=$XPUS_PER_HOST total_xpus=$TOTAL_XPUS global_batch=$GLOBAL_BATCH_SIZE micro_batch=$MICRO_BATCH_SIZE accumulation=$GRADIENT_ACCUMULATION_STEPS run=$RUN_NAME"
 echo "daos=${DAOS_POOL}:${DAOS_CONT} dataset=$PREPROCESSED_DATASET_DIR checkpoints=$CHECKPOINT_DIR"
 echo "walltime=${JOB_WALLTIME_SECONDS}s checkpoint_margin=${CHECKPOINT_MARGIN_SECONDS}s deadline=$IONA_JOB_DEADLINE_EPOCH"
-echo "torch_compile=$TORCH_COMPILE inductor_cache=$TORCHINDUCTOR_CACHE_DIR"
+echo "inductor_cache=$TORCHINDUCTOR_CACHE_DIR"
 echo "nodes:"
 sed 's/^/  /' "$NODE_LIST"
 "$VENV_DIR/bin/python" -c 'import torch; print(f"torch={torch.__version__} xccl={torch.distributed.is_xccl_available()}")'
@@ -343,7 +334,6 @@ TRAIN_ARGS=(
     --per_device_train_batch_size "$MICRO_BATCH_SIZE"
     --gradient_accumulation_steps "$GRADIENT_ACCUMULATION_STEPS"
     --ddp_backend xccl
-    --torch_compile "$TORCH_COMPILE"
     --logging_nan_inf_filter false
     --probe_execution "$PROBE_EXECUTION"
 )
