@@ -1970,3 +1970,24 @@ quality: comparisons need runs well past the break-through, normalised for FLOPs
 Setup differences from master (not the cause, but to fix for real comparisons): warmup 11 vs 2000, 300 steps,
 cap 150 peaks, no DeepSpeed / torch_compile, global batch 512.
 
+
+## C27-C: weighting the consensus more heavily does not help library search (job 8878582; scored 2026-09-29/30)
+
+50m@540k, K66 recipe (lr 4e-4, 128 x 2), 3 seeds; mean ± half range. ref_exp = K53 runs 8873825 (no consensus).
+Library search = experimental query vs consensus-only library. No query fails the precursor filter here (F n=0).
+Raw: results/raw/finetune/contrastive/c27-{validation,test,oodval,mouse,human,yeast}/ (yeast still scoring).
+
+    validation     exp MAP@R      library Hit@1: open / 20 ppm / iso 20 ppm
+    ref_exp        0.886±0.002    0.872±0.004 / 0.994 / 0.983
+    cons_w1        0.874±0.002    0.947±0.000 / 0.998 / 0.995
+    cons_w3        0.864±0.000    0.947±0.001 / 0.998 / 0.995
+    cons_always    0.844±0.000    0.946±0.001 / 0.998 / 0.995
+    cons_w3_kl0    0.862±0.002    0.945±0.000 / 0.998 / 0.995
+    (test: same ranking; ref 0.888 / 0.872, w1 0.876 / 0.947, always 0.846 / 0.945)
+
+1. Consensus in training (w1) lifts unfiltered library Hit@1 0.872 -> 0.947 (+0.075); with 20 ppm 0.994 -> 0.998.
+2. Weighting it more (w3, always) adds NOTHING to library search (0.945-0.947) and costs experimental MAP@R
+   in proportion to the weight: -0.012 (w1), -0.022 (w3), -0.042 (always) vs ref. KL 0 doesn't help either.
+3. The approved guard (exp MAP@R drop <= seed spread) rejects every consensus arm, w1 included (-0.012 vs
+   ±0.002): consensus trades ~0.012 experimental MAP@R for ~0.075 library Hit@1 (user's call, K139c/K135).
+4. Note the reference is much better at library search at the new recipe (0.872) than at C20's old recipe (0.71).
