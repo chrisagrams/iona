@@ -30,6 +30,9 @@ if (( _lf_rc != 0 )) || ! module is-loaded "${_lf_mod}" 2>/dev/null; then
     (( _lf_had_u )) && set -u
     return 3 2>/dev/null || exit 3
 fi
+# K129-I (2026-09-30): no core dumps by default -- an abort wrote 2-3.5 GB cores into the job's working
+# directory (the repo on /home). MSDELTA_CORE_DUMPS=1 re-enables them (e.g. to debug a native crash).
+[[ ${MSDELTA_CORE_DUMPS:-0} == 1 ]] || ulimit -c 0
 # K138-I (2026-09-29): mpiexec (PALS) gives each rank TMPDIR=$TMPDIR/<uuid>/tmp. With PBS's job TMPDIR
 # (/var/tmp/pbs.<full job id>, 68 chars) that is 109 chars, over the 108-char AF_UNIX socket limit, so
 # DataLoader workers crash ("OSError: AF_UNIX path too long") and every mpiexec-launched run hangs.
