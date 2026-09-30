@@ -108,7 +108,7 @@ def _run(model, batch, checkpointing=False):
 def test_defaults_bit_identical_to_reference(reference_module, monkeypatch, overrides,
                                              checkpointing):
     # The reference (07f53424) predates the sdpa_view default (K117); pin the impl both sides know.
-    cfg = _config(**{"pair_tri_attn_impl": "sdpa", **overrides})
+    cfg = _config(**{"pair_tri_attn_impl": "sdpa", "pair_writeback_impl": "materialize", **overrides})
     batch = _batch()
     new = _model(cfg)
     torch.manual_seed(123)  # dropout stream

@@ -420,6 +420,12 @@ class TriangleAttention(nn.Module):
 class OuterProductMean(nn.Module):
     """Single -> pair write-back, ``z_ij += Linear(a_i (x) b_j)`` (AF3 Alg. 9, one sequence).
 
+    ``pair_writeback="outer"``: the outer product of ``a_i`` and ``b_j`` (``c_o`` each). With
+    ``pair_writeback_impl="factored"`` (K152-P(a)) the ``(B, N, N, c_o^2)`` tensor is never
+    built: ``W (a_i (x) b_j) = sum_c a_ic (W_c b_j)``, so ``W_c b_j`` is computed per peak and
+    contracted with ``a_i`` in one matmul -- same parameters, same math up to float rounding.
+    ``pair_writeback="pointwise"``: ``Linear(a_i * b_j)`` (rank ``c_o`` instead of ``c_o^2``).
+
     The output projection is a ``ZeroInitLinear`` (zeroed by
     ``MSDeltaPreTrainedModel._init_weights``) so the write-back starts as a no-op.
     """
@@ -427,18 +433,29 @@ class OuterProductMean(nn.Module):
     def __init__(self, config: MSDeltaConfig):
         super().__init__()
         c = config.pair_opm_channels
+        self.form = getattr(config, "pair_writeback", "outer")
+        self.impl = getattr(config, "pair_writeback_impl", "factored")
         self.norm = nn.LayerNorm(config.hidden_size, eps=config.layer_norm_eps)
         self.left = nn.Linear(config.hidden_size, c, bias=False)
         self.right = nn.Linear(config.hidden_size, c, bias=False)
-        self.out = ZeroInitLinear(c * c, config.pair_channels)
+        self.out = ZeroInitLinear(c * c if self.form == "outer" else c, config.pair_channels)
 
     def forward(self, s: Tensor, mask: Tensor) -> Tensor:
         s = self.norm(s)
         m = mask.unsqueeze(-1).to(s.dtype)
         a = self.left(s) * m
         b = self.right(s) * m
-        outer = torch.einsum("bic,bjd->bijcd", a, b)
-        return self.out(outer.reshape(*outer.shape[:3], -1))
+        if self.form == "pointwise":
+            return self.out(a.unsqueeze(2) * b.unsqueeze(1))
+        if self.impl == "materialize":
+            outer = torch.einsum("bic,bjd->bijcd", a, b)
+            return self.out(outer.reshape(*outer.shape[:3], -1))
+        B, N, c = a.shape
+        c_z = self.out.out_features
+        w = self.out.weight.view(c_z, c, c)  # [z, c (from a), d (from b)]
+        t = torch.einsum("zcd,bjd->bcjz", w, b).reshape(B, c, N * c_z)
+        out = torch.matmul(a, t).view(B, N, N, c_z)
+        return out if self.out.bias is None else out + self.out.bias
 
 
 def pair_update_schedule(config: MSDeltaConfig) -> list[tuple[bool, bool]]:
@@ -473,8 +490,11 @@ class PairLayer(nn.Module):
         if self.use_writeback:
             self.opm = OuterProductMean(config)
         if self.pair_update == "triangle":
-            self.tri_out = TriangleMultiplication(config, outgoing=True)
-            self.tri_in = TriangleMultiplication(config, outgoing=False)
+            tri_mul = getattr(config, "pair_tri_mul", "both")  # K151-P: one or both directions
+            if tri_mul in ("both", "outgoing"):
+                self.tri_out = TriangleMultiplication(config, outgoing=True)
+            if tri_mul in ("both", "incoming"):
+                self.tri_in = TriangleMultiplication(config, outgoing=False)
             if self.use_triangle_attention:
                 self.tri_attn_start = TriangleAttention(config, starting=True)
                 self.tri_attn_end = TriangleAttention(config, starting=False)
@@ -506,8 +526,10 @@ class PairLayer(nn.Module):
         if self.use_writeback:
             z = z + self.dropout(self.opm(s, mask))
         if self.pair_update == "triangle":
-            z = z + self.dropout(self.tri_out(z, pair_mask))
-            z = z + self.dropout(self.tri_in(z, pair_mask))
+            if hasattr(self, "tri_out"):
+                z = z + self.dropout(self.tri_out(z, pair_mask))
+            if hasattr(self, "tri_in"):
+                z = z + self.dropout(self.tri_in(z, pair_mask))
             if self.use_triangle_attention:
                 z = z + self.dropout(self.tri_attn_start(z, mask))
                 z = z + self.dropout(self.tri_attn_end(z, mask))

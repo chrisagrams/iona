@@ -51,6 +51,14 @@ class MSDeltaConfig(PretrainedConfig):
         pair_tri_attn_checkpoint_chunks: bool = False,  # K102
         pair_use_writeback: bool = True,
         pair_opm_channels: int = 8,
+        # K152-P write-back form: "outer" = Linear(a_i (x) b_j) (the original), "pointwise" =
+        # Linear(a_i * b_j) (width pair_opm_channels; cheaper, kept as a speed option).
+        pair_writeback: str = "outer",
+        # "factored" = the outer product computed without materialising the c_o^2 tensor (same
+        # math and parameters, K152-P(a)); "materialize" = the original einsum (reference).
+        pair_writeback_impl: str = "factored",
+        # K151-P: which triangle multiplications run: "both" (original), "outgoing" or "incoming".
+        pair_tri_mul: str = "both",
         pair_single_use_mz: bool = True,
         pair_use_intensity: bool = True,
         pair_use_mass_defect: bool = False,  # dropped by default (user, K91/K113, 2026-09-28)
@@ -92,6 +100,9 @@ class MSDeltaConfig(PretrainedConfig):
         self.pair_tri_attn_checkpoint_chunks = pair_tri_attn_checkpoint_chunks
         self.pair_use_writeback = pair_use_writeback
         self.pair_opm_channels = pair_opm_channels
+        self.pair_writeback = pair_writeback
+        self.pair_writeback_impl = pair_writeback_impl
+        self.pair_tri_mul = pair_tri_mul
         self.pair_single_use_mz = pair_single_use_mz
         self.pair_use_intensity = pair_use_intensity
         self.pair_use_mass_defect = pair_use_mass_defect
@@ -153,6 +164,12 @@ class MSDeltaConfig(PretrainedConfig):
                 raise ValueError("pair_tri_attn_impl must be 'naive', 'sdpa' or 'sdpa_view'")
         if self.pair_use_writeback and self.pair_opm_channels <= 0:
             raise ValueError("pair_opm_channels must be positive when pair_use_writeback is set")
+        if self.pair_writeback not in ("outer", "pointwise"):
+            raise ValueError("pair_writeback must be 'outer' or 'pointwise'")
+        if self.pair_writeback_impl not in ("factored", "materialize"):
+            raise ValueError("pair_writeback_impl must be 'factored' or 'materialize'")
+        if self.pair_tri_mul not in ("both", "outgoing", "incoming"):
+            raise ValueError("pair_tri_mul must be 'both', 'outgoing' or 'incoming'")
         if self.pair_loss_bank_sigma_ppm <= 0:
             raise ValueError("pair_loss_bank_sigma_ppm must be positive")
         if not 0.0 <= self.pair_dropout < 1.0:

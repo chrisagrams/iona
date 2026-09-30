@@ -343,6 +343,9 @@ bf16.
 | `pair_tri_attn_heads` / `_dim` / `_chunk` | H_t / d_t / query-row chunk | 2 / 8 / 32 | 4 / 16 / 32 (`tri_attn_*`) |
 | `pair_use_writeback` | block a | True | True (`use_writeback`) |
 | `pair_opm_channels` | c_o | 8 | 16 (`opm_channels`) |
+| `pair_writeback` | write-back form: `outer` Linear(a_i ⊗ b_j) or `pointwise` Linear(a_i ⊙ b_j) (K152-P) | outer | (outer) |
+| `pair_writeback_impl` | `factored` (outer product never materialised; same weights/math) or `materialize` | factored | (materialize) |
+| `pair_tri_mul` | triangle multiplications run: `both` / `outgoing` / `incoming` (K151-P) | both | (both) |
 | `pair_single_use_mz` | m/z term in the token | True | True (`single_use_mz`) |
 | `pair_use_intensity` | p6 | True | True |
 | `pair_use_mass_defect` / `pair_mass_defect_n_freqs` | p2 / F_md | True / 16 | True / 32 (`mass_defect_n_freqs`) |
