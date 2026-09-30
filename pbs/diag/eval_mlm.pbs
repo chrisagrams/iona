@@ -1,0 +1,38 @@
+#!/bin/bash -l
+#PBS -N eval-mlm
+#PBS -A UIC-HPC
+#PBS -l select=1
+#PBS -l walltime=01:00:00
+#PBS -l filesystems=home:flare
+#PBS -j oe
+#PBS -o pbs/logs/
+# Masked-peak (pretraining) validation loss of saved checkpoints -- transformer and Pairformer alike --
+# on one preprocessed split, with the same spectra, the same masked peaks (fixed seed) and the trainer's
+# loss (msdelta/pretraining/eval_mlm.py). Evaluation only, one XPU tile. qsub -v values cannot contain
+# commas, so CHECKPOINTS is '+'-separated:
+#   qsub -q debug -v REPO_DIR=$PWD,CHECKPOINTS=/path/a+/path/b pbs/diag/eval_mlm.pbs
+# Optional -v: DATASET (default the P2 cap-150 set), SPLIT (validation), OUT, MAX_SPECTRA, BATCH_SIZE (32),
+# SEED (0), MASK_RATIO (0.50), PRECISION (bf16), PAD_TO_MULTIPLE_OF.
+REPO_DIR=${REPO_DIR:-${PBS_O_WORKDIR:-$PWD}}
+cd "$REPO_DIR"
+source "$REPO_DIR/pbs/lib/load_frameworks.sh"
+set -uo pipefail
+export ONEAPI_DEVICE_SELECTOR=level_zero:gpu ZE_FLAT_DEVICE_HIERARCHY=FLAT ZE_AFFINITY_MASK=0
+export OMP_NUM_THREADS=${OMP_NUM_THREADS:-8} PYTHONPATH=$REPO_DIR${PYTHONPATH:+:$PYTHONPATH}
+source "$REPO_DIR/pbs/lib/code_snapshot.sh"
+PY="$REPO_DIR/.venv/bin/python"
+JOB=${PBS_JOBID%%.*}; JOB=${JOB:-local}
+: "${CHECKPOINTS:?set CHECKPOINTS=/path/a+/path/b via qsub -v}"
+DATASET=${DATASET:-/lus/flare/projects/UIC-HPC/khuss/msdelta/data/p2-cap150-half/preprocessed}
+O=results/raw/diag/eval_mlm; mkdir -p "$O"
+OUT=${OUT:-$O/${JOB}.json}
+args=(--checkpoints "$CHECKPOINTS" --dataset "$DATASET" --split "${SPLIT:-validation}" --out "$OUT"
+      --batch_size "${BATCH_SIZE:-32}" --seed "${SEED:-0}" --mask_ratio "${MASK_RATIO:-0.50}"
+      --precision "${PRECISION:-bf16}" --device xpu)
+[[ -n ${MAX_SPECTRA:-} ]] && args+=(--max_spectra "$MAX_SPECTRA")
+[[ -n ${PAD_TO_MULTIPLE_OF:-} ]] && args+=(--pad_to_multiple_of "$PAD_TO_MULTIPLE_OF")
+echo "=== $(date -Is) eval_mlm -> $OUT"
+"$PY" -m msdelta.pretraining.eval_mlm "${args[@]}" 2>&1 | tee "${OUT%.json}.log" | grep -E "^\[eval_mlm\]"
+rc=${PIPESTATUS[0]}
+echo "=== $(date -Is) done rc=$rc"
+exit "$rc"
