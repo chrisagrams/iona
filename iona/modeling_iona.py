@@ -332,8 +332,6 @@ class IonaForPreTraining(IonaPreTrainedModel):
                 raise ValueError("labels must have the same shape as mz")
             if mask_positions is None:
                 raise ValueError("mask_positions must be provided with labels")
-            # Branchless so torch.compile does not graph-break; rows without
-            # masked peaks contribute zero loss and zero gradient.
             selected = mask_positions.bool()
             log_prob = F.log_softmax(
                 logits.masked_fill(~selected, float("-inf")), dim=-1
