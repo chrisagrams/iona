@@ -118,6 +118,18 @@ Card notes/P2_full_pretrain_card.md. Pick data/cap (a: cap 150 drop, ~80 node-h;
 ~280 node-h; c: + triangle attention ~2x; d: cap 256 ~5x), nodes/walltime, grad checkpointing, probes.
 Gated on the K147 leak audit. Dataset MSConsensus-100M (rev 78b3e74) is on /flare.
 
+### K151-P: making the pair update cheaper -- which knobs to screen (open, 2026-09-30)
+User: "the pair update needs to be cheaper; what is every knob?" Measured (8880138): one pair update ~= 108 ms
+(no tri-attn) / ~364 ms (tri-attn) vs ~131 ms for all 10 single blocks, B=32 N=150. Per-update time split
+(K114): triangle mult. out ~35% + in ~33%, write-back ~8%, pair transition ~8%, glue ~3%; tri-attn adds ~45%.
+Existing knobs: pair_update_every / pair_bias_lag (how many updates); pair_channels c_z (64; projections and
+transition scale ~c_z^2); pair_tri_channels c_t (64); pair_transition_expansion (2); pair_opm_channels c_o
+(16; write-back output ~c_o^2 * c_z); pair_use_writeback; pair_update triangle|transition|static;
+pair_use_triangle_attention (+ heads, dim); max_peaks N (N^2 everywhere, N^3 in the triangle einsums);
+delta_bias_n_freqs (pair-feature init, once). Not yet in code: fewer peaks in the pair stream only (top-k
+peaks), sparse pairs, low-rank pair, shared pair weights across updates. Proposal: a speed-only profiling
+screen first (no training), then a short training card for the cheapest settings.
+
 ### K110-S: checkpoint cleanup on /flare (f, g, a-lite DELETED 2026-09-30; rest open)
 Confirm: delete the remaining checkpoint WEIGHTS of the K110a runs too (only finals kept)? K110b/c/d/h/i/j open.
 Decide per tier (K110a..K110k in the card). Biggest: K110a old-run intermediate checkpoints 1,055 GiB (or
