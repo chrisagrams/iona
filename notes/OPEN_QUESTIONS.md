@@ -137,6 +137,14 @@ Card notes/P2_full_pretrain_card.md. Pick data/cap (a: cap 150 drop, ~80 node-h;
 Gated on the K147 leak audit. Dataset MSConsensus-100M (rev 78b3e74) is on /flare.
 
 ### K147-P: intensity-leak audit (running, 2026-09-30)
+CORRECTION (2026-09-30, checked): the pair-feature leak was found, verified and FIXED on the source branch
+(sweep/pairformer-aurora TODO.md 12a: pair feature log I_i - log I_j used the true masked intensity; a
+leak-only predictor scored skill 0.985; fix = learned stand-in, with a regression test). The port carries
+that fix. The transformer (paper model) was verified NOT affected by it (masked logits don't move: 0.0).
+Chris's W&B Pairformer losses (0.014 / 0.0012) CANNOT be compared with the transformer's 0.061: they start
+at 10.5 vs 0.97 (different loss scale; source TODO 12 discusses loss normalisation), so they are not
+evidence of a leak. The only transformer-relevant path is the weaker max-normalisation leak (K96).
+User asked (2026-09-30): train leak / leak-free copies and see whether it matters -- card K149.
 Agent on branch leak-audit: tests that masked peaks' intensities can't reach either model; quantify the
 known max-normalisation leak (K96); report notes/K147_intensity_leak_audit.md.
 
