@@ -135,6 +135,9 @@ IDs carry a track suffix: -C contrastive (spectrum encoder), -A alignment (pepti
 | 2026-09-30 | K149 | No leak/leak-free training comparison: the Pairformer uses the current leak-free model; just run it and compare with Chris's existing transformer pretraining | user |
 | 2026-09-30 | K148-P | Options (a)+(c): cap 150 with larger spectra dropped, with and without triangle attention; not the full dataset -- about 0.25 or 0.5 epoch, to see how the eval looks | user |
 | 2026-09-30 | K147-P (done) | Leak audit merged (tests/test_intensity_leak.py, notes/K147_intensity_leak_audit.md): the ONLY leak in either architecture is the max-normalisation one (K96; parked by the user as very likely not a big deal): base peak masked 50% of the time, detectable 100%. Masked peaks below the max change nothing (bit-identical); the Pairformer's pair features never see a masked intensity; m/z features clean; neither model takes precursor m/z or charge. Both arms of the P comparison use the same normalisation as the transformer checkpoints | Claude (audit) |
+| 2026-09-30 | K128-P | Rerun: job 8879960 (K114 missing triattn cases N=150/256/512 + K119 variants, one process each) | user |
+| 2026-09-30 | K150-P | Optimise the Pairformer BEFORE the 0.5-epoch comparison runs (preprocessing continues) | user |
+| 2026-09-30 | K129-I | Core dumps off in every job (ulimit -c 0 in load_frameworks.sh; opt-out MSDELTA_CORE_DUMPS=1) | user |
 
 ## Settings chosen WITHOUT explicit approval (before this log existed)
 

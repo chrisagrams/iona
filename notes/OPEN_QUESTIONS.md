@@ -86,11 +86,6 @@ Related: K114 (8877117) also aborted in the runtime -- `Segmentation fault from 
 are saved (OBSERVATIONS). Both aborts are in the old PE's compute runtime on the new driver. Proposal:
 rerun the 3 missing K114 cases, each in its own process, together with the K119 retry.
 
-### K129-I: core dumps land in the repo on /home (open, 2026-09-29)
-K119's abort wrote a 2 GB core file into ~/code/msdelta (the job's working directory; /home has a
-small quota). Proposal: `ulimit -c 0` in pbs/lib/load_frameworks.sh (every job sources it), or
-redirect cores to $S/cores/ for jobs where we want them. Nothing changed yet.
-
 ### K134-C..K137-C: before "winning C recipe on every pretraining checkpoint" (open, 2026-09-29)
 Context: K66-C per-scale search = 4 settings x 3 seeds at the final checkpoint (540,423). 100m/200m scored;
 400m (8876832) and 25m (8876833) training, scoring automatic afterwards (yeast ~3 h more). The all-checkpoint
