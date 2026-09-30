@@ -132,6 +132,8 @@ which would need a larger allocation request. K142-C: 400m 8878459 will likely h
 future capacity jobs should ask for more (limit is 168 h).
 
 ### K148-P: full Pairformer pretraining test run -- choices (open, 2026-09-30)
+User picked (a)+(c): cap 150 (drop), with and without triangle attention, ~0.25 or 0.5 epoch. Still open:
+0.25 vs 0.5 epoch, node count, and the comparison method (see chat 2026-09-30).
 Card notes/P2_full_pretrain_card.md. Pick data/cap (a: cap 150 drop, ~80 node-h; b: top-150 peaks all spectra,
 ~280 node-h; c: + triangle attention ~2x; d: cap 256 ~5x), nodes/walltime, grad checkpointing, probes.
 Gated on the K147 leak audit. Dataset MSConsensus-100M (rev 78b3e74) is on /flare.
@@ -147,11 +149,6 @@ evidence of a leak. The only transformer-relevant path is the weaker max-normali
 User asked (2026-09-30): train leak / leak-free copies and see whether it matters -- card K149.
 Agent on branch leak-audit: tests that masked peaks' intensities can't reach either model; quantify the
 known max-normalisation leak (K96); report notes/K147_intensity_leak_audit.md.
-
-### K149-P/S: train with vs without the leaks (open, 2026-09-30)
-Card notes/K149_leak_training_card.md: (A) Pairformer stand-in vs leak re-opened; (B, paper-relevant)
-transformer max-over-all vs max-over-visible normalisation; same leak-free held-out evaluation for both
-arms; downstream probe if B differs. Waits for the K147 audit. Needs approval.
 
 ### K130-P: K117 copy-cost bench -- settings to approve before submission (open, 2026-09-29)
 Script merged (8e726a6): pbs/diag/triattn_copy_bench.{py,pbs}, tests/test_triattn_copy_bench.py. NOT run.

@@ -131,6 +131,9 @@ IDs carry a track suffix: -C contrastive (spectrum encoder), -A alignment (pepti
 | 2026-09-30 | K144-P (features) | First make sure the Pairformer's features don't leak intensities (K147 audit); then the CURRENT feature set + the transformer's precursor decision is the feature list; feature explorations later. First priority: speed optimisations and whether triangle multiplication / attention are useful | user |
 | 2026-09-30 | K142-C | Auto-resume the 400m C training if it hits walltime (pbs/tools/k66_400m_resume.sh running) | user |
 | 2026-09-30 | P2 | Start a full Pairformer pretraining test run in pairformer_pretrain -> card notes/P2_full_pretrain_card.md (K148-P, draft) | user |
+| 2026-09-30 | K96-S | Max-normalisation leak: very likely not a big deal (parked) | user |
+| 2026-09-30 | K149 | No leak/leak-free training comparison: the Pairformer uses the current leak-free model; just run it and compare with Chris's existing transformer pretraining | user |
+| 2026-09-30 | K148-P | Options (a)+(c): cap 150 with larger spectra dropped, with and without triangle attention; not the full dataset -- about 0.25 or 0.5 epoch, to see how the eval looks | user |
 
 ## Settings chosen WITHOUT explicit approval (before this log existed)
 
