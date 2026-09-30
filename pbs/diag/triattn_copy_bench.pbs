@@ -35,7 +35,7 @@ JOB=${PBS_JOBID%%.*}; JOB=${JOB:-local}
 O=results/raw/diag/triattn_copy_bench; mkdir -p "$O"
 
 echo "=== $(date -Is) triattn copy bench on $(hostname), job $JOB"
-"$PY" "$MSDELTA_CODE_DIR"/pbs/diag/triattn_copy_bench.py --out "$O/$JOB.json" 2>&1 | tee "$O/$JOB.log"
+"$PY" "$MSDELTA_CODE_DIR"/pbs/diag/triattn_copy_bench.py --out "$O/$JOB.json" ${BENCH_ARGS:-} 2>&1 | tee "$O/$JOB.log"
 rc=${PIPESTATUS[0]}
 echo "=== $(date -Is) done (rc=$rc)"
 exit $rc
