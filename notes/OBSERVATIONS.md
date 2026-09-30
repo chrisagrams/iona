@@ -1991,3 +1991,18 @@ Raw: results/raw/finetune/contrastive/c27-{validation,test,oodval,mouse,human,ye
 3. The approved guard (exp MAP@R drop <= seed spread) rejects every consensus arm, w1 included (-0.012 vs
    ±0.002): consensus trades ~0.012 experimental MAP@R for ~0.075 library Hit@1 (user's call, K139c/K135).
 4. Note the reference is much better at library search at the new recipe (0.872) than at C20's old recipe (0.71).
+
+## K117-P: triangle-attention copy cost and copy-free layouts (job 8879977, 2026-09-30; 1 tile, bf16)
+
+Raw: results/raw/diag/triattn_copy_bench/8879977.{json,log} (+ traces). Profiler attribution worked on device
+(basis "device"). One triangle-attention module (c_z 64, 4 heads x 16, chunk 32), B = 2 / 8, N = 200 / 256 / 512.
+- Copies are 17-38% of device time in the current SDPA path; the attention kernel itself 42-56%.
+- Copy-free layouts (hview = rows into the head dim with a stride-0 mask; cached = masks built once):
+  forward 1.17-1.28x faster and peak memory ~2.5x lower (B=8, N=512: 14.3 -> 5.4-5.7 GB), all accurate.
+  But a TRAINING step (fwd+bwd) gains only 0.98-1.08x: the backward pass dominates (B=8 N=512: 232 ms of
+  which fwd 59).
+- sdpa5d (the K116 layout) is slower everywhere and fails the accuracy rule at N=256.
+- Takeaway: layout tweaks buy memory, not training speed; the time is in the attention kernel and its
+  backward -> the fused-kernel route (K118/K119) is where training speed must come from. Adopting hview or
+  cached is still worth it for memory (bigger batches / N=512). B=32 supplement queued (the Pairformer's
+  usual micro-batch, K130).
