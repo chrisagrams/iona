@@ -269,7 +269,13 @@ class TriangleAttention(nn.Module):
     - ``pair_tri_attn_impl="sdpa"``: each chunk is one
       ``F.scaled_dot_product_attention`` call with the triangle bias plus the padded-key
       mask as its float ``attn_mask`` (broadcast over the query row), so a fused /
-      memory-efficient backend can avoid materialising the weights.
+      memory-efficient backend can avoid materialising the weights. The 4-D call folds
+      ``(B, chunk)`` into the batch dim, so the ``(H, N, N)`` mask is copied once per row.
+    - ``pair_tri_attn_impl="sdpa_view"`` (K117): same SDPA call, but the rows of a chunk go
+      into SDPA's second ("head") dim, ``(B*H, chunk, N, d)``, and the mask is a stride-0
+      ``expand`` view over the rows: no per-row mask copy. Numerically equal to "sdpa"
+      (fp32); K117 bench (job 8879977): forward 1.0-1.27x, peak memory ~2.5x lower, training
+      step 0.98-1.08x (0.98x at B=8, N=256), so it is selectable but not the default.
     """
 
     def __init__(self, config: MSDeltaConfig, starting: bool):
@@ -316,6 +322,18 @@ class TriangleAttention(nn.Module):
         out = F.scaled_dot_product_attention(q, k, v, attn_mask=attn_mask)
         return out.view(b, c, self.h, n, self.d).permute(0, 1, 3, 2, 4)  # (B, c, N, H, d)
 
+    def _chunk_sdpa_view(self, q: Tensor, k: Tensor, v: Tensor, attn_mask: Tensor) -> Tensor:
+        """q/k/v ``(B, c, N, H, d)``; attn_mask ``(B, H, N, N)``, contiguous.
+
+        Rows of the chunk take SDPA's head dim and ``(B, H)`` its batch dim, so the mask is
+        passed as ``(B*H, c, N, N)`` with stride 0 over the rows -- a view, not a copy.
+        """
+        b, c, n = q.shape[:3]
+        q, k, v = (t.permute(0, 3, 1, 2, 4).reshape(b * self.h, c, n, self.d) for t in (q, k, v))
+        attn_mask = attn_mask[:, :, None].expand(b, self.h, c, n, n).reshape(b * self.h, c, n, n)
+        out = F.scaled_dot_product_attention(q, k, v, attn_mask=attn_mask)
+        return out.view(b, self.h, c, n, self.d).permute(0, 2, 3, 1, 4)  # (B, c, N, H, d)
+
     def forward(self, z: Tensor, mask: Tensor) -> Tensor:
         # Ending-node attention is starting-node attention on the transposed pair tensor.
         if not self.starting:
@@ -334,6 +352,13 @@ class TriangleAttention(nn.Module):
             attn_mask = attn_mask.masked_fill(~mask[:, None, None, None, :],
                                               torch.finfo(q.dtype).min)
             fn, extra = self._chunk_sdpa, (attn_mask,)
+        elif self.impl == "sdpa_view":
+            # Same mask as "sdpa", as (B, H, N(j), N(k)); contiguous so (B, H) merge into one
+            # batch dim without a copy in _chunk_sdpa_view.
+            attn_mask = bias.to(q.dtype).permute(0, 3, 1, 2)
+            attn_mask = attn_mask.masked_fill(~mask[:, None, None, :],
+                                              torch.finfo(q.dtype).min).contiguous()
+            fn, extra = self._chunk_sdpa_view, (attn_mask,)
         else:
             key_mask = torch.zeros(mask.shape, dtype=torch.float32, device=z.device)
             key_mask = key_mask.masked_fill(~mask, torch.finfo(torch.float32).min)

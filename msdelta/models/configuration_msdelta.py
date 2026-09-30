@@ -47,7 +47,7 @@ class MSDeltaConfig(PretrainedConfig):
         pair_tri_attn_heads: int = 2,
         pair_tri_attn_dim: int = 8,
         pair_tri_attn_chunk: int = 32,
-        pair_tri_attn_impl: str = "sdpa",  # "naive" | "sdpa" (K102); sdpa default since K115 (bf16 check 8875855)
+        pair_tri_attn_impl: str = "sdpa",  # "naive" | "sdpa" (K102) | "sdpa_view" (K117, copy-free mask); sdpa default since K115 (bf16 check 8875855)
         pair_tri_attn_checkpoint_chunks: bool = False,  # K102
         pair_use_writeback: bool = True,
         pair_opm_channels: int = 8,
@@ -143,8 +143,8 @@ class MSDeltaConfig(PretrainedConfig):
             for name in ("pair_tri_attn_heads", "pair_tri_attn_dim", "pair_tri_attn_chunk"):
                 if getattr(self, name) <= 0:
                     raise ValueError(f"{name} must be positive")
-            if self.pair_tri_attn_impl not in ("naive", "sdpa"):
-                raise ValueError("pair_tri_attn_impl must be 'naive' or 'sdpa'")
+            if self.pair_tri_attn_impl not in ("naive", "sdpa", "sdpa_view"):
+                raise ValueError("pair_tri_attn_impl must be 'naive', 'sdpa' or 'sdpa_view'")
         if self.pair_use_writeback and self.pair_opm_channels <= 0:
             raise ValueError("pair_opm_channels must be positive when pair_use_writeback is set")
         if self.pair_loss_bank_sigma_ppm <= 0:
