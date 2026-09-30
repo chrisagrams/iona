@@ -25,7 +25,7 @@
 
 module use /soft/modulefiles
 module load daos
-module load frameworks
+module load frameworks/2026.1.0
 module load xpu-smi
 
 set -euo pipefail
