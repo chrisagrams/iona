@@ -30,3 +30,20 @@ chosen data (CPU job, hours for (b)).
 (or the master probes at their default steps — your call).
 
 Balance: 9,265 node-h left (UIC-HPC).
+
+## Update 2026-09-30 (user: (a)+(c), 0.5 epoch, fastest node count, fair comparison with the pretrained transformer)
+- Data: shards 0-199 (0.5 epoch, dataset is shuffled), cap 150 drop -> ~13.5M train spectra; validation = the
+  Stage 0 shard. Preprocessing job 8879887.
+- Peak counts (1 shard, 250k spectra): median 207, p90 461, p99 1012; <=150: 27%, <=256: 66%, <=512: 92%.
+- Fastest: 16 nodes per arm (capacity max). 16 x 12 tiles x micro 3 = global 576 = the transformer baseline's
+  global batch (2 x 4 accum x 72 ranks). Est.: no tri-attn ~32 node-h (~2 h), tri-attn ~64 node-h (~4 h).
+- FAIR COMPARISON (proposal, K150-P): (1) the transformer's LR schedule -- warmup 2000, cosine over its full
+  540,423 steps, our run stops at 0.5 epoch (~23k steps) -- so both are compared at the same point of the same
+  schedule (a schedule compressed into 23k steps would decay to 0 and flatter us); (2) the transformer's
+  checkpoints (50m: 10k, 50k, 120k steps) evaluated on OUR validation set with the same loss; (3) curves vs
+  spectra seen, FLOPs and node-hours.
+- 512 peaks (the base's cap): ~all spectra kept (3.7x the spectra of cap 150), per-spectrum cost ~10-17x
+  (N^3 in the triangle updates; K114: B=8, N=512 only fits with gradient checkpointing, 1.6 spectra/s/tile).
+  0.5 epoch ~= 51M spectra -> ~650-750 node-h without tri-attn (~40-45 h on 16 nodes); with tri-attn it
+  OOMs at N=512 today (needs chunked checkpointing / kernels, K102/K117). The transformer: ~45 node-h per 0.5
+  epoch -> the Pairformer at 512 is ~15x more expensive per spectrum.

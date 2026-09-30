@@ -132,8 +132,10 @@ which would need a larger allocation request. K142-C: 400m 8878459 will likely h
 future capacity jobs should ask for more (limit is 168 h).
 
 ### K148-P: full Pairformer pretraining test run -- choices (open, 2026-09-30)
-User picked (a)+(c): cap 150 (drop), with and without triangle attention, ~0.25 or 0.5 epoch. Still open:
-0.25 vs 0.5 epoch, node count, and the comparison method (see chat 2026-09-30).
+User picked (a)+(c): cap 150 (drop), with and without triangle attention, ~0.25 or 0.5 epoch. Decided: 0.5 epoch, fastest node count (16/arm). Preprocessing 8879887 submitted.
+Open (K150-P): fair-comparison design -- transformer's LR schedule (cosine over 540k, stop at ~23k), global
+batch 576 (16 nodes x 12 x micro 3), transformer checkpoints evaluated on our validation set; and whether to
+run 512 peaks (~650-750 node-h without tri-attn; tri-attn OOMs at 512 today). See the card's update.
 Card notes/P2_full_pretrain_card.md. Pick data/cap (a: cap 150 drop, ~80 node-h; b: top-150 peaks all spectra,
 ~280 node-h; c: + triangle attention ~2x; d: cap 256 ~5x), nodes/walltime, grad checkpointing, probes.
 Gated on the K147 leak audit. Dataset MSConsensus-100M (rev 78b3e74) is on /flare.
