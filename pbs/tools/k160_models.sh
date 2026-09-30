@@ -9,7 +9,7 @@ J=$(cat "$S/feeder/k160_cons/cons_train")
 F=sweeps/arms/score_cons.txt
 {
     echo "# K160-C consensus twins (job $J) + finished K155-C no-consensus arms (job 8880712)"
-    while read -r arm; do echo "$arm $S/runs/sweep-$arm-$J/final"; done < sweeps/arms/cons_all.txt
+    while read -r arm; do echo "$arm $S/runs/sweep-$arm-$J/final"; done < sweeps/arms/cons_main.txt
     for ck in 220k 330k 430k; do for seed in 0 1 2; do
         arm=s100m_ck${ck}_lr4e-4_p170k2_seed$seed; echo "$arm $S/runs/sweep-$arm-8880712/final"
     done; done
