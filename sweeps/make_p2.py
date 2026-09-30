@@ -1,0 +1,111 @@
+"""K156-P: P2 half-epoch Pairformer pretraining arms (K148-P (a)+(c), K150-P design; arms chosen by Claude
+under the user's 2026-09-30 delegation: "schedule subsequent experiments autonomously using your best
+judgement"; see notes/DECISIONS.md K156-P).
+
+    python sweeps/make_p2.py            # write configs/p2/<arm>/
+    python sweeps/make_p2.py --check
+
+Fixed (K148/K150, approved): data = MSConsensus-100M shards 0-199 at cap 150 (drop), 13,470,623 train
+spectra; validation = the Stage 0 shard (67,933); the transformer's LR schedule (lr 1.3e-4, AdamW 0.9/0.95,
+wd 0.01, warmup 2000, cosine over its 540,423 steps) stopped at 0.5 epoch = 23,387 steps of global batch 576
+(16 nodes x 12 tiles x micro 3) via MSDELTA_STOP_AT_STEP; bf16; mask ratio 0.5; probes off;
+W&B CS_Pharm/pairformer_pretrain.
+Model: the Stage 0 Pairformer (hidden 512, 10 layers, 8 heads) with the user's pair choices (K151-K153):
+c_z = c_t = 32, c_o = 16, outgoing triangle multiplication only, factored write-back.
+Arms: k1 (pair update every layer), k1_triattn (+ triangle attention, K148 (c)), k5 (pair update on layers
+1 and 6: pair cost ~ single cost, the user's K114 balancing rule, width profile 8880628).
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import shutil
+from pathlib import Path
+
+REPO = Path(__file__).resolve().parent.parent
+OUT = REPO / "configs" / "p2"
+BASE = REPO / "configs" / "stage0" / "pairformer"
+S = "/lus/flare/projects/UIC-HPC/khuss/msdelta"
+PAIR = {"pair_channels": 32, "pair_tri_channels": 32, "pair_opm_channels": 16, "pair_tri_mul": "outgoing",
+        "pair_writeback": "outer", "pair_writeback_impl": "factored"}
+ARMS = {
+    "p2-cz32-k1": {},
+    "p2-cz32-k1-triattn": {"pair_use_triangle_attention": True},
+    "p2-cz32-k5": {"pair_update_every": 5},
+}
+TRAINING = """--config_name configs/p2/{arm}
+--processor_name_or_path configs/p2/{arm}
+--output_dir ./runs/{arm}
+--run_name {arm}
+--dataset_repo_id {S}/data/p2-cap150-half/raw
+--dataset_train_split train
+--dataset_validation_split validation
+--preprocessing_num_workers 24
+--max_peaks 150
+--mask_ratio 0.50
+--per_device_train_batch_size 3
+--per_device_eval_batch_size 32
+--gradient_accumulation_steps 1
+--dataloader_num_workers 6
+--learning_rate 1.3e-4
+--adam_beta1 0.9
+--adam_beta2 0.95
+--lr_scheduler_type cosine
+--warmup_steps 2000
+--max_steps 540423
+--weight_decay 0.01
+--max_grad_norm 1.0
+--bf16 true
+--gradient_checkpointing false
+--seed 0
+--logging_steps 50
+--logging_first_step true
+--eval_strategy steps
+--eval_steps 1000
+--save_strategy steps
+--save_steps 5000
+--save_total_limit 3
+--remove_unused_columns false
+--report_to wandb
+--wandb_project pairformer_pretrain
+--probe_execution off
+--bias_curve_steps 0
+--probe_steps 0
+--denoise_steps 0
+--retrieval_steps 0
+"""
+
+
+def arms() -> dict[str, dict[str, str]]:
+    base = json.loads((BASE / "config.json").read_text())
+    out = {}
+    for arm, over in ARMS.items():
+        cfg = {**base, **PAIR, **over}
+        out[arm] = {"config.json": json.dumps(dict(sorted(cfg.items())), indent=2) + "\n",
+                    "preprocessor_config.json": (BASE / "preprocessor_config.json").read_text(),
+                    "training.args": TRAINING.format(arm=arm, S=S)}
+    return out
+
+
+def main() -> int:
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--check", action="store_true")
+    cli = ap.parse_args()
+    want = arms()
+    if cli.check:
+        bad = [f"{a}/{f}" for a, files in want.items() for f, text in files.items()
+               if not (OUT / a / f).exists() or (OUT / a / f).read_text() != text]
+        print("stale or missing: " + str(bad) if bad else f"{len(want)} arms match")
+        return 1 if bad else 0
+    for arm, files in want.items():
+        shutil.rmtree(OUT / arm, ignore_errors=True)
+        (OUT / arm).mkdir(parents=True)
+        for f, text in files.items():
+            (OUT / arm / f).write_text(text)
+    print(f"wrote {len(want)} arms to {OUT.relative_to(REPO)}")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
