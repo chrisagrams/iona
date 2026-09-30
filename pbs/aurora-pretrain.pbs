@@ -193,11 +193,13 @@ PY
 fi
 TORCHINDUCTOR_CACHE_DIR=${TORCHINDUCTOR_CACHE_DIR:-/tmp/torchinductor-$USER}
 DDP_ARGS_FILE=$RUN_DIR/training-ddp.args
-awk '
-    $1 != "--deepspeed" &&
-    $1 != "--logging_nan_inf_filter"
-' "$ARGS_FILE" >"$DDP_ARGS_FILE"
-printf '%s\n' '--logging_nan_inf_filter false' >>"$DDP_ARGS_FILE"
+{
+    awk '
+        $1 != "--deepspeed" &&
+        $1 != "--logging_nan_inf_filter"
+    ' "$ARGS_FILE"
+    printf '%s\n' '--logging_nan_inf_filter false'
+} >"$DDP_ARGS_FILE"
 
 cd "$REPO_DIR"
 NODE_LIST=$RUN_DIR/pbs-nodes
