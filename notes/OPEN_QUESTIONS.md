@@ -130,6 +130,17 @@ delta_bias_n_freqs (pair-feature init, once). Not yet in code: fewer peaks in th
 peaks), sparse pairs, low-rank pair, shared pair weights across updates. Proposal: a speed-only profiling
 screen first (no training), then a short training card for the cheapest settings.
 
+### K152-P: write-back form -- outer product vs pointwise vs none (open, 2026-09-30)
+User asked why the write-back takes the outer product a_i (x) b_j (c_o^2 values) instead of a pointwise a_i * b_j.
+Both are low-rank bilinear maps of (s_i, s_j); pointwise with width m is rank m (MLB-style Hadamard pooling,
+works well in practice), outer product with c_o is a c_o^2-term (Tucker) form. AF2's reason (the MEAN over MSA
+sequences of outer products = co-variation) does not apply to us: one spectrum, no mean. AF3's Pairformer has
+no single->pair write-back inside the trunk. Our code materialises B*N^2*c_o^2 (32*150^2*256 floats ~0.74 GB
+fp32); an exact refactor (Linear first on b_j, then contract over c) cuts it to ~c_o*c_z per cell.
+Options: (a) keep outer product, exact cheaper refactor; (b) pointwise, width m (e.g. 32-64); (c) additive
+Linear(s_i)+Linear(s_j); (d) no write-back (pair_use_writeback=False). Proposal: implement (a) refactor and
+(b) as a switch (default unchanged), put (a)/(b)/(d) into the K151 speed screen, pick by training.
+
 ### K110-S: checkpoint cleanup on /flare (f, g, a-lite DELETED 2026-09-30; rest open)
 Confirm: delete the remaining checkpoint WEIGHTS of the K110a runs too (only finals kept)? K110b/c/d/h/i/j open.
 Decide per tier (K110a..K110k in the card). Biggest: K110a old-run intermediate checkpoints 1,055 GiB (or
