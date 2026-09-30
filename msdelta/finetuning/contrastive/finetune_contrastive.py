@@ -31,6 +31,7 @@ from msdelta.finetuning.contrastive.contrastive import (GroupBatchSampler, MSDel
                                  retrieval_summary,
                                  subset_by_group)
 from msdelta.finetuning.denoise.finetune_denoise import MemoryProbe, load_description, select_device, subset_splits
+from msdelta.utils.callbacks import EvaluationCacheCallback
 from msdelta.models.loading import check_architecture, load_strict
 from msdelta.models.modeling_msdelta import MSDeltaForPreTraining
 from msdelta.models.processing_msdelta import MSDeltaProcessor
@@ -728,6 +729,11 @@ def main(argv: list[str] | None = None) -> int:
             consensus_mask=consensus_rows(datasets["train"], data_args),
             consensus_weight=data_args.consensus_weight)
         trainer.add_callback(MemoryProbe(every=50))
+        # K168-C: free the allocator's cache before every evaluation. With trimmed GradCache chunks the cache
+        # holds one block per chunk width the seed happened to draw (400m + consensus, seed 0: ~65 GB on a
+        # 64 GB tile), and the first evaluation's allocations on top faulted ("Segmentation fault from GPU",
+        # NotPresent) instead of raising OOM. Memory only; numerics unchanged.
+        trainer.add_callback(EvaluationCacheCallback(model))
         trainer.add_callback(SamplerEpochCallback(trainer))
         trainer.add_callback(SaveEncoderCallback(model, processor))
         # Pass it explicitly. Trainer.train() defaults resume_from_checkpoint to None
@@ -743,6 +749,7 @@ def main(argv: list[str] | None = None) -> int:
 
         # The number this whole exercise exists to move: does the space separate peptides?
         if datasets.get("validation") is not None:
+            EvaluationCacheCallback(model)._clear_cache()  # K168-C, as before in-training evaluations
             before_after = group_separation_summary(
                 model, datasets["validation"], collator, trainer.args.device,
                 max_rows=training_args.eval_alignment_rows
