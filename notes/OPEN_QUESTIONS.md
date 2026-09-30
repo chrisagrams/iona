@@ -148,6 +148,11 @@ User asked (2026-09-30): train leak / leak-free copies and see whether it matter
 Agent on branch leak-audit: tests that masked peaks' intensities can't reach either model; quantify the
 known max-normalisation leak (K96); report notes/K147_intensity_leak_audit.md.
 
+### K149-P/S: train with vs without the leaks (open, 2026-09-30)
+Card notes/K149_leak_training_card.md: (A) Pairformer stand-in vs leak re-opened; (B, paper-relevant)
+transformer max-over-all vs max-over-visible normalisation; same leak-free held-out evaluation for both
+arms; downstream probe if B differs. Waits for the K147 audit. Needs approval.
+
 ### K130-P: K117 copy-cost bench -- settings to approve before submission (open, 2026-09-29)
 Script merged (8e726a6): pbs/diag/triattn_copy_bench.{py,pbs}, tests/test_triattn_copy_bench.py. NOT run.
 Command: `qsub -q debug -l select=1 -l walltime=01:00:00 -A UIC-HPC -l filesystems=home:flare -v REPO_DIR=$PWD pbs/diag/triattn_copy_bench.pbs`
