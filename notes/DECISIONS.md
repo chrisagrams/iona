@@ -146,6 +146,7 @@ IDs carry a track suffix: -C contrastive (spectrum encoder), -A alignment (pepti
 | 2026-09-30 | K117-P | Adopt the copy-free triangle-attention layout as the default (agent on branch k117-adopt) | user |
 | 2026-09-30 | K114-P | Decoupled streams WILL be implemented (agent on branch decoupled-streams; knobs default to the current model); checking whether triangle attention is worth it stays important | user |
 | 2026-09-30 | Pairformer baselines | User: the earlier Pairformer runs (the USER's, not Chris's) may carry the leak -> not reliable as a comparison. Checked: the pf-* runs (CS_Pharm/pairformer_pretrain, 2026-09-11) record commit 39492212, which contains the leak fix fd64faa1 (2026-09-10), and pair_use_intensity=True; but that commit's date (20:44) is AFTER the runs' start (18:28), so W&B may record a later resume or a dirty tree -- not proof. Treat all earlier Pairformer runs as unverified; compare only our own leak-audited runs (K147) against the transformer's logs | user |
+| 2026-09-30 | Pairformer baselines (resolved) | The user's pf-* runs (CS_Pharm/pairformer_pretrain) are POST-FIX and usable: they STARTED 2026-09-11 21:58-23:49 (W&B metadata startedAt; "created" 18:28 was only the run-ID registration), after commit 39492212 (20:44), which contains the leak fix fd64faa1; no diff.patch logged. The older msdelta-pairformer-50m* runs (2026-09-07/08, before the fix) remain unreliable | user |
 
 ## Settings chosen WITHOUT explicit approval (before this log existed)
 
