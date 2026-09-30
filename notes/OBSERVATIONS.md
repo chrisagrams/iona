@@ -2095,3 +2095,11 @@ Train histogram: 2: 277,732; 3: 132,478; 4-7: 240,628; 8-15: 181,568; 16-63: 317
 Groups stop at 100 (the source keeps at most 100 spectra per peptide), so no very large groups exist.
 Precursor m/z is theoretical (no measured value), so precursor-filter failure analyses are empty on this data.
 Files: $S/data/massive-kb-contrastive/{manifest.json, group_sizes.parquet, overlap_report.md}.
+
+## K157-P transformer baseline on the P2 validation set (job 8880677, eval_mlm, 2026-09-30)
+Production 50m transformer (49.81M params), the full P2 validation split (67,933 spectra <= 150 peaks, 3,682,687
+masked peaks, mask 0.5, seed 0, bf16): masked-peak eval loss 0.1169 at step 10k, 0.0769 at 50k, 0.0648 at 120k,
+0.0554 at 540,423 (final). The P2 Pairformer runs stop at step 23,387 on the same schedule: interpolating in
+log(step) between 10k and 50k gives ~0.096 for the transformer there (an estimate; no checkpoint at 23k).
+Caveats: the transformer trained on spectra up to 512 peaks (this set is the <=150-peak subset) and K157-P
+(held-out status of this shard) is unconfirmed. Raw: results/raw/diag/eval_mlm/8880677.json.
