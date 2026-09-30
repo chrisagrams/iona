@@ -64,6 +64,11 @@ class MSDeltaTrainingArguments(TrainingArguments):
     sidecar_denoise_device: str | None = None
     sidecar_retrieval_device: str | None = None
     mask_ratio: float = 0.15
+    pad_to_multiple_of: int | None = field(
+        default=None,
+        metadata={"help": "K167-I: pad pretraining batches to a multiple of this many peaks (fixed shapes for "
+                          "torch.compile; = max_peaks gives one shape). None = pad to the longest spectrum."},
+    )
     logarithmic_eval_start_step: int | None = 500
     bias_curve_steps: int = 5000
     probe_steps: int = 0
