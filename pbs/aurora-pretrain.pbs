@@ -25,7 +25,7 @@
 
 module use /soft/modulefiles
 module load daos
-module load frameworks
+module load frameworks/2026.1.0
 module load xpu-smi
 
 set -euo pipefail
@@ -191,16 +191,15 @@ PY
     )
     echo "resuming latest checkpoint: $RESUME_FROM_CHECKPOINT"
 fi
+TORCHINDUCTOR_CACHE_DIR=${TORCHINDUCTOR_CACHE_DIR:-/tmp/torchinductor-$USER}
 DDP_ARGS_FILE=$RUN_DIR/training-ddp.args
-awk '
-    $1 != "--deepspeed" &&
-    $1 != "--torch_compile" &&
-    $1 != "--logging_nan_inf_filter"
-' "$ARGS_FILE" >"$DDP_ARGS_FILE"
-printf '%s\n' \
-    '--torch_compile false' \
-    '--logging_nan_inf_filter false' \
-    >>"$DDP_ARGS_FILE"
+{
+    awk '
+        $1 != "--deepspeed" &&
+        $1 != "--logging_nan_inf_filter"
+    ' "$ARGS_FILE"
+    printf '%s\n' '--logging_nan_inf_filter false'
+} >"$DDP_ARGS_FILE"
 
 cd "$REPO_DIR"
 NODE_LIST=$RUN_DIR/pbs-nodes
@@ -283,6 +282,7 @@ fi
 echo "$(date -Is) job=${PBS_JOBID:-local} hosts=$NUM_HOSTS xpus_per_host=$XPUS_PER_HOST total_xpus=$TOTAL_XPUS global_batch=$GLOBAL_BATCH_SIZE micro_batch=$MICRO_BATCH_SIZE accumulation=$GRADIENT_ACCUMULATION_STEPS run=$RUN_NAME"
 echo "daos=${DAOS_POOL}:${DAOS_CONT} dataset=$PREPROCESSED_DATASET_DIR checkpoints=$CHECKPOINT_DIR"
 echo "walltime=${JOB_WALLTIME_SECONDS}s checkpoint_margin=${CHECKPOINT_MARGIN_SECONDS}s deadline=$IONA_JOB_DEADLINE_EPOCH"
+echo "inductor_cache=$TORCHINDUCTOR_CACHE_DIR"
 echo "nodes:"
 sed 's/^/  /' "$NODE_LIST"
 "$VENV_DIR/bin/python" -c 'import torch; print(f"torch={torch.__version__} xccl={torch.distributed.is_xccl_available()}")'
@@ -292,7 +292,6 @@ export MKL_NUM_THREADS=${MKL_NUM_THREADS:-4}
 export OPENBLAS_NUM_THREADS=${OPENBLAS_NUM_THREADS:-4}
 export CCL_PROCESS_LAUNCHER=pmix
 export CCL_ATL_TRANSPORT=mpi
-export CCL_KVS_MODE=mpi
 export FI_MR_CACHE_MONITOR=${FI_MR_CACHE_MONITOR:-userfaultfd}
 unset CCL_ZE_IPC
 unset CCL_ZE_IPC_EXCHANGE
@@ -301,6 +300,7 @@ export HF_DATASETS_CACHE=$DATASET_CACHE_DIR
 export HF_HUB_CACHE=$HF_HOME/hub
 export HF_HUB_OFFLINE=${HF_HUB_OFFLINE:-1}
 export HF_DATASETS_OFFLINE=${HF_DATASETS_OFFLINE:-1}
+export TORCHINDUCTOR_CACHE_DIR
 export PYTHONPATH=$REPO_DIR${PYTHONPATH:+:$PYTHONPATH}
 export MASTER_ADDR=${MASTER_ADDR:-$(head -n 1 "$NODE_LIST")}
 export MASTER_PORT=${MASTER_PORT:-29500}
@@ -335,7 +335,6 @@ TRAIN_ARGS=(
     --per_device_train_batch_size "$MICRO_BATCH_SIZE"
     --gradient_accumulation_steps "$GRADIENT_ACCUMULATION_STEPS"
     --ddp_backend xccl
-    --torch_compile false
     --logging_nan_inf_filter false
     --probe_execution "$PROBE_EXECUTION"
 )
@@ -370,11 +369,9 @@ exec mpiexec \
         export WORLD_SIZE="$IONA_WORLD_SIZE"
         export LOCAL_RANK="${PALS_LOCAL_RANKID:-${MPI_LOCALRANKID:-$((RANK % IONA_XPUS_PER_HOST))}}"
         export LOCAL_WORLD_SIZE="$IONA_XPUS_PER_HOST"
-        if [[ $LOCAL_RANK == 0 ]]; then
-            if ! command -v telegraf >/dev/null 2>&1; then
-                echo "telegraf is required for Aurora XPU metrics" >&2
-                exit 2
-            fi
+        if [[ $LOCAL_RANK == 0 ]] && ! command -v telegraf >/dev/null 2>&1; then
+            echo "warning: telegraf not found on $HOSTNAME; skipping XPU metrics" >&2
+        elif [[ $LOCAL_RANK == 0 ]]; then
             telegraf --config "$IONA_XPU_TELEGRAF_CONFIG" \
                 >"$LOG_DIR/xpu-telegraf-${HOSTNAME}.log" 2>&1 &
             telegraf_pid=$!

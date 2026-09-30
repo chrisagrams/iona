@@ -333,15 +333,12 @@ class IonaForPreTraining(IonaPreTrainedModel):
             if mask_positions is None:
                 raise ValueError("mask_positions must be provided with labels")
             selected = mask_positions.bool()
-            if selected.any():
-                log_prob = F.log_softmax(
-                    logits.masked_fill(~selected, float("-inf")), dim=-1
-                ).masked_fill(~selected, 0.0)
-                target = labels.float().masked_fill(~selected, 0.0)
-                target = target / target.sum(dim=-1, keepdim=True).clamp_min(1e-12)
-                loss = F.kl_div(log_prob, target, reduction="batchmean")
-            else:
-                loss = logits.new_zeros(())
+            log_prob = F.log_softmax(
+                logits.masked_fill(~selected, float("-inf")), dim=-1
+            ).masked_fill(~selected, 0.0)
+            target = labels.float().masked_fill(~selected, 0.0)
+            target = target / target.sum(dim=-1, keepdim=True).clamp_min(1e-12)
+            loss = F.kl_div(log_prob, target, reduction="batchmean")
 
         if not return_dict:
             result = (logits,)
