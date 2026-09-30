@@ -271,10 +271,18 @@ bf16.
 | `f` (bf16 copy for the W_c gradient) | 0.36 GB, once |
 | write-back `a⊗b` `(B,N,N,c_o²)` | 0.37 GB bf16 (0.74 GB if the fp32 operands survive into the einsum, §6 item 9) |
 | triangle mult., each | ~12 z-sized tensors ≈ 2.3 GB (review K93) |
-| triangle attn., each (off) | ≈ 3.2·B·N³·H_t·4 B ≈ 5.5 GB. Chunking bounds only no-grad memory (review #2) |
+| triangle attn., each (off) | ≈ 3.2·B·N³·H_t·4 B ≈ 5.5 GB. Chunking bounds only no-grad memory (review #2); see the implementations note below |
 | pair transition | LN in/out plus 4 tensors of width e·c_z ≈ 1 GB *est.* |
 | single block | O(B·N·I) + `(B,H,N,N)` ≈ 0.1 GB |
 | **10 layers, no checkpointing** | **≈ 45 GB (review #8)** |
+
+- Triangle-attention implementations (`pair_tri_attn_impl`, same parameters, interchangeable in a
+  checkpoint): `naive` (einsum + fp32 softmax), `sdpa` (DEFAULT since K115: one SDPA call per chunk,
+  `(B·chunk, H, N, N)` layout, so the bias mask is copied once per row), `sdpa_view` (K117: rows of a
+  chunk in SDPA's head dim, `(B·H, chunk, N, d)`, mask passed as a stride-0 view, no copy; equal to
+  `sdpa` in fp32). K117 bench (job 8879977): `sdpa_view` peak memory ~2.5x lower, forward 1.0-1.27x,
+  training step 0.98-1.08x (0.98x at B=8, N=256) -- selectable, not the default until the B=32
+  supplement (8880031) shows no slowdown. `pair_tri_attn_checkpoint_chunks` works with all three.
 
 - With `gradient_checkpointing`, each `PairLayer` and each single block is its own checkpoint
   segment. Only the boundaries are kept: `z`, the bias `(B,H,N,N)` and `s`, about 0.2 GB per layer

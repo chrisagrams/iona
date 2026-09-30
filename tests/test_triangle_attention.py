@@ -1,4 +1,5 @@
-"""Triangle-attention memory options (K102): per-chunk checkpointing and the SDPA path.
+"""Triangle-attention memory options (K102): per-chunk checkpointing and the SDPA paths
+("sdpa", and "sdpa_view" from K117: rows in SDPA's head dim, stride-0 mask view, no mask copy).
 
 Both must be numerically equivalent to the naive chunked path (outputs and gradients, fp32 on
 CPU, with padded keys and padded queries, starting and ending node), and checkpointing must
@@ -91,14 +92,19 @@ VARIANTS = [
     dict(pair_tri_attn_checkpoint_chunks=True),
     dict(pair_tri_attn_impl="sdpa"),
     dict(pair_tri_attn_impl="sdpa", pair_tri_attn_checkpoint_chunks=True),
+    dict(pair_tri_attn_impl="naive"),
+    dict(pair_tri_attn_impl="sdpa_view"),
+    dict(pair_tri_attn_impl="sdpa_view", pair_tri_attn_checkpoint_chunks=True),
 ]
+VARIANT_IDS = ["default", "default+ckpt", "sdpa", "sdpa+ckpt", "naive", "sdpa_view",
+               "sdpa_view+ckpt"]
 
 
 @pytest.mark.parametrize("starting", [True, False], ids=["starting", "ending"])
-@pytest.mark.parametrize("variant", VARIANTS, ids=["naive", "naive+ckpt", "sdpa", "sdpa+ckpt"])
+@pytest.mark.parametrize("variant", VARIANTS, ids=VARIANT_IDS)
 @pytest.mark.parametrize("flatten", [True, False], ids=["sdpa4d", "sdpa5d"])
 def test_matches_reference(starting, variant, flatten):
-    if not flatten and variant.get("pair_tri_attn_impl") != "sdpa":
+    if not flatten and variant.get("pair_tri_attn_impl", "sdpa") != "sdpa":
         pytest.skip("sdpa_flatten only affects the sdpa path")
     z, mask = _inputs()
     m = _module(starting, **variant)
@@ -112,7 +118,7 @@ def test_matches_reference(starting, variant, flatten):
                                    msg=lambda s, n=name: f"{n}: {s}")
 
 
-@pytest.mark.parametrize("variant", VARIANTS[1:], ids=["naive+ckpt", "sdpa", "sdpa+ckpt"])
+@pytest.mark.parametrize("variant", VARIANTS[1:], ids=VARIANT_IDS[1:])
 def test_no_grad_matches(variant):
     z, mask = _inputs(seed=3)
     m = _module(True, **variant)
@@ -173,5 +179,121 @@ def test_model_level_equivalence():
 def test_config_validation():
     with pytest.raises(ValueError, match="pair_tri_attn_impl"):
         _config(pair_tri_attn_impl="flash")
+    assert _config(pair_tri_attn_impl="sdpa_view").pair_tri_attn_impl == "sdpa_view"
     assert MSDeltaConfig().pair_tri_attn_impl == "sdpa"  # default since K115
     assert MSDeltaConfig().pair_tri_attn_checkpoint_chunks is False
+
+
+# ---------------------------------------------------------------- sdpa_view (K117) --------
+
+def _pair(starting, impl_a, impl_b, ckpt=False, **overrides):
+    """Two modules with identical weights, differing only in the impl."""
+    a = _module(starting, pair_tri_attn_impl=impl_a, pair_tri_attn_checkpoint_chunks=ckpt,
+                **overrides)
+    b = _module(starting, pair_tri_attn_impl=impl_b, pair_tri_attn_checkpoint_chunks=ckpt,
+                **overrides)
+    b.load_state_dict(a.state_dict())
+    return a, b
+
+
+def _inputs_n(n: int, seed: int = 0):
+    g = torch.Generator().manual_seed(seed)
+    z = torch.randn(B, n, n, C_Z, generator=g)
+    mask = torch.ones(B, n, dtype=torch.bool)
+    if n > 1:
+        mask[1, max(1, n - 4):] = False  # padded keys and padded query rows
+        mask[2, n - 1:] = False
+    return z, mask
+
+
+@pytest.mark.parametrize("starting", [True, False], ids=["starting", "ending"])
+@pytest.mark.parametrize("ckpt", [False, True], ids=["plain", "ckpt"])
+@pytest.mark.parametrize("n,chunk", [(11, 4), (13, 5), (7, 32), (9, 1), (16, 16), (1, 4)],
+                         ids=["n11c4", "n13c5", "n7c32", "n9c1", "n16c16", "n1c4"])
+@pytest.mark.parametrize("other", ["sdpa", "naive"])
+def test_sdpa_view_matches_fp32(starting, ckpt, n, chunk, other):
+    """Outputs, dL/dz and every parameter gradient match "sdpa" to ~1e-6 (fp32; forward is
+    bit-identical on CPU) and "naive" to the suite's 1e-5 (sdpa itself differs from naive by up
+    to ~2e-5 abs on the larger parameter gradients: summation order)."""
+    view, ref = _pair(starting, "sdpa_view", other, ckpt, pair_tri_attn_chunk=chunk)
+    z, mask = _inputs_n(n)
+    out_r, dz_r, g_r = _run(ref, z, mask)
+    out_v, dz_v, g_v = _run(view, z, mask)
+    tol = dict(rtol=1e-6, atol=2e-6) if other == "sdpa" else dict(rtol=1e-5, atol=1e-5)
+    torch.testing.assert_close(out_v, out_r, **tol)
+    torch.testing.assert_close(dz_v, dz_r, **tol)
+    for name in g_r:
+        torch.testing.assert_close(g_v[name], g_r[name], **tol,
+                                   msg=lambda s, n=name: f"{n}: {s}")
+
+
+def test_sdpa_view_fully_padded_sample_is_finite():
+    view, ref = _pair(True, "sdpa_view", "sdpa")
+    z, mask = _inputs_n(N)
+    mask[2] = False  # every key padded: the dtype-min mask keeps the softmax finite
+    out_r, dz_r, _ = _run(ref, z, mask)
+    out_v, dz_v, _ = _run(view, z, mask)
+    assert torch.isfinite(out_v).all() and torch.isfinite(dz_v).all()
+    torch.testing.assert_close(out_v, out_r, rtol=0, atol=2e-6)
+    torch.testing.assert_close(dz_v, dz_r, rtol=0, atol=2e-6)
+
+
+def _rel_l2(a, b):
+    return ((a.double() - b.double()).norm() / b.double().norm().clamp_min(1e-30)).item()
+
+
+@pytest.mark.parametrize("starting", [True, False], ids=["starting", "ending"])
+def test_sdpa_view_bf16_no_less_accurate_than_sdpa(starting):
+    """bf16 autocast vs the fp32 naive reference: sdpa_view is no less accurate than sdpa (the
+    K115 acceptance rule, rel-L2 <= max(2 x sdpa's, 1e-3)) for the output, dz and every grad."""
+    z, mask = _inputs_n(N, seed=5)
+    out_ref, dz_ref, g_ref = _run(_module(starting, pair_tri_attn_impl="naive"), z, mask)
+    res = {}
+    for impl in ("sdpa", "sdpa_view"):
+        m = _module(starting, pair_tri_attn_impl=impl)
+        with torch.autocast("cpu", dtype=torch.bfloat16):
+            res[impl] = _run(m, z, mask, lambda mm, zz, mk: mm(zz, mk).float())
+    names = ["out", "dz"] + list(g_ref)
+
+    def pick(r, name):
+        return r[0] if name == "out" else r[1] if name == "dz" else r[2][name]
+
+    ref = (out_ref, dz_ref, g_ref)
+    for name in names:
+        r, s, v = pick(ref, name), pick(res["sdpa"], name), pick(res["sdpa_view"], name)
+        err_s, err_v = _rel_l2(s, r), _rel_l2(v, r)
+        assert err_v <= max(2 * err_s, 1e-3), f"{name}: view {err_v:.2e} vs sdpa {err_s:.2e}"
+        assert _rel_l2(v, s) <= max(2 * err_s, 1e-3), f"{name}: view-sdpa {_rel_l2(v, s):.2e}"
+
+
+def test_sdpa_view_mask_is_a_view(monkeypatch):
+    """Each chunk's SDPA mask shares one (B, H, N, N) storage, stride 0 over the rows: no copy."""
+    import msdelta.models.pairformer as pf
+
+    seen = []
+    orig = pf.F.scaled_dot_product_attention
+
+    def spy(q, k, v, attn_mask=None, **kw):
+        seen.append(attn_mask)
+        return orig(q, k, v, attn_mask=attn_mask, **kw)
+
+    monkeypatch.setattr(pf.F, "scaled_dot_product_attention", spy)
+    m = _module(True, pair_tri_attn_impl="sdpa_view")
+    z, mask = _inputs_n(N)
+    with torch.no_grad():
+        m(z, mask)
+    assert len(seen) == math.ceil(N / CHUNK)
+    assert len({am.untyped_storage().data_ptr() for am in seen}) == 1
+    for am in seen:
+        assert am.shape[0] == B * H and am.stride(1) == 0
+
+
+def test_impls_share_state_dict():
+    """Switching impl changes no parameters: checkpoints load across impls unchanged."""
+    sd = {}
+    for impl in ("naive", "sdpa", "sdpa_view"):
+        torch.manual_seed(0)
+        sd[impl] = MSDeltaModel(_config(pair_tri_attn_impl=impl)).state_dict()
+    assert list(sd["sdpa_view"]) == list(sd["sdpa"]) == list(sd["naive"])
+    for k in sd["sdpa"]:
+        assert sd["sdpa_view"][k].shape == sd["sdpa"][k].shape
