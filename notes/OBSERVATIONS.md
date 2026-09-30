@@ -2103,3 +2103,13 @@ masked peaks, mask 0.5, seed 0, bf16): masked-peak eval loss 0.1169 at step 10k,
 log(step) between 10k and 50k gives ~0.096 for the transformer there (an estimate; no checkpoint at 23k).
 Caveats: the transformer trained on spectra up to 512 peaks (this set is the <=150-peak subset) and K157-P
 (held-out status of this shard) is unconfirmed. Raw: results/raw/diag/eval_mlm/8880677.json.
+
+## K156-P P2 smoke (job 8880669, 2 nodes x 12 tiles, micro 3, global 72, 120 steps, 2026-09-30)
+All three arms trained, evaluated (full P2 validation) and saved (checkpoint-120 + final). Steady step rate
+(tqdm): k1 5.65 it/s (0.18 s/step), k1 + tri-attn 3.46 it/s (0.29 s), k5 8.64 it/s (0.12 s). Full validation
+pass on 24 tiles: 25 s (k1), 59 s (tri-attn), 23 s (k5). Estimated 16-node runs (23,387 steps, if the step time
+holds at 192 ranks): k1 ~1.2 h, tri-attn ~1.9 h, k5 ~0.75 h, ~60 node-h together plus evals.
+Per-tile efficiency at micro 3 is low: k1 does 17 spectra/s/tile vs 76 at B=32 (profile 8880628). Fewer nodes
+at a larger micro-batch (same global 576) would cost ~3-4x fewer node-hours at a similar wall time; kept 16
+nodes as approved (K150 "fastest"), cost is small either way.
+Eval loss at step 120 (warmup, lr ~1e-5): 0.817 for all three arms.
