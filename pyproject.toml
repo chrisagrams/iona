@@ -4,7 +4,7 @@ version = "0.1.0"
 description = "Mass-spec transformer with learned per-head Δm/z attention bias"
 readme = "README.md"
 license = "Apache-2.0"
-requires-python = ">=3.13"
+requires-python = ">=3.12"
 dependencies = [
     "mscompress>=1.0.16",
     "numpy",
@@ -60,7 +60,7 @@ packages = ["iona"]
 include = ["iona", "tests", "README.md", "MODEL_CARD.md"]
 
 [tool.ruff]
-target-version = "py313"
+target-version = "py312"
 line-length = 100
 
 [tool.ruff.lint]
