@@ -13,15 +13,14 @@ BRANCHES / CHECKOUTS
   dev_finetune            frozen at paper submission; master untouched
   merges                  scratch worktree -> tests -> pbs/checkout_ff (K111); jobs snapshot a commit
 
-THREAD C -- K160-C consensus twins of the existing models; K155-C all-checkpoint run PAUSED
+THREAD C -- K160-C consensus twins; K155-C all-checkpoint run PAUSED
 ──────────────────────────────────────────────────────────────────────────
-  [~] K155 8880712 (no consensus, 78 arms): 9 done (100m 220k/330k/430k); pausing once every in-flight arm has
-      saved its next checkpoint (~17:55 UTC), then qdel. Resume later: RESUME_JOB=8880712. Feeder stopped.
-  [ ] 8881357 cons-smoke: 1-node debug-scaling, 4 consensus arms x 20 steps (MAX_STEPS)
-  [ ] cons_train: 24 consensus twins (configs/sweep-cons), 1-node capacity, ~16 h -> feeder plan
-      pbs/tools/feeder_plans/k160_cons.txt(.pending until the smoke passes); then scoring of the 24 twins + the
-      9 finished K155 arms on six sets -> results/raw/finetune/contrastive/cons-<set>/ -> paired comparison.
-  Parked: K161-C scale both sets to every checkpoint.
+  [x] K155 8880712 paused 20:29 UTC (qdel). 27/78 done: 100m 220k/330k/430k, all 18 200m. 400m ~72%, 50m ~30%
+      (resumable: RESUME_JOB=8880712). Unscored except via k160 (the 9 100m arms).
+  [ ] 8882001 cons_train: 23 consensus twins, 1-node capacity, ~15 h (feeder k160_cons, PID 2055767, log
+      $S/logs/feeder_k160.log); then scoring on six sets -> results/raw/finetune/contrastive/cons-<set>/
+  [!] 400m final seed 0 twin held back: deterministic GPU page fault after step 20 in smoke (8881357, 8881848).
+  Open: twins for the 18 finished 200m arms? Parked: K161-C scale both sets to every checkpoint.
 
 THREAD P -- K156-P P2 half-epoch Pairformer runs (cz32 outgoing; k1, k1+tri-attn, k5)
 ──────────────────────────────────────────────────────────────────────────
