@@ -72,6 +72,9 @@ class MSDeltaConfig(PretrainedConfig):
         # See the pairformer module docstring, "Decoupled streams".
         pair_update_every: int = 1,
         pair_bias_lag: int = 0,
+        # K172-P: run pair update m on a side stream concurrently with round m's single blocks
+        # (needs pair_bias_lag=1; same numerics as the sequential lag-1 loop).
+        pair_concurrent: bool = False,
         **kwargs,
     ):
         super().__init__(**kwargs)
@@ -114,6 +117,7 @@ class MSDeltaConfig(PretrainedConfig):
         self.pair_bias_scale = pair_bias_scale
         self.pair_update_every = pair_update_every
         self.pair_bias_lag = pair_bias_lag
+        self.pair_concurrent = pair_concurrent
         self._validate()
 
     def to_dict(self) -> dict[str, Any]:
@@ -185,6 +189,11 @@ class MSDeltaConfig(PretrainedConfig):
             # One round only: the single update would never be read, so nothing refines z.
             raise ValueError("pair_bias_lag=1 needs pair_update_every < num_hidden_layers "
                              "(at least two rounds), otherwise no pair update is ever read")
+        if not isinstance(self.pair_concurrent, bool):
+            raise ValueError("pair_concurrent must be a bool")
+        if self.pair_concurrent and lag != 1:
+            # At lag 0 the round's single blocks read the update's output: nothing to overlap.
+            raise ValueError("pair_concurrent needs pair_bias_lag=1")
 
 
 class MSDeltaDenoisingConfig(PretrainedConfig):

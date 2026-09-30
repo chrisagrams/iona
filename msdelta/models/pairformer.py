@@ -32,8 +32,8 @@ Two hidden states refined together at every layer::
   gated biased self-attention and a SwiGLU transition.
 * ``pair_update_every`` / ``pair_bias_lag`` (K114-P) decouple the two streams: the pair update
   runs on fewer layers than the single update, optionally with a one-update-stale bias so the
-  two could run concurrently. See "Decoupled streams" below; the defaults (1, 0) are the model
-  described above, unchanged.
+  two can run concurrently (``pair_concurrent``, K172-P). See "Decoupled streams" below; the
+  defaults (1, 0, False) are the model described above, unchanged.
 * ``pair_update`` reproduces the source's ablation ladder: ``"static"`` (z frozen after init,
   only the per-layer bias readout learns), ``"transition"`` (pointwise refinement only),
   ``"triangle"`` (+ triangle multiplication, the default).
@@ -95,15 +95,34 @@ on two streams. The last round's update would never be read, so it is not built 
 otherwise see unused parameters); lag 1 therefore has one pair update fewer than lag 0 at the
 same k, and needs at least two rounds.
 
-What true concurrency would still need (not implemented): per round, fork a side stream for
-``PairLayer`` update m (event on the main stream after s and z(m) are ready, ``record_stream``
-on the tensors it reads so the caching allocator does not recycle them early), run the k single
-blocks on the main stream, join with an event before round m + 1. Autograd runs each backward
-op on its forward op's stream, so backward overlaps too if the device backend honours that
-(check on XPU). Gradient checkpointing recomputes a segment on the stream that runs its
-backward, which serialises the recompute unless the checkpoint function sets the stream
-itself. On one tile the overlap is limited because the triangle ops are memory-bound; across
-two tiles it is model parallelism with an s and bias exchange per round.
+``pair_concurrent`` (K172-P, needs lag 1) runs the two streams at the same time on one device
+(``run_rounds_concurrent``). Per round m: an event on the main stream once s and z(m) exist;
+a side stream waits on it and runs ``PairLayer.update`` m (write-back, triangle ops,
+transition) from z(m) and the s entering the round; meanwhile the round's k single blocks run
+on the main stream, each with its own ``readout`` of z(m); before round m + 1 the main stream
+waits on an event recorded on the side stream after the update. ``record_stream`` marks the
+tensors that cross streams (z(m), s and the masks read on the side stream; z(m+1) read on
+main) so the caching allocator does not hand their memory to the other stream while queued
+work still reads it. The update is issued before the blocks, i.e. in the sequential order, so
+the dropout RNG draws are the same; on CPU (no streams) the path is the sequential lag-1
+computation, bit for bit.
+
+Backward relies on autograd's stream semantics: each backward op runs on the stream of its
+forward op, and where a gradient crosses streams the engine makes the consumer wait on the
+producer (and records the gradient on the consumer stream), device-generically through the
+backend's guard (``XPUGuardImpl`` implements events and ``recordDataPtrOnStream``). The
+backward graph mirrors the forward: the blocks' backward of round m (main) and update m's
+backward (side) are independent -- both feed grad s_m and grad z(m) -- so they can overlap,
+provided the engine's single device thread launches ahead of the GPU. ``backward()`` returns
+after syncing the caller's stream with every stream that produced a leaf gradient.
+
+Limits: gradient checkpointing is refused (``NotImplementedError``): the recompute would run
+on whichever stream the unpacking backward op runs on, which is not something to rely on
+unverified. Forward hooks on ``PairLayer`` do not fire (its ``update`` / ``readout`` are
+called directly; the single blocks' hooks do). ``torch.compile`` of the stream code is
+untested. On one tile the overlap is bounded because the triangle ops are memory-bound and
+share bandwidth with the single blocks; ``pbs/diag/k172_overlap.py`` measures it. Across two
+tiles this would instead be model parallelism with an s and bias exchange per round.
 
 Cost
 ----
@@ -119,6 +138,7 @@ saved activation. The config defaults are test-sized; experiment sizes are chose
 
 from __future__ import annotations
 
+import contextlib
 import math
 
 import torch
@@ -514,6 +534,10 @@ class PairLayer(nn.Module):
             bias = self.scale * torch.tanh(bias / self.scale)
         return bias
 
+    def readout(self, z: Tensor) -> Tensor:
+        """The ``(B, heads, N, N)`` attention bias the single block consumes."""
+        return self.read_bias(z).permute(0, 3, 1, 2).contiguous()
+
     def forward(
         self, z: Tensor, s: Tensor, mask: Tensor, pair_mask: Tensor,
         z_read: Tensor | None = None,
@@ -523,6 +547,11 @@ class PairLayer(nn.Module):
         The bias is read from the refined ``z``, or from ``z_read`` when given (the lagged
         state, ``pair_bias_lag=1``; then the update and the readout are independent).
         """
+        z = self.update(z, s, mask, pair_mask)
+        return z, self.readout(z if z_read is None else z_read)
+
+    def update(self, z: Tensor, s: Tensor, mask: Tensor, pair_mask: Tensor) -> Tensor:
+        """The pair update alone (write-back, triangle ops, transition); identity if skipped."""
         if self.use_writeback:
             z = z + self.dropout(self.opm(s, mask))
         if self.pair_update == "triangle":
@@ -535,8 +564,7 @@ class PairLayer(nn.Module):
                 z = z + self.dropout(self.tri_attn_end(z, mask))
         if self.pair_update in ("triangle", "transition"):
             z = z + self.transition(z)
-        bias = self.read_bias(z if z_read is None else z_read).permute(0, 3, 1, 2).contiguous()
-        return z, bias
+        return z
 
 
 class PairStack(nn.Module):
@@ -553,6 +581,7 @@ class PairStack(nn.Module):
         self.w_b = nn.Linear(config.hidden_size, config.pair_channels, bias=False)
         self.w_c = nn.Linear(self.pair_feats.out_dim, config.pair_channels, bias=False)
         self.bias_lag = getattr(config, "pair_bias_lag", 0)
+        self.concurrent = getattr(config, "pair_concurrent", False)  # K172-P
         self.layers = nn.ModuleList(
             [PairLayer(config, updates=u, round_start=r) for r, u in pair_update_schedule(config)]
         )
@@ -637,6 +666,121 @@ class PairformerSingleBlock(nn.Module):
         return hidden_states + self.transition(hidden_states)
 
 
+class NullStreams:
+    """No streams (CPU, or a device without a stream API): every primitive is a no-op.
+
+    ``run_rounds_concurrent`` then issues exactly the ops of the sequential lag-1 loop, in the
+    same order, so the result is bit-identical to ``pair_concurrent=False``.
+    """
+
+    def main(self):
+        return None
+
+    def side(self):
+        return None
+
+    def use(self, stream):
+        return contextlib.nullcontext()
+
+    def event(self, stream):
+        return None
+
+    def wait(self, stream, event) -> None:
+        pass
+
+    def keep(self, tensor: Tensor, stream) -> None:
+        pass
+
+
+class DeviceStreams(NullStreams):
+    """The stream primitives of ``torch.cuda`` / ``torch.xpu`` (same API on both).
+
+    One side stream per device, created on first use and reused, so a step does not build
+    new streams (and new queues on XPU) every forward.
+    """
+
+    _side: dict[torch.device, object] = {}
+
+    def __init__(self, backend, device: torch.device):
+        self.backend, self.device = backend, device
+
+    def main(self):
+        return self.backend.current_stream(self.device)
+
+    def side(self):
+        if self.device not in DeviceStreams._side:
+            DeviceStreams._side[self.device] = self.backend.Stream(device=self.device)
+        return DeviceStreams._side[self.device]
+
+    def use(self, stream):
+        return self.backend.stream(stream)
+
+    def event(self, stream):
+        event = self.backend.Event()
+        event.record(stream)
+        return event
+
+    def wait(self, stream, event) -> None:
+        stream.wait_event(event)
+
+    def keep(self, tensor: Tensor, stream) -> None:
+        # The caching allocator frees a block for reuse on its allocation stream only; this
+        # delays reuse until the work queued on ``stream`` (at the time of the free) is done.
+        tensor.record_stream(stream)
+
+
+def device_streams(device: torch.device) -> NullStreams:
+    """``DeviceStreams`` for a CUDA / XPU device, ``NullStreams`` otherwise."""
+    backend = {"cuda": getattr(torch, "cuda", None), "xpu": getattr(torch, "xpu", None)}.get(
+        device.type)
+    if backend is None or not hasattr(backend, "Stream"):
+        return NullStreams()
+    return DeviceStreams(backend, device)
+
+
+def run_rounds_concurrent(
+    model: nn.Module, s: Tensor, z: Tensor, mask: Tensor, pair_mask: Tensor,
+    padding_mask: Tensor, streams: NullStreams,
+) -> Tensor:
+    """The lag-1 rounds with pair update m on a side stream, concurrent with round m (K172-P).
+
+    Per round m (layers ``a .. b-1``, ``a`` the round start):
+
+    1. main waits for update m - 1 (event ``joined``): z(m) is complete;
+    2. if the round builds an update: event on main after s and z(m) exist, the side stream
+       waits on it, update m runs on the side stream from z(m) and the s entering the round
+       and produces z(m+1); ``joined`` is recorded on the side stream after it;
+    3. ``record_stream``: z(m), s, mask and pair_mask were allocated on main and are read on
+       the side stream; z(m+1) is allocated on the side stream and read on main next round;
+    4. the round's single blocks run on main, each with its own readout of z(m).
+
+    The update is ISSUED before the blocks, so the ops (and the dropout RNG draws) come in the
+    order of the sequential loop; with ``NullStreams`` the two are the same computation.
+    """
+    layers, blocks = model.bias_module.layers, model.blocks
+    starts = [i for i, layer in enumerate(layers) if layer.round_start] + [len(layers)]
+    main, side = streams.main(), streams.side()
+    joined = None
+    for a, b in zip(starts[:-1], starts[1:]):
+        if joined is not None:
+            streams.wait(main, joined)
+            joined = None
+        z_read = z
+        if layers[a].updates:
+            streams.wait(side, streams.event(main))
+            with streams.use(side):
+                z = layers[a].update(z_read, s, mask, pair_mask)
+            joined = streams.event(side)
+            for t in (z_read, s, mask, pair_mask):
+                streams.keep(t, side)
+            streams.keep(z, main)
+        for i in range(a, b):
+            s = blocks[i](s, layers[i].readout(z_read), padding_mask)
+    if joined is not None:  # not reached at lag 1 (the last round builds no update)
+        streams.wait(main, joined)
+    return s
+
+
 def build_pairformer(model: nn.Module, config: MSDeltaConfig) -> None:
     """Attach the Pairformer submodules to an ``MSDeltaModel`` (called from its ``__init__``)."""
     model.embed = PairformerPeakEmbed(config)
@@ -661,6 +805,13 @@ def encode_pairformer(
     z = model.bias_module.init_state(s, mz, log_intensity, mask_positions)
     checkpointing = model.gradient_checkpointing and model.training
     lag = model.bias_module.bias_lag
+    if model.bias_module.concurrent:
+        if checkpointing:
+            raise NotImplementedError(
+                "pair_concurrent does not support gradient checkpointing (the recompute's "
+                "stream is not controlled); disable one of them")
+        return run_rounds_concurrent(model, s, z, mask, pair_mask, padding_mask,
+                                     device_streams(s.device))
     z_read = z
     for pair_layer, block in zip(model.bias_module.layers, model.blocks):
         # pair_bias_lag=1: the single blocks of a round read the z that entered the round.

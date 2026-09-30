@@ -1,0 +1,35 @@
+#!/bin/bash -l
+#PBS -N k172-overlap
+#PBS -A UIC-HPC
+#PBS -l select=1
+#PBS -l walltime=01:00:00
+#PBS -l filesystems=home:flare
+#PBS -j oe
+#PBS -o pbs/logs/
+# K172-P: does pair_concurrent (pair update m on a side stream while round m's single blocks run
+# on the main stream) overlap on one tile? P2 Pairformer (configs/p2/p2-cz32-k5), B=24, N=150,
+# k in {5, 7} x num_hidden_layers in {10, 14}; lag 1 sequential vs lag 1 concurrent vs lag 0
+# sequential (reference): median fwd+bwd step time (bf16 autocast), peak memory, and an on-device
+# check that concurrent == sequential (fp32 and bf16). Diagnostic only, no training.
+#   qsub -q debug -v REPO_DIR=$PWD pbs/diag/k172_overlap.pbs
+# On the 2026 stack (.venv-2026, PyTorch 2.13):
+#   qsub -q debug -v REPO_DIR=$PWD,FRAMEWORKS_MODULE=frameworks/2026.1.0,VENV_DIR=$PWD/.venv-2026 pbs/diag/k172_overlap.pbs
+REPO_DIR=${REPO_DIR:-${PBS_O_WORKDIR:-$PWD}}
+cd "$REPO_DIR"
+source "$REPO_DIR/pbs/lib/load_frameworks.sh"   # honours FRAMEWORKS_MODULE
+set -uo pipefail
+export ONEAPI_DEVICE_SELECTOR=level_zero:gpu ZE_FLAT_DEVICE_HIERARCHY=FLAT ZE_AFFINITY_MASK=0
+export CCL_KVS_MODE=pmi
+export OMP_NUM_THREADS=${OMP_NUM_THREADS:-8} PYTHONPATH=$REPO_DIR${PYTHONPATH:+:$PYTHONPATH}
+source "$REPO_DIR/pbs/lib/code_snapshot.sh"
+VENV_DIR=${VENV_DIR:-$REPO_DIR/.venv}
+PY="$VENV_DIR/bin/python"
+JOB=${PBS_JOBID%%.*}; JOB=${JOB:-local}
+O=results/raw/diag/k172_overlap; mkdir -p "$O"
+echo "=== $(date -Is) python $PY ($("$PY" -c 'import torch; print(torch.__version__)' 2>/dev/null))"
+timeout 3300 "$PY" "$MSDELTA_CODE_DIR"/pbs/diag/k172_overlap.py --out "$O/$JOB.json" \
+    --config "$REPO_DIR/configs/p2/p2-cz32-k5/config.json" \
+    --batch 24 --peaks 150 --ks 5,7 --layers 10,14 --warmup 5 --reps 20 \
+    2>&1 | tee "$O/$JOB.log" | grep -E "^\[k172\]|Error|Traceback"
+echo "=== $(date -Is) done"
+exit 0
