@@ -141,6 +141,7 @@ IDs carry a track suffix: -C contrastive (spectrum encoder), -A alignment (pepti
 | 2026-09-30 | K110-S | Approved and DONE (deletion protocol: lists rebuilt + re-verified live -- no final/, unreferenced, job not live, K110f reruns exist; dry run; tested on a copy; staged live): K110g 123 dirs (12 GiB; runs/allocfix kept -- referenced by pbs/diag/allocfix.sh), K110f 25 crashed runs (328 GiB), K110a-lite 4,836 optimizer/scheduler/rng/global_step items in checkpoints of 262 old finished runs (781 GiB; weights and finals kept). Lists + logs: $S/k110-logs/. Project 8.75/10 TB after. Still open: full K110a (delete those checkpoints' weights too -- user said "we would only need the models"; to confirm), K110b/c/d/h/i/j | user |
 | 2026-09-30 | C18-C | Full prep: clean (peptide-disjoint) splits; KEEP oversize spectra whole (MAX_PEAKS=1000000; loaders drop/trim if needed); no group cap yet -- look at group-size statistics first. Job 8879991 | user |
 | 2026-09-30 | K117-P | Run the copy-cost bench (job 8879977) | user |
+| 2026-09-30 | K130-P | Bench settings approved; batch sizes checked against master: master configs micro 64/tile (transformer; PBS default global 512), the production transformer runs logged micro 2 x accum 4, the Pairformer branch (exp_pairformer) and Stage 0 use micro 32 (Chris also ran 8). The bench's B=2,8 miss 32 -> supplementary run B=32, N=150/200 (N>=256 at B=32 OOMs with tri-attn, K114) | user |
 
 ## Settings chosen WITHOUT explicit approval (before this log existed)
 
