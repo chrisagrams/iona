@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import os
+
 import json
 import logging
 import subprocess
@@ -402,6 +404,27 @@ class SidecarCallback(TrainerCallback):
         self.processes.clear()
 
 
+
+class StopAtStepCallback(TrainerCallback):
+    """K150-P: stop training at ``stop_step`` while the LR schedule stays defined over ``max_steps``.
+
+    Lets a short run follow a long run's schedule exactly (e.g. the transformer's cosine over 540,423
+    steps, stopped at 0.5 epoch) instead of compressing the schedule into the short run. Saves at the stop.
+    Enabled only through the environment variable MSDELTA_STOP_AT_STEP (off by default).
+    """
+
+    def __init__(self, stop_step: int):
+        if stop_step < 1:
+            raise ValueError("MSDELTA_STOP_AT_STEP must be a positive integer")
+        self.stop_step = stop_step
+
+    def on_step_end(self, args, state, control, **kwargs):
+        if state.global_step >= self.stop_step:
+            control.should_save = True
+            control.should_training_stop = True
+        return control
+
+
 def build_callbacks(
     module,
     val_dataset,
@@ -417,6 +440,9 @@ def build_callbacks(
 ):
     """Create the callbacks enabled in the configuration."""
     cbs: list[TrainerCallback] = []
+    stop_at = os.environ.get("MSDELTA_STOP_AT_STEP")
+    if stop_at:
+        cbs.append(StopAtStepCallback(int(stop_at)))
     if training_args.logarithmic_eval_start_step is not None:
         cbs.append(LogarithmicEvalCallback(training_args.logarithmic_eval_start_step))
     cbs.append(EvaluationCacheCallback(module))
