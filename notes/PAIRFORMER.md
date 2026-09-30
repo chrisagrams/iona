@@ -350,6 +350,22 @@ bf16.
 | `pair_use_isotope` | p5 | True | True |
 | `pair_dropout` | pDrop on blocks a-e | 0.0 | 0.0 |
 | `pair_bias_scale` | tanh cap on β (None = off) | None | None |
+| `pair_update_every` | k: pair update (a-f) once per round of k layers (K114-P) | 1 | (not in source) |
+| `pair_bias_lag` | 0/1: single blocks read the z from before their round's update (K114-P) | 0 | (not in source) |
+
+**Decoupled streams (K114-P, branch `decoupled-streams`).** Layers form rounds of k
+(`i % k == 0` opens a round; the last round is shorter when k does not divide L). The pair update
+(write-back a, triangle b-e, transition f) runs on the round's first layer, before its single
+block; the other layers keep only their own readout g and do not write back. At lag 1 the
+single blocks of round m read z(m) (round 0 reads `z_init`) while the update produces z(m+1),
+so update and single blocks are independent within a round; the last round's update is never
+read and is not built. Only update layers have update modules; `layers.{i}` indices are kept,
+so k = 1, lag 0 has exactly the original keys and outputs (tests/test_decoupled_streams.py
+compares against 07f53424 bit for bit). Stage-0 config (triangle attention off), total /
+pair-branch parameters: k=1 46,329,154 / 1,190,721; k=2 45,788,034 / 649,601; k=3 (4 updates)
+45,679,810 / 541,377; k=5 45,463,362 / 324,929; k=10 45,355,138 / 216,705. Lag 1 drops one more
+update (k=1: 9 updates, 46,220,930). Concurrency on XPU streams is not implemented; the module
+docstring lists what it would need. Profiler: `--pair-config-overrides '{"pair_update_every": 3}'`.
 
 - The `pair_*` defaults are test-sized. A run must set every one of them (review #4, K95).
 - A transformer config omits `architecture` and all `pair_*` fields from `to_dict()`.

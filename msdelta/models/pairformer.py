@@ -30,6 +30,10 @@ Two hidden states refined together at every layer::
   triangle multiplication outgoing + incoming, optional triangle attention starting + ending
   node, SwiGLU transition), read a per-head additive attention bias from z, then update s with
   gated biased self-attention and a SwiGLU transition.
+* ``pair_update_every`` / ``pair_bias_lag`` (K114-P) decouple the two streams: the pair update
+  runs on fewer layers than the single update, optionally with a one-update-stale bias so the
+  two could run concurrently. See "Decoupled streams" below; the defaults (1, 0) are the model
+  described above, unchanged.
 * ``pair_update`` reproduces the source's ablation ladder: ``"static"`` (z frozen after init,
   only the per-layer bias readout learns), ``"transition"`` (pointwise refinement only),
   ``"triangle"`` (+ triangle multiplication, the default).
@@ -65,6 +69,41 @@ stack; ``.ff`` and ``.evaluate(grid) -> (grid, heads)`` as on ``DeltaMZBias``, s
 ``render_bias_panels`` and the alignment diagnostics run), and ``encoder.norm``.
 ``evaluate`` reports only the pure-Δm/z component of the learned bias (see
 ``PairStack.evaluate_layers``).
+
+Decoupled streams (K114-P, ``pair_update_every = k``, ``pair_bias_lag``)
+-----------------------------------------------------------------------
+The layers are grouped into ROUNDS of ``k`` consecutive layers (the last round is shorter when
+``k`` does not divide ``num_hidden_layers``). The pair update -- everything in ``PairLayer``
+except the readout: write-back, triangle multiplications, triangle attention, pair transition
+-- runs once per round, on the round's FIRST layer (``i % k == 0``), before that layer's single
+block, exactly where it runs in the per-layer model. The other layers of the round run their
+single block only; the write-back is part of the update, so skipped layers do NOT write back.
+Every layer keeps its own bias readout (``bias_norm``, ``to_bias``; 2c_z + c_z*H parameters,
+<1% of the step), so each single block still reads its own per-head bias from the current z.
+Only the update layers build update modules; the ``layers.{i}`` indices are kept, so at k = 1
+the state-dict keys are exactly the original ones.
+
+Why the first layer of a round and not the last: at lag 0 every single block, including layer
+0, reads a refined z (never the raw ``z_init``), k = 1 reduces to the original order, and the
+"one pair update per k single blocks" rounds line up with the lag-1 concurrency below.
+
+``pair_bias_lag = 1``: the single blocks of round m read z(m), the pair state from BEFORE the
+round's update (round 0 reads ``z_init``), while the update produces z(m+1) for round m + 1.
+Within a round the update and the single blocks then depend only on the round's inputs (z(m)
+and the s entering the round -- the write-back reads the same s as at lag 0), so they could run
+on two streams. The last round's update would never be read, so it is not built (DDP would
+otherwise see unused parameters); lag 1 therefore has one pair update fewer than lag 0 at the
+same k, and needs at least two rounds.
+
+What true concurrency would still need (not implemented): per round, fork a side stream for
+``PairLayer`` update m (event on the main stream after s and z(m) are ready, ``record_stream``
+on the tensors it reads so the caching allocator does not recycle them early), run the k single
+blocks on the main stream, join with an event before round m + 1. Autograd runs each backward
+op on its forward op's stream, so backward overlaps too if the device backend honours that
+(check on XPU). Gradient checkpointing recomputes a segment on the stream that runs its
+backward, which serialises the recompute unless the checkpoint function sets the stream
+itself. On one tile the overlap is limited because the triangle ops are memory-bound; across
+two tiles it is model parallelism with an s and bias exchange per round.
 
 Cost
 ----
@@ -402,14 +441,33 @@ class OuterProductMean(nn.Module):
         return self.out(outer.reshape(*outer.shape[:3], -1))
 
 
-class PairLayer(nn.Module):
-    """One layer's pair refinement plus its per-head attention-bias readout."""
+def pair_update_schedule(config: MSDeltaConfig) -> list[tuple[bool, bool]]:
+    """Per layer ``(round_start, updates)`` for ``pair_update_every`` / ``pair_bias_lag``.
 
-    def __init__(self, config: MSDeltaConfig):
+    ``round_start``: the layer opens a round of ``k`` layers (``i % k == 0``). ``updates``: the
+    layer holds (and runs) a pair update -- every round start, except at lag 1 the last round's,
+    whose output nothing would read. Defaults: every layer is ``(True, True)``.
+    """
+    n = config.num_hidden_layers
+    k = getattr(config, "pair_update_every", 1)
+    lag = getattr(config, "pair_bias_lag", 0)
+    return [(i % k == 0, i % k == 0 and (lag == 0 or i + k < n)) for i in range(n)]
+
+
+class PairLayer(nn.Module):
+    """One layer's pair refinement (when ``updates``) plus its per-head attention-bias readout.
+
+    With ``updates=False`` (a layer skipped by ``pair_update_every``, K114-P) only the readout
+    is built and ``forward`` passes z through unchanged.
+    """
+
+    def __init__(self, config: MSDeltaConfig, updates: bool = True, round_start: bool = True):
         super().__init__()
-        self.pair_update = config.pair_update
-        self.use_writeback = config.pair_use_writeback
-        self.use_triangle_attention = config.pair_use_triangle_attention
+        self.updates = updates
+        self.round_start = round_start
+        self.pair_update = config.pair_update if updates else "static"
+        self.use_writeback = config.pair_use_writeback and updates
+        self.use_triangle_attention = config.pair_use_triangle_attention and updates
         self.scale = config.pair_bias_scale
         self.dropout = nn.Dropout(config.pair_dropout)
         if self.use_writeback:
@@ -437,9 +495,14 @@ class PairLayer(nn.Module):
         return bias
 
     def forward(
-        self, z: Tensor, s: Tensor, mask: Tensor, pair_mask: Tensor
+        self, z: Tensor, s: Tensor, mask: Tensor, pair_mask: Tensor,
+        z_read: Tensor | None = None,
     ) -> tuple[Tensor, Tensor]:
-        """Return the refined ``z`` and the ``(B, heads, N, N)`` attention bias read from it."""
+        """Return the refined ``z`` and the ``(B, heads, N, N)`` attention bias.
+
+        The bias is read from the refined ``z``, or from ``z_read`` when given (the lagged
+        state, ``pair_bias_lag=1``; then the update and the readout are independent).
+        """
         if self.use_writeback:
             z = z + self.dropout(self.opm(s, mask))
         if self.pair_update == "triangle":
@@ -450,7 +513,7 @@ class PairLayer(nn.Module):
                 z = z + self.dropout(self.tri_attn_end(z, mask))
         if self.pair_update in ("triangle", "transition"):
             z = z + self.transition(z)
-        bias = self.read_bias(z).permute(0, 3, 1, 2).contiguous()
+        bias = self.read_bias(z if z_read is None else z_read).permute(0, 3, 1, 2).contiguous()
         return z, bias
 
 
@@ -467,7 +530,10 @@ class PairStack(nn.Module):
         self.w_a = nn.Linear(config.hidden_size, config.pair_channels, bias=False)
         self.w_b = nn.Linear(config.hidden_size, config.pair_channels, bias=False)
         self.w_c = nn.Linear(self.pair_feats.out_dim, config.pair_channels, bias=False)
-        self.layers = nn.ModuleList([PairLayer(config) for _ in range(config.num_hidden_layers)])
+        self.bias_lag = getattr(config, "pair_bias_lag", 0)
+        self.layers = nn.ModuleList(
+            [PairLayer(config, updates=u, round_start=r) for r, u in pair_update_schedule(config)]
+        )
 
     @property
     def ff(self) -> FourierFeatures:
@@ -494,10 +560,13 @@ class PairStack(nn.Module):
         feats = self.ff(delta_mz_grid).to(self.w_c.weight.dtype)
         z = F.linear(feats, self.w_c.weight[:, : feats.shape[-1]])
         curves = []
+        z_read = z
         for layer in self.layers:
+            if self.bias_lag and layer.round_start:
+                z_read = z
             if layer.pair_update in ("triangle", "transition"):
                 z = z + layer.transition(z)
-            curves.append(layer.read_bias(z))
+            curves.append(layer.read_bias(z_read if self.bias_lag else z))
         return torch.stack(curves).float()
 
     def evaluate(self, delta_mz_grid: Tensor) -> Tensor:
@@ -569,13 +638,21 @@ def encode_pairformer(
     s = model.embed(mz, log_intensity, mask_positions)
     z = model.bias_module.init_state(s, mz, log_intensity, mask_positions)
     checkpointing = model.gradient_checkpointing and model.training
+    lag = model.bias_module.bias_lag
+    z_read = z
     for pair_layer, block in zip(model.bias_module.layers, model.blocks):
+        # pair_bias_lag=1: the single blocks of a round read the z that entered the round.
+        extra = ()
+        if lag:
+            if pair_layer.round_start:
+                z_read = z
+            extra = (z_read,)
         if checkpointing:
             z, bias = model._gradient_checkpointing_func(
-                pair_layer.__call__, z, s, mask, pair_mask
+                pair_layer.__call__, z, s, mask, pair_mask, *extra
             )
             s = model._gradient_checkpointing_func(block.__call__, s, bias, padding_mask)
         else:
-            z, bias = pair_layer(z, s, mask, pair_mask)
+            z, bias = pair_layer(z, s, mask, pair_mask, *extra)
             s = block(s, bias, padding_mask)
     return s

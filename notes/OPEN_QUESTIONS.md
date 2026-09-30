@@ -153,6 +153,14 @@ a bottleneck. Partly covered by review ablation #7 (ratio only); the parallel ex
 and open points: notes/PAIRFORMER_REVIEW.md ablation #12. Proposal: test the ratio first (sequential,
 compute-matched); build the parallel version only if a larger ratio doesn't hurt quality. Needs a card
 (and code) when Pairformer ablations start.
+Update 2026-09-30: code on branch decoupled-streams (`pair_update_every`, `pair_bias_lag`; sequential
+only; see notes/PAIRFORMER.md §5). Design choices awaiting confirmation: (a) the update runs on the
+FIRST layer of each round (i % k == 0), not the last; (b) skipped layers keep their own bias readout
+and do not write back; (c) k that does not divide L (e.g. 3 with L=10) leaves a short last round
+(updates at 0,3,6,9) -- allowed, not rejected; (d) at lag 1 the last round's update is not built (one
+update fewer than lag 0) and lag 1 needs >= 2 rounds; (e) interface is the ratio k, not a total count.
+Rough gain from the K114 profile (gc off, sequential, pair ops a-f + glue removed on skipped layers):
+step time x0.54-0.63 at k=2, x0.45-0.56 at k=3, x0.27-0.41 at k=5 (larger N / triattn -> larger gain).
 
 ### K116-P / K117-P: which SDPA call layout for triangle attention (K117 bench approved 2026-09-29, being written; K116 open)
 Context: triangle attention shares one bias beta_jk across every row i. The 4-D SDPA call (fused
