@@ -127,6 +127,10 @@ IDs carry a track suffix: -C contrastive (spectrum encoder), -A alignment (pepti
 | 2026-09-29 | K144-P | Plan accepted with changes: (1) run, then normalise comparisons for FLOPs/time; (2) absolute m/z is NOT a confound -- including it is a design choice and a win if it helps (first iteration omitted it on a generalisation thesis); (3) decoupled streams (pair rep updated less often than singles) may be the most important idea; (5) speed: optimise every kernel/trick; (6) win on pretraining/scaling laws -> scale to more tasks -> new model paper. (4) input features: explained in chat | user |
 | 2026-09-29 | W&B | Pairformer-thread runs log to CS_Pharm/pairformer_pretrain (both arms of P comparisons); pass WANDB_ENTITY=CS_Pharm (without it the key's personal entity kelhus2-uic is used) | user |
 | 2026-09-29 | K146-I | Keep the next-eval probe (8879772) queued; legacy-reg probe 8879810 also queued ("Can Never Run": no nodes) | user |
+| 2026-09-30 | K141-P | No own transformer runs for P comparisons: the baseline is the existing transformer pretraining logs (W&B CS_Pharm/msdelta-pretrain) | user |
+| 2026-09-30 | K144-P (features) | First make sure the Pairformer's features don't leak intensities (K147 audit); then the CURRENT feature set + the transformer's precursor decision is the feature list; feature explorations later. First priority: speed optimisations and whether triangle multiplication / attention are useful | user |
+| 2026-09-30 | K142-C | Auto-resume the 400m C training if it hits walltime (pbs/tools/k66_400m_resume.sh running) | user |
+| 2026-09-30 | P2 | Start a full Pairformer pretraining test run in pairformer_pretrain -> card notes/P2_full_pretrain_card.md (K148-P, draft) | user |
 
 ## Settings chosen WITHOUT explicit approval (before this log existed)
 

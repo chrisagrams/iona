@@ -131,6 +131,15 @@ makes sense only for production-scale pretraining (e.g. Pairformer at 100m+/full
 which would need a larger allocation request. K142-C: 400m 8878459 will likely hit its 14 h walltime --
 future capacity jobs should ask for more (limit is 168 h).
 
+### K148-P: full Pairformer pretraining test run -- choices (open, 2026-09-30)
+Card notes/P2_full_pretrain_card.md. Pick data/cap (a: cap 150 drop, ~80 node-h; b: top-150 peaks all spectra,
+~280 node-h; c: + triangle attention ~2x; d: cap 256 ~5x), nodes/walltime, grad checkpointing, probes.
+Gated on the K147 leak audit. Dataset MSConsensus-100M (rev 78b3e74) is on /flare.
+
+### K147-P: intensity-leak audit (running, 2026-09-30)
+Agent on branch leak-audit: tests that masked peaks' intensities can't reach either model; quantify the
+known max-normalisation leak (K96); report notes/K147_intensity_leak_audit.md.
+
 ### K130-P: K117 copy-cost bench -- settings to approve before submission (open, 2026-09-29)
 Script merged (8e726a6): pbs/diag/triattn_copy_bench.{py,pbs}, tests/test_triattn_copy_bench.py. NOT run.
 Command: `qsub -q debug -l select=1 -l walltime=01:00:00 -A UIC-HPC -l filesystems=home:flare -v REPO_DIR=$PWD pbs/diag/triattn_copy_bench.pbs`
