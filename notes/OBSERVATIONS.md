@@ -2006,3 +2006,19 @@ Raw: results/raw/diag/triattn_copy_bench/8879977.{json,log} (+ traces). Profiler
   backward -> the fused-kernel route (K118/K119) is where training speed must come from. Adopting hview or
   cached is still worth it for memory (bigger batches / N=512). B=32 supplement queued (the Pairformer's
   usual micro-batch, K130).
+
+## K128-P: FlexAttention works on XPU once ONEAPI_DEVICE_SELECTOR is unset; K114's missing cases (job 8879960, 2026-09-30)
+
+- K119 root cause: Triton's Intel launcher aborts ("sycl ... No device of requested type available") when
+  ONEAPI_DEVICE_SELECTOR is set -- both level_zero:gpu and level_zero:0 abort; UNSET works. Affects every
+  Triton / torch.compile path in our jobs (they export ONEAPI_DEVICE_SELECTOR=level_zero:gpu; master's
+  production configs set torch_compile true). ZE_AFFINITY_MASK still pins the tile.
+- With it unset: compiled flex_attention for triangle attention matches SDPA exactly in fp32 (out and grads,
+  rel. L2 ~1e-7). Speed (one module, fwd+bwd, bf16): flex is NOT faster -- B=8 N=100 11.5 vs 6.8 ms SDPA,
+  N=150 20.6 vs 16.6; B=32 N=100 31.3 vs 23.0, N=150 71.7 vs 70.6 (parity at the largest size). Memory:
+  the row-head layout uses ~2.6x less (B=32 N=150: 1.41 vs 3.72 GB). First call compiles for 12-27 s.
+  Raw: results/raw/diag/flexattn/8879960_c_unset.{json,log}.
+- K114 missing (full Pairformer with tri-attn, B=32): N=150 only fits with gradient checkpointing
+  (3.8 s/step, 13.8 GB); N=256 12.9 s/step, 47 GB; N=512 OOM even with checkpointing.
+- Takeaway for speed: neither layout tricks (K117) nor stock FlexAttention beat SDPA on time; both cut memory.
+  Time must come from a custom fused kernel (K118) or from using triangle attention less (decoupled streams).

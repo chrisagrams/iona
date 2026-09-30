@@ -69,23 +69,6 @@ peptide encoder (alignment track), which waits for the new C models; the peptide
 unseen data (nine-species open Hit@1 0.39). Proposal: a new PLAN thread + a design card when
 alignment resumes; meanwhile optionally prepare the digestion/index code.
 
-### K128-P: K119 FlexAttention test aborted before any result (open, 2026-09-29)
-Job 8877118 (debug-scaling, x4208c0s0b0n0) exited 134 after 70 s. torch saw the XPU fine; the crash came
-when Triton's Intel backend built and loaded its SYCL launcher (the job-only shim to the frameworks
-module's triton 3.6.0): `terminate ... sycl::exception: No device of requested type available`. So the
-compiled path never ran and no JSON was written (log: results/raw/diag/flexattn/8877118.log; 2 GB core
-moved to $S/diag/k119/). Likely suspects: the launcher's SYCL runtime not matching the job's device
-selection (ONEAPI_DEVICE_SELECTOR=level_zero:gpu + ZE_AFFINITY_MASK=0 + FLAT) or the SYCL runtime
-it links after the 2026-09 image change. Proposed follow-up (needs approval): one debug job that
-(1) runs each test case in its own subprocess so a crash keeps earlier results, (2) retries the
-compiled case with ONEAPI_DEVICE_SELECTOR unset / =level_zero:0 and with SYCL_UR_TRACE=1, and
-(3) logs `ldd` of the compiled launcher. Or park until the frameworks/2026.1.0 move (K125-S), whose
-PyTorch 2.13 ships its own XPU Triton.
-Related: K114 (8877117) also aborted in the runtime -- `Segmentation fault from GPU ... NotPresent`,
-`Abort ... intel-compute-runtime-25.18 .../drm_neo.cpp` -- right after an OOM case; 13 of its cases
-are saved (OBSERVATIONS). Both aborts are in the old PE's compute runtime on the new driver. Proposal:
-rerun the 3 missing K114 cases, each in its own process, together with the K119 retry.
-
 ### K134-C..K137-C: before "winning C recipe on every pretraining checkpoint" (open, 2026-09-29)
 Context: K66-C per-scale search = 4 settings x 3 seeds at the final checkpoint (540,423). 100m/200m scored;
 400m (8876832) and 25m (8876833) training, scoring automatic afterwards (yeast ~3 h more). The all-checkpoint
@@ -134,32 +117,6 @@ run 512 peaks (~650-750 node-h without tri-attn; tri-attn OOMs at 512 today). Se
 Card notes/P2_full_pretrain_card.md. Pick data/cap (a: cap 150 drop, ~80 node-h; b: top-150 peaks all spectra,
 ~280 node-h; c: + triangle attention ~2x; d: cap 256 ~5x), nodes/walltime, grad checkpointing, probes.
 Gated on the K147 leak audit. Dataset MSConsensus-100M (rev 78b3e74) is on /flare.
-
-### K130-P: K117 copy-cost bench -- settings to approve before submission (open, 2026-09-29)
-Script merged (8e726a6): pbs/diag/triattn_copy_bench.{py,pbs}, tests/test_triattn_copy_bench.py. NOT run.
-Command: `qsub -q debug -l select=1 -l walltime=01:00:00 -A UIC-HPC -l filesystems=home:flare -v REPO_DIR=$PWD pbs/diag/triattn_copy_bench.pbs`
-(~10-15 min expected; stops starting new sizes at 40 min). Dims c_z 64, 4 heads x 16, chunk 32, bf16 autocast.
-Variants: `current` (model's SDPA path), `sdpa5d` (sdpa_flatten=False, the K116 point), `hview` (chunk rows
-into SDPA's head dim, stride-0 expanded mask, no copy), `cached` (current layout, masks prebuilt outside the
-timed region). Settings the writing agent chose (all CLI flags):
-- K130a batch sizes 2 and 8 at every N (200/256/512).
-- K130b "agrees" = rel. L2 error vs the fp32 naive reference <= max(1.25 x current's error, 1e-4) on output,
-  dz and every parameter gradient (encodes K115's "no less accurate than current").
-- K130c accuracy on both inits of triattn_bf16_check (normal, "sharp"); timing on normal init, starting module only.
-- K130d timing = 1 warm-up + median of 5 steps; fwd timed with grad enabled; profiler records 2 steps.
-- K130e `naive` off by default (available via --variants).
-- K130f fp32 reference = naive path with per-chunk checkpointing (same numbers, fits at N=512).
-- K130g `cached`: prebuilt masks still require grad (gradient flows as in the real path; one shared tensor
-  adds a grad-accumulation sum, reported separately).
-- K130h job exits 1 on any non-OOM error in accuracy/timing (so an XPU rejection of hview's stride-0 mask
-  fails the job though the JSON is complete); profiler failures are non-fatal.
-- K130i raw profiler traces saved only for B=2 N=200.
-- K130j output in results/raw/diag/triattn_copy_bench/ (like the other benches).
-
-### K131-P: K117 bench -- uncertainties (open, 2026-09-29)
-- K131a the XPU profiler attribution (kernels -> launching op via correlation ID) could not be tested on the
-  login node; if the job reports `basis: cpu_self` or large unattributed time, re-classify offline from the traces.
-- K131b the stage-0 configs have triangle attention OFF; the bench uses their dims with the code's sdpa default.
 
 ### K110-S: checkpoint cleanup on /flare (f, g, a-lite DELETED 2026-09-30; rest open)
 Confirm: delete the remaining checkpoint WEIGHTS of the K110a runs too (only finals kept)? K110b/c/d/h/i/j open.
