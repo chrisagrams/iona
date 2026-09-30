@@ -2113,3 +2113,13 @@ Per-tile efficiency at micro 3 is low: k1 does 17 spectra/s/tile vs 76 at B=32 (
 at a larger micro-batch (same global 576) would cost ~3-4x fewer node-hours at a similar wall time; kept 16
 nodes as approved (K150 "fastest"), cost is small either way.
 Eval loss at step 120 (warmup, lr ~1e-5): 0.817 for all three arms.
+
+## K156-P first P2 result: Pairformer k=5 (job 8880727) vs the transformer, same masks (2026-09-30)
+p2-cz32-k5 (45.27M params; c_z=c_t=32, c_o=16, outgoing tri-mul, pair updates on layers 1 and 6), 23,387 steps
+x 576 = 13.47M spectra (0.5 epoch of the cap-150 half), 16 nodes, 49.5 min wall (~13 node-h), exit 0.
+eval_mlm on the P2 validation set (identical mask and input digests to the transformer job 8880677):
+  Pairformer k5 @ 23,387: 0.0926
+  transformer 50m @ 10k: 0.1169, @ 50k: 0.0769 (log-step interpolation @ 23,387: ~0.096), final: 0.0554
+In-training eval (random masks) ended at 0.0923. So at the same step of the same LR schedule the k5 Pairformer is
+slightly below the transformer (by ~0.003-0.004; the transformer value is interpolated, and the cap-150 caveat
+applies). Raw: results/raw/diag/eval_mlm/p2-k5-8880727.json; run $S/runs/p2/p2-cz32-k5-8880727.
