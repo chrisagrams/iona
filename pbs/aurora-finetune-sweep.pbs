@@ -262,6 +262,7 @@ declare -A GRID_CHECK=(
     [configs/sweep-hp-scale]="sweeps/make_hp_scale.py --check"
     [configs/sweep-c27]="sweeps/make_c27.py --check"
     [configs/sweep-allck]="sweeps/make_allck.py --check"
+    [configs/sweep-cons]="sweeps/make_cons.py --check"
 )
 if [[ -n $RESUME_CONFIGS_DIR ]]; then
     echo "  grid check skipped: resuming with $RESUME_JOB's own configs, checked at its launch"

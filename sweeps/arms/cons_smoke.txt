@@ -1,0 +1,4 @@
+s025m_ck540k_lr4e-4_p170k2_cons_seed0
+s100m_ck220k_lr4e-4_p170k2_cons_seed0
+s200m_ck540k_lr4e-4_p170k2_cons_seed0
+s400m_ck540k_lr4e-4_p170k2_cons_seed0
