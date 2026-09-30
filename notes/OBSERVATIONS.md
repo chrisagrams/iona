@@ -2080,3 +2080,18 @@ c_z: at 32 it makes the step 4.5x slower (gc on). Raw: results/raw/diag/width_pr
 | 400m | .926+-.006 | **.946+-.003** | .940+-.005 | .938+-.006 |
 20 ppm filtered library Hit@1 0.974-0.997, isotope-tolerant 0.929-0.992. Library Hit@1 is far noisier across seeds
 than experimental MAP@R. Same raw files as above (library/* keys).
+
+## C18 MassIVE-KB contrastive prep, full run (job 8879991, 2026-09-30): group statistics
+Source chrisagrams/massive_kb_v1_shuffled rev 891f42f7, 30.5M spectra read; kept 25.4M after removing every
+spectrum whose sequence (I/L collapsed) is in one of our evaluation sets (5.13M spectra, 31,283 sequences;
+e.g. 94% of ms-contrastive-100k validation/test sequences and 98.5% of noble-human are in MassIVE-KB) and
+1,170 with an unknown modification. Peptide-disjoint splits; spectra kept whole (max_peaks 1e6), mean 246 peaks.
+| split | groups | spectra | singleton groups | median / p90 / p99 / max group size |
+|---|---|---|---|---|
+| train | 1,894,101 | 23,716,268 | 636,569 (2.7% of spectra) | 3 / 33 / 100 / 100 |
+| validation | 67,072 | 824,126 | 22,778 | 3 / 32 / 100 / 100 |
+| test | 66,538 | 835,055 | 22,447 | 3 / 34 / 100 / 100 |
+Train histogram: 2: 277,732; 3: 132,478; 4-7: 240,628; 8-15: 181,568; 16-63: 317,135; 64-255: 107,991 groups.
+Groups stop at 100 (the source keeps at most 100 spectra per peptide), so no very large groups exist.
+Precursor m/z is theoretical (no measured value), so precursor-filter failure analyses are empty on this data.
+Files: $S/data/massive-kb-contrastive/{manifest.json, group_sizes.parquet, overlap_report.md}.
