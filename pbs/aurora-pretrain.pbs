@@ -378,11 +378,9 @@ exec mpiexec \
         export WORLD_SIZE="$IONA_WORLD_SIZE"
         export LOCAL_RANK="${PALS_LOCAL_RANKID:-${MPI_LOCALRANKID:-$((RANK % IONA_XPUS_PER_HOST))}}"
         export LOCAL_WORLD_SIZE="$IONA_XPUS_PER_HOST"
-        if [[ $LOCAL_RANK == 0 ]]; then
-            if ! command -v telegraf >/dev/null 2>&1; then
-                echo "telegraf is required for Aurora XPU metrics" >&2
-                exit 2
-            fi
+        if [[ $LOCAL_RANK == 0 ]] && ! command -v telegraf >/dev/null 2>&1; then
+            echo "warning: telegraf not found on $HOSTNAME; skipping XPU metrics" >&2
+        elif [[ $LOCAL_RANK == 0 ]]; then
             telegraf --config "$IONA_XPU_TELEGRAF_CONFIG" \
                 >"$LOG_DIR/xpu-telegraf-${HOSTNAME}.log" 2>&1 &
             telegraf_pid=$!
