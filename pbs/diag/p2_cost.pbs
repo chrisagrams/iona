@@ -13,8 +13,10 @@
 # Step time = (elapsed at step 300 - elapsed at step 150) / 150, from the progress bar. The first few
 # hundred steps run slower than steady state (16-node k1: 0.24 s/step at 200-300 vs 0.15 at 5100-5900),
 # so k1:3 is the control that ties this window to the 16-node runs.
+# K162-P: an arm <config>:<micro>:c runs with torch.compile (TORCH_COMPILE=1 in aurora-pretrain.pbs); compile
+# time falls in the first steps, outside the 150-300 window (recompiles, if any, show as a slower window).
 # Memory: an out-of-memory arm is itself the answer (that micro-batch does not fit without checkpointing).
-#   qsub -q debug -v REPO_DIR=$PWD pbs/diag/p2_cost.pbs        (ARMS=a:12+b:24 to pick arms)
+#   qsub -q debug -v REPO_DIR=$PWD pbs/diag/p2_cost.pbs        (ARMS=a:12+b:24:c to pick arms)
 REPO_DIR=${REPO_DIR:-${PBS_O_WORKDIR:-$PWD}}
 cd "$REPO_DIR"
 set -uo pipefail
@@ -27,14 +29,15 @@ elapsed() {  # seconds on the progress bar at step $2 in file $1
         | awk -F: '{s=0; for (i=1; i<=NF; i++) s = s*60 + $i; print s}'
 }
 for spec in ${ARMS//+/ }; do
-    arm=${spec%%:*}; micro=${spec##*:}; tag=$arm-m$micro
+    IFS=: read -r arm micro comp <<<"$spec"; tag=$arm-m$micro${comp:+-compile}
+    [[ $comp == c ]] && compile=1 || compile=0
     sed -e 's/^--eval_strategy .*/--eval_strategy no/' -e 's/^--save_steps .*/--save_steps 300/' \
         -e 's/^--logging_steps .*/--logging_steps 10/' -e 's/^--report_to .*/--report_to none/' \
         "configs/p2/$arm/training.args" > "$SM/$tag.args"
     echo "=== $(date -Is) $tag"
     timeout 600 env ARGS_FILE="$SM/$tag.args" CHECKPOINT_DIR="$SM" RUN_NAME="p2cost-$tag-$JOB" \
         HF_HOME=$S/huggingface PREPROCESSED_DATASET_DIR=$S/data/p2-cap150-half/preprocessed \
-        XPUS_PER_HOST=12 MICRO_BATCH_SIZE=$micro GLOBAL_BATCH_SIZE=576 PROBE_EXECUTION=off CCL_KVS_MODE=pmi \
+        XPUS_PER_HOST=12 MICRO_BATCH_SIZE=$micro GLOBAL_BATCH_SIZE=576 TORCH_COMPILE=$compile PROBE_EXECUTION=off CCL_KVS_MODE=pmi \
         WANDB_MODE=disabled MSDELTA_STOP_AT_STEP=300 bash pbs/aurora-pretrain.pbs > "$SM/$tag.log" 2>&1
     rc=$?
     err=$(find "$SM/p2cost-$tag-$JOB" -name "train-*.err" 2>/dev/null | head -1)
@@ -43,6 +46,6 @@ for spec in ${ARMS//+/ }; do
     if [[ -n $t150 && -n $t300 ]]; then
         sps=$(awk -v a="$t150" -v b="$t300" 'BEGIN{printf "%.3f", (b-a)/150}')
     else sps=NA; fi
-    echo "RESULT $tag rc=$rc micro=$micro s_per_step=$sps t150=${t150:-NA} t300=${t300:-NA} oom=$oom"
+    echo "RESULT $tag rc=$rc micro=$micro compile=$compile s_per_step=$sps t150=${t150:-NA} t300=${t300:-NA} oom=$oom"
 done | tee "$SM/summary.txt"
 exit 0

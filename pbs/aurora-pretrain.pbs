@@ -96,8 +96,13 @@ awk '
     $1 != "--torch_compile" &&
     $1 != "--logging_nan_inf_filter"
 ' "$ARGS_FILE" >"$DDP_ARGS_FILE"
+# K162-P: TORCH_COMPILE=1 opts into torch.compile (default stays off, as master's 8e77f464). Triton's Intel
+# launcher aborts when ONEAPI_DEVICE_SELECTOR is set (K128-P), so compiled runs unset it below; ZE_AFFINITY_MASK
+# still pins the tiles.
+TORCH_COMPILE=${TORCH_COMPILE:-0}
+[[ $TORCH_COMPILE == 1 ]] && COMPILE_FLAG=true || COMPILE_FLAG=false
 printf '%s\n' \
-    '--torch_compile false' \
+    "--torch_compile $COMPILE_FLAG" \
     '--logging_nan_inf_filter false' \
     >>"$DDP_ARGS_FILE"
 
@@ -169,7 +174,11 @@ else
     export ZE_AFFINITY_MASK
     export CPU_BIND=${CPU_BIND:-none}
 fi
-export ONEAPI_DEVICE_SELECTOR=${ONEAPI_DEVICE_SELECTOR:-level_zero:gpu}
+if [[ $TORCH_COMPILE == 1 ]]; then
+    unset ONEAPI_DEVICE_SELECTOR
+else
+    export ONEAPI_DEVICE_SELECTOR=${ONEAPI_DEVICE_SELECTOR:-level_zero:gpu}
+fi
 export ZE_FLAT_DEVICE_HIERARCHY=${ZE_FLAT_DEVICE_HIERARCHY:-FLAT}
 unset SYCL_DEVICE_FILTER
 
@@ -240,7 +249,7 @@ TRAIN_ARGS=(
     --per_device_train_batch_size "$MICRO_BATCH_SIZE"
     --gradient_accumulation_steps "$GRADIENT_ACCUMULATION_STEPS"
     --ddp_backend xccl
-    --torch_compile false
+    --torch_compile "$COMPILE_FLAG"
     --logging_nan_inf_filter false
     --probe_execution "$PROBE_EXECUTION"
 )
