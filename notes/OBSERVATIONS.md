@@ -2022,3 +2022,8 @@ Raw: results/raw/diag/triattn_copy_bench/8879977.{json,log} (+ traces). Profiler
   (3.8 s/step, 13.8 GB); N=256 12.9 s/step, 47 GB; N=512 OOM even with checkpointing.
 - Takeaway for speed: neither layout tricks (K117) nor stock FlexAttention beat SDPA on time; both cut memory.
   Time must come from a custom fused kernel (K118) or from using triangle attention less (decoupled streams).
+
+K117 supplement, B=32 (job 8880031): train step (fwd+bwd) hview 1.01x (N=150) / 1.06x (N=200), cached 1.04x /
+1.08x; peak memory hview 2.85 vs 2.85 GB (N=150) and 3.58 vs 5.54 GB (N=200). -> sdpa_view (= hview) made the
+default 2026-09-30 (only B=8 N=256 was slower, 0.98x). Note: sdpa5d is 1.25x at B=32 N=150 but slower at
+N=200 forward and failed the accuracy rule at B=8 N=256 -- not adopted.
