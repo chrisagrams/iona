@@ -1,5 +1,5 @@
 # K160-C (user 2026-09-30): consensus twins of the FINAL checkpoints first (user: skip intermediate checkpoints for now):
-# 14 arms (5 scales x 3 seeds, 400m seed0 held back after its smoke crash), 1-node capacity (~15 h), then scoring on the K66-C sets.
+# 15 arms (5 scales x 3 seeds; 400m seed0 back in after the K168-C cache fix), 1-node capacity (~15 h), then scoring on the K66-C sets.
 cons_train|-|-q capacity -l select=1 -l place=scatter -l walltime=20:00:00 -A UIC-HPC -l filesystems=home:flare -N cons -v REPO_DIR=$PWD,SWEEP_ROOT=configs/sweep-cons,SWEEP_MODULE=msdelta.finetune_contrastive,ARMS_FILE=sweeps/arms/cons_finals.txt,ARM_COSTS=s400m_:138+s200m_:88+s100m_:55+s050m_:38+s025m_:36 pbs/aurora-finetune-sweep.pbs
 s_validation|cons_train|-q capacity -l select=1 -A UIC-HPC -l filesystems=home:flare -l walltime=05:00:00 -N cons-val -v REPO_DIR=$PWD,MODELS=$(pbs/tools/k160_models.sh),SPLIT=validation,OUT_DIR=results/raw/finetune/contrastive/cons-validation pbs/eval_grouped_retrieval.pbs
 s_test|cons_train|-q capacity -l select=1 -A UIC-HPC -l filesystems=home:flare -l walltime=05:00:00 -N cons-test -v REPO_DIR=$PWD,MODELS=$(pbs/tools/k160_models.sh),SPLIT=test,OUT_DIR=results/raw/finetune/contrastive/cons-test pbs/eval_grouped_retrieval.pbs
