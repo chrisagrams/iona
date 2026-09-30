@@ -1,0 +1,1 @@
+ALL-CHECKPOINT ARM (K155-C): 50m checkpoint 220,000, lr4e-4_p170k2 (--learning_rate 4e-4 --groups_per_batch 170 --replicates 2), seed 2. Otherwise the K66-C arm s050m_ck540k_lr4e-4_p170k2_seed2. sweeps/make_allck.py.

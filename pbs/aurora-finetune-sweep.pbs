@@ -261,6 +261,7 @@ declare -A GRID_CHECK=(
     [configs/sweep-c20]="sweeps/make_c20.py --check"
     [configs/sweep-hp-scale]="sweeps/make_hp_scale.py --check"
     [configs/sweep-c27]="sweeps/make_c27.py --check"
+    [configs/sweep-allck]="sweeps/make_allck.py --check"
 )
 if [[ -n $RESUME_CONFIGS_DIR ]]; then
     echo "  grid check skipped: resuming with $RESUME_JOB's own configs, checked at its launch"
@@ -470,6 +471,15 @@ for arm in "${ARM_LIST[@]}"; do
     [[ $arm == *_ep4_* ]] && cost=$(( cost * 2 ))
     [[ $arm == *_h512  ]] && cost=$(( cost * 13 / 10 ))
     [[ $arm == *_h256  ]] && cost=$(( cost * 11 / 10 ))
+    # ARM_COSTS (opt-in, K155-C): measured costs override the heuristic, "pattern:cost" joined
+    # by "+" (qsub -v cannot carry commas), first substring match wins, e.g.
+    # ARM_COSTS=s400m_:138+s050m_:38 (minutes / 10 per arm).
+    if [[ -n ${ARM_COSTS:-} ]]; then
+        IFS=+ read -ra _costs <<<"$ARM_COSTS"
+        for _pc in "${_costs[@]}"; do
+            [[ $arm == *"${_pc%:*}"* ]] && { cost=${_pc##*:}; break; }
+        done
+    fi
     weighted+=("$cost $arm")
 done
 while read -r cost arm; do

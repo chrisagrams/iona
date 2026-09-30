@@ -1,0 +1,14 @@
+s050m_ck010k_lr4e-4_p170k2_seed0
+s050m_ck133k_lr4e-4_p170k2_seed0
+s050m_ck050k_lr4e-4_p170k2_seed0
+s100m_ck010k_lr4e-4_p170k2_seed0
+s100m_ck138k_lr4e-4_p170k2_seed0
+s100m_ck430k_lr4e-4_p170k2_seed0
+s200m_ck010k_lr4e-4_p170k2_seed0
+s200m_ck192k_lr4e-4_p170k2_seed0
+s200m_ck330k_lr4e-4_p170k2_seed0
+s400m_ck010k_lr4e-4_p170k2_seed0
+s400m_ck181k_lr4e-4_p170k2_seed0
+s400m_ck255k_lr4e-4_p170k2_seed0
+s400m_ck430k_lr4e-4_p170k2_seed0
+s400m_ck120k_lr4e-4_p170k2_seed0
