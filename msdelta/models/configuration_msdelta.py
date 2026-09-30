@@ -60,6 +60,10 @@ class MSDeltaConfig(PretrainedConfig):
         pair_use_isotope: bool = True,
         pair_dropout: float = 0.0,
         pair_bias_scale: float | None = None,
+        # K114-P decoupled streams (defaults = the original model, one pair update per layer).
+        # See the pairformer module docstring, "Decoupled streams".
+        pair_update_every: int = 1,
+        pair_bias_lag: int = 0,
         **kwargs,
     ):
         super().__init__(**kwargs)
@@ -97,6 +101,8 @@ class MSDeltaConfig(PretrainedConfig):
         self.pair_use_isotope = pair_use_isotope
         self.pair_dropout = pair_dropout
         self.pair_bias_scale = pair_bias_scale
+        self.pair_update_every = pair_update_every
+        self.pair_bias_lag = pair_bias_lag
         self._validate()
 
     def to_dict(self) -> dict[str, Any]:
@@ -153,6 +159,15 @@ class MSDeltaConfig(PretrainedConfig):
             raise ValueError("pair_dropout must be in [0, 1)")
         if self.pair_bias_scale is not None and self.pair_bias_scale <= 0:
             raise ValueError("pair_bias_scale must be positive when set")
+        k, lag = self.pair_update_every, self.pair_bias_lag
+        if isinstance(k, bool) or not isinstance(k, int) or not 1 <= k <= self.num_hidden_layers:
+            raise ValueError("pair_update_every must be an int in [1, num_hidden_layers]")
+        if isinstance(lag, bool) or lag not in (0, 1):
+            raise ValueError("pair_bias_lag must be 0 or 1")
+        if lag == 1 and k >= self.num_hidden_layers:
+            # One round only: the single update would never be read, so nothing refines z.
+            raise ValueError("pair_bias_lag=1 needs pair_update_every < num_hidden_layers "
+                             "(at least two rounds), otherwise no pair update is ever read")
 
 
 class MSDeltaDenoisingConfig(PretrainedConfig):

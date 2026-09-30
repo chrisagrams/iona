@@ -15,6 +15,10 @@ Models (--models):
   pairformer_triattn    the same with pair_use_triangle_attention=true, pair_tri_attn_impl="sdpa"
                         (4 heads x 16, chunk 32, as in that config).
   transformer           configs/msdelta-base-50m/config.json (640 x 10, 10 heads).
+  --pair-config-overrides '{"pair_update_every": 3, "pair_bias_lag": 1}' applies the JSON on top
+  of both Pairformer configs (K114-P decoupled streams; any MSDeltaConfig field works). With
+  k > 1 the calibration also reports the pair update per UPDATE (a-f only, divided by the
+  number of update layers).
 Sizes: --batches 8,32 x --peaks 100,150,256,512. Each batch is a set of random spectra --
 m/z uniform in [100, 2000] sorted, lengths uniform in [0.3 N, N] with one spectrum at exactly
 N, log1p-normalised intensities -- padded and masked by the pretraining collator itself
@@ -233,7 +237,8 @@ def make_batch(b: int, n: int, seed: int = 0, mask_ratio: float = 0.5) -> dict:
     return MSDeltaDataCollatorForPreTraining(mask_ratio=mask_ratio)(feats)
 
 
-def load_config(name: str, pairformer_config: str, transformer_config: str) -> MSDeltaConfig:
+def load_config(name: str, pairformer_config: str, transformer_config: str,
+                pair_overrides: dict | None = None) -> MSDeltaConfig:
     if name == "transformer":
         d = json.loads(Path(transformer_config).read_text())
     else:
@@ -242,6 +247,7 @@ def load_config(name: str, pairformer_config: str, transformer_config: str) -> M
             d.update(pair_use_triangle_attention=True, pair_tri_attn_impl="sdpa")
         elif name != "pairformer":
             raise ValueError(name)
+        d.update(pair_overrides or {})
     return MSDeltaConfig(**d)
 
 
@@ -355,8 +361,12 @@ def profiled_mode(model, batch, dev, prof: BlockProfiler, warmup: int, reps: int
                 peak_gb=peak_since(dev, base), blocks=blocks)
 
 
-def calibration(prof_rec: dict, n_layers: int) -> dict:
-    """Per-layer costs and the ratio the user asked for."""
+def calibration(prof_rec: dict, n_layers: int, n_pair_updates: int | None = None) -> dict:
+    """Per-layer costs and the ratio the user asked for.
+
+    ``n_pair_updates`` (K114-P): with ``pair_update_every > 1`` only some layers run the pair
+    update (blocks a-f); their cost is also reported per update rather than averaged per layer.
+    """
     b = prof_rec["blocks"]
     get = lambda labs, key: sum(b[k][key] for k in labs if k in b)  # noqa: E731
     out = {}
@@ -371,6 +381,12 @@ def calibration(prof_rec: dict, n_layers: int) -> dict:
             out[f"single_blocks_per_pair_update_{tag}"] = pair / single if single else None
         if tblock:
             out[f"transformer_block_{tag}_ms_per_layer"] = tblock
+        if pair and n_pair_updates:
+            ops = get(PAIR_BLOCKS[:6], key) / n_pair_updates
+            out[f"pair_ops_{tag}_ms_per_update"] = ops
+            out[f"single_blocks_per_pair_ops_update_{tag}"] = ops / single if single else None
+    if n_pair_updates:
+        out["n_pair_updates"] = n_pair_updates
     return out
 
 
@@ -402,7 +418,9 @@ def run_config(model_name, model, cfg, prof, b, n, dev, a) -> dict:
               f"{rec[mode].get('step_ms', '')} ms peak {rec[mode].get('peak_gb', '')} GB",
               flush=True)
     if rec["profiled"].get("status") == "ok":
-        rec["calibration"] = calibration(rec["profiled"], cfg.num_hidden_layers)
+        n_upd = (sum(getattr(layer, "updates", True) for layer in model.msdelta.bias_module.layers)
+                 if getattr(cfg, "architecture", "transformer") == "pairformer" else None)
+        rec["calibration"] = calibration(rec["profiled"], cfg.num_hidden_layers, n_upd)
     del batch
     return rec
 
@@ -474,7 +492,11 @@ def main():
     ap.add_argument("--mask-ratio", type=float, default=0.5)
     ap.add_argument("--pairformer-config", default=PAIRFORMER_CONFIG)
     ap.add_argument("--transformer-config", default=TRANSFORMER_CONFIG)
+    ap.add_argument("--pair-config-overrides", default="{}",
+                    help="JSON applied on top of both Pairformer configs (K114-P), e.g. "
+                         "'{\"pair_update_every\": 3, \"pair_bias_lag\": 1}'")
     a = ap.parse_args()
+    pair_overrides = json.loads(a.pair_config_overrides)
 
     xpu = hasattr(torch, "xpu") and torch.xpu.is_available()
     dev = torch.device("xpu" if xpu else "cpu")
@@ -486,7 +508,7 @@ def main():
                autocast="bf16", pairformer_config=a.pairformer_config,
                pairformer_config_source="stage0-prep:configs/stage0/pairformer/config.json @ cde0905",
                transformer_config=a.transformer_config, warmup=a.warmup, reps=a.reps,
-               mask_ratio=a.mask_ratio)
+               mask_ratio=a.mask_ratio, pair_config_overrides=pair_overrides)
     print(f"[env] {env}", flush=True)
     out_path = Path(a.out)
     out_path.parent.mkdir(parents=True, exist_ok=True)
@@ -496,7 +518,7 @@ def main():
     peaks = sorted(int(x) for x in a.peaks.split(","))
     for name in a.models.split(","):
         try:
-            cfg = load_config(name, a.pairformer_config, a.transformer_config)
+            cfg = load_config(name, a.pairformer_config, a.transformer_config, pair_overrides)
             model = build_model(cfg, dev, a.seed)
         except Exception as e:  # noqa: BLE001
             report["configs"][name] = dict(error=f"{type(e).__name__}: {e}",
