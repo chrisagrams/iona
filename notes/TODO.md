@@ -914,3 +914,4 @@ Recall@K is the fraction of QUERIES with at least one hit in the top K. Document
 - 2026-09-30 W&B: WANDB_MODE=disabled did NOT stop logging in pbs/diag/p2_smoke.pbs (aurora-pretrain.pbs path), and
   without WANDB_ENTITY the three smoke runs (p2smoke-p2-cz32-*-8880669) went to the user's personal entity
   kelhus2-uic/pairformer_pretrain. Find what overrides WANDB_MODE; the user decides whether to delete those runs.
+  -> DELETED 2026-09-30 on the user's request (DECISIONS "W&B cleanup"); the WANDB_MODE override is still to find.
