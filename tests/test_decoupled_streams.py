@@ -107,7 +107,8 @@ def _run(model, batch, checkpointing=False):
 @pytest.mark.parametrize("checkpointing", [False, True])
 def test_defaults_bit_identical_to_reference(reference_module, monkeypatch, overrides,
                                              checkpointing):
-    cfg = _config(**overrides)
+    # The reference (07f53424) predates the sdpa_view default (K117); pin the impl both sides know.
+    cfg = _config(**{"pair_tri_attn_impl": "sdpa", **overrides})
     batch = _batch()
     new = _model(cfg)
     torch.manual_seed(123)  # dropout stream
