@@ -47,7 +47,7 @@ class MSDeltaConfig(PretrainedConfig):
         pair_tri_attn_heads: int = 2,
         pair_tri_attn_dim: int = 8,
         pair_tri_attn_chunk: int = 32,
-        pair_tri_attn_impl: str = "sdpa",  # "naive" | "sdpa" (K102) | "sdpa_view" (K117, copy-free mask); sdpa default since K115 (bf16 check 8875855)
+        pair_tri_attn_impl: str = "sdpa_view",  # "naive" | "sdpa" (K102, K115) | "sdpa_view" (K117, copy-free mask; default since 2026-09-30: B=32 train step 1.01-1.06x, up to 1.55x less memory, jobs 8879977/8880031)
         pair_tri_attn_checkpoint_chunks: bool = False,  # K102
         pair_use_writeback: bool = True,
         pair_opm_channels: int = 8,

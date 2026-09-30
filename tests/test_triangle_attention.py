@@ -180,7 +180,7 @@ def test_config_validation():
     with pytest.raises(ValueError, match="pair_tri_attn_impl"):
         _config(pair_tri_attn_impl="flash")
     assert _config(pair_tri_attn_impl="sdpa_view").pair_tri_attn_impl == "sdpa_view"
-    assert MSDeltaConfig().pair_tri_attn_impl == "sdpa"  # default since K115
+    assert MSDeltaConfig().pair_tri_attn_impl == "sdpa_view"  # default since K117 (2026-09-30)
     assert MSDeltaConfig().pair_tri_attn_checkpoint_chunks is False
 
 
