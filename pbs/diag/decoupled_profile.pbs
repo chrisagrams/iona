@@ -1,0 +1,34 @@
+#!/bin/bash -l
+#PBS -N k114-decoupled
+#PBS -A UIC-HPC
+#PBS -l select=1
+#PBS -l walltime=01:00:00
+#PBS -l filesystems=home:flare
+#PBS -j oe
+#PBS -o pbs/logs/
+# K114-P validation of decoupled streams (user 2026-09-30: validate before the Pairformer runs): per-block
+# profile of the stage-0 Pairformer with pair_update_every k in {1,2,3,5,10} (lag 0) and k in {2,5} with
+# pair_bias_lag 1, without and with triangle attention, at B=32 N=150 (the P2 micro-batch / peak cap).
+# One process per setting (a crash keeps the rest). Diagnostic only: no training, no settings chosen for
+# experiments.   qsub -q debug -v REPO_DIR=$PWD pbs/diag/decoupled_profile.pbs
+REPO_DIR=${REPO_DIR:-${PBS_O_WORKDIR:-$PWD}}
+cd "$REPO_DIR"
+source "$REPO_DIR/pbs/lib/load_frameworks.sh"
+set -uo pipefail
+export ONEAPI_DEVICE_SELECTOR=level_zero:gpu ZE_FLAT_DEVICE_HIERARCHY=FLAT ZE_AFFINITY_MASK=0
+export OMP_NUM_THREADS=${OMP_NUM_THREADS:-8} PYTHONPATH=$REPO_DIR${PYTHONPATH:+:$PYTHONPATH}
+source "$REPO_DIR/pbs/lib/code_snapshot.sh"
+PY="$REPO_DIR/.venv/bin/python"
+JOB=${PBS_JOBID%%.*}; JOB=${JOB:-local}
+O=results/raw/diag/decoupled_profile; mkdir -p "$O"
+for spec in 1:0 2:0 3:0 5:0 10:0 2:1 5:1; do
+    k=${spec%:*}; lag=${spec#*:}
+    tag=k${k}_lag${lag}
+    echo "=== $(date -Is) $tag"
+    timeout 600 "$PY" "$MSDELTA_CODE_DIR"/pbs/diag/pairformer_profile.py --out "$O/${JOB}_$tag.json" \
+        --models pairformer,pairformer_triattn --batches 32 --peaks 150 \
+        --pair-config-overrides "{\"pair_update_every\": $k, \"pair_bias_lag\": $lag}" \
+        2>&1 | tee "$O/${JOB}_$tag.log" | grep -E "^\[profile\].*(ok|oom|error)"
+done
+echo "=== $(date -Is) done"
+exit 0
