@@ -130,14 +130,6 @@ delta_bias_n_freqs (pair-feature init, once). Not yet in code: fewer peaks in th
 peaks), sparse pairs, low-rank pair, shared pair weights across updates. Proposal: a speed-only profiling
 screen first (no training), then a short training card for the cheapest settings.
 
-### K153-P: which triangle multiplication to keep (open, 2026-09-30)
-User chose one triangle multiplication (K151-P). Outgoing: z_ij += sum_k a_ik * b_jk (i and j compare their
-rows: "peaks that both relate to the same k"); incoming: sum_k a_ki * b_kj (their columns). Incoming on z is
-outgoing on the transpose z_ji. Our pair features are signed (delta m/z, intensity ratio), but z_ji's
-initial features are a fixed linear re-mapping of z_ij's (sin flips sign, cos does not), so the two
-directions are expected to behave alike -- an expectation, not measured. Options: pick outgoing (AF order, cheaper to decide) or screen both in the K151 speed/short-training
-card. Switch: pair_tri_mul = outgoing | incoming.
-
 ### K110-S: checkpoint cleanup on /flare (f, g, a-lite DELETED 2026-09-30; rest open)
 Confirm: delete the remaining checkpoint WEIGHTS of the K110a runs too (only finals kept)? K110b/c/d/h/i/j open.
 Decide per tier (K110a..K110k in the card). Biggest: K110a old-run intermediate checkpoints 1,055 GiB (or

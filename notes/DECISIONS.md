@@ -154,6 +154,8 @@ IDs carry a track suffix: -C contrastive (spectrum encoder), -A alignment (pepti
 | 2026-09-30 | K151-P (direction) | User supports dropping one of the two triangle multiplications (to be a switch, default both; which direction to keep is screened). Widths direction: c_z (pair_channels) around 2x the 8 heads, i.e. 16 or 32 (stage0 has 64); c_t = c_z; c_o depends on the write-back form (K152-P). Exact values set after the K151 speed screen, which needs its own card | user |
 | 2026-09-30 | K152-P | Write-back = (a) outer product, computed factored (no c_o^2 tensor; same weights and math) -- made the default pair_writeback_impl under the "adopt if no downsides" rule (tested equal to the materialised form, checkpoints interchangeable); (b) pointwise kept as an option (pair_writeback="pointwise") if more speed is needed | user (impl default: Claude, per the K117 rule) |
 | 2026-09-30 | K151-P widths | Pairformer pair widths for the next runs: c_z = c_t = 32, c_o = 16 ("cp=16", read as c_o); ONE triangle multiplication (switch pair_tri_mul; which direction = K153-P) | user |
+| 2026-09-30 | K153-P | Keep the OUTGOING triangle multiplication (pair_tri_mul="outgoing") | user |
+| 2026-09-30 | K154-P | Pair widths to be chosen from the measured cost of a pair pass vs a single pass at the new settings (re-test): profile job 8880628 (c_z=c_t 16/32/64, c_o 16, outgoing, factored; old layout as reference; B=32 N=150; with/without tri-attn). The earlier c_z=c_t=32 choice stands until the numbers are in | user |
 
 ## Settings chosen WITHOUT explicit approval (before this log existed)
 

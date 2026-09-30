@@ -2040,3 +2040,20 @@ Cost model fitted from these: step ~= S + u x P, u = number of pair updates.
     whole single stack).
 -> Time-balancing single vs pair work ("two singles per pair op") would need k >= 10 at this size; the pair
    update is ~25x (no tri-attn) to ~60x+ (tri-attn) a single block, not 2x. Raw: results/raw/diag/decoupled_profile/.
+
+## K66-C / K136-C per-scale search complete: 25m, 50m (P170), 100m, 200m, 400m (2026-09-30)
+Jobs: 25m 8878461, 400m 8878459, K136 50m-P170 8878464 (100m/200m earlier). Validation, experimental queries,
+mean of 3 seeds (± half range of MAP@R). All validation queries pass the precursor filter (F n=0), so the
+filtered columns are full = pass.
+
+| scale | lr2e-4 P128 | lr4e-4 P128 | lr4e-4 P170 | lr8e-4 P128 |
+|---|---|---|---|---|
+| 25m  MAP@R / Hit@1 | .8655 / .9152 | .8674 / .9176 | **.8712±.0009 / .9197** | .8468 / .9024 |
+| 50m  | (K66) | .886 (C27 ref) | **.8880±.0002 / .9303** | (K66) |
+| 100m | .9001 / .9376 | .8981 / .9369 | **.9018±.0005 / .9393** | .8803 / .9253 |
+| 200m | .9052 / .9414 | .9065 / .9423 | **.9090±.0005 / .9440** | .8909 / .9320 |
+| 400m | .9170 / .9479 | .9176 / .9492 | **.9201±.0005 / .9504** | .9056 / .9420 |
+
+20 ppm MAP@R 0.992-0.996, iso20 0.977-0.989 across all arms. lr 4e-4 with P170 x K2 is best at every scale
+(margins 0.002-0.004 over the next arm, above the seed spread); lr 8e-4 is worst everywhere. Raw:
+results/raw/finetune/contrastive/hp-scale-<scale>-<split>/. Other splits (test, oodval, mouse, human, yeast) scored, not yet tabulated.
