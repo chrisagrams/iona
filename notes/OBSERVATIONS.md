@@ -2250,7 +2250,9 @@ Compiled, 2 nodes x 12 tiles x micro 24 (global 576), probe data (cap 512), s/st
   | model | pad to 512 | length-grouped, pad 64, static shapes | speed-up | 1 epoch (~160k steps), 2 nodes |
   | Pairformer 1 update (10 x 640) | 0.560 | 0.173 | 3.2x | ~7.7 h, ~15 node-h |
   | transformer-50m | 0.387 | 0.133 | 2.9x | ~5.9 h, ~12 node-h |
-  One-time compile of the ~8 shapes: ~8 min (transformer), ~14 min (Pairformer). Both fit micro 24 at 512 when compiled.
+  | Pairformer 2 updates | -- | 0.207 (8885503) | -- | ~9.2 h, ~18 node-h |
+  One-time compile of the ~8 shapes: ~8 min (transformer), ~14 min (1 update), ~21 min (2 updates); all fit micro 24
+  at 512 when compiled. 4 updates: compile outlasted the debug hour in 8885503 -> rerun alone (8886241).
 
 ## K163-C consensus twins vs no-consensus partners (final checkpoints, lr 4e-4 P170xK2, 3 seeds; sweeps/compare_cons.py)
 Validation (8883725; 25,691 library queries; every query passes the 20 ppm filter, F n=0, so "with filter" = Fbar):
