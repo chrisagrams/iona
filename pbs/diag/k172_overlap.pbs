@@ -26,10 +26,18 @@ VENV_DIR=${VENV_DIR:-$REPO_DIR/.venv}
 PY="$VENV_DIR/bin/python"
 JOB=${PBS_JOBID%%.*}; JOB=${JOB:-local}
 O=results/raw/diag/k172_overlap; mkdir -p "$O"
-echo "=== $(date -Is) python $PY ($("$PY" -c 'import torch; print(torch.__version__)' 2>/dev/null))"
-timeout 3300 "$PY" "$MSDELTA_CODE_DIR"/pbs/diag/k172_overlap.py --out "$O/$JOB.json" \
-    --config "$REPO_DIR/configs/p2/p2-cz32-k5/config.json" \
-    --batch 24 --peaks 150 --ks "${K172_KS:-1,2,3,5,7}" --layers "${K172_LAYERS:-10,14}" --warmup 5 --reps 20 \
-    2>&1 | tee "$O/$JOB.log" | grep -E "^\[k172\]|Error|Traceback"
+K172_CCS=${K172_CCS:-1}   # e.g. 1+2
+# K174-P: K172_CCS lists compute-engine modes to run in turn (Level Zero ZEX_NUMBER_OF_CCS on device 0; Aurora
+# tiles default to 1 CCS, which serialises every queue on the tile). 1 = the default, the control.
+for CCS in ${K172_CCS//+/ }; do
+    export ZEX_NUMBER_OF_CCS=0:$CCS
+    TAG=$JOB-ccs$CCS
+    echo "=== $(date -Is) ZEX_NUMBER_OF_CCS=$ZEX_NUMBER_OF_CCS python $PY"
+    "$PY" -c 'import torch; n = torch.xpu.device_count(); print("[k172] xpu devices:", n, [torch.xpu.get_device_properties(i).name for i in range(n)])' 2>&1 | grep "\[k172\]" | tee "$O/$TAG.devices"
+    timeout $(( 3300 / $(wc -w <<<"${K172_CCS//+/ }") )) "$PY" "$MSDELTA_CODE_DIR"/pbs/diag/k172_overlap.py --out "$O/$TAG.json" \
+        --config "$REPO_DIR/configs/p2/p2-cz32-k5/config.json" \
+        --batch "${K172_BATCH:-24}" --peaks 150 --ks "${K172_KS:-1,2,3,5,7}" --layers "${K172_LAYERS:-10,14}" --warmup 5 --reps 20 \
+        2>&1 | tee "$O/$TAG.log" | grep -E "^\[k172\]|Error|Traceback"
+done
 echo "=== $(date -Is) done"
 exit 0
