@@ -315,6 +315,7 @@ export IONA_XPUS_PER_HOST=$XPUS_PER_HOST
 export IONA_WORLD_SIZE=$TOTAL_XPUS
 export IONA_XPU_TELEGRAF_CONFIG=$XPU_TELEGRAF_CONFIG
 export IONA_TELEGRAF_BIN=$TELEGRAF_BIN
+export IONA_TELEGRAF_STARTUP_SECONDS=${IONA_TELEGRAF_STARTUP_SECONDS:-120}
 export IONA_XPU_METRICS_PORT=${IONA_XPU_METRICS_PORT:-9274}
 export LOG_DIR
 
@@ -380,13 +381,15 @@ exec mpiexec \
         if [[ $LOCAL_RANK == 0 && -z $IONA_TELEGRAF_BIN ]]; then
             echo "warning: telegraf not found (set TELEGRAF_BIN); skipping XPU metrics" >&2
         elif [[ $LOCAL_RANK == 0 ]]; then
-            "$IONA_TELEGRAF_BIN" --config "$IONA_XPU_TELEGRAF_CONFIG" \
+            telegraf_bin=/tmp/telegraf-$USER
+            cp "$IONA_TELEGRAF_BIN" "$telegraf_bin"
+            "$telegraf_bin" --config "$IONA_XPU_TELEGRAF_CONFIG" \
                 >"$LOG_DIR/xpu-telegraf-${HOSTNAME}.log" 2>&1 &
             telegraf_pid=$!
             trap '\''kill "$telegraf_pid" 2>/dev/null || true; wait "$telegraf_pid" 2>/dev/null || true'\'' EXIT
             export IONA_XPU_METRICS_URL="http://127.0.0.1:${IONA_XPU_METRICS_PORT}/metrics"
-            for _ in {1..20}; do
-                if curl --noproxy 127.0.0.1 --fail --silent --show-error \
+            for ((attempt = 0; attempt < IONA_TELEGRAF_STARTUP_SECONDS * 2; attempt++)); do
+                if curl --noproxy 127.0.0.1 --fail --silent \
                     "$IONA_XPU_METRICS_URL" >/dev/null; then
                     metrics_endpoint_ready=1
                     break
