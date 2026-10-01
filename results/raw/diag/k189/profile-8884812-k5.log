@@ -1,0 +1,79 @@
+[env] {'torch': '2.10.0a0+git449b176', 'device': 'xpu', 'device_name': 'Intel(R) Data Center GPU Max 1550', 'device_total_gb': 68.70269952, 'ZE_AFFINITY_MASK': '0', 'job': '8884812.aurora-pbs-0001.hostmgmt.cm.aurora.alcf.anl.gov', 'code_dir': '/lus/flare/projects/UIC-HPC/khuss/msdelta/code-snapshots/8884812', 'autocast': 'bf16', 'pairformer_config': 'configs/p2/p2-W640-k5/config.json', 'pairformer_config_source': 'stage0-prep:configs/stage0/pairformer/config.json @ cde0905', 'transformer_config': 'configs/p2/p2-T-W640/config.json', 'warmup': 2, 'reps': 3, 'mask_ratio': 0.5, 'pair_config_overrides': {}}
+[profile] pairformer B=24 N=150 plain_gc_off: ok 147.0114070107229 ms peak 5.610422272 GB
+[profile] pairformer B=24 N=150 plain_gc_on: ok 188.2485749956686 ms peak 2.798695424 GB
+[profile] pairformer B=24 N=150 profiled: ok 159.8306189989671 ms peak 5.610422272 GB
+[profile] pairformer B=24 N=256 plain_gc_off: ok 365.856699005235 ms peak 14.044158976 GB
+[profile] pairformer B=24 N=256 plain_gc_on: ok 468.72452599927783 ms peak 8.114104832 GB
+[profile] pairformer B=24 N=256 profiled: ok 376.4888359874021 ms peak 14.044158976 GB
+[profile] pairformer B=24 N=384 plain_gc_off: ok 773.225751996506 ms peak 29.240964608 GB
+[profile] pairformer B=24 N=384 plain_gc_on: ok 992.8468890138902 ms peak 18.225407488 GB
+[profile] pairformer B=24 N=384 profiled: ok 784.2336829926353 ms peak 29.240964608 GB
+[profile] pairformer B=24 N=512 plain_gc_off: oom  ms peak  GB
+[profile] pairformer B=24 N=512 plain_gc_on: oom  ms peak  GB
+[profile] wrote results/raw/diag/k189/profile-8884812-k5.json
+
+== pairformer  B=24  N=150  gc_off 147 ms/5.6 GB  gc_on 188 ms/2.8 GB
+   profiled step 159.8 ms (fwd 81.2, bwd 78.6), peak 5.61 GB
+   block                  calls    fwd ms    bwd ms     total  % step   fwd GB
+   b_trimul_out               2     12.17     19.55     31.72   19.8%    1.198
+   h_single_attention        10     14.44     15.67     30.11   18.8%    2.209
+   z_init                     1     12.10      9.17     21.27   13.3%    0.661
+   g_bias_readout            10      8.17     10.97     19.14   12.0%    0.500
+   i_single_transition       10      6.65     10.14     16.79   10.5%    1.004
+   pair_features              1     13.17      0.30     13.47    8.4%    1.233
+   pair_glue                 10      4.20      3.69      7.89    4.9%    2.770
+   f_pair_transition          2      2.49      4.67      7.16    4.5%    0.770
+   other                      0      4.06      0.79      4.85    3.0%    0.000
+   a_writeback                2      3.02      1.51      4.53    2.8%    0.165
+   token_embed                1      0.68      0.80      1.48    0.9%    0.024
+   loss                       0      0.00      0.84      0.84    0.5%    0.000
+   head                       1      0.15      0.30      0.45    0.3%    0.005
+   final_ln                   1      0.09      0.12      0.21    0.1%    0.010
+   per layer: pair update 7.04 ms, single block 4.69 ms -> 1.50 single blocks per pair update (fwd 1.43, bwd 1.56)
+
+== pairformer  B=24  N=256  gc_off 366 ms/14.0 GB  gc_on 469 ms/8.1 GB
+   profiled step 376.5 ms (fwd 191.2, bwd 185.3), peak 14.04 GB
+   block                  calls    fwd ms    bwd ms     total  % step   fwd GB
+   b_trimul_out               2     35.78     56.71     92.49   24.6%    3.485
+   z_init                     1     34.19     26.74     60.93   16.2%    1.914
+   g_bias_readout            10     21.31     32.00     53.31   14.2%    1.447
+   h_single_attention        10     23.43     24.33     47.76   12.7%    4.241
+   pair_features              1     38.48      0.52     39.00   10.4%    3.592
+   i_single_transition       10      9.67     14.77     24.44    6.5%    1.636
+   f_pair_transition          2      8.15     15.15     23.30    6.2%    2.240
+   pair_glue                 10      8.57      9.36     17.93    4.8%    8.023
+   a_writeback                2      6.91      2.80      9.71    2.6%    0.448
+   other                      0      3.83      0.81      4.64    1.2%    0.000
+   token_embed                1      0.70      0.81      1.51    0.4%    0.041
+   loss                       0      0.00      0.85      0.85    0.2%    0.000
+   head                       1      0.17      0.30      0.47    0.1%    0.008
+   final_ln                   1      0.11      0.15      0.26    0.1%    0.016
+   per layer: pair update 19.67 ms, single block 7.22 ms -> 2.73 single blocks per pair update (fwd 2.44, bwd 2.97)
+
+== pairformer  B=24  N=384  gc_off 773 ms/29.2 GB  gc_on 993 ms/18.2 GB
+   profiled step 784.2 ms (fwd 373.2, bwd 411.0), peak 29.24 GB
+   block                  calls    fwd ms    bwd ms     total  % step   fwd GB
+   b_trimul_out               2     83.40    153.37    236.78   30.2%    7.842
+   g_bias_readout            10     45.34     72.25    117.58   15.0%    3.258
+   z_init                     1     45.90     60.02    105.92   13.5%    4.292
+   pair_features              1     90.45      0.91     91.36   11.6%    8.083
+   h_single_attention        10     42.73     42.49     85.22   10.9%    7.348
+   f_pair_transition          2     18.22     32.82     51.04    6.5%    5.040
+   pair_glue                 10     16.02     21.18     37.20    4.7%   18.018
+   i_single_transition       10     11.63     19.03     30.66    3.9%    2.403
+   a_writeback                2     14.46      5.26     19.72    2.5%    0.974
+   other                      0      3.79      0.85      4.64    0.6%    0.000
+   token_embed                1      1.03      0.83      1.86    0.2%    0.060
+   loss                       0      0.00      0.93      0.93    0.1%    0.000
+   head                       1      0.16      0.34      0.50    0.1%    0.012
+   final_ln                   1      0.12      0.22      0.34    0.0%    0.024
+   per layer: pair update 46.23 ms, single block 11.59 ms -> 3.99 single blocks per pair update (fwd 3.26, bwd 4.63)
+
+== pairformer  B=24  N=512  gc_off oom  gc_on oom
+   profiled: skipped plain_gc_off did not run
+
+== summary: single blocks per pair update (fwd+bwd, per layer), and transformer blocks per pair update at the same B, N
+   model                  B    N   pair ms  single ms   ratio   tfm ms  pair/tfm
+   pairformer            24  150      7.04       4.69    1.50      nan       nan
+   pairformer            24  256     19.67       7.22    2.73      nan       nan
+   pairformer            24  384     46.23      11.59    3.99      nan       nan

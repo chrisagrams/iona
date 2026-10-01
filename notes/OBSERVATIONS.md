@@ -2232,6 +2232,21 @@ Interactive probes (results/raw/diag/k172_overlap/ccs_probe*.{sh,out}), .venv-20
   runtime does not expose the halves as devices (no sub-sub-devices). Not a PyTorch limitation; below it. Question for
   ALCF: how to get CCS sub-sub-devices on Aurora (driver/runtime setting, or not supported in FLAT on this release).
 
+## K189-P cost of one epoch on Chris's recipe (MSConsensus-100M, max_peaks 512; 2026-10-01)
+Peaks (2M spectra, results/raw/diag/k189/peaks.json): kept at cap 150 / 256 / 512 = 27% / 66% / 92%; median at cap 512
+197, mean 215; a random batch of 24 pads to 444 (473 at pad 64), length-grouped ~246 (pad 64).
+Eager one-tile profile (8884812, B 24, whole fwd+bwd step, ms): N = 150 / 256 / 384 / 512
+  Pairformer 10 x 640, 1 update: 124 / 300 / 613 / 1039 (37 GB at 512); 2 updates: 147 / 366 / 773 / OOM (fragmentation);
+  4 updates: 192 / 505 / 1098 / OOM; transformer-50m: 89 / 216 / 459 / OOM (its delta-m/z bias is per pair too).
+One epoch (92.3M spectra), node-hours, eager (compiled ~2x less, K167), before comms/optimizer overhead:
+  | model | length-grouped | random batches (Chris's way) |
+  | Pairformer 1 update | 28 | 81 |
+  | Pairformer 2 updates | 35 | 104 |
+  | Pairformer 4 updates | 49 | 150 |
+  | transformer-50m | 21 | 63 |
+-> grouping cuts ~3x; 1 + 2 updates, one epoch each: ~63 node-h eager, ~31 compiled. Memory: 512-peak batches of 24
+   do not fit with 2+ updates -> micro 12 (or expandable segments) for long buckets. Compiled 2-node check pending (k189_e1-e3).
+
 ## K163-C consensus twins vs no-consensus partners (final checkpoints, lr 4e-4 P170xK2, 3 seeds; sweeps/compare_cons.py)
 Validation (8883725; 25,691 library queries; every query passes the 20 ppm filter, F n=0, so "with filter" = Fbar):
 | scale | lib Hit@1 no filter: no-cons -> cons | 20 ppm | iso 20 ppm | MAP@R (spectrum-spectrum) |

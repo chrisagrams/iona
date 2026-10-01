@@ -1,0 +1,153 @@
+[env] {'torch': '2.10.0a0+git449b176', 'device': 'xpu', 'device_name': 'Intel(R) Data Center GPU Max 1550', 'device_total_gb': 68.70269952, 'ZE_AFFINITY_MASK': '0', 'job': '8884812.aurora-pbs-0001.hostmgmt.cm.aurora.alcf.anl.gov', 'code_dir': '/lus/flare/projects/UIC-HPC/khuss/msdelta/code-snapshots/8884812', 'autocast': 'bf16', 'pairformer_config': 'configs/p2/p2-W640-k10/config.json', 'pairformer_config_source': 'stage0-prep:configs/stage0/pairformer/config.json @ cde0905', 'transformer_config': 'configs/p2/p2-T-W640/config.json', 'warmup': 2, 'reps': 3, 'mask_ratio': 0.5, 'pair_config_overrides': {}}
+[profile] pairformer B=24 N=150 plain_gc_off: ok 124.42391799413599 ms peak 4.4733184 GB
+[profile] pairformer B=24 N=150 plain_gc_on: ok 157.25228999508545 ms peak 2.798695424 GB
+[profile] pairformer B=24 N=150 profiled: ok 136.75776301533915 ms peak 4.4733184 GB
+[profile] pairformer B=24 N=256 plain_gc_off: ok 299.6267630078364 ms peak 10.753604608 GB
+[profile] pairformer B=24 N=256 plain_gc_on: ok 370.5654090153985 ms peak 8.114104832 GB
+[profile] pairformer B=24 N=256 profiled: ok 309.43025200394914 ms peak 10.753604608 GB
+[profile] pairformer B=24 N=384 plain_gc_off: ok 613.0483869928867 ms peak 21.849261568 GB
+[profile] pairformer B=24 N=384 plain_gc_on: ok 764.9334930174518 ms peak 18.225407488 GB
+[profile] pairformer B=24 N=384 profiled: ok 620.9230269887485 ms peak 21.849261568 GB
+[profile] pairformer B=24 N=512 plain_gc_off: ok 1038.8081290002447 ms peak 36.867675136 GB
+[profile] pairformer B=24 N=512 plain_gc_on: ok 1299.6657110052183 ms peak 32.37317888 GB
+[profile] pairformer B=24 N=512 profiled: ok 1047.918213007506 ms peak 36.867675136 GB
+[profile] transformer B=24 N=150 plain_gc_off: ok 89.04445701045915 ms peak 7.98484224 GB
+[profile] transformer B=24 N=150 plain_gc_on: ok 105.06585400435142 ms peak 7.380070912 GB
+[profile] transformer B=24 N=150 profiled: ok 98.4232499904465 ms peak 7.98484224 GB
+[profile] transformer B=24 N=256 plain_gc_off: ok 216.43408300587907 ms peak 21.645727232 GB
+[profile] transformer B=24 N=256 plain_gc_on: ok 243.02425599307753 ms peak 21.445375488 GB
+[profile] transformer B=24 N=256 profiled: ok 225.39173701079562 ms peak 21.645727232 GB
+[profile] transformer B=24 N=384 plain_gc_off: ok 459.34283602400683 ms peak 48.223394304 GB
+[profile] transformer B=24 N=384 plain_gc_on: ok 507.9692139988765 ms peak 48.223394304 GB
+[profile] transformer B=24 N=384 profiled: ok 466.9681569794193 ms peak 48.223394304 GB
+[profile] transformer B=24 N=512 plain_gc_off: oom  ms peak  GB
+[profile] transformer B=24 N=512 plain_gc_on: oom  ms peak  GB
+[profile] wrote results/raw/diag/k189/profile-8884812-k10.json
+
+== pairformer  B=24  N=150  gc_off 124 ms/4.5 GB  gc_on 157 ms/2.8 GB
+   profiled step 136.8 ms (fwd 71.5, bwd 65.2), peak 4.47 GB
+   block                  calls    fwd ms    bwd ms     total  % step   fwd GB
+   h_single_attention        10     14.65     15.67     30.32   22.2%    2.206
+   z_init                     1     12.02      9.17     21.19   15.5%    0.661
+   g_bias_readout            10      8.34     11.02     19.37   14.2%    0.499
+   i_single_transition       10      6.93     10.17     17.10   12.5%    1.004
+   b_trimul_out               1      6.05      9.80     15.86   11.6%    0.600
+   pair_features              1     13.10      0.30     13.40    9.8%    1.233
+   pair_glue                 10      3.13      2.98      6.11    4.5%    1.636
+   other                      0      3.81      0.91      4.72    3.5%    0.000
+   f_pair_transition          1      1.26      2.36      3.62    2.6%    0.385
+   a_writeback                1      1.43      0.74      2.17    1.6%    0.082
+   token_embed                1      0.66      0.69      1.36    1.0%    0.024
+   loss                       0      0.00      0.81      0.81    0.6%    0.000
+   head                       1      0.16      0.30      0.46    0.3%    0.005
+   final_ln                   1      0.09      0.12      0.21    0.2%    0.009
+   per layer: pair update 4.71 ms, single block 4.74 ms -> 0.99 single blocks per pair update (fwd 0.94, bwd 1.04)
+
+== pairformer  B=24  N=256  gc_off 300 ms/10.8 GB  gc_on 371 ms/8.1 GB
+   profiled step 309.4 ms (fwd 162.7, bwd 146.7), peak 10.75 GB
+   block                  calls    fwd ms    bwd ms     total  % step   fwd GB
+   z_init                     1     34.20     26.88     61.08   19.7%    1.913
+   g_bias_readout            10     21.55     31.83     53.39   17.3%    1.447
+   h_single_attention        10     23.11     24.79     47.90   15.5%    4.240
+   b_trimul_out               1     17.88     28.30     46.18   14.9%    1.743
+   pair_features              1     38.66      0.47     39.13   12.6%    3.592
+   i_single_transition       10      9.62     14.95     24.58    7.9%    1.634
+   pair_glue                 10      5.58      7.48     13.06    4.2%    4.737
+   f_pair_transition          1      4.05      7.54     11.59    3.7%    1.120
+   other                      0      3.82      0.93      4.75    1.5%    0.000
+   a_writeback                1      3.29      1.38      4.68    1.5%    0.225
+   token_embed                1      0.79      0.70      1.50    0.5%    0.039
+   loss                       0      0.00      0.80      0.80    0.3%    0.000
+   head                       1      0.16      0.33      0.49    0.2%    0.008
+   final_ln                   1      0.10      0.17      0.26    0.1%    0.016
+   per layer: pair update 12.89 ms, single block 7.25 ms -> 1.78 single blocks per pair update (fwd 1.60, bwd 1.93)
+
+== pairformer  B=24  N=384  gc_off 613 ms/21.8 GB  gc_on 765 ms/18.2 GB
+   profiled step 620.9 ms (fwd 309.8, bwd 311.1), peak 21.85 GB
+   block                  calls    fwd ms    bwd ms     total  % step   fwd GB
+   b_trimul_out               1     41.78     76.53    118.32   19.1%    3.921
+   g_bias_readout            10     45.74     72.35    118.09   19.0%    3.256
+   z_init                     1     45.02     60.33    105.34   17.0%    4.292
+   pair_features              1     91.42      0.86     92.28   14.9%    8.083
+   h_single_attention        10     42.77     42.28     85.05   13.7%    7.341
+   i_single_transition       10     11.98     18.79     30.77    5.0%    2.402
+   pair_glue                 10     10.22     17.00     27.22    4.4%   10.636
+   f_pair_transition          1      9.08     16.56     25.64    4.1%    2.520
+   a_writeback                1      7.06      2.64      9.70    1.6%    0.487
+   other                      0      3.78      0.85      4.63    0.7%    0.000
+   token_embed                1      0.75      0.80      1.54    0.2%    0.060
+   loss                       0      0.00      0.84      0.84    0.1%    0.000
+   head                       1      0.16      0.32      0.48    0.1%    0.012
+   final_ln                   1      0.12      0.22      0.34    0.1%    0.024
+   per layer: pair update 29.90 ms, single block 11.58 ms -> 2.58 single blocks per pair update (fwd 2.08, bwd 3.03)
+
+== pairformer  B=24  N=512  gc_off 1039 ms/36.9 GB  gc_on 1300 ms/32.4 GB
+   profiled step 1047.9 ms (fwd 513.7, bwd 534.2), peak 36.87 GB
+   block                  calls    fwd ms    bwd ms     total  % step   fwd GB
+   g_bias_readout            10     83.20    128.31    211.51   20.2%    5.788
+   b_trimul_out               1     74.68    132.50    207.17   19.8%    6.971
+   z_init                     1     89.06    109.44    198.50   18.9%    7.621
+   pair_features              1    136.18      1.57    137.75   13.1%   14.370
+   h_single_attention        10     64.79     68.67    133.45   12.7%   11.157
+   pair_glue                 10     17.75     30.34     48.10    4.6%   18.894
+   f_pair_transition          1     16.14     29.43     45.56    4.3%    4.480
+   i_single_transition       10     14.65     26.09     40.74    3.9%    3.166
+   a_writeback                1     12.23      4.22     16.45    1.6%    0.850
+   other                      0      3.98      0.83      4.81    0.5%    0.000
+   token_embed                1      0.94      0.80      1.74    0.2%    0.079
+   loss                       0      0.00      0.83      0.83    0.1%    0.000
+   head                       1      0.18      0.37      0.55    0.1%    0.016
+   final_ln                   1      0.14      0.30      0.44    0.0%    0.032
+   per layer: pair update 52.88 ms, single block 17.42 ms -> 3.04 single blocks per pair update (fwd 2.57, bwd 3.43)
+
+== transformer  B=24  N=150  gc_off 89 ms/8.0 GB  gc_on 105 ms/7.4 GB
+   profiled step 98.4 ms (fwd 61.5, bwd 37.0), peak 7.98 GB
+   block                  calls    fwd ms    bwd ms     total  % step   fwd GB
+   dmz_bias                   1     38.14     11.75     49.90   50.7%    6.240
+   attention                 10     10.25     11.83     22.08   22.4%    0.963
+   ffn                       10      5.35      7.17     12.52   12.7%    0.645
+   block_glue                10      5.01      3.82      8.83    9.0%    1.701
+   other                      0      2.50      0.61      3.11    3.2%    0.000
+   token_embed                1      0.36      0.61      0.96    1.0%    0.019
+   loss                       0      0.00      0.76      0.76    0.8%    0.000
+   head                       1      0.15      0.30      0.45    0.5%    0.005
+   final_ln                   1      0.09      0.12      0.20    0.2%    0.009
+   per layer: transformer block 4.34 ms
+
+== transformer  B=24  N=256  gc_off 216 ms/21.6 GB  gc_on 243 ms/21.4 GB
+   profiled step 225.4 ms (fwd 158.3, bwd 67.1), peak 21.65 GB
+   block                  calls    fwd ms    bwd ms     total  % step   fwd GB
+   dmz_bias                   1    122.39     30.83    153.22   68.0%   18.151
+   attention                 10     17.50     18.97     36.47   16.2%    2.199
+   ffn                       10      7.57      9.36     16.93    7.5%    1.055
+   block_glue                10      5.80      5.25     11.05    4.9%    3.413
+   other                      0      2.32      0.90      3.22    1.4%    0.000
+   token_embed                1      0.39      0.63      1.02    0.5%    0.033
+   loss                       0      0.00      0.77      0.77    0.3%    0.000
+   head                       1      0.15      0.30      0.45    0.2%    0.008
+   final_ln                   1      0.10      0.16      0.25    0.1%    0.017
+   per layer: transformer block 6.45 ms
+
+== transformer  B=24  N=384  gc_off 459 ms/48.2 GB  gc_on 508 ms/48.2 GB
+   profiled step 467.0 ms (fwd 337.8, bwd 129.2), peak 48.22 GB
+   block                  calls    fwd ms    bwd ms     total  % step   fwd GB
+   dmz_bias                   1    282.97     70.43    353.40   75.7%   40.840
+   attention                 10     35.18     35.64     70.81   15.2%    4.340
+   ffn                       10      9.66     11.79     21.45    4.6%    1.542
+   block_glue                10      6.89      7.09     13.98    3.0%    6.119
+   other                      0      2.34      2.00      4.34    0.9%    0.000
+   token_embed                1      0.44      0.68      1.12    0.2%    0.050
+   loss                       0      0.00      0.75      0.75    0.2%    0.000
+   head                       1      0.17      0.34      0.51    0.1%    0.012
+   final_ln                   1      0.12      0.22      0.34    0.1%    0.024
+   per layer: transformer block 10.62 ms
+
+== transformer  B=24  N=512  gc_off oom  gc_on oom
+   profiled: skipped plain_gc_off did not run
+
+== summary: single blocks per pair update (fwd+bwd, per layer), and transformer blocks per pair update at the same B, N
+   model                  B    N   pair ms  single ms   ratio   tfm ms  pair/tfm
+   pairformer            24  150      4.71       4.74    0.99     4.34      1.09
+   pairformer            24  256     12.89       7.25    1.78     6.45      2.00
+   pairformer            24  384     29.90      11.58    2.58    10.62      2.81
+   pairformer            24  512     52.88      17.42    3.04      nan       nan
