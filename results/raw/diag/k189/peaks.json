@@ -1,0 +1,61 @@
+{
+  "shards": [
+    "/lus/flare/projects/UIC-HPC/khuss/msdelta/huggingface/hub/datasets--Gaolaboratory--MSConsensus-100M/snapshots/78b3e74b90021f233747de6417064c837136a9b9/train-00000-of-00400.parquet",
+    "/lus/flare/projects/UIC-HPC/khuss/msdelta/huggingface/hub/datasets--Gaolaboratory--MSConsensus-100M/snapshots/78b3e74b90021f233747de6417064c837136a9b9/train-00050-of-00400.parquet",
+    "/lus/flare/projects/UIC-HPC/khuss/msdelta/huggingface/hub/datasets--Gaolaboratory--MSConsensus-100M/snapshots/78b3e74b90021f233747de6417064c837136a9b9/train-00100-of-00400.parquet",
+    "/lus/flare/projects/UIC-HPC/khuss/msdelta/huggingface/hub/datasets--Gaolaboratory--MSConsensus-100M/snapshots/78b3e74b90021f233747de6417064c837136a9b9/train-00150-of-00400.parquet",
+    "/lus/flare/projects/UIC-HPC/khuss/msdelta/huggingface/hub/datasets--Gaolaboratory--MSConsensus-100M/snapshots/78b3e74b90021f233747de6417064c837136a9b9/train-00200-of-00400.parquet",
+    "/lus/flare/projects/UIC-HPC/khuss/msdelta/huggingface/hub/datasets--Gaolaboratory--MSConsensus-100M/snapshots/78b3e74b90021f233747de6417064c837136a9b9/train-00250-of-00400.parquet",
+    "/lus/flare/projects/UIC-HPC/khuss/msdelta/huggingface/hub/datasets--Gaolaboratory--MSConsensus-100M/snapshots/78b3e74b90021f233747de6417064c837136a9b9/train-00300-of-00400.parquet",
+    "/lus/flare/projects/UIC-HPC/khuss/msdelta/huggingface/hub/datasets--Gaolaboratory--MSConsensus-100M/snapshots/78b3e74b90021f233747de6417064c837136a9b9/train-00350-of-00400.parquet"
+  ],
+  "spectra": 2000000,
+  "cap150": {
+    "kept_frac": 0.2695865,
+    "q": {
+      "10": 67.0,
+      "25": 89.0,
+      "50": 114.0,
+      "75": 133.0,
+      "90": 144.0,
+      "99": 150.0
+    },
+    "mean": 108.80336552460898,
+    "mean_N2": 12690.906345458694,
+    "mean_N3": 1550521.935888852,
+    "batch24_padded_mean": 147.76105052303583,
+    "batch24_padded_q50": 149.0
+  },
+  "cap256": {
+    "kept_frac": 0.6565525,
+    "q": {
+      "10": 88.0,
+      "25": 123.0,
+      "50": 165.0,
+      "75": 205.0,
+      "90": 233.0,
+      "99": 254.0
+    },
+    "mean": 162.1035202820795,
+    "mean_N2": 29126.469754513157,
+    "mean_N3": 5611163.70369087,
+    "batch24_padded_mean": 246.93580932884925,
+    "batch24_padded_q50": 249.0
+  },
+  "cap512": {
+    "kept_frac": 0.922434,
+    "q": {
+      "10": 99.0,
+      "25": 141.0,
+      "50": 197.0,
+      "75": 271.0,
+      "90": 364.0,
+      "99": 489.0
+    },
+    "mean": 214.8703115886882,
+    "mean_N2": 56435.5485541513,
+    "mean_N3": 17321809.477353394,
+    "batch24_padded_mean": 444.3104502465233,
+    "batch24_padded_q50": 454.0
+  }
+}
