@@ -20,6 +20,8 @@
 # DENOISE_XPU_TILES=4,5 and RETRIEVAL_XPU_TILES=10,11 use both tiles per spare card.
 # Export comma-separated lists before qsub; commas also delimit qsub -v entries.
 # Set PROBE_EXECUTION=inline to retain synchronous probes, or off to disable heads.
+# Telegraf is no longer provided on Aurora; set TELEGRAF_BIN to a portable
+# binary on a shared filesystem (see pbs/install-telegraf.sh).
 # The launch follows the ALCF Aurora PyTorch DDP guidance:
 # https://docs.alcf.anl.gov/aurora/data-science/frameworks/pytorch/
 
@@ -106,6 +108,11 @@ if [[ ! -x $VENV_DIR/bin/python ]]; then
     exit 2
 fi
 XPU_TELEGRAF_CONFIG=${IONA_XPU_TELEGRAF_CONFIG:-$REPO_DIR/pbs/xpu-telegraf.conf}
+TELEGRAF_BIN=${TELEGRAF_BIN:-$(command -v telegraf || true)}
+if [[ -n $TELEGRAF_BIN && ! -x $TELEGRAF_BIN ]]; then
+    echo "TELEGRAF_BIN is not executable: $TELEGRAF_BIN" >&2
+    exit 2
+fi
 if [[ ! -f $XPU_TELEGRAF_CONFIG ]]; then
     echo "XPU Telegraf configuration not found: $XPU_TELEGRAF_CONFIG" >&2
     exit 2
@@ -307,6 +314,7 @@ export MASTER_PORT=${MASTER_PORT:-29500}
 export IONA_XPUS_PER_HOST=$XPUS_PER_HOST
 export IONA_WORLD_SIZE=$TOTAL_XPUS
 export IONA_XPU_TELEGRAF_CONFIG=$XPU_TELEGRAF_CONFIG
+export IONA_TELEGRAF_BIN=$TELEGRAF_BIN
 export IONA_XPU_METRICS_PORT=${IONA_XPU_METRICS_PORT:-9274}
 export LOG_DIR
 
@@ -369,10 +377,10 @@ exec mpiexec \
         export WORLD_SIZE="$IONA_WORLD_SIZE"
         export LOCAL_RANK="${PALS_LOCAL_RANKID:-${MPI_LOCALRANKID:-$((RANK % IONA_XPUS_PER_HOST))}}"
         export LOCAL_WORLD_SIZE="$IONA_XPUS_PER_HOST"
-        if [[ $LOCAL_RANK == 0 ]] && ! command -v telegraf >/dev/null 2>&1; then
-            echo "warning: telegraf not found on $HOSTNAME; skipping XPU metrics" >&2
+        if [[ $LOCAL_RANK == 0 && -z $IONA_TELEGRAF_BIN ]]; then
+            echo "warning: telegraf not found (set TELEGRAF_BIN); skipping XPU metrics" >&2
         elif [[ $LOCAL_RANK == 0 ]]; then
-            telegraf --config "$IONA_XPU_TELEGRAF_CONFIG" \
+            "$IONA_TELEGRAF_BIN" --config "$IONA_XPU_TELEGRAF_CONFIG" \
                 >"$LOG_DIR/xpu-telegraf-${HOSTNAME}.log" 2>&1 &
             telegraf_pid=$!
             trap '\''kill "$telegraf_pid" 2>/dev/null || true; wait "$telegraf_pid" 2>/dev/null || true'\'' EXIT
