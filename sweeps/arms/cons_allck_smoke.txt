@@ -1,0 +1,2 @@
+s400m_ck010k_lr4e-4_p170k2_cons_seed0
+s050m_ck010k_lr4e-4_p170k2_cons_seed0

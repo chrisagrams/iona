@@ -26,8 +26,11 @@ RUN_PREFIX = "v2_cons-"
 ARM = "lr4e-4_p170k2"
 SEEDS = ("0", "1", "2")
 # (source grid, scale, checkpoint tag) of the no-consensus arms that exist
+# K188-C (user 2026-10-01: "We should run the full scaling for all checkpoints w/consensus"): every K155-C arm
+# (sweeps/arms/allck_all.txt: 50m/100m/200m/400m x 26 non-final checkpoints), not only the 100m ones finished in K160.
+ALLCK = sorted({tuple(a.split("_")[:2]) for a in (ARMS_DIR / "allck_all.txt").read_text().split()})
 SOURCES = [("sweep-hp-scale", s, "540k") for s in ("025m", "050m", "100m", "200m", "400m")] + \
-          [("sweep-allck", "100m", ck) for ck in ("220k", "330k", "430k")]
+          [("sweep-allck", size[1:], ck[2:]) for size, ck in ALLCK]
 
 
 def arms() -> dict[str, tuple[str, str, str]]:
@@ -68,6 +71,7 @@ def main() -> int:
         (OUT / name / "training.args").write_text(args)
         (OUT / name / "DESCRIPTION.md").write_text(desc)
     (ARMS_DIR / "cons_all.txt").write_text("\n".join(sorted(want)) + "\n")
+    (ARMS_DIR / "cons_allck.txt").write_text("\n".join(sorted(n for n in want if "_ck540k_" not in n)) + "\n")
     print(f"wrote {len(want)} arms to {OUT.relative_to(REPO)}")
     return 0
 
