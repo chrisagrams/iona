@@ -2317,7 +2317,9 @@ L14 k5 (3 updates) 0.0862 vs L14 k7 (2 updates) 0.0856: at 14 layers too, fewer 
 (55 vs 52 min). Sweep complete; ranking: L10 k10 0.0839 < L14 k7 0.0856 < L14 k5 0.0862 < L10 k3 0.0903 < L10 k5 0.0937.
 K186-P (20 layers x 512, 89.9M params, same setup): L20 k10 (2 pair updates, layers 0 and 10) 0.0796, 63 min (~2.1 node-h);
 in-training eval 2k 0.351, 6k 0.149, 10k 0.114, 20k 0.085. Best so far (L10 k10 0.0839, L14 k7 0.0856); depth keeps
-paying. Pending: L20 k20 (1 update), L20 k5 (4), L20 static (0), transformer L20 (63.4M) for the depth-matched baseline.
+paying. L20 k20 (1 update, layer 0): 0.0776, 60 min -- beats 2 updates (0.0796) again, by 2x the noise; slow start (2k 0.441
+vs 0.351) then ahead from ~10k (0.111 vs 0.114; 20k 0.083 vs 0.085). Fewer pair updates win at 10 and 20 layers.
+Pending: L20 k5 (4), L20 static (0), transformer L20 (63.4M) for the depth-matched baseline.
 
 ## K66-C / K136-C final-checkpoint arms on the other sets (mean of 3 seeds, experimental MAP@R, unfiltered)
 | set | scale | lr2e-4 P128 | lr4e-4 P128 | lr4e-4 P170 | lr8e-4 P128 |
