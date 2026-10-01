@@ -244,6 +244,14 @@ checkpoints, 21 50m arms not started). With consensus: the remaining ~69 twins (
 go forward with consensus ("we probably will then go forward with the consensus runs"), so the likely alternative
 is consensus-only on the remaining checkpoints and K155 left paused.
 
+### K182-P (open) -- one pair update beats more: what to test next?
+K180: L10 k10 (one pair update) 0.0839 beats L10 k3 0.0903 and k5 0.0937 (same setup) and L14 k7 0.0856, at the lowest
+cost (39 min, 2 nodes). The lead is steady from step ~6k (not noise). Candidate follow-ups (each ~1-1.5 node-h, 2 nodes,
+compiled, P2 recipe): (a) seed replicate of k10 and k5 (is the ranking stable?); (b) k = inf: no pair update at all, only
+the initial pair state + per-layer bias readouts (does the update matter?); (c) L14 k14 (one update, deeper);
+(d) a 14-layer transformer baseline (K166) and a transformer under this exact setup (the ~0.096 baseline came from a
+different setup). Needs: which of these.
+
 ### K172-P (open) -- make the two streams actually run in parallel
 User (K169): "the entire point we do this is to run the two streams in parallel." Current state: the code has
 pair_update_every (k) and pair_bias_lag (K114), and lag 1 removes the dependency so the pair update COULD overlap the

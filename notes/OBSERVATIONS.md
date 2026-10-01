@@ -2239,7 +2239,7 @@ Interactive probes (results/raw/diag/k172_overlap/ccs_probe*.{sh,out}), .venv-20
 | k5 (P2) | 10 | 5 | 2 | eager, 16 nodes x micro 3 | 0.0926 | 46 min (~12 nh) | 8880727 |
 | L10 k3 | 10 | 3 | 4 | compiled, 2 nodes x micro 24 | 0.0903 | 50 min (~1.7 nh) | 8883041 |
 | L10 k5 (K181 control) | 10 | 5 | 2 | compiled, 2 nodes x micro 24 | 0.0937 | 44 min (~1.5 nh) | 8883230 |
-| L10 k10 | 10 | 10 | 1 | compiled, 2 nodes x micro 24 | pending (resubmitted) | | |
+| L10 k10 | 10 | 10 | 1 | compiled, 2 nodes x micro 24 | **0.0839** | 39 min (~1.3 nh) | 8883303 |
 | L14 k7 | 14 | 7 | 2 | compiled, 2 nodes x micro 24 | 0.0856 | 52 min (~1.7 nh), 63.1M params | 8883043 |
 | L14 k5 | 14 | 5 | 3 | compiled, 2 nodes x micro 24 | pending | | 8883044 |
 K181 control: the same k5 model scores 0.0937 in the new setup vs 0.0926 in P2 (+0.0011, more than the +-0.0005 bar):
@@ -2252,6 +2252,11 @@ Caveat: truncated-run comparison under a 540k-step cosine; a run planned for the
 L14 k7 (14 layers, 2 pair updates, 63.1M vs 45.3M params): 0.0856 -- far ahead of every 10-layer arm (k3 0.0903) for about
 the same wall time (52 vs 50 min). Depth (single layers) is cheap and pays; but it is also 40% more parameters, so a
 14-layer transformer is the fair baseline before crediting the Pairformer.
+L10 k10 (ONE pair update, on layer 1): 0.0839 -- best of all and fastest. In-training eval (same masks within the family):
+step 2k 0.347 (worst; slow start) -> 6k 0.155 (best from here) -> 10k 0.117 vs 0.127-0.131 for k1/k3/k5 -> 20k 0.089 vs
+0.097-0.101 -> final 0.084 vs 0.090-0.094. A steady ~0.01 lead from 10k on, far above the ~0.001 noise (K181) -> real.
+Per step at this budget: fewer pair updates are BETTER (k10 0.084, L14 k7 0.085 < k3 0.090 ~ k1 0.091 < k5 0.092-0.094),
+not monotone between k3 and k5. Open: is any pair update needed (k=inf), seed replicates, deeper single-update models.
 
 ## K66-C / K136-C final-checkpoint arms on the other sets (mean of 3 seeds, experimental MAP@R, unfiltered)
 | set | scale | lr2e-4 P128 | lr4e-4 P128 | lr4e-4 P170 | lr8e-4 P128 |
