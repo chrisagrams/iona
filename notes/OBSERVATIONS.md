@@ -2215,6 +2215,12 @@ overlap is not reachable through torch.xpu streams on this stack. Raw: results/r
 - ccs2 (one tile split into 2 engines, each its own device): every selector tried exposed 0 devices -> no data; needs
   interactive debugging of the ZEX_NUMBER_OF_CCS / ONEAPI_DEVICE_SELECTOR / ZE_AFFINITY_MASK combination.
 
+## K178-P SR-IOV virtual GPUs (xpu-smi vgpu) are not available on Aurora compute nodes (job 8882737, 2026-10-01)
+Read-only check on x4502c7s3b0n0: `xpu-smi vgpu --precheck` -> VMX pass, SR-IOV FAIL ("disabled ... BIOS settings and kernel
+command line"), IOMMU FAIL. All 6 GPUs: sriov_totalvfs=0, sriov_numvfs not writable; kernel cmdline has no iommu/sriov
+options. Enabling it needs BIOS + kernel changes + root (an ALCF system change, and VFs target VMs anyway). Dead end
+for us; the CCS split (K177-P) remains the only same-tile route.
+
 ## K66-C / K136-C final-checkpoint arms on the other sets (mean of 3 seeds, experimental MAP@R, unfiltered)
 | set | scale | lr2e-4 P128 | lr4e-4 P128 | lr4e-4 P170 | lr8e-4 P128 |
 |---|---|---|---|---|---|
