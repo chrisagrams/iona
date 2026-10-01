@@ -41,8 +41,16 @@ ARMS = {
     "p2-L14-k5": {"num_hidden_layers": 14, "pair_update_every": 5},
     # K181-P: p2-cz32-k5 rerun under the K180 setup (compiled, 2 nodes x micro 24) -- does the setup alone move the loss?
     "p2-L10-k5": {"pair_update_every": 5},
+    # K185-P (user-approved 2026-10-01): no pair updates -- the initial pair state is only read out (per-layer bias).
+    "p2-L10-static": {"pair_update": "static"},
+    "p2-L20-static": {"num_hidden_layers": 20, "pair_update": "static"},
+    # K186-P (user-approved 2026-10-01): 20 layers with 1 / 2 / 4 pair updates.
+    "p2-L20-k20": {"num_hidden_layers": 20, "pair_update_every": 20},
+    "p2-L20-k10": {"num_hidden_layers": 20, "pair_update_every": 10},
+    "p2-L20-k5": {"num_hidden_layers": 20, "pair_update_every": 5},
 }
-EXTRA_ARGS = {a: "--pad_to_multiple_of 150\n" for a in ("p2-L10-k3", "p2-L10-k10", "p2-L14-k7", "p2-L14-k5", "p2-L10-k5")}
+EXTRA_ARGS = {a: "--pad_to_multiple_of 150\n" for a in ("p2-L10-k3", "p2-L10-k10", "p2-L14-k7", "p2-L14-k5", "p2-L10-k5",
+                                     "p2-L10-static", "p2-L20-static", "p2-L20-k20", "p2-L20-k10", "p2-L20-k5")}
 TRAINING = """--config_name configs/p2/{arm}
 --processor_name_or_path configs/p2/{arm}
 --output_dir ./runs/{arm}
