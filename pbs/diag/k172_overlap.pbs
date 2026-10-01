@@ -1,24 +1,33 @@
 #!/bin/bash -l
-#PBS -N k172-overlap
+#PBS -N k176-overlap
 #PBS -A UIC-HPC
 #PBS -l select=1
 #PBS -l walltime=01:00:00
 #PBS -l filesystems=home:flare
 #PBS -j oe
 #PBS -o pbs/logs/
-# K172-P: does pair_concurrent (pair update m on a side stream while round m's single blocks run
-# on the main stream) overlap on one tile? P2 Pairformer (configs/p2/p2-cz32-k5), B=24, N=150,
-# k in {5, 7} x num_hidden_layers in {10, 14}; lag 1 sequential vs lag 1 concurrent vs lag 0
-# sequential (reference): median fwd+bwd step time (bf16 autocast), peak memory, and an on-device
-# check that concurrent == sequential (fp32 and bf16). Diagnostic only, no training.
-#   qsub -q debug -v REPO_DIR=$PWD pbs/diag/k172_overlap.pbs
-# On the 2026 stack (.venv-2026, PyTorch 2.13):
+# K172-P / K176-P: do the Pairformer's pair and single streams overlap? P2 Pairformer
+# (configs/p2/p2-cz32-k5), B=24, N=150, 14 layers x k in {2, 3, 5}; per setting lag 1 sequential,
+# lag 1 + side stream (pair_concurrent), lag 1 with the pair stream on a SECOND DEVICE
+# (pair_device_offset=1: main xpu:0, pair xpu:1), lag 0 sequential (reference): median fwd+bwd step
+# (bf16 autocast), peak memory per device, the per-round cross-device copy volume, and on-device
+# numerics of each lag-1 variant against lag 1 sequential. Diagnostic only, no training.
+#
+# K176_MODE (+ separated, each mode in its own python process) picks how two devices are exposed:
+#   tiles  two tiles of card 0 as two FLAT devices: ZE_AFFINITY_MASK=0,1 (xpu:0 = tile 0, xpu:1 = tile 1)
+#   ccs2   tile 0 split into 2 compute-command streamers (ZEX_NUMBER_OF_CCS=0:2), each exposed as its own
+#          SYCL root device by ONEAPI_DEVICE_SELECTOR (sub-devices of tile 0). The right selector string
+#          depends on the driver's hierarchy mode, so candidates are probed in order (FLAT "level_zero:0.*",
+#          "level_zero:*.*"; COMPOSITE "level_zero:0.0.*", "level_zero:*.*.*") and the first with >= 2
+#          devices is used; none -> the mode fails clearly. NOTE: in ccs2 the one-device modes run on ONE
+#          CCS (half the tile's EUs), so compare its lag1_dev with lag1_seq of the tiles run as well.
+# Lists use + (qsub -v splits on commas); PBS copies this script at qsub time.
 #   qsub -q debug -v REPO_DIR=$PWD,FRAMEWORKS_MODULE=frameworks/2026.1.0,VENV_DIR=$PWD/.venv-2026 pbs/diag/k172_overlap.pbs
+#   optional: K176_MODE=tiles+ccs2 K172_KS=2+3+5 K172_LAYERS=14 K172_BATCH=24 K172_MODES=lag1_seq+lag1_conc+lag1_dev+lag0_seq
 REPO_DIR=${REPO_DIR:-${PBS_O_WORKDIR:-$PWD}}
 cd "$REPO_DIR"
 source "$REPO_DIR/pbs/lib/load_frameworks.sh"   # honours FRAMEWORKS_MODULE
 set -uo pipefail
-export ONEAPI_DEVICE_SELECTOR=level_zero:gpu ZE_FLAT_DEVICE_HIERARCHY=FLAT ZE_AFFINITY_MASK=0
 export CCL_KVS_MODE=pmi
 export OMP_NUM_THREADS=${OMP_NUM_THREADS:-8} PYTHONPATH=$REPO_DIR${PYTHONPATH:+:$PYTHONPATH}
 source "$REPO_DIR/pbs/lib/code_snapshot.sh"
@@ -26,17 +35,48 @@ VENV_DIR=${VENV_DIR:-$REPO_DIR/.venv}
 PY="$VENV_DIR/bin/python"
 JOB=${PBS_JOBID%%.*}; JOB=${JOB:-local}
 O=results/raw/diag/k172_overlap; mkdir -p "$O"
-K172_CCS=${K172_CCS:-1}   # e.g. 1+2
-# K174-P: K172_CCS lists compute-engine modes to run in turn (Level Zero ZEX_NUMBER_OF_CCS on device 0; Aurora
-# tiles default to 1 CCS, which serialises every queue on the tile). 1 = the default, the control.
-for CCS in ${K172_CCS//+/ }; do
-    export ZEX_NUMBER_OF_CCS=0:$CCS
-    TAG=$JOB-ccs$CCS
-    echo "=== $(date -Is) ZEX_NUMBER_OF_CCS=$ZEX_NUMBER_OF_CCS python $PY"
-    "$PY" -c 'import torch; n = torch.xpu.device_count(); print("[k172] xpu devices:", n, [torch.xpu.get_device_properties(i).name for i in range(n)])' 2>&1 | grep "\[k172\]" | tee "$O/$TAG.devices"
-    timeout $(( 3300 / $(wc -w <<<"${K172_CCS//+/ }") )) "$PY" "$MSDELTA_CODE_DIR"/pbs/diag/k172_overlap.py --out "$O/$TAG.json" \
-        --config "$REPO_DIR/configs/p2/p2-cz32-k5/config.json" \
-        --batch "${K172_BATCH:-24}" --peaks 150 --ks "$(tr + , <<<"${K172_KS:-1,2,3,5,7}")" --layers "$(tr + , <<<"${K172_LAYERS:-10,14}")" --warmup 5 --reps 20 \
+MODES=${K176_MODE:-tiles+ccs2}
+N_MODES=$(wc -w <<<"${MODES//+/ }")
+PROBE='import torch; n = torch.xpu.device_count(); print("[k176] xpu devices:", n, [(torch.xpu.get_device_properties(i).name, getattr(torch.xpu.get_device_properties(i), "gpu_eu_count", None)) for i in range(n)]); raise SystemExit(0 if n >= 2 else 2)'
+
+setup_tiles() {
+    unset ZEX_NUMBER_OF_CCS
+    export ZE_FLAT_DEVICE_HIERARCHY=FLAT ZE_AFFINITY_MASK=0,1 ONEAPI_DEVICE_SELECTOR=level_zero:gpu
+    "$PY" -c "$PROBE" 2>&1 | grep "\[k176\]" | tee "$O/$TAG.devices"
+    return "${PIPESTATUS[0]}"
+}
+
+setup_ccs2() {
+    export ZEX_NUMBER_OF_CCS=0:2 ZE_AFFINITY_MASK=0
+    local h sel
+    for cand in FLAT:level_zero:0.\* FLAT:level_zero:\*.\* COMPOSITE:level_zero:0.0.\* COMPOSITE:level_zero:\*.\*.\*; do
+        h=${cand%%:*}; sel=${cand#*:}
+        export ZE_FLAT_DEVICE_HIERARCHY=$h ONEAPI_DEVICE_SELECTOR=$sel
+        echo "[k176] probe ZE_FLAT_DEVICE_HIERARCHY=$h ONEAPI_DEVICE_SELECTOR=$sel" | tee -a "$O/$TAG.devices"
+        if timeout 300 "$PY" -c "$PROBE" 2>&1 | grep "\[k176\]" | tee -a "$O/$TAG.devices"; [[ ${PIPESTATUS[0]} == 0 ]]; then
+            return 0
+        fi
+    done
+    return 2
+}
+
+for MODE in ${MODES//+/ }; do
+    TAG=$JOB-$MODE
+    echo "=== $(date -Is) K176_MODE=$MODE python $PY"
+    case $MODE in
+        tiles) setup_tiles ;;
+        ccs2) setup_ccs2 ;;
+        *) echo "[k176] unknown K176_MODE '$MODE' (tiles | ccs2)"; false ;;
+    esac
+    if (( $? != 0 )); then
+        echo "[k176] $MODE: FEWER THAN 2 XPU DEVICES VISIBLE -- lag1_dev cannot run in this mode; skipping it" | tee -a "$O/$TAG.devices"
+        continue
+    fi
+    echo "[k176] $MODE: ZE_FLAT_DEVICE_HIERARCHY=$ZE_FLAT_DEVICE_HIERARCHY ZE_AFFINITY_MASK=${ZE_AFFINITY_MASK:-} ZEX_NUMBER_OF_CCS=${ZEX_NUMBER_OF_CCS:-} ONEAPI_DEVICE_SELECTOR=$ONEAPI_DEVICE_SELECTOR"
+    K176_MODE=$MODE timeout $(( 3000 / N_MODES )) "$PY" "$MSDELTA_CODE_DIR"/pbs/diag/k172_overlap.py --out "$O/$TAG.json" \
+        --config "$REPO_DIR/configs/p2/p2-cz32-k5/config.json" --pair-device-offset 1 \
+        --batch "${K172_BATCH:-24}" --peaks 150 --ks "${K172_KS:-2+3+5}" --layers "${K172_LAYERS:-14}" \
+        --modes "${K172_MODES:-lag1_seq+lag1_conc+lag1_dev+lag0_seq}" --warmup 5 --reps 20 \
         2>&1 | tee "$O/$TAG.log" | grep -E "^\[k172\]|Error|Traceback"
 done
 echo "=== $(date -Is) done"

@@ -121,8 +121,40 @@ on whichever stream the unpacking backward op runs on, which is not something to
 unverified. Forward hooks on ``PairLayer`` do not fire (its ``update`` / ``readout`` are
 called directly; the single blocks' hooks do). ``torch.compile`` of the stream code is
 untested. On one tile the overlap is bounded because the triangle ops are memory-bound and
-share bandwidth with the single blocks; ``pbs/diag/k172_overlap.py`` measures it. Across two
-tiles this would instead be model parallelism with an s and bias exchange per round.
+share bandwidth with the single blocks; ``pbs/diag/k172_overlap.py`` measures it. Measured on
+Aurora (jobs 8882322, 8882544): no overlap at all, also with ``ZEX_NUMBER_OF_CCS=0:2`` -- PyTorch
+XPU streams are in-order queues on one device and engine, so they serialise.
+
+``pair_device_offset = d > 0`` (K176-P, needs lag 1) puts the pair stream on ANOTHER device:
+index main + d of the same type (a second tile, or a second CCS exposed as its own device).
+Only the update modules move (``PairStack.place_pair_stream``, called after the usual
+``.to(device)``); z init, the per-layer readouts and the single blocks stay on main. Per round
+(``run_rounds_two_devices``): copy the s entering round m to the pair device (round 0 also
+z_init), issue update m there, issue the round's single blocks on main reading z(m), then copy
+z(m+1) back to main. The pair device keeps its z(m+1) for update m + 1, so per round one s and
+one z cross each way in forward, and the same volume of gradients in backward.
+
+Synchronisation is PyTorch's device-to-device copy: ``copy_`` between two devices runs on the
+SOURCE device's current stream after a two-way barrier -- the source stream waits for an event
+recorded on the destination's current stream, and the destination stream waits for an event
+recorded after the copy (CUDA's ``copy_device_to_device``; torch-xpu-ops ports the same logic,
+which the timing script's numerics check confirms on device). ``non_blocking`` only matters for
+host memory. So each copy is a full barrier between the two queues at the point it is issued,
+which fixes the launch order: update m is issued before the blocks of round m (both devices
+have work queued), and z(m+1) is copied back after them -- issued earlier, main would wait for
+update m before starting round m. Backward goes through autograd's cross-device copies, and
+the engine runs one worker thread PER DEVICE, so the two backward graphs also proceed in
+parallel, joined by the gradient copies.
+
+Limits: gradient checkpointing is refused. The pair update draws dropout from the pair
+device's generator, so with ``pair_dropout > 0`` the masks differ from the one-device model
+(same distribution; with p = 0, as in P2, the numerics are the same). If the updates were never
+placed (e.g. a checkpoint loaded with ``.to(device)`` only), the model warns once and runs on one
+device, numerically the same. Placement is the caller's job: the Trainer moves the model with
+``.to``, so a trainer must call ``place_pair_stream`` after that, and DDP wrapping a module that
+spans two devices needs ``device_ids=None`` (and one device pair per rank). The optimizer,
+``clip_grad_norm_`` and ``state_dict`` handle parameters on two devices. On CPU there is one
+device: the offset is ignored and the path is the sequential lag-1 computation.
 
 Cost
 ----
@@ -139,7 +171,9 @@ saved activation. The config defaults are test-sized; experiment sizes are chose
 from __future__ import annotations
 
 import contextlib
+import functools
 import math
+import warnings
 
 import torch
 import torch.nn.functional as F
@@ -478,6 +512,10 @@ class OuterProductMean(nn.Module):
         return out if self.out.bias is None else out + self.out.bias
 
 
+# The submodules of a pair UPDATE (everything in ``PairLayer`` except the readout).
+PAIR_UPDATE_MODULES = ("opm", "tri_out", "tri_in", "tri_attn_start", "tri_attn_end", "transition")
+
+
 def pair_update_schedule(config: MSDeltaConfig) -> list[tuple[bool, bool]]:
     """Per layer ``(round_start, updates)`` for ``pair_update_every`` / ``pair_bias_lag``.
 
@@ -582,9 +620,44 @@ class PairStack(nn.Module):
         self.w_c = nn.Linear(self.pair_feats.out_dim, config.pair_channels, bias=False)
         self.bias_lag = getattr(config, "pair_bias_lag", 0)
         self.concurrent = getattr(config, "pair_concurrent", False)  # K172-P
+        self.device_offset = getattr(config, "pair_device_offset", 0)  # K176-P
         self.layers = nn.ModuleList(
             [PairLayer(config, updates=u, round_start=r) for r, u in pair_update_schedule(config)]
         )
+
+    def update_modules(self) -> list[nn.Module]:
+        """The modules of the pair UPDATES (what ``place_pair_stream`` moves; K176-P)."""
+        return [getattr(layer, name) for layer in self.layers if layer.updates
+                for name in PAIR_UPDATE_MODULES if hasattr(layer, name)]
+
+    def pair_device_for(self, main: torch.device) -> torch.device:
+        """Index ``main + pair_device_offset`` of ``main``'s type; CPU has one device."""
+        main = torch.device(main)
+        if main.type == "cpu" or not self.device_offset:
+            return main
+        return torch.device(main.type, (main.index or 0) + self.device_offset)
+
+    def place_pair_stream(self, device: torch.device | str | None = None,
+                          pair_device: torch.device | str | None = None) -> torch.device:
+        """Move the update modules to the pair device; call AFTER the usual ``.to(device)``.
+
+        ``device`` is the main device (default: where the readouts live), ``pair_device`` an
+        explicit override of ``pair_device_for(device)``. Returns the pair device. Everything
+        else -- z init, the per-layer readouts, the single blocks -- stays on the main device.
+        """
+        main = torch.device(device) if device is not None else self.w_a.weight.device
+        target = (torch.device(pair_device) if pair_device is not None
+                  else self.pair_device_for(main))
+        for module in self.update_modules():
+            module.to(target)
+        return target
+
+    def pair_device(self) -> torch.device:
+        """Where the pair updates currently live (the main device if they hold no parameter)."""
+        for module in self.update_modules():
+            for p in module.parameters():
+                return p.device
+        return self.w_a.weight.device
 
     @property
     def ff(self) -> FourierFeatures:
@@ -616,7 +689,9 @@ class PairStack(nn.Module):
             if self.bias_lag and layer.round_start:
                 z_read = z
             if layer.pair_update in ("triangle", "transition"):
-                z = z + layer.transition(z)
+                # The transition may sit on the pair device (K176-P); .to is a no-op otherwise.
+                dev = layer.transition.norm.weight.device
+                z = z + layer.transition(z.to(dev)).to(z.device)
             curves.append(layer.read_bias(z_read if self.bias_lag else z))
         return torch.stack(curves).float()
 
@@ -781,6 +856,57 @@ def run_rounds_concurrent(
     return s
 
 
+@functools.cache
+def _warn_not_placed() -> None:
+    warnings.warn(
+        "pair_device_offset > 0 but the pair updates are on the main device: call "
+        "bias_module.place_pair_stream(device) after .to(device). Running on one device "
+        "(same numerics, no overlap).", stacklevel=3)
+
+
+def transfer(t: Tensor, device: torch.device) -> Tensor:
+    """Cross-device copy used by ``run_rounds_two_devices`` (a no-op on the same device).
+
+    A module-level function so a test or a profiler can wrap it (count calls and bytes).
+    """
+    return t.to(device, non_blocking=True)
+
+
+def run_rounds_two_devices(
+    model: nn.Module, s: Tensor, z: Tensor, mask: Tensor, pair_mask: Tensor,
+    padding_mask: Tensor, pair_device: torch.device, to=None,
+) -> Tensor:
+    """The lag-1 rounds with pair update m on ``pair_device``, concurrent with round m (K176-P).
+
+    Per round m (layers ``a .. b-1``): copy the s entering the round to the pair device (and,
+    in round 0 only, z_init) and ISSUE update m there; issue the round's single blocks on the
+    main device, each with its own readout of z(m) (on main); then copy z(m+1) back to main
+    for round m + 1. The pair device keeps its own z(m+1) as the next update's input, so z
+    crosses once per round. The masks cross once per forward. ``to`` defaults to
+    ``transfer``; with ``pair_device`` equal to the main device every copy is the identity
+    and this is the sequential lag-1 computation, op for op.
+    """
+    to = to or transfer
+    main = s.device
+    layers, blocks = model.bias_module.layers, model.blocks
+    starts = [i for i, layer in enumerate(layers) if layer.round_start] + [len(layers)]
+    mask_p, pair_mask_p = to(mask, pair_device), to(pair_mask, pair_device)
+    z_pair = None
+    for a, b in zip(starts[:-1], starts[1:]):
+        z_read = z
+        if layers[a].updates:
+            if z_pair is None:
+                z_pair = to(z_read, pair_device)
+            z_pair = layers[a].update(z_pair, to(s, pair_device), mask_p, pair_mask_p)
+        for i in range(a, b):
+            s = blocks[i](s, layers[i].readout(z_read), padding_mask)
+        if layers[a].updates:
+            # Issued AFTER the blocks: the copy is a barrier between the two devices' current
+            # queues, so issuing it earlier would make main wait for update m before round m.
+            z = to(z_pair, main)
+    return s
+
+
 def build_pairformer(model: nn.Module, config: MSDeltaConfig) -> None:
     """Attach the Pairformer submodules to an ``MSDeltaModel`` (called from its ``__init__``)."""
     model.embed = PairformerPeakEmbed(config)
@@ -812,6 +938,14 @@ def encode_pairformer(
                 "stream is not controlled); disable one of them")
         return run_rounds_concurrent(model, s, z, mask, pair_mask, padding_mask,
                                      device_streams(s.device))
+    if model.bias_module.device_offset:
+        if checkpointing:
+            raise NotImplementedError(
+                "pair_device_offset does not support gradient checkpointing; disable one of them")
+        pair_device = model.bias_module.pair_device()
+        if pair_device == s.device and s.device.type != "cpu":
+            _warn_not_placed()
+        return run_rounds_two_devices(model, s, z, mask, pair_mask, padding_mask, pair_device)
     z_read = z
     for pair_layer, block in zip(model.bias_module.layers, model.blocks):
         # pair_bias_lag=1: the single blocks of a round read the z that entered the round.

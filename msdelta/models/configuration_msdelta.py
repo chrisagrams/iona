@@ -75,6 +75,10 @@ class MSDeltaConfig(PretrainedConfig):
         # K172-P: run pair update m on a side stream concurrently with round m's single blocks
         # (needs pair_bias_lag=1; same numerics as the sequential lag-1 loop).
         pair_concurrent: bool = False,
+        # K176-P: the pair update modules live on device index (main + pair_device_offset) of the
+        # same device type and update m runs there while round m's single blocks run on the
+        # main device (needs pair_bias_lag=1; placement by PairStack.place_pair_stream). 0 = off.
+        pair_device_offset: int = 0,
         **kwargs,
     ):
         super().__init__(**kwargs)
@@ -118,6 +122,7 @@ class MSDeltaConfig(PretrainedConfig):
         self.pair_update_every = pair_update_every
         self.pair_bias_lag = pair_bias_lag
         self.pair_concurrent = pair_concurrent
+        self.pair_device_offset = pair_device_offset
         self._validate()
 
     def to_dict(self) -> dict[str, Any]:
@@ -194,6 +199,14 @@ class MSDeltaConfig(PretrainedConfig):
         if self.pair_concurrent and lag != 1:
             # At lag 0 the round's single blocks read the update's output: nothing to overlap.
             raise ValueError("pair_concurrent needs pair_bias_lag=1")
+        off = self.pair_device_offset
+        if isinstance(off, bool) or not isinstance(off, int) or off < 0:
+            raise ValueError("pair_device_offset must be an int >= 0")
+        if off > 0 and lag != 1:
+            raise ValueError("pair_device_offset > 0 needs pair_bias_lag=1")
+        if off > 0 and self.pair_concurrent:
+            # Two devices already give the update its own queue; the side stream adds nothing.
+            raise ValueError("pair_device_offset > 0 and pair_concurrent are exclusive")
 
 
 class MSDeltaDenoisingConfig(PretrainedConfig):

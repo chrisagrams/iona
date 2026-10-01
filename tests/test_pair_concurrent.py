@@ -306,3 +306,136 @@ def test_device_streams_primitives_with_fake_backend():
     ds.keep(T(), side)
     assert calls[-1] == ("record_stream", side)
     pf.DeviceStreams._side.pop(dev, None)
+
+
+# ===================================================== K176-P: pair stream on another device --
+
+@pytest.mark.parametrize("k", [2, 5])
+@pytest.mark.parametrize("overrides", [
+    {},
+    {"pair_use_triangle_attention": False, "pair_tri_mul": "outgoing"},
+    {"hidden_dropout_prob": 0.1, "attention_probs_dropout_prob": 0.1, "pair_dropout": 0.1},
+])
+def test_cpu_two_device_path_bit_identical_to_sequential_lag1(k, overrides):
+    """pair device == main device == cpu: the two-device path is the lag-1 computation."""
+    batch = _batch()
+    seq = _model(_config(pair_update_every=k, **overrides))
+    dev = _model(_config(pair_update_every=k, pair_device_offset=1, **overrides))
+    stack = dev.msdelta.bias_module
+    assert stack.place_pair_stream("cpu") == torch.device("cpu")  # CPU: offset ignored
+    assert stack.pair_device() == torch.device("cpu")
+    assert list(seq.state_dict()) == list(dev.state_dict())
+    out_seq, out_dev = _run(seq, batch), _run(dev, batch)
+    _assert_same(out_seq, out_dev)
+    missing = [n for n, p in dev.named_parameters() if p.requires_grad and n not in out_dev[2]]
+    assert not missing, missing
+
+
+def test_two_device_refuses_gradient_checkpointing():
+    model = _model(_config(pair_update_every=2, pair_device_offset=1))
+    model.gradient_checkpointing_enable()
+    model.train()
+    with pytest.raises(NotImplementedError, match="gradient checkpointing"):
+        model(**_batch())
+
+
+@pytest.mark.parametrize("bad", [
+    dict(pair_device_offset=1, pair_bias_lag=0),
+    dict(pair_device_offset=-1),
+    dict(pair_device_offset=True),
+    dict(pair_device_offset=1.0),
+    dict(pair_device_offset=1, pair_concurrent=True),
+])
+def test_two_device_config_validation(bad):
+    with pytest.raises(ValueError):
+        _config(**bad)
+
+
+def test_pair_device_for():
+    stack = _model(_config(pair_update_every=2, pair_device_offset=1)).msdelta.bias_module
+    assert stack.pair_device_for(torch.device("xpu", 0)) == torch.device("xpu", 1)
+    assert stack.pair_device_for(torch.device("xpu")) == torch.device("xpu", 1)
+    assert stack.pair_device_for(torch.device("cuda", 2)) == torch.device("cuda", 3)
+    assert stack.pair_device_for(torch.device("cpu")) == torch.device("cpu")
+    off = _model(_config(pair_update_every=2)).msdelta.bias_module
+    assert off.pair_device_for(torch.device("xpu", 0)) == torch.device("xpu", 0)
+
+
+def test_place_pair_stream_moves_only_update_modules():
+    model = _model(_config(pair_update_every=2, pair_device_offset=1))
+    keys = list(model.state_dict())
+    stack = model.msdelta.bias_module
+    assert stack.place_pair_stream(pair_device="meta") == torch.device("meta")
+    assert stack.pair_device() == torch.device("meta")
+    on_meta = {n for n, p in model.named_parameters() if p.device.type == "meta"}
+    expected = {f"msdelta.bias_module.layers.{i}.{n}"
+                for i, layer in enumerate(stack.layers) if layer.updates
+                for n, _ in layer.named_parameters()
+                if n.split(".")[0] in pf.PAIR_UPDATE_MODULES}
+    assert on_meta == expected and expected
+    for i, layer in enumerate(stack.layers):  # readouts stay on the main device
+        assert layer.to_bias.weight.device.type == "cpu", i
+    assert list(model.state_dict()) == keys
+
+
+@pytest.mark.parametrize("k", [2, 3, 5])
+def test_two_device_orchestration_order(monkeypatch, k):
+    """Copies issued, update issued before the round's blocks, z(m+1) brought back to main and
+    read by the next round's readouts; the pair device keeps its own z for the next update."""
+    log = []
+    model = _model(_config(pair_update_every=k, pair_device_offset=1))
+    stack = model.msdelta.bias_module
+
+    def to(t, device):
+        out = t.clone()  # a new tensor per copy (same values), so ids track the hand-offs
+        log.append(("to", id(t), str(device), id(out)))
+        return out
+
+    for i, layer in enumerate(stack.layers):
+        orig_u, orig_r = layer.update, layer.readout
+
+        def update(z, s, mask, pair_mask, i=i, orig=orig_u):
+            out = orig(z, s, mask, pair_mask)
+            log.append(("update", i, id(z), id(s), id(out)))
+            return out
+
+        def readout(z, i=i, orig=orig_r):
+            log.append(("readout", i, id(z)))
+            return orig(z)
+
+        layer.update, layer.readout = update, readout
+    for i, block in enumerate(model.msdelta.blocks):
+        block.register_forward_hook(lambda m, a, o, i=i: log.append(("block", i)))
+    real = pf.run_rounds_two_devices
+    monkeypatch.setattr(pf, "run_rounds_two_devices", lambda *a: real(*a[:-1], "PAIR", to))
+    out = _run(model, _batch())
+    _assert_same(out, _run(_model(_config(pair_update_every=k)), _batch()))
+
+    assert [(e[0], e[2]) for e in log[:2]] == [("to", "PAIR"), ("to", "PAIR")]  # the masks
+    pos = 2
+    rounds = [list(range(a, min(a + k, N_LAYERS))) for a in range(0, N_LAYERS, k)]
+    z_main = z_pair = None
+    for m, layers in enumerate(rounds):
+        a = layers[0]
+        updates = a + k < N_LAYERS
+        if updates:
+            if m == 0:  # z_init goes over once
+                e = log[pos]
+                assert e[0] == "to" and e[2] == "PAIR"
+                z_main, z_pair = e[1], e[3]
+                pos += 1
+            e = log[pos]  # the s entering the round
+            assert e[0] == "to" and e[2] == "PAIR"
+            u = log[pos + 1]
+            assert u[:2] == ("update", a) and u[2] == z_pair and u[3] == e[3]
+            pos += 2
+        for i in layers:  # blocks after the update was issued, each reading z(m) on main
+            assert log[pos] == ("readout", i, z_main), (m, i, log[pos])
+            assert log[pos + 1] == ("block", i)
+            pos += 2
+        if updates:
+            e = log[pos]  # z(m+1) back to main, after the blocks
+            assert e[0] == "to" and e[1] == u[4] and e[2] == "cpu"
+            z_main, z_pair = e[3], u[4]
+            pos += 1
+    assert pos == len(log), log[pos:]
