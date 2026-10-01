@@ -4,4 +4,12 @@
 # (calibrates (2): comms, optimizer, real lengths), micro 24 and 12 (memory).
 k189_data|-|-q debug -v REPO_DIR=$PWD pbs/diag/k189_data.pbs
 k189_prof|-|-q debug -l select=1 -l walltime=01:00:00 -A UIC-HPC -l filesystems=home:flare -v REPO_DIR=$PWD pbs/diag/k189_profile.pbs
-k189_e2e|k189_data|-q debug -l select=2 -l walltime=01:00:00 -v REPO_DIR=$PWD,PREPROC=$S/data/probe-cap512/preprocessed,ARMS=p2-W640-k10:24:c+p2-T-W640:24:c+p2-W640-k10:12:c+p2-W640-k5:24:c pbs/diag/p2_cost.pbs
+
+# K189-P length grouping (user: "Implement length grouping ... validate that length grouping works and speed up the
+# training"): compiled 2-node step time at cap 512, pad 512 vs length-grouped (pad 64, static shapes), steps 250-400;
+# then a full same-setup validation run on P2 data: p2-L10-k10-grp vs K180 p2-L10-k10 (8883303, 0.0839, 39 min).
+k189_e1|k189_data|-q debug -l select=2 -l walltime=01:00:00 -v REPO_DIR=$PWD,PREPROC=$S/data/probe-cap512/preprocessed,STOP=400,W0=250,ARM_TIMEOUT=1500,STRICT=1,ARMS=p2-W640-k10:24:c+p2-W640-k10:24:c:g pbs/diag/p2_cost.pbs
+k189_e2|k189_data|-q debug-scaling -l select=2 -l walltime=01:00:00 -v REPO_DIR=$PWD,PREPROC=$S/data/probe-cap512/preprocessed,STOP=400,W0=250,ARM_TIMEOUT=1500,ARMS=p2-T-W640:24:c+p2-T-W640:24:c:g pbs/diag/p2_cost.pbs
+k189_e3|k189_e1|-q debug -l select=2 -l walltime=01:00:00 -v REPO_DIR=$PWD,PREPROC=$S/data/probe-cap512/preprocessed,STOP=400,W0=250,ARM_TIMEOUT=1500,ARMS=p2-W640-k5:24:c:g+p2-W640-k3:24:c:g pbs/diag/p2_cost.pbs
+t_p2_L10_k10_grp|k189_e1|-q capacity -l select=2 -l place=scatter -A UIC-HPC -l filesystems=home:flare -j oe -o $S/runs/p2/pbs-logs -l walltime=04:00:00 -N p2-L10-k10-grp -v REPO_DIR=$PWD,CHECKPOINT_DIR=$S/runs/p2,HF_HOME=$S/huggingface,PREPROCESSED_DATASET_DIR=$S/data/p2-cap150-half/preprocessed,XPUS_PER_HOST=12,MICRO_BATCH_SIZE=24,GLOBAL_BATCH_SIZE=576,TORCH_COMPILE=1,FRAMEWORKS_MODULE=frameworks/2026.1.0,VENV_DIR=$PWD/.venv-2026,PROBE_EXECUTION=off,CCL_KVS_MODE=pmi,WANDB_ENTITY=CS_Pharm,MSDELTA_STOP_AT_STEP=23387,ARGS_FILE=configs/p2/p2-L10-k10-grp/training.args pbs/aurora-pretrain.pbs
+e_p2_L10_k10_grp|t_p2_L10_k10_grp|-q debug-scaling -A UIC-HPC -l filesystems=home:flare -N evm-p2-L10-k10-grp -v REPO_DIR=$PWD,CHECKPOINTS=$S/runs/p2/p2-L10-k10-grp-$(cat $S/feeder/k189_probe/t_p2_L10_k10_grp)/final,OUT=results/raw/diag/eval_mlm/p2-L10-k10-grp-$(cat $S/feeder/k189_probe/t_p2_L10_k10_grp).json pbs/diag/eval_mlm.pbs

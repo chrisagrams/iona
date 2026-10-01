@@ -63,6 +63,11 @@ W640 = {"hidden_size": 640, "num_attention_heads": 10, "intermediate_size": 2560
 PROBE = {"p2-W640-k10": {**W640, "pair_update_every": 10}, "p2-W640-k5": {**W640, "pair_update_every": 5},
          "p2-W640-k3": {**W640, "pair_update_every": 3}}
 TARMS["p2-T-W640"] = {}
+# K189-P validation of length grouping (user 2026-10-01: "validate that length grouping works and speed up the
+# training"): p2-L10-k10 (K180, 8883303: eval_mlm 0.0839, 39 min) with length-grouped global batches, pad 64 and static
+# compiled shapes; everything else identical.
+ARMS["p2-L10-k10-grp"] = {"pair_update_every": 10}
+GROUPED = "--length_grouped_batches true\n--pad_to_multiple_of 64\n--compile_static_shapes true\n"
 PROBE_DATA = f"{S}/data/probe-cap512/raw"
 EXTRA_ARGS = {a: "--pad_to_multiple_of 150\n" for a in TARMS} | {a: "--pad_to_multiple_of 150\n" for a in ("p2-L10-k3", "p2-L10-k10", "p2-L14-k7", "p2-L14-k5", "p2-L10-k5",
                                      "p2-L10-static", "p2-L20-static", "p2-L20-k20", "p2-L20-k10", "p2-L20-k5")}
@@ -117,6 +122,8 @@ def arms() -> dict[str, dict[str, str]]:
         cfg = {**tbase, **over} if arm in TARMS else {**base, **PAIR, **over}
         probe = arm in PROBE or arm == "p2-T-W640"
         args = TRAINING.format(arm=arm, S=S) + EXTRA_ARGS.get(arm, "")
+        if arm == "p2-L10-k10-grp":
+            args = args.replace("--pad_to_multiple_of 150\n", "") + GROUPED
         if probe:  # K189: Chris's processor and cap, the probe data, one compiled shape at 512
             args = args.replace("--max_peaks 150", "--max_peaks 512").replace(
                 f"{S}/data/p2-cap150-half/raw", PROBE_DATA).replace("--pad_to_multiple_of 150", "")

@@ -69,6 +69,21 @@ class MSDeltaTrainingArguments(TrainingArguments):
         metadata={"help": "K167-I: pad pretraining batches to a multiple of this many peaks (fixed shapes for "
                           "torch.compile; = max_peaks gives one shape). None = pad to the longest spectrum."},
     )
+    length_grouped_batches: bool = field(
+        default=False,
+        metadata={"help": "K189-P: order training data so every GLOBAL batch holds spectra of similar length "
+                          "(msdelta.pretraining.length_grouping); with pad_to_multiple_of, few compiled shapes."},
+    )
+    length_group_megabatches: int = field(
+        default=50, metadata={"help": "K189-P: global batches per length-sorted megabatch."}
+    )
+    compile_static_shapes: bool = field(
+        default=False,
+        metadata={"help": "K189-P: with torch_compile, compile one static graph per padded batch shape "
+                          "(torch._dynamo automatic_dynamic_shapes off, recompile limit raised to "
+                          "compile_recompile_limit) instead of switching to a dynamic-shape graph."},
+    )
+    compile_recompile_limit: int = 16
     logarithmic_eval_start_step: int | None = 500
     bias_curve_steps: int = 5000
     probe_steps: int = 0

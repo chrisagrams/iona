@@ -16,6 +16,7 @@ from msdelta.utils.callbacks import SidecarCallback, build_callbacks
 from msdelta.models.configuration_msdelta import MSDeltaConfig
 from msdelta.data.data import build_pretraining_datasets, load_pretraining_datasets_from_disk
 from msdelta.models.modeling_msdelta import MSDeltaForPreTraining
+from msdelta.pretraining.length_grouping import GlobalLengthGroupedSampler, spectrum_lengths
 from msdelta.pretraining.posttraining import build_probe_data
 from msdelta.models.processing_msdelta import MSDeltaDataCollatorForPreTraining, MSDeltaProcessor
 from msdelta.pretraining.training_args import DataArguments, ModelArguments, MSDeltaTrainingArguments
@@ -32,6 +33,16 @@ class MSDeltaTrainer(Trainer):
         self.use_denoising_probe = use_denoising_probe
         self.use_retrieval_probe = use_retrieval_probe
         super().__init__(*args, **kwargs)
+
+    def _get_train_sampler(self, train_dataset=None):
+        # K189-P: length-grouped global batches (see msdelta.pretraining.length_grouping).
+        if not getattr(self.args, "length_grouped_batches", False):
+            return super()._get_train_sampler(train_dataset)
+        dataset = train_dataset if train_dataset is not None else self.train_dataset
+        global_batch = (self.args.per_device_train_batch_size * self.args.gradient_accumulation_steps
+                        * self.args.world_size)
+        return GlobalLengthGroupedSampler(spectrum_lengths(dataset), global_batch,
+                                          megabatches=self.args.length_group_megabatches, seed=self.args.seed)
 
     def _build_accelerator_args(self, **kwargs):
         args = super()._build_accelerator_args(**kwargs)
@@ -68,6 +79,13 @@ def main(argv: list[str] | None = None) -> int:
         os.environ.setdefault("WANDB_DIR", str(out_dir))
 
     set_seed(training_args.seed)
+    if training_args.torch_compile and training_args.compile_static_shapes:
+        # K189-P: one static graph per padded shape (<= max_peaks / pad_to_multiple_of of them).
+        import torch._dynamo
+        torch._dynamo.config.automatic_dynamic_shapes = False
+        torch._dynamo.config.recompile_limit = training_args.compile_recompile_limit
+        torch._dynamo.config.accumulated_recompile_limit = max(
+            torch._dynamo.config.accumulated_recompile_limit, 4 * training_args.compile_recompile_limit)
     model_config = MSDeltaConfig.from_pretrained(model_args.config_name)
     if model_args.config_overrides is not None:
         model_config.update_from_string(model_args.config_overrides)
