@@ -192,6 +192,7 @@ IDs carry a track suffix: -C contrastive (spectrum encoder), -A alignment (pepti
 | 2026-10-01 16:55 | K187-P | User: "K187-P: I agree with your rec" -> Pairformer at 10 x 640 (transformer-50m's single stream + the pair stream), full 540,423-step schedule, compared with transformer-50m (eval_mlm 0.055). Run 1: 1 pair update; run 2: 2 or 4 updates, picked from K186. Config, cost and resume plan to be shown before submission | user |
 | 2026-10-01 | K188-C smoke | 8884292 submitted (debug-scaling, 1 node, 400m + 50m ck010k consensus twins, 20 steps) | Claude (ops) |
 | 2026-10-01 16:35 | K182-P (d), K187-P, K188-C | User: "K188-C: Ok sounds good queue them / K187-P: Use the aspect ratio scaling / K182 (d): Sure ok". (d): plain transformer (transformer-50m config, delta-m/z bias, no pair stream) at 10/14/20 x 512 = every Pairformer depth run; Claude ran both of the '14 or 20' depths offered (+~1 node-h); T-L14 (44.5M) is also parameter-matched to the 10-layer Pairformers (45M). K180 setup, debug smoke first, eval_mlm after; plan k182d_tbase.txt. K187: 10 x 640 (ladder rung d = 64 L for 50m). K188: main job starts automatically once K185/K186 and the (d) runs have left the queue and its smoke passed | user |
+| 2026-10-01 | K185/K186 smoke | 8884143 passed: L20 k5 and L10 static trained compiled 200 steps, evaluated and saved; feeder submits the five runs | Claude (ops) |
 
 ## Settings chosen WITHOUT explicit approval (before this log existed)
 
