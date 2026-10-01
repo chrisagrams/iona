@@ -116,18 +116,6 @@ def build_preprocessed_dataset(
     )
 
 
-def add_length_column(dataset: Dataset, num_proc: int | None = None) -> Dataset:
-    """Add the peak-count ``length`` column used by length-grouped sampling, if missing."""
-    if "length" in dataset.column_names:
-        return dataset
-    return dataset.map(
-        lambda batch: {"length": [len(mz) for mz in batch["mz"]]},
-        batched=True,
-        num_proc=num_proc,
-        desc="add length column",
-    )
-
-
 def map_length_sorted(
     dataset: Dataset,
     function: Callable[[list[dict]], dict],
