@@ -91,3 +91,10 @@ def test_trainer_uses_sampler_only_when_enabled():
 def test_rejects_bad_sizes(bad):
     with pytest.raises(ValueError):
         GlobalLengthGroupedSampler(_lengths(10), global_batch=bad)
+
+
+def test_train_main_keeps_torch_global():
+    """Regression (8884395/8884396 died at start): an `import torch.<sub>` inside main() makes `torch` a local name
+    and every earlier `torch.` in main() raises UnboundLocalError."""
+    from msdelta.pretraining import train
+    assert "torch" not in train.main.__code__.co_varnames

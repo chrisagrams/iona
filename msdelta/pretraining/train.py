@@ -81,11 +81,11 @@ def main(argv: list[str] | None = None) -> int:
     set_seed(training_args.seed)
     if training_args.torch_compile and training_args.compile_static_shapes:
         # K189-P: one static graph per padded shape (<= max_peaks / pad_to_multiple_of of them).
-        import torch._dynamo
-        torch._dynamo.config.automatic_dynamic_shapes = False
-        torch._dynamo.config.recompile_limit = training_args.compile_recompile_limit
-        torch._dynamo.config.accumulated_recompile_limit = max(
-            torch._dynamo.config.accumulated_recompile_limit, 4 * training_args.compile_recompile_limit)
+        import torch._dynamo as dynamo  # bound as `dynamo`: a bare `import torch.x` here would make `torch` local
+        dynamo.config.automatic_dynamic_shapes = False
+        dynamo.config.recompile_limit = training_args.compile_recompile_limit
+        dynamo.config.accumulated_recompile_limit = max(
+            dynamo.config.accumulated_recompile_limit, 4 * training_args.compile_recompile_limit)
     model_config = MSDeltaConfig.from_pretrained(model_args.config_name)
     if model_args.config_overrides is not None:
         model_config.update_from_string(model_args.config_overrides)
