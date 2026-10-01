@@ -17,6 +17,7 @@
 # time falls in the first steps, outside the 150-300 window (recompiles, if any, show as a slower window).
 # Memory: an out-of-memory arm is itself the answer (that micro-batch does not fit without checkpointing).
 #   qsub -q debug -v REPO_DIR=$PWD pbs/diag/p2_cost.pbs        (ARMS=a:12+b:24:c to pick arms)
+# K189-P: PREPROC=<preprocessed dir> runs the arms on other data (default: the P2 set).
 REPO_DIR=${REPO_DIR:-${PBS_O_WORKDIR:-$PWD}}
 cd "$REPO_DIR"
 set -uo pipefail
@@ -36,7 +37,7 @@ for spec in ${ARMS//+/ }; do
         "configs/p2/$arm/training.args" > "$SM/$tag.args"
     echo "=== $(date -Is) $tag"
     timeout 600 env ARGS_FILE="$SM/$tag.args" CHECKPOINT_DIR="$SM" RUN_NAME="p2cost-$tag-$JOB" \
-        HF_HOME=$S/huggingface PREPROCESSED_DATASET_DIR=$S/data/p2-cap150-half/preprocessed \
+        HF_HOME=$S/huggingface PREPROCESSED_DATASET_DIR=${PREPROC:-$S/data/p2-cap150-half/preprocessed} \
         XPUS_PER_HOST=12 MICRO_BATCH_SIZE=$micro GLOBAL_BATCH_SIZE=576 TORCH_COMPILE=$compile PROBE_EXECUTION=off CCL_KVS_MODE=pmi \
         WANDB_MODE=disabled MSDELTA_STOP_AT_STEP=300 bash pbs/aurora-pretrain.pbs > "$SM/$tag.log" 2>&1
     rc=$?

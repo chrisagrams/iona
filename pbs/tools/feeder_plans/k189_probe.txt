@@ -1,0 +1,7 @@
+# K189-P probe (user 2026-10-01: "run the probe"): price the K187 full-recipe runs (MSConsensus-100M, max_peaks 512,
+# 10 x 640) -- (1) peak-count histogram + cap-512 probe data; (2) eager per-length profile on one tile (B 24, N 150-512,
+# 1/2/4 pair updates + transformer-50m); (3) compiled 2-node end-to-end step time at pad 512 on the probe data
+# (calibrates (2): comms, optimizer, real lengths), micro 24 and 12 (memory).
+k189_data|-|-q debug -v REPO_DIR=$PWD pbs/diag/k189_data.pbs
+k189_prof|-|-q debug -l select=1 -l walltime=01:00:00 -A UIC-HPC -l filesystems=home:flare -v REPO_DIR=$PWD pbs/diag/k189_profile.pbs
+k189_e2e|k189_data|-q debug -l select=2 -l walltime=01:00:00 -v REPO_DIR=$PWD,PREPROC=$S/data/probe-cap512/preprocessed,ARMS=p2-W640-k10:24:c+p2-T-W640:24:c+p2-W640-k10:12:c+p2-W640-k5:24:c pbs/diag/p2_cost.pbs

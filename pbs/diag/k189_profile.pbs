@@ -1,0 +1,45 @@
+#!/bin/bash -l
+# K189-P: per-length step time and peak memory of the K187 shape (10 x 640, Chris's processor), 1 / 2 / 4 pair
+# updates (pair_update_every 10 / 5 / 3) vs transformer-50m, B 24 x N 150/256/384/512, eager (pbs/diag/pairformer_profile.py).
+#
+#   qsub -q debug -l select=1 -l walltime=00:45:00 -A UIC-HPC -l filesystems=home:flare \
+#        -v REPO_DIR=$PWD pbs/diag/k189_profile.pbs
+#
+# One tile. Output: results/raw/diag/k189/profile-<jobid>-k<k>.json (+ .log).
+
+#PBS -N k189-prof
+#PBS -A UIC-HPC
+#PBS -l filesystems=home:flare
+#PBS -j oe
+#PBS -o pbs/logs/
+
+set -uo pipefail
+REPO_DIR=${REPO_DIR:-${PBS_O_WORKDIR:-$PWD}}
+cd "$REPO_DIR"
+
+set +u
+source "${REPO_DIR:-${PBS_O_WORKDIR:-$PWD}}/pbs/lib/load_frameworks.sh"
+set -u
+export ONEAPI_DEVICE_SELECTOR=level_zero:gpu
+export ZE_FLAT_DEVICE_HIERARCHY=FLAT
+export ZE_AFFINITY_MASK=0
+export OMP_NUM_THREADS=${OMP_NUM_THREADS:-8}
+export PYTHONPATH=$REPO_DIR${PYTHONPATH:+:$PYTHONPATH}
+# Run from a frozen copy of the code (pbs/lib/code_snapshot.sh).
+source "$REPO_DIR/pbs/lib/code_snapshot.sh"
+PY="$REPO_DIR/.venv/bin/python"
+JOB=${PBS_JOBID%%.*}; JOB=${JOB:-local}
+O=results/raw/diag/k189; mkdir -p "$O"
+
+rc=0
+for k in 10 5 3; do
+    models=pairformer; [[ $k == 10 ]] && models=pairformer,transformer
+    echo "=== $(date -Is) K189 profile k=$k ($models) on $(hostname), job $JOB"
+    "$PY" "$MSDELTA_CODE_DIR"/pbs/diag/pairformer_profile.py --out "$O/profile-$JOB-k$k.json" \
+        --models "$models" --batches 24 --peaks 150,256,384,512 \
+        --pairformer-config configs/p2/p2-W640-k$k/config.json --transformer-config configs/p2/p2-T-W640/config.json \
+        2>&1 | tee "$O/profile-$JOB-k$k.log"
+    (( PIPESTATUS[0] )) && rc=1
+done
+echo "=== $(date -Is) done (rc=$rc)"
+exit $rc

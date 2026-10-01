@@ -55,6 +55,15 @@ ARMS = {
 TBASE = REPO / "configs" / "msdelta-base-50m"
 TSHAPE = {"hidden_size": 512, "num_attention_heads": 8, "intermediate_size": 2048}
 TARMS = {f"p2-T-L{n}": {**TSHAPE, "num_hidden_layers": n} for n in (10, 14, 20)}
+# K189-P cost probe (user 2026-10-01: "run the probe"): the K187 shape (10 x 640 = transformer-50m's rung, user: "Use the
+# aspect ratio scaling") on Chris's data recipe (MSConsensus-100M, max_peaks 512 = spectra over 512 peaks dropped):
+# 1 / 2 / 4 pair updates (pair_update_every 10 / 5 / 3: updates on layers [0] / [0,5] / [0,3,6,9]) + the transformer-50m
+# config itself. Processor = transformer-50m's (max_peaks 512); data = the probe build (pbs/diag/k189_data.pbs).
+W640 = {"hidden_size": 640, "num_attention_heads": 10, "intermediate_size": 2560}
+PROBE = {"p2-W640-k10": {**W640, "pair_update_every": 10}, "p2-W640-k5": {**W640, "pair_update_every": 5},
+         "p2-W640-k3": {**W640, "pair_update_every": 3}}
+TARMS["p2-T-W640"] = {}
+PROBE_DATA = f"{S}/data/probe-cap512/raw"
 EXTRA_ARGS = {a: "--pad_to_multiple_of 150\n" for a in TARMS} | {a: "--pad_to_multiple_of 150\n" for a in ("p2-L10-k3", "p2-L10-k10", "p2-L14-k7", "p2-L14-k5", "p2-L10-k5",
                                      "p2-L10-static", "p2-L20-static", "p2-L20-k20", "p2-L20-k10", "p2-L20-k5")}
 TRAINING = """--config_name configs/p2/{arm}
@@ -104,11 +113,17 @@ def arms() -> dict[str, dict[str, str]]:
     base = json.loads((BASE / "config.json").read_text())
     out = {}
     tbase = json.loads((TBASE / "config.json").read_text())
-    for arm, over in [*ARMS.items(), *TARMS.items()]:
+    for arm, over in [*ARMS.items(), *TARMS.items(), *PROBE.items()]:
         cfg = {**tbase, **over} if arm in TARMS else {**base, **PAIR, **over}
+        probe = arm in PROBE or arm == "p2-T-W640"
+        args = TRAINING.format(arm=arm, S=S) + EXTRA_ARGS.get(arm, "")
+        if probe:  # K189: Chris's processor and cap, the probe data, one compiled shape at 512
+            args = args.replace("--max_peaks 150", "--max_peaks 512").replace(
+                f"{S}/data/p2-cap150-half/raw", PROBE_DATA).replace("--pad_to_multiple_of 150", "")
+            args = args.rstrip("\n") + "\n--pad_to_multiple_of 512\n"
         out[arm] = {"config.json": json.dumps(dict(sorted(cfg.items())), indent=2) + "\n",
-                    "preprocessor_config.json": (BASE / "preprocessor_config.json").read_text(),
-                    "training.args": TRAINING.format(arm=arm, S=S) + EXTRA_ARGS.get(arm, "")}
+                    "preprocessor_config.json": ((TBASE if probe else BASE) / "preprocessor_config.json").read_text(),
+                    "training.args": args}
     return out
 
 
