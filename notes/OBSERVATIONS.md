@@ -2252,7 +2252,9 @@ Compiled, 2 nodes x 12 tiles x micro 24 (global 576), probe data (cap 512), s/st
   | transformer-50m | 0.387 | 0.133 | 2.9x | ~5.9 h, ~12 node-h |
   | Pairformer 2 updates | -- | 0.207 (8885503) | -- | ~9.2 h, ~18 node-h |
   One-time compile of the ~8 shapes: ~8 min (transformer), ~14 min (1 update), ~21 min (2 updates); all fit micro 24
-  at 512 when compiled. 4 updates: compile outlasted the debug hour in 8885503 -> rerun alone (8886241).
+  at 512 when compiled. 4 updates: compile outlasted the debug hour in 8885503; rerun alone (8886241) went OOM at
+  step 16 at micro 24 (36.7 GB PyTorch + ~27 GB outside its allocator on the tile) -> 4 updates needs micro 12 x accum 2;
+  not in the K187 plan (1 and 2 updates). Rerun id was (8886241).
 
 ## K163-C consensus twins vs no-consensus partners (final checkpoints, lr 4e-4 P170xK2, 3 seeds; sweeps/compare_cons.py)
 Validation (8883725; 25,691 library queries; every query passes the 20 ppm filter, F n=0, so "with filter" = Fbar):

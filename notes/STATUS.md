@@ -25,6 +25,9 @@ DETACHED PROCESSES ON THE LOGIN NODE (setsid nohup; survive a session restart; l
     setsid nohup pbs/tools/feeder.sh pbs/tools/feeder_plans/<plan>.txt >> $S/logs/feeder_<x>.log 2>&1 < /dev/null &
     setsid nohup pbs/tools/k188_gate.sh passed >> $S/logs/k188_gate.log 2>&1 < /dev/null &
   In-session watchers (scratchpad watch.sh) die with the session -- harmless, just re-check qstat.
+  !! The detached helpers ALSO die when the user's last login session ends (login node not rebooted, uptime 3 d;
+     loginctl Linger=no): 2026-10-01 ~19:30-20:00 all four died; restarted 20:01 UTC. Restart them after every
+     reconnect.
 
 THREAD C
 ──────────────────────────────────────────────────────────────────────────
