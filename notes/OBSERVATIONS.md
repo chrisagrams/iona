@@ -2247,6 +2247,16 @@ Consensus training wins library search at every scale and filter, largest withou
 seed sd ~0.001). Caveats: twins train 1,713 steps vs 1,593 (consensus adds groups); the library is made of consensus
 spectra, so training on them matches the query-library format -- the other five sets (incl. OOD species) decide whether
 it generalises. Pending: test, oodval, mouse, human, yeast.
+K184-C, experimental-only retrieval (experimental queries vs other experimental spectra; no consensus in the pool),
+cons minus no-cons, 25m..200m (400m test/oodval not in yet):
+  validation/test, no filter: Hit@1 -0.004..-0.009, MAP@R -0.006..-0.011 (larger at small scale);
+    20 ppm MAP@R within +-0.0004; iso 20 ppm -0.0001..-0.0007 (all queries pass the filter: F n=0).
+  oodval (20,004 queries, 93 fail the filter): 25m MAP@R -0.007; 50m +0.016, 100m +0.027, 200m +0.029 (no filter);
+    20 ppm +0.001..+0.004; iso 20 ppm +0.003..+0.012.
+  -> the experimental cost is in-distribution and open-search only, gone under a precursor filter, and reversed
+     out of distribution at 50m+.
+K183-C note: library Hit@1 and experimental MAP@R are different searches (library: R=1, one consensus per peptide;
+experimental: R = other replicates, median 13), and even within one search Hit@1 = 1 does not imply MAP@R = 1 when R > 1.
 
 ## K180-P k sweep, running table (P2 recipe, eval_mlm digest 89e46099fdba; 2026-10-01)
 | arm | layers | k | pair updates | setup | eval_mlm | train time | job |

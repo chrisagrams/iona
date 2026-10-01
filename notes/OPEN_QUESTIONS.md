@@ -244,6 +244,22 @@ checkpoints, 21 50m arms not started). With consensus: the remaining ~69 twins (
 go forward with consensus ("we probably will then go forward with the consensus runs"), so the likely alternative
 is consensus-only on the remaining checkpoints and K155 left paused.
 
+### K185-P / K186-P / K187-P (cards PROPOSED 2026-10-01, awaiting approval) -- how useful are pair updates?
+User (K180-P reply): "start looking at option b ... try dropping them ... go to 20 layers, and test 1 vs 2 vs 4 pair
+updates ... It's slower but we need the data ... later on the models with pair updates [may] generalize better ... train
+two 50m models to 'completion', one with k=1 and one with k=2/4". All on the K180 setup (P2 recipe/data/masks, lag 0,
+compiled, 2 nodes x micro 24, global 576, stop 23,387, eval_mlm digest 89e46099fdba) unless stated.
+K185-P no pair updates (pair_update=static: initial pair state, per-layer bias readouts, never updated):
+  L10 static (vs L10 k10 0.0839) and L20 static (anchor for K186). ~1.3 + ~2.5 node-h.
+K186-P 20 layers (hidden 512, ~90M params), 1 / 2 / 4 pair updates = pair_update_every 20 / 10 / 5 (+ L20 static
+  from K185 as 0 updates). ~2.5 node-h each, ~7.5 total. Reading: "k=1,2,4" = number of pair updates, not
+  pair_update_every (k=1 there would be 20 updates) -- confirm.
+K187-P two "50m" models to completion, 1 update vs 2 or 4 (picked from K186). Needs: (i) shape -- P2's L10 x 512
+  (45M) or the transformer-50m shape L10 x 640 (~50M); (ii) "completion" = the transformer-50m's full 540,423-step
+  schedule on the same data (~11.5x P2's length; est. 15-25 h on 2 nodes, ~30-50 node-h each, needs resume across
+  jobs) or something shorter; (iii) compare against transformer-50m final (P2 validation eval_mlm 0.055).
+Still open from K182-P: (a) seed replicates; (d) transformer baselines under this exact setup.
+
 ### K182-P (open) -- one pair update beats more: what to test next?
 K180: L10 k10 (one pair update) 0.0839 beats L10 k3 0.0903 and k5 0.0937 (same setup) and L14 k7 0.0856, at the lowest
 cost (39 min, 2 nodes). The lead is steady from step ~6k (not noise). Candidate follow-ups (each ~1-1.5 node-h, 2 nodes,
