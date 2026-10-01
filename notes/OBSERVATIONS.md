@@ -2190,6 +2190,17 @@ One tile (Max 1550), .venv-2026 (torch 2.13), B 24, N 150, P2 widths (c_z 32, ou
 - Likely reasons: Aurora tiles run in 1-CCS mode by default (one compute engine per tile, so two queues serialise),
   and at B 24 each kernel already fills the tile. Raw: results/raw/diag/k172_overlap/8882322.{json,log}.
 
+## K174-P two compute engines per tile: still no overlap, and 1.6x slower (job 8882544, 2026-10-01)
+Same test as K173 (14 layers, B 24, N 150, .venv-2026), ZEX_NUMBER_OF_CCS 0:1 (default) vs 0:2. PyTorch sees 1 device both ways.
+| k | 1 CCS: lag1 seq / conc / lag0 | 2 CCS: lag1 seq / conc / lag0 |
+|---|---|---|
+| 2 | 239.5 / 239.4 / 260.8 ms | 389.5 / 389.2 / 424.0 ms |
+| 3 | 198.1 / 198.3 / 218.4 | 319.5 / 319.8 / 353.6 |
+| 5 | 157.2 / 157.7 / 177.0 | 250.2 / 250.3 / 283.4 |
+The 2-CCS mode took effect (everything ~1.6x slower = the work runs on half the tile's compute), but concurrent ==
+sequential again: PyTorch's XPU streams all submit to the same engine, so the second engine sits idle. Same-tile
+overlap is not reachable through torch.xpu streams on this stack. Raw: results/raw/diag/k172_overlap/8882544-ccs{1,2}.*
+
 ## K66-C / K136-C final-checkpoint arms on the other sets (mean of 3 seeds, experimental MAP@R, unfiltered)
 | set | scale | lr2e-4 P128 | lr4e-4 P128 | lr4e-4 P170 | lr8e-4 P128 |
 |---|---|---|---|---|---|

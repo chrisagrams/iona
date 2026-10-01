@@ -1,0 +1,27 @@
+/opt/aurora/26.181.0/frameworks/aurora_frameworks-2026.1.0/lib/python3.12/site-packages/torch/library.py:505: UserWarning: Warning only once for all operators,  other operators may also be overridden.
+  Overriding a previously registered kernel for the same operator and the same dispatch key
+  operator: aten::topk(Tensor self, SymInt k, int dim=-1, bool largest=True, bool sorted=True) -> (Tensor values, Tensor indices)
+    registered at /lus/tegu/projects/datasets/software/26.181.0/wheelforge/repositories/pytorch_2.13.0_patched_08_02_2026/pytorch/build/aten/src/ATen/RegisterSchema.cpp:6
+  dispatch key: XPU
+  previous kernel: registered at /lus/tegu/projects/datasets/software/26.181.0/wheelforge/repositories/pytorch_2.13.0_patched_08_02_2026/pytorch/build/aten/src/ATen/RegisterCPU_1.cpp:9289
+       new kernel: registered at /opt/aurora/26.181.0/frameworks/aurora_frameworks-2026.1.0/lib/python3.12/site-packages/torch/__init__.py:3095 (Triggered internally at /lus/tegu/projects/datasets/software/26.181.0/wheelforge/repositories/pytorch_2.13.0_patched_08_02_2026/pytorch/aten/src/ATen/core/dispatch/OperatorEntry.cpp:208.)
+  self.m.impl(
+W1001 02:30:57.118000 600499 site-packages/torch/utils/_pytree.py:630] <enum 'KernelPreference'> is an Enum subclass and is now natively supported by torch.compile as an opaque value type. Calling register_constant() on Enum subclasses is deprecated and will be an error in a future release.
+W1001 02:30:57.168000 600499 site-packages/torch/utils/_pytree.py:630] <enum 'ScaleCalculationMode'> is an Enum subclass and is now natively supported by torch.compile as an opaque value type. Calling register_constant() on Enum subclasses is deprecated and will be an error in a future release.
+[k172] {'torch': '2.13.0a0+gitcf30153', 'device': 'xpu:0', 'device_name': 'Intel(R) Data Center GPU Max 1550', 'config': '/home/khuss/code/msdelta/.claude/worktrees/agent-acb3b2cdf4aa7c9f2/configs/p2/p2-cz32-k5/config.json', 'batch': 24, 'peaks': 150, 'warmup': 5, 'reps': 20, 'autocast': 'bf16', 'job': '8882544.aurora-pbs-0001.hostmgmt.cm.aurora.alcf.anl.gov', 'frameworks': 'frameworks/2026.1.0', 'python': '/home/khuss/code/msdelta/.claude/worktrees/agent-acb3b2cdf4aa7c9f2/.venv-2026/bin/python'}
+[k172] L=14 k=2 lag1_seq  ok    239.5 ms  peak 10.631251456 GB  updates 6
+[k172] L=14 k=2 lag1_conc ok    239.4 ms  peak 10.653004288 GB  updates 6
+[k172] L=14 k=2 lag0_seq  ok    260.8 ms  peak 11.6595072 GB  updates 7
+[k172] L=14 k=2 numerics fp32: match=True bitwise=False loss_rel=0.00e+00 grad_max_rel=2.38e-07
+[k172] L=14 k=2 numerics bf16: match=True bitwise=False loss_rel=0.00e+00 grad_max_rel=1.17e-04
+[k172] L=14 k=3 lag1_seq  ok    198.1 ms  peak 8.426049024 GB  updates 4
+[k172] L=14 k=3 lag1_conc ok    198.3 ms  peak 8.4527616 GB  updates 4
+[k172] L=14 k=3 lag0_seq  ok    218.4 ms  peak 9.392836096 GB  updates 5
+[k172] L=14 k=3 numerics fp32: match=True bitwise=False loss_rel=0.00e+00 grad_max_rel=2.50e-07
+[k172] L=14 k=3 numerics bf16: match=True bitwise=False loss_rel=0.00e+00 grad_max_rel=2.99e-04
+[k172] L=14 k=5 lag1_seq  ok    157.2 ms  peak 6.302245888 GB  updates 2
+[k172] L=14 k=5 lag1_conc ok    157.7 ms  peak 6.329902592 GB  updates 2
+[k172] L=14 k=5 lag0_seq  ok    177.0 ms  peak 7.119796736 GB  updates 3
+[k172] L=14 k=5 numerics fp32: match=True bitwise=False loss_rel=0.00e+00 grad_max_rel=2.26e-07
+[k172] L=14 k=5 numerics bf16: match=True bitwise=False loss_rel=0.00e+00 grad_max_rel=1.19e-04
+[k172] wrote results/raw/diag/k172_overlap/8882544-ccs1.json
