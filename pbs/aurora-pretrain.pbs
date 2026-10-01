@@ -289,7 +289,7 @@ fi
 echo "$(date -Is) job=${PBS_JOBID:-local} hosts=$NUM_HOSTS xpus_per_host=$XPUS_PER_HOST total_xpus=$TOTAL_XPUS global_batch=$GLOBAL_BATCH_SIZE micro_batch=$MICRO_BATCH_SIZE accumulation=$GRADIENT_ACCUMULATION_STEPS run=$RUN_NAME"
 echo "daos=${DAOS_POOL}:${DAOS_CONT} dataset=$PREPROCESSED_DATASET_DIR checkpoints=$CHECKPOINT_DIR"
 echo "walltime=${JOB_WALLTIME_SECONDS}s checkpoint_margin=${CHECKPOINT_MARGIN_SECONDS}s deadline=$IONA_JOB_DEADLINE_EPOCH"
-echo "inductor_cache=$TORCHINDUCTOR_CACHE_DIR tmpdir_was=${TMPDIR:-unset}"
+echo "inductor_cache=$TORCHINDUCTOR_CACHE_DIR"
 echo "nodes:"
 sed 's/^/  /' "$NODE_LIST"
 "$VENV_DIR/bin/python" -c 'import torch; print(f"torch={torch.__version__} xccl={torch.distributed.is_xccl_available()}")'
