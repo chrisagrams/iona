@@ -244,6 +244,16 @@ checkpoints, 21 50m arms not started). With consensus: the remaining ~69 twins (
 go forward with consensus ("we probably will then go forward with the consensus runs"), so the likely alternative
 is consensus-only on the remaining checkpoints and K155 left paused.
 
+### K189-P (open) -- K187 "full schedule": on which data, against which transformer?
+transformer-50m (Chris, configs/msdelta-base-50m/training.args): MSConsensus-100M (all shards), 3 epochs = 540,423
+steps, no 150-peak cap. P2 data (all our Pairformer runs): shards 0-199 at cap 150 (drop), 13,470,623 spectra = one
+pass in 23,387 steps; 540,423 steps on it = ~23 passes. So "full schedule" on P2 data repeats data ~8x more than the
+transformer did, on a different (capped) subset: the 0.055 comparison would be confounded. Options:
+(A) P2 data, 540k steps (cheapest; repetition + data mismatch);
+(B) a cap-150 build of all shards (preprocessing job; still drops >150-peak spectra the transformer saw);
+(C) also a transformer-50m twin trained identically (same data/cap/steps/compile) -- the clean baseline; ~half
+    the Pairformer's cost. Recommendation: (C) with (A) or (B). K187 not submitted until decided.
+
 ### K188-C (card PROPOSED 2026-10-01, awaiting approval) -- all-checkpoint scaling WITH consensus
 User: "K184-C: So we should do the all-checkpoint scaling using the with consensus runs. Have already finished that
 scaling for non-consensus? How much time would it take to finish with consensus?"
