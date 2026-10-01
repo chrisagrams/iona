@@ -49,7 +49,13 @@ ARMS = {
     "p2-L20-k10": {"num_hidden_layers": 20, "pair_update_every": 10},
     "p2-L20-k5": {"num_hidden_layers": 20, "pair_update_every": 5},
 }
-EXTRA_ARGS = {a: "--pad_to_multiple_of 150\n" for a in ("p2-L10-k3", "p2-L10-k10", "p2-L14-k7", "p2-L14-k5", "p2-L10-k5",
+# K182-P (d) (user 2026-10-01: "Sure ok"): plain-transformer baselines under the K180 setup, matching the Pairformer
+# depths run (10 / 14 / 20 layers) at P2's single-stream width: transformer-50m's config (configs/msdelta-base-50m:
+# learned delta-m/z attention bias, no pair stream) with hidden 512, 8 heads, FFN 2048; P2's processor (max_peaks 150).
+TBASE = REPO / "configs" / "msdelta-base-50m"
+TSHAPE = {"hidden_size": 512, "num_attention_heads": 8, "intermediate_size": 2048}
+TARMS = {f"p2-T-L{n}": {**TSHAPE, "num_hidden_layers": n} for n in (10, 14, 20)}
+EXTRA_ARGS = {a: "--pad_to_multiple_of 150\n" for a in TARMS} | {a: "--pad_to_multiple_of 150\n" for a in ("p2-L10-k3", "p2-L10-k10", "p2-L14-k7", "p2-L14-k5", "p2-L10-k5",
                                      "p2-L10-static", "p2-L20-static", "p2-L20-k20", "p2-L20-k10", "p2-L20-k5")}
 TRAINING = """--config_name configs/p2/{arm}
 --processor_name_or_path configs/p2/{arm}
@@ -97,8 +103,9 @@ TRAINING = """--config_name configs/p2/{arm}
 def arms() -> dict[str, dict[str, str]]:
     base = json.loads((BASE / "config.json").read_text())
     out = {}
-    for arm, over in ARMS.items():
-        cfg = {**base, **PAIR, **over}
+    tbase = json.loads((TBASE / "config.json").read_text())
+    for arm, over in [*ARMS.items(), *TARMS.items()]:
+        cfg = {**tbase, **over} if arm in TARMS else {**base, **PAIR, **over}
         out[arm] = {"config.json": json.dumps(dict(sorted(cfg.items())), indent=2) + "\n",
                     "preprocessor_config.json": (BASE / "preprocessor_config.json").read_text(),
                     "training.args": TRAINING.format(arm=arm, S=S) + EXTRA_ARGS.get(arm, "")}
