@@ -2221,6 +2221,17 @@ command line"), IOMMU FAIL. All 6 GPUs: sriov_totalvfs=0, sriov_numvfs not writa
 options. Enabling it needs BIOS + kernel changes + root (an ALCF system change, and VFs target VMs anyway). Dead end
 for us; the CCS split (K177-P) remains the only same-tile route.
 
+## K177-P compute engines (CCS) cannot be exposed as devices on Aurora's 2026.1.0 stack (held node 8882770, 2026-10-01)
+Interactive probes (results/raw/diag/k172_overlap/ccs_probe*.{sh,out}), .venv-2026, ZE_AFFINITY_MASK unset:
+- PyTorch torch.xpu.device_count(): level_zero:gpu -> 12 (448 EUs each); ZEX_NUMBER_OF_CCS=0:2 without selector -> 12 x 448;
+  every sub-device selector ("*:*.*.*" as in Intel's guide, with ZEX 0:2 / 0:2,1:2 / 0:4,1:4; level_zero:*.*.*;
+  level_zero:0.*.*; FLAT "*:*.*", "level_zero:0.*", "*:0.*"; COMBINED "*:*.*.*") -> 0 devices; COMPOSITE "*:*.*" -> 12 tiles.
+- sycl-ls (the runtime itself): "*:*.*.*" + ZEX 0:2 -> "No platforms found"; ZEX 0:2 unfiltered -> every GPU reports
+  Num SubDevices 0, Num SubSubDevices 0.
+- Yet ZEX_NUMBER_OF_CCS=0:2 does change execution (K174: 1.6x slower = half the EUs). So the CCS split happens but the
+  runtime does not expose the halves as devices (no sub-sub-devices). Not a PyTorch limitation; below it. Question for
+  ALCF: how to get CCS sub-sub-devices on Aurora (driver/runtime setting, or not supported in FLAT on this release).
+
 ## K66-C / K136-C final-checkpoint arms on the other sets (mean of 3 seeds, experimental MAP@R, unfiltered)
 | set | scale | lr2e-4 P128 | lr4e-4 P128 | lr4e-4 P170 | lr8e-4 P128 |
 |---|---|---|---|---|---|
