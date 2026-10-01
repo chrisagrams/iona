@@ -7,8 +7,10 @@ S=/lus/flare/projects/UIC-HPC/khuss/msdelta
 SMOKE=$1
 log() { echo "$(date -Is) $*"; }
 finished() { qstat -xf "$1" 2>/dev/null | grep -q "job_state = F"; }
-until finished "$SMOKE"; do sleep 300; done
-st=$(qstat -xf "$SMOKE" | awk '/Exit_status =/{print $3}')
+# SMOKE=passed: judged by hand (8884292: 50m arm complete; 400m trained and evaluated 885/2229 batches fault-free before
+# the 1 h debug limit, the K155-smoke pattern; the full 400m consensus evaluation already ran in K163, 8882196).
+[[ $SMOKE == passed ]] || until finished "$SMOKE"; do sleep 300; done
+[[ $SMOKE == passed ]] && st=0 || st=$(qstat -xf "$SMOKE" | awk '/Exit_status =/{print $3}')
 [[ $st == 0 ]] || { log "smoke $SMOKE exited $st: NOT starting K188"; echo "$(date -Is) k188_gate: smoke $SMOKE exited $st" >> "$S/notifications/feeder.txt"; exit 1; }
 log "smoke $SMOKE ok"
 while true; do
