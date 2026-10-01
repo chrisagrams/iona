@@ -251,7 +251,13 @@ pass in 23,387 steps; 540,423 steps on it = ~23 passes. So "full schedule" on P2
 transformer did, on a different (capped) subset: the 0.055 comparison would be confounded. Options:
 (A) P2 data, 540k steps (cheapest; repetition + data mismatch);
 (B) a cap-150 build of all shards (preprocessing job; still drops >150-peak spectra the transformer saw);
-(C) also a transformer-50m twin trained identically (same data/cap/steps/compile) -- the clean baseline; ~half
+User follow-up: "If we do MSConsensus-100M, all shards, with a peak cap of 512 like chris' ..., for 3 epochs, how much time
+... All the trained models should be trained like this for a fair comparison. ... why not just use chris' pretraining data?"
+-> agreed: on Chris's exact recipe his transformer-50m IS the baseline (no twin). Facts: only ~27% of spectra have
+<=150 peaks (p2-cap150-half README), so at cap 512 most spectra are long; triangle multiplication scales ~N^3, pair
+readouts ~N^2. Rough estimate for 10 x 640, 1 update, 540k steps: ~0.8-1.8 s/step on 2 nodes -> ~5-11 days, ~250-550
+node-h per model (needs a debug cost probe at cap 512: s/step + memory + peak-count histogram).
+(C) (superseded) also a transformer-50m twin trained identically (same data/cap/steps/compile) -- the clean baseline; ~half
     the Pairformer's cost. Recommendation: (C) with (A) or (B). K187 not submitted until decided.
 
 ### K188-C (card PROPOSED 2026-10-01, awaiting approval) -- all-checkpoint scaling WITH consensus
