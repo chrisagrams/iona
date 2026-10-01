@@ -2169,6 +2169,27 @@ the evaluation's allocations on top exceed the tile (XPU reports it as "Segmenta
 instead of OOM, as in FT7). Fix (memory only, numerics unchanged): free the XPU cache before every evaluation
 (EvaluationCacheCallback registered in finetune_contrastive + before the post-training evaluation). Retest running.
 
+## K173-P concurrent pair/single streams: NO overlap on XPU as run (job 8882322, 2026-10-01)
+One tile (Max 1550), .venv-2026 (torch 2.13), B 24, N 150, P2 widths (c_z 32, outgoing, factored), bf16, fwd+bwd median.
+| layers | k | lag1 sequential | lag1 concurrent | lag0 sequential | pair updates (lag1/lag0) |
+|---|---|---|---|---|---|
+| 10 | 1 | 276.4 ms | 276.4 | 298.2 | 9 / 10 |
+| 10 | 2 | 173.7 | 174.2 | 194.0 | 4 / 5 |
+| 10 | 3 | 153.7 | 153.9 | 173.3 | 3 / 4 |
+| 10 | 5 | 114.0 | 113.7 | 132.9 | 1 / 2 |
+| 10 | 7 | 113.6 | 114.0 | 132.8 | 1 / 2 |
+| 14 | 1 | 382.1 | 381.7 | 403.5 | 13 / 14 |
+| 14 | 2 | 236.5 | 236.9 | 257.2 | 6 / 7 |
+| 14 | 3 | 196.4 | 196.5 | 216.4 | 4 / 5 |
+| 14 | 5 | 156.3 | 156.1 | 175.5 | 2 / 3 |
+| 14 | 7 | 136.4 | 136.1 | 155.1 | 1 / 2 |
+- Concurrent == sequential to <0.5 ms everywhere: the side stream did not run alongside the main one. lag1 saves only
+  the one pair update it does not build (~20 ms). Numerics: concurrent matches sequential (fp32 grad rel <=2.6e-7).
+- Cost model from these rows: one pair update ~20.5 ms, one single layer (with its bias readout) ~5.7 ms, rest ~36 ms
+  -> pair/single ~3.6x at B 24 on the 2026 stack -> time-balanced k ~3-4.
+- Likely reasons: Aurora tiles run in 1-CCS mode by default (one compute engine per tile, so two queues serialise),
+  and at B 24 each kernel already fills the tile. Raw: results/raw/diag/k172_overlap/8882322.{json,log}.
+
 ## K66-C / K136-C final-checkpoint arms on the other sets (mean of 3 seeds, experimental MAP@R, unfiltered)
 | set | scale | lr2e-4 P128 | lr4e-4 P128 | lr4e-4 P170 | lr8e-4 P128 |
 |---|---|---|---|---|---|
