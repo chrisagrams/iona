@@ -2232,6 +2232,22 @@ Interactive probes (results/raw/diag/k172_overlap/ccs_probe*.{sh,out}), .venv-20
   runtime does not expose the halves as devices (no sub-sub-devices). Not a PyTorch limitation; below it. Question for
   ALCF: how to get CCS sub-sub-devices on Aurora (driver/runtime setting, or not supported in FLAT on this release).
 
+## K163-C consensus twins vs no-consensus partners (final checkpoints, lr 4e-4 P170xK2, 3 seeds; sweeps/compare_cons.py)
+Validation (8883725; 25,691 library queries; every query passes the 20 ppm filter, F n=0, so "with filter" = Fbar):
+| scale | lib Hit@1 no filter: no-cons -> cons | 20 ppm | iso 20 ppm | MAP@R (spectrum-spectrum) |
+|---|---|---|---|---|
+| 25m | 0.708+-0.065 -> 0.940+-0.001 (+0.232) | 0.977 -> 0.998 | 0.938 -> 0.994 | 0.871 -> 0.860 (-0.011) |
+| 50m | 0.875 -> 0.948 (+0.073) | 0.995 -> 0.998 | 0.984 -> 0.995 | 0.888 -> 0.879 (-0.010) |
+| 100m | 0.885 -> 0.956 (+0.072) | 0.994 -> 0.999 | 0.984 -> 0.995 | 0.902 -> 0.893 (-0.009) |
+| 200m | 0.920 -> 0.959 (+0.039) | 0.996 -> 0.998 | 0.989 -> 0.996 | 0.909 -> 0.901 (-0.008) |
+| 400m | 0.940 -> 0.965 (+0.025) | 0.997 -> 0.999 | 0.992 -> 0.996 | 0.920 -> 0.914 (-0.006) |
+Consensus training wins library search at every scale and filter, largest without a filter and at small scales (25m:
++23 points, and seed spread drops from 0.065 to 0.001); a 25m consensus model (0.940) matches the 400m no-consensus one
+(0.940). Cost: spectrum-to-spectrum MAP@R drops ~0.006-0.011 at every scale (more consistent with a trade than noise:
+seed sd ~0.001). Caveats: twins train 1,713 steps vs 1,593 (consensus adds groups); the library is made of consensus
+spectra, so training on them matches the query-library format -- the other five sets (incl. OOD species) decide whether
+it generalises. Pending: test, oodval, mouse, human, yeast.
+
 ## K180-P k sweep, running table (P2 recipe, eval_mlm digest 89e46099fdba; 2026-10-01)
 | arm | layers | k | pair updates | setup | eval_mlm | train time | job |
 |---|---|---|---|---|---|---|---|
