@@ -2201,6 +2201,20 @@ The 2-CCS mode took effect (everything ~1.6x slower = the work runs on half the 
 sequential again: PyTorch's XPU streams all submit to the same engine, so the second engine sits idle. Same-tile
 overlap is not reachable through torch.xpu streams on this stack. Raw: results/raw/diag/k172_overlap/8882544-ccs{1,2}.*
 
+## K176-P pair stream on a second tile: real overlap, -14 to -23% step time; 2-CCS devices not exposed (job 8882596, 2026-10-01)
+14 layers, B 24, N 150, .venv-2026. "tiles": main = tile 0, pair updates = tile 1 of the same card (FLAT, ZE_AFFINITY_MASK=0,1).
+| k | lag1 seq (1 tile) | lag1 same-tile streams | lag1 two tiles | lag0 seq | peak GB (2 tiles: main / pair) | copies per forward |
+|---|---|---|---|---|---|---|
+| 2 | 237.2 ms | 237.3 | 184.7 (-22%) | 258.1 | 4.3 / 6.6 | 494 MB |
+| 3 | 196.6 | 196.6 | 152.2 (-23%) | 216.3 | 4.2 / 4.5 | 341 MB |
+| 5 | 156.0 | 156.0 | 133.5 (-14%) | 175.7 | 4.2 / 2.4 | 188 MB |
+- First real overlap. Numerics match (fp32 grad rel <=2.6e-7; bf16 grad rel up to 4e-3 vs 1e-4 for same-device, to watch).
+- Cost: two tiles per model copy. Tile-time per batch k3: 2 x 152 = 304 ms vs 197 ms on one tile -> 1.55x MORE compute per
+  sample than plain data parallel; it buys wall time, not node-hours. Ideal overlap at k3 would be ~max(pair ~82+copies,
+  single ~116) ms; 152 achieved -> copies (76.5 MB/round + backward) and the per-round barrier eat part of it.
+- ccs2 (one tile split into 2 engines, each its own device): every selector tried exposed 0 devices -> no data; needs
+  interactive debugging of the ZEX_NUMBER_OF_CCS / ONEAPI_DEVICE_SELECTOR / ZE_AFFINITY_MASK combination.
+
 ## K66-C / K136-C final-checkpoint arms on the other sets (mean of 3 seeds, experimental MAP@R, unfiltered)
 | set | scale | lr2e-4 P128 | lr4e-4 P128 | lr4e-4 P170 | lr8e-4 P128 |
 |---|---|---|---|---|---|

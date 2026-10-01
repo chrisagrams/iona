@@ -1,0 +1,9 @@
+[k176] probe ZE_FLAT_DEVICE_HIERARCHY=FLAT ONEAPI_DEVICE_SELECTOR=level_zero:0.*
+[k176] xpu devices: 0 []
+[k176] probe ZE_FLAT_DEVICE_HIERARCHY=FLAT ONEAPI_DEVICE_SELECTOR=level_zero:*.*
+[k176] xpu devices: 0 []
+[k176] probe ZE_FLAT_DEVICE_HIERARCHY=COMPOSITE ONEAPI_DEVICE_SELECTOR=level_zero:0.0.*
+[k176] xpu devices: 0 []
+[k176] probe ZE_FLAT_DEVICE_HIERARCHY=COMPOSITE ONEAPI_DEVICE_SELECTOR=level_zero:*.*.*
+[k176] xpu devices: 0 []
+[k176] ccs2: FEWER THAN 2 XPU DEVICES VISIBLE -- lag1_dev cannot run in this mode; skipping it
