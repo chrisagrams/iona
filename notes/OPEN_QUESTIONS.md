@@ -244,6 +244,15 @@ checkpoints, 21 50m arms not started). With consensus: the remaining ~69 twins (
 go forward with consensus ("we probably will then go forward with the consensus runs"), so the likely alternative
 is consensus-only on the remaining checkpoints and K155 left paused.
 
+### K191-P (open) -- K187 at 1 epoch: which schedule, and which transformer checkpoint to compare?
+User: "How much would just 1 epoch cost us? 1 seed, two choices of k, 1 full epoch of training on the full ds".
+1 epoch at cap 512 = ~92.3M spectra (92.3% of 100M kept, shard 0) = ~180k steps if Chris's global batch is 512
+(540,423 / 3 x 512 = 92.2M matches; to confirm from his configs). Options: (a) Chris's 3-epoch cosine stopped at
+~180k (as P2 did) -> compare with his transformer-50m at the same step (his checkpoints we know of near it: 133k, 220k
+-- need one at ~180k, or eval_mlm both and bracket); (b) a cosine planned for 1 epoch -> the transformer needs a 1-epoch
+run too (cheaper than the Pairformer). Also: 10 x 640 Pairformer = 70.5M vs transformer-50m 49.8M (+42%; the pair
+stream's readouts/write-back grow with width) -- not parameter-matched.
+
 ### K189-P (open) -- K187 "full schedule": on which data, against which transformer?
 transformer-50m (Chris, configs/msdelta-base-50m/training.args): MSConsensus-100M (all shards), 3 epochs = 540,423
 steps, no 150-peak cap. P2 data (all our Pairformer runs): shards 0-199 at cap 150 (drop), 13,470,623 spectra = one
