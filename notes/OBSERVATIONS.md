@@ -2257,6 +2257,8 @@ step 2k 0.347 (worst; slow start) -> 6k 0.155 (best from here) -> 10k 0.117 vs 0
 0.097-0.101 -> final 0.084 vs 0.090-0.094. A steady ~0.01 lead from 10k on, far above the ~0.001 noise (K181) -> real.
 Per step at this budget: fewer pair updates are BETTER (k10 0.084, L14 k7 0.085 < k3 0.090 ~ k1 0.091 < k5 0.092-0.094),
 not monotone between k3 and k5. Open: is any pair update needed (k=inf), seed replicates, deeper single-update models.
+L14 k5 (3 updates) 0.0862 vs L14 k7 (2 updates) 0.0856: at 14 layers too, fewer pair updates is no worse and cheaper
+(55 vs 52 min). Sweep complete; ranking: L10 k10 0.0839 < L14 k7 0.0856 < L14 k5 0.0862 < L10 k3 0.0903 < L10 k5 0.0937.
 
 ## K66-C / K136-C final-checkpoint arms on the other sets (mean of 3 seeds, experimental MAP@R, unfiltered)
 | set | scale | lr2e-4 P128 | lr4e-4 P128 | lr4e-4 P170 | lr8e-4 P128 |
