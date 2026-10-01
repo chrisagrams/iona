@@ -11,6 +11,7 @@
 # 2 nodes x 12 tiles x micro 3 (the real per-rank micro-batch), stop at step 120, eval every 50 steps,
 # save at the stop, W&B off. Checks: multi-node DDP launch, the new pair switches, eval, save, step time.
 #   qsub -q debug -v REPO_DIR=$PWD pbs/diag/p2_smoke.pbs        (ARMS=a+b to pick arms)
+# K180-P: SMOKE_MICRO / SMOKE_GLOBAL / SMOKE_STOP / TORCH_COMPILE (+ FRAMEWORKS_MODULE, VENV_DIR) override the defaults.
 REPO_DIR=${REPO_DIR:-${PBS_O_WORKDIR:-$PWD}}
 cd "$REPO_DIR"
 set -uo pipefail
@@ -20,13 +21,13 @@ SM=$S/runs/p2-smoke/$JOB; mkdir -p "$SM"
 rc_all=0
 ARMS=${ARMS:-p2-cz32-k1+p2-cz32-k1-triattn+p2-cz32-k5}
 for arm in ${ARMS//+/ }; do
-    sed -e 's/^--eval_steps .*/--eval_steps 50/' -e 's/^--save_steps .*/--save_steps 120/' \
+    sed -e 's/^--eval_steps .*/--eval_steps 50/' -e 's/^--report_to .*/--report_to none/' -e "s/^--save_steps .*/--save_steps ${SMOKE_STOP:-120}/" \
         -e 's/^--logging_steps .*/--logging_steps 10/' "configs/p2/$arm/training.args" > "$SM/$arm.args"
     echo "=== $(date -Is) $arm"
     timeout 1080 env ARGS_FILE="$SM/$arm.args" CHECKPOINT_DIR="$SM" RUN_NAME="p2smoke-$arm-$JOB" \
         HF_HOME=$S/huggingface PREPROCESSED_DATASET_DIR=$S/data/p2-cap150-half/preprocessed \
-        XPUS_PER_HOST=12 MICRO_BATCH_SIZE=3 GLOBAL_BATCH_SIZE=72 PROBE_EXECUTION=off CCL_KVS_MODE=pmi \
-        WANDB_MODE=disabled MSDELTA_STOP_AT_STEP=120 bash pbs/aurora-pretrain.pbs > "$SM/$arm.log" 2>&1
+        XPUS_PER_HOST=12 MICRO_BATCH_SIZE=${SMOKE_MICRO:-3} GLOBAL_BATCH_SIZE=${SMOKE_GLOBAL:-72} TORCH_COMPILE=${TORCH_COMPILE:-0} PROBE_EXECUTION=off CCL_KVS_MODE=pmi \
+        WANDB_MODE=disabled MSDELTA_STOP_AT_STEP=${SMOKE_STOP:-120} bash pbs/aurora-pretrain.pbs > "$SM/$arm.log" 2>&1
     rc=$?; echo "=== $(date -Is) $arm rc=$rc"; [[ $rc == 0 ]] || rc_all=1
     grep -E "'loss'|eval_loss|train_runtime|Error|error" "$SM/$arm.log" | tail -8
 done

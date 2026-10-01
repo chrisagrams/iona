@@ -33,7 +33,14 @@ ARMS = {
     "p2-cz32-k1": {},
     "p2-cz32-k1-triattn": {"pair_use_triangle_attention": True},
     "p2-cz32-k5": {"pair_update_every": 5},
+    # K180-P (user-approved k sweep, 2026-10-01): same recipe, compiled on 2 nodes x micro 24 (global 576 as above);
+    # fixed padding to max_peaks so torch.compile sees one shape.
+    "p2-L10-k3": {"pair_update_every": 3},
+    "p2-L10-k10": {"pair_update_every": 10},
+    "p2-L14-k7": {"num_hidden_layers": 14, "pair_update_every": 7},
+    "p2-L14-k5": {"num_hidden_layers": 14, "pair_update_every": 5},
 }
+EXTRA_ARGS = {a: "--pad_to_multiple_of 150\n" for a in ("p2-L10-k3", "p2-L10-k10", "p2-L14-k7", "p2-L14-k5")}
 TRAINING = """--config_name configs/p2/{arm}
 --processor_name_or_path configs/p2/{arm}
 --output_dir ./runs/{arm}
@@ -84,7 +91,7 @@ def arms() -> dict[str, dict[str, str]]:
         cfg = {**base, **PAIR, **over}
         out[arm] = {"config.json": json.dumps(dict(sorted(cfg.items())), indent=2) + "\n",
                     "preprocessor_config.json": (BASE / "preprocessor_config.json").read_text(),
-                    "training.args": TRAINING.format(arm=arm, S=S)}
+                    "training.args": TRAINING.format(arm=arm, S=S) + EXTRA_ARGS.get(arm, "")}
     return out
 
 
