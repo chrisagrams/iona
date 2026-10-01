@@ -18,7 +18,7 @@ from datasets import load_from_disk
 from safetensors.torch import load_file
 from transformers import HfArgumentParser
 
-from iona.data import group_ids
+from iona.data import group_ids, map_length_sorted
 from iona.finetune_align import AlignDataArguments, AlignModelArguments
 from iona.modeling_iona import IonaForPreTraining
 from iona.reranking import (
@@ -81,14 +81,17 @@ def main(argv: list[str] | None = None) -> int:
     candidates = list(slot)
     spectrum_group = np.array([slot[k] for k in keys])
 
-    spectra, sequences = [], []
+    def embed_batch(chunk):
+        batch = collator(chunk)
+        return {"spectrum": embed_spectrum(teacher, batch["mz"].to(device),
+                                           batch["log_intensity"].to(device),
+                                           batch["attention_mask"].to(device),
+                                           manifest["pooling"]).float().cpu().numpy()}
+
+    sequences = []
     with torch.no_grad():
-        for start in range(0, len(features), cli.batch_size):
-            batch = collator(features[start:start + cli.batch_size])
-            spectra.append(embed_spectrum(teacher, batch["mz"].to(device),
-                                          batch["log_intensity"].to(device),
-                                          batch["attention_mask"].to(device),
-                                          manifest["pooling"]).cpu())
+        spectra = [torch.from_numpy(np.stack(
+            map_length_sorted(rows, embed_batch, cli.batch_size)["spectrum"]))]
         peptide_collator = PeptideCollator(max_length=model_args.max_peptide_length)
         for start in range(0, len(candidates), 256):
             chunk = candidates[start:start + 256]

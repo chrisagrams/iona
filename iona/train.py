@@ -14,7 +14,11 @@ from transformers import HfArgumentParser, Trainer, set_seed
 
 from iona.callbacks import SidecarCallback, WalltimeCheckpointCallback, build_callbacks
 from iona.configuration_iona import IonaConfig
-from iona.data import build_pretraining_datasets, load_pretraining_datasets_from_disk
+from iona.data import (
+    add_length_column,
+    build_pretraining_datasets,
+    load_pretraining_datasets_from_disk,
+)
 from iona.modeling_iona import IonaForPreTraining
 from iona.posttraining import build_probe_data
 from iona.processing_iona import IonaDataCollatorForPreTraining, IonaProcessor
@@ -144,6 +148,11 @@ def main(argv: list[str] | None = None) -> int:
                     num_proc=data_args.preprocessing_num_workers or None,
                     cache_dir=data_args.dataset_cache_dir,
                 )
+        if training_args.train_sampling_strategy == "group_by_length":
+            # Datasets preprocessed before the length column existed need it backfilled.
+            with training_args.main_process_first(local=False, desc="length column"):
+                train_ds = add_length_column(train_ds, data_args.preprocessing_num_workers or None)
+                val_ds = add_length_column(val_ds, data_args.preprocessing_num_workers or None)
         include_probes = training_args.probe_execution == "inline"
         denoising_datasets = denoising_processor = None
         retrieval_datasets = retrieval_evaluation_datasets = None
