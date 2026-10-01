@@ -334,8 +334,10 @@ exec mpiexec \
                 sleep 0.5
             done
             if [[ ${metrics_endpoint_ready:-0} != 1 ]]; then
-                echo "XPU metrics endpoint failed to start; see $LOG_DIR/xpu-telegraf-${HOSTNAME}.log" >&2
-                exit 2
+                # Metrics are optional (as in 67737fc7 on chore/aurora-py312-compile): telegraf can come up after the 10 s wait (8883042
+                # died on that race with the endpoint listening seconds later). Warn and train anyway.
+                echo "warning: XPU metrics endpoint not up after 10 s on $HOSTNAME; training without it" \
+                    "(see $LOG_DIR/xpu-telegraf-${HOSTNAME}.log)" >&2
             fi
             "$@"
             exit $?
