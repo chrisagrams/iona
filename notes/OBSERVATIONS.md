@@ -2238,10 +2238,16 @@ Interactive probes (results/raw/diag/k172_overlap/ccs_probe*.{sh,out}), .venv-20
 | k1 (P2) | 10 | 1 | 10 | eager, 16 nodes x micro 3 | 0.0907 | 64 min (~17 nh) | 8880726 |
 | k5 (P2) | 10 | 5 | 2 | eager, 16 nodes x micro 3 | 0.0926 | 46 min (~12 nh) | 8880727 |
 | L10 k3 | 10 | 3 | 4 | compiled, 2 nodes x micro 24 | 0.0903 | 50 min (~1.7 nh) | 8883041 |
-| L10 k5 (K181 control) | 10 | 5 | 2 | compiled, 2 nodes x micro 24 | pending | | 8883230 |
+| L10 k5 (K181 control) | 10 | 5 | 2 | compiled, 2 nodes x micro 24 | 0.0937 | 44 min (~1.5 nh) | 8883230 |
 | L10 k10 | 10 | 10 | 1 | compiled, 2 nodes x micro 24 | pending (resubmitted) | | |
 | L14 k7 / L14 k5 | 14 | 7 / 5 | 2 / 3 | compiled, 2 nodes x micro 24 | pending | | 8883043 / 8883044 |
-Provisional: k3 beats k1 and k5 at matched steps, but the setup differs from P2 (K181 control decides comparability).
+K181 control: the same k5 model scores 0.0937 in the new setup vs 0.0926 in P2 (+0.0011, more than the +-0.0005 bar):
+setup change and/or run-to-run noise (different rank count -> different data order) is ~0.001, so compare new arms with
+each other only; old k1-vs-k5 (0.0019) is barely above that noise.
+Same setup, k3 vs k5: matched STEPS k3 0.0903 vs k5 0.0937 (k3 better by 0.0034). Matched WALL TIME (k3 run 50.4 min vs
+k5 43.6 min, both incl. 23 evals, ratio 1.155; one-tile benchmark ratio 1.30): k3's in-training eval at step ~20.2k
+(1.155) is ~0.097, at ~18k (1.30) ~0.102, vs k5's final 0.0940 (in-training masks) -> at matched compute k5 is ahead.
+Caveat: truncated-run comparison under a 540k-step cosine; a run planned for the shorter budget may differ.
 
 ## K66-C / K136-C final-checkpoint arms on the other sets (mean of 3 seeds, experimental MAP@R, unfiltered)
 | set | scale | lr2e-4 P128 | lr4e-4 P128 | lr4e-4 P170 | lr8e-4 P128 |
