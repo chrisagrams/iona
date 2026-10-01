@@ -2253,6 +2253,8 @@ cons minus no-cons, 25m..200m (400m test/oodval not in yet):
     20 ppm MAP@R within +-0.0004; iso 20 ppm -0.0001..-0.0007 (all queries pass the filter: F n=0).
   oodval (20,004 queries, 93 fail the filter): 25m MAP@R -0.007; 50m +0.016, 100m +0.027, 200m +0.029, 400m +0.058 (no filter; 400m Hit@1 +0.028);
     20 ppm +0.001..+0.004; iso 20 ppm +0.003..+0.012.
+  test complete (all 5 scales) replicates validation to within ~0.003: library Hit@1 no filter 25m 0.706->0.940 ...
+    400m 0.938->0.965; experimental MAP@R 25m -0.011 ... 400m -0.006; 20 ppm / iso 20 ppm unchanged (+-0.001).
   -> the experimental cost is in-distribution and open-search only, gone under a precursor filter, and reversed
      out of distribution at 50m+.
 K183-C note: library Hit@1 and experimental MAP@R are different searches (library: R=1, one consensus per peptide;
