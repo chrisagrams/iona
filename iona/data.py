@@ -10,11 +10,6 @@ import numpy as np
 import pyarrow.compute as pc
 import torch
 from datasets import Dataset, DatasetDict, load_dataset, load_from_disk
-from datasets.utils import (
-    are_progress_bars_disabled,
-    disable_progress_bars,
-    enable_progress_bars,
-)
 
 from iona.chemistry import PROTON_MASS, RESIDUE_MASSES, WATER_MASS
 from iona.processing_iona import IonaProcessor
@@ -137,8 +132,6 @@ def map_length_sorted(
     dataset: Dataset,
     function: Callable[[list[dict]], dict],
     batch_size: int,
-    *,
-    show_progress: bool = False,
 ) -> Dataset:
     """Run ``function`` on batches of similar-length spectra and return its outputs in input order.
 
@@ -156,22 +149,15 @@ def map_length_sorted(
         ])
     # select(argsort) is what Dataset.sort does, minus add_column's flatten of any indices mapping.
     order = np.argsort(-lengths, kind="stable")
-    was_disabled = are_progress_bars_disabled()
-    if not show_progress:
-        disable_progress_bars()
-    try:
-        outputs = dataset.select(order).map(
-            lambda batch: function([dict(zip(batch, row)) for row in zip(*batch.values())]),
-            batched=True,
-            batch_size=batch_size,
-            remove_columns=dataset.column_names,
-            keep_in_memory=True,
-            load_from_cache_file=False,
-            desc="length-sorted inference",
-        )
-    finally:
-        if not was_disabled:
-            enable_progress_bars()
+    outputs = dataset.select(order).map(
+        lambda batch: function([dict(zip(batch, row)) for row in zip(*batch.values())]),
+        batched=True,
+        batch_size=batch_size,
+        remove_columns=dataset.column_names,
+        keep_in_memory=True,
+        load_from_cache_file=False,
+        desc="length-sorted inference",
+    )
     return outputs.select(np.argsort(order))
 
 
