@@ -2251,7 +2251,7 @@ K184-C, experimental-only retrieval (experimental queries vs other experimental 
 cons minus no-cons, 25m..200m (400m test/oodval not in yet):
   validation/test, no filter: Hit@1 -0.004..-0.009, MAP@R -0.006..-0.011 (larger at small scale);
     20 ppm MAP@R within +-0.0004; iso 20 ppm -0.0001..-0.0007 (all queries pass the filter: F n=0).
-  oodval (20,004 queries, 93 fail the filter): 25m MAP@R -0.007; 50m +0.016, 100m +0.027, 200m +0.029 (no filter);
+  oodval (20,004 queries, 93 fail the filter): 25m MAP@R -0.007; 50m +0.016, 100m +0.027, 200m +0.029, 400m +0.058 (no filter; 400m Hit@1 +0.028);
     20 ppm +0.001..+0.004; iso 20 ppm +0.003..+0.012.
   -> the experimental cost is in-distribution and open-search only, gone under a precursor filter, and reversed
      out of distribution at 50m+.
