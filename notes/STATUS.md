@@ -4,36 +4,48 @@ What is true right now. Overwritten, not appended: before changing it, copy the 
 `status-history/`. Questions: `PLAN.md`; results: `OBSERVATIONS.md`; decisions: `DECISIONS.md`;
 waiting on the user: `OPEN_QUESTIONS.md` (top: "Your to-do").
 
-Last updated: 2026-10-01 ~14:05 UTC, during Autonomy-2 (user: "keep running our research queue autonomously for the
-next 10 hours", 07:00-17:00 UTC; approved queue only, new experiments go to OPEN_QUESTIONS).
+Last updated: 2026-10-01 ~19:25 UTC (before a client reconnect). Every new setting needs the user's approval.
 
 ```
 BRANCHES / CHECKOUTS
 ──────────────────────────────────────────────────────────────────────────
-  ~/code/msdelta          dev_finetune_02 (working branch; main checkout)
-  dev_finetune            frozen at paper submission; master/main untouched
-  merges                  scratch worktree -> tests -> pbs/checkout_ff (K111); jobs snapshot a commit
+  ~/code/msdelta          dev_finetune_02 (working branch; main checkout). Jobs snapshot HEAD at START (memory
+                          queued-jobs-snapshot-head): debug-test code before committing while jobs are queued.
+  master/main             untouched (Chris)
 
-THREAD C -- K163-C consensus twins of the FINAL checkpoints
+DETACHED PROCESSES ON THE LOGIN NODE (setsid nohup; survive a session restart; logs in $S/logs/)
 ──────────────────────────────────────────────────────────────────────────
-  [x] 8882196 cons_train: 15 twins (25m-400m x 3 seeds, ck540k), 13.8 h, exit 0, all 15 finals present
-      (list: sweeps/arms/score_cons.txt)
-  [ ] scoring on six sets -> results/raw/finetune/contrastive/cons-<set>/: 8883725 val, 8883726 test, 8883727 oodval,
-      8883728 mouse, 8883729 human (queued); yeast waits for a queue slot (5-queued per-user limit), feeder retries.
-      Capacity runs 2 of my jobs at a time, 5-10 h each -> all six done ~late tonight / tomorrow morning UTC.
-      Feeder k160_cons PID 950208, log $S/logs/feeder_k160.log.
-  [ ] then: with vs without consensus, per scale, all six sets, library search, with/without precursor filter
-      (none / 20 ppm / iso-tolerant 20 ppm) on filter passes and failures (memory metrics-with-without-filter)
-  [~] K155 (no consensus, all checkpoints) PAUSED, 27/78 done. Parked: K161-C both sets at every checkpoint.
+  feeder k185_p2u      K185/K186 runs + eval_mlm          log feeder_k185.log
+  feeder k182d_tbase   K182 (d) transformer baselines     log feeder_k182d.log
+  feeder k189_probe    K189 probe + grouped validation    log feeder_k189.log
+  k188_gate.sh passed  starts feeder k188_cons_allck once every K185/K186 + K182 (d) training job has left the
+                       queue                              log k188_gate.log
+  feeder k160_cons     finished (only yeast scoring left, already submitted)
+  Check: ps -u khuss -o pid,etime,args | grep -E "feeder|gate".  Restart (state files prevent double submission):
+    setsid nohup pbs/tools/feeder.sh pbs/tools/feeder_plans/<plan>.txt >> $S/logs/feeder_<x>.log 2>&1 < /dev/null &
+    setsid nohup pbs/tools/k188_gate.sh passed >> $S/logs/k188_gate.log 2>&1 < /dev/null &
+  In-session watchers (scratchpad watch.sh) die with the session -- harmless, just re-check qstat.
 
-THREAD P -- K180-P k sweep DONE (P2 recipe, compiled, 2 nodes x micro 24, eval_mlm digest 89e46099fdba)
+THREAD C
 ──────────────────────────────────────────────────────────────────────────
-  L10 k10 0.0839 (1 pair update, 39 min) < L14 k7 0.0856 < L14 k5 0.0862 < L10 k3 0.0903 < L10 k5 0.0937 (K181 control;
-  P2 k5 was 0.0926 -> setup/noise ~0.001). Table: OBSERVATIONS "K180-P k sweep".
-  [?] K182-P next (OPEN_QUESTIONS): seed replicates / no pair update / L14 k14 / transformer baselines at this setup.
-  Launcher fix: telegraf metrics start is no longer fatal (two runs died on that race; both resubmitted and done).
-  Shelved: triangle attention (K164). Same-tile stream overlap impossible on this stack (K173/K174/K177/K178); K179
-  ALCF question drafted, not sent.
+  [x] K163-C consensus twins of the finals: trained (8882196) and scored on validation/test/oodval/mouse/human
+      (OBSERVATIONS "K163-C"); [ ] yeast 8883903 queued. Consensus = default recipe (K188).
+  [ ] K188-C consensus twins of all 78 K155 checkpoints: configs/sweep-cons (cons_allck.txt), smoke judged passed;
+      one 4-node capacity job (~16 h) + six-set scoring, started by k188_gate.sh after the short P runs.
+THREAD P
+──────────────────────────────────────────────────────────────────────────
+  [x] K180/K181 k sweep (OBSERVATIONS "K180-P"): L10 k10 0.0839 best.
+  [ ] K185 (no pair updates: L10/L20 static, resubmitted after the train.py bug) and K186 (L20, 1/2/4 updates):
+      8884427 L20 k10 running; L20 k20 8884397 queued; static reruns pending submission; eval_mlm after each.
+  [ ] K182 (d) transformer baselines L10/L14/L20 x 512: 8885130, 8885131 queued, L20 pending.
+  [ ] K189 length grouping (msdelta/pretraining/length_grouping.py; --length_grouped_batches, --compile_static_shapes):
+      compiled 2-node speed at cap 512: Pairformer 1 update 0.560 -> 0.173 s/step, transformer 0.387 -> 0.133,
+      2 updates 0.207 (grouped); 4 updates rerun 8886241 (debug). Validation run p2-L10-k10-grp (P2 data, vs 0.0839)
+      pending submission (feeder k189_probe).
+  [?] K187 card to present: full cap-512 build (~380 GB) + 10 x 640 Pairformer, 1 and 2 updates, 1 epoch
+      (~160k steps at global 576, Chris's 3-epoch cosine stopped at 1 epoch, K191 a / K192 b), grouped + compiled,
+      ~15 + ~18 node-h; compare with transformer-50m at 1 epoch (his 180k checkpoint: user to ask Chris).
+WAITING ON THE USER: K187 card approval; Chris's 180k checkpoint; K182 (a) seeds; K179 ALCF question (not sent).
 
 DONE RECENTLY
 ──────────────────────────────────────────────────────────────────────────
