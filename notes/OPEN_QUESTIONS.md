@@ -244,6 +244,24 @@ checkpoints, 21 50m arms not started). With consensus: the remaining ~69 twins (
 go forward with consensus ("we probably will then go forward with the consensus runs"), so the likely alternative
 is consensus-only on the remaining checkpoints and K155 left paused.
 
+### K188-C (card PROPOSED 2026-10-01, awaiting approval) -- all-checkpoint scaling WITH consensus
+User: "K184-C: So we should do the all-checkpoint scaling using the with consensus runs. Have already finished that
+scaling for non-consensus? How much time would it take to finish with consensus?"
+Status of K155 (no consensus): paused, 27/78 done (100m 220k/330k/430k, all 18 200m). In-flight when paused:
+50m 18 arms at 17-33% (ck 265/530 of 1,593), 100m 9 arms at 67-83%, 400m 21 arms at 67%; resumable (RESUME_JOB=8880712).
+Remaining ~16 node-h (~4-5 h on 4 nodes) by the measured per-arm costs; none of the 78 is scored yet.
+Proposal: 78 consensus twins (50m/100m/200m/400m x 26 non-final checkpoints x 3 seeds) = each K155 arm's training.args
++ ONLY --include_consensus true --consensus_weight 1 (as K160/K163, which the finals used); K168-C cache fix included.
+Est. ~65 node-h training (K155's ~60 x 1.075 for consensus's extra steps), one 4-node capacity job ~16 h, after a debug
+smoke; scoring on the six sets ~3-4 h per set (78 arms; 15 arms took 27-48 min per set).
+Needs: (i) approve; (ii) also resume and score the no-consensus K155 remainder (~16 node-h + scoring)? (iii) priority:
+capacity runs only 2 of my jobs at a time -- C (16 h job) vs P (K185/K186 five ~1.5 h jobs, K187 two ~20 h jobs).
+### K187-P (shape still open)
+User: "The regular transformer model uses 10x640? why?" The transformer ladder (configs/msdelta-base-*, Chris's) keeps
+width ~= 64 x depth with 64-dim heads: 8x512 (25m), 10x640 (50m), 13x800 (100m), 16x1024 (200m), 20x1280 (400m); 1b
+breaks it (20x2048). P2's 10x512 (45M) was our own choice, below the 50m rung. Options: Pairformer 10x640 (the same
+single stream as transformer-50m + the pair stream; cleanest comparison) or 10x512.
+
 ### K185-P / K186-P / K187-P (cards PROPOSED 2026-10-01, awaiting approval) -- how useful are pair updates?
 User (K180-P reply): "start looking at option b ... try dropping them ... go to 20 layers, and test 1 vs 2 vs 4 pair
 updates ... It's slower but we need the data ... later on the models with pair updates [may] generalize better ... train
