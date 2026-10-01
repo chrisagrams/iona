@@ -2232,6 +2232,17 @@ Interactive probes (results/raw/diag/k172_overlap/ccs_probe*.{sh,out}), .venv-20
   runtime does not expose the halves as devices (no sub-sub-devices). Not a PyTorch limitation; below it. Question for
   ALCF: how to get CCS sub-sub-devices on Aurora (driver/runtime setting, or not supported in FLAT on this release).
 
+## K180-P k sweep, running table (P2 recipe, eval_mlm digest 89e46099fdba; 2026-10-01)
+| arm | layers | k | pair updates | setup | eval_mlm | train time | job |
+|---|---|---|---|---|---|---|---|
+| k1 (P2) | 10 | 1 | 10 | eager, 16 nodes x micro 3 | 0.0907 | 64 min (~17 nh) | 8880726 |
+| k5 (P2) | 10 | 5 | 2 | eager, 16 nodes x micro 3 | 0.0926 | 46 min (~12 nh) | 8880727 |
+| L10 k3 | 10 | 3 | 4 | compiled, 2 nodes x micro 24 | 0.0903 | 50 min (~1.7 nh) | 8883041 |
+| L10 k5 (K181 control) | 10 | 5 | 2 | compiled, 2 nodes x micro 24 | pending | | 8883230 |
+| L10 k10 | 10 | 10 | 1 | compiled, 2 nodes x micro 24 | pending (resubmitted) | | |
+| L14 k7 / L14 k5 | 14 | 7 / 5 | 2 / 3 | compiled, 2 nodes x micro 24 | pending | | 8883043 / 8883044 |
+Provisional: k3 beats k1 and k5 at matched steps, but the setup differs from P2 (K181 control decides comparability).
+
 ## K66-C / K136-C final-checkpoint arms on the other sets (mean of 3 seeds, experimental MAP@R, unfiltered)
 | set | scale | lr2e-4 P128 | lr4e-4 P128 | lr4e-4 P170 | lr8e-4 P128 |
 |---|---|---|---|---|---|
