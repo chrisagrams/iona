@@ -2256,6 +2256,13 @@ Compiled, 2 nodes x 12 tiles x micro 24 (global 576), probe data (cap 512), s/st
   step 16 at micro 24 (36.7 GB PyTorch + ~27 GB outside its allocator on the tile) -> 4 updates needs micro 12 x accum 2;
   not in the K187 plan (1 and 2 updates). Rerun id was (8886241).
 
+## K189-P length grouping validation on P2 data (2026-10-02)
+p2-L10-k10-grp (8898521: --length_grouped_batches, pad 64, static shapes) vs p2-L10-k10 (8883303), otherwise identical:
+eval_mlm 0.0859 vs 0.0839 (+0.0020, ~2x the K181 noise); in-training eval behind at every point (2k 0.408 vs 0.347,
+10k 0.122 vs 0.117, 20k 0.092 vs 0.089). Likely cause: each optimizer step sees one length band (less representative
+gradient). Wall time here is not a fair speed test (pad 64 rounds cap-150 batches up to 192; 2749 vs 2327 s); the cap-512
+speed-up (3.2x) stands. Proposal K194-P: micro 12 x accum 2 with mixed bands per step.
+
 ## K163-C consensus twins vs no-consensus partners (final checkpoints, lr 4e-4 P170xK2, 3 seeds; sweeps/compare_cons.py)
 Validation (8883725; 25,691 library queries; every query passes the 20 ppm filter, F n=0, so "with filter" = Fbar):
 | scale | lib Hit@1 no filter: no-cons -> cons | 20 ppm | iso 20 ppm | MAP@R (spectrum-spectrum) |
