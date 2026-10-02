@@ -2325,7 +2325,13 @@ K182 (d) transformer baselines (same setup, no pair stream): T-L10 x 512 (31.9M)
 T-L20 x 512 (63.4M): 0.0872, 46 min (2755 s) vs Pairformer L20 k20 (89.8M) 0.0776 (3596 s): -0.0096 at matched steps;
 matched wall time (k20 at ~17.9k steps, in-training ~0.086 vs T-L20's final in-training 0.0883): ~-0.002 -- smaller
 margin than at 10 layers. Depth gain is the same for both (L10 -> L20: transformer -0.0073, Pairformer -0.0063); the
-Pairformer's lead per step stays ~0.01. Pending: L20 k5 (4), L20 static (0), T-L14 (44.5M, parameter-matched to L10).
+Pairformer's lead per step stays ~0.01. 20 layers, number of pair updates (final in-training eval at step ~23.4k, same masks within the family | eval_mlm):
+  0 (static, 8895802): 0.0789 | pending; 60 min      1 (k20): 0.0778 | 0.0776; 60 min
+  2 (k10): 0.0800 | 0.0796; 63 min                     4 (k5, 8887319): 0.0847 | 0.0847; 70 min
+  transformer T-L20: 0.0883 | 0.0872; 46 min
+-> almost all of the Pairformer's lead over the transformer (~0.009) is already there with NO pair update (static pair
+   features + per-layer bias readouts); one update adds ~0.001 (= noise level, K181); 2 and 4 updates are worse and
+   slower. Pending: L20 static eval_mlm, L10 static, T-L14.
 
 ## K66-C / K136-C final-checkpoint arms on the other sets (mean of 3 seeds, experimental MAP@R, unfiltered)
 | set | scale | lr2e-4 P128 | lr4e-4 P128 | lr4e-4 P170 | lr8e-4 P128 |
