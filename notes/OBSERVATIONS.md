@@ -2338,7 +2338,12 @@ Pairformer's lead per step stays ~0.01. 20 layers, number of pair updates (final
   transformer T-L20: 0.0883 | 0.0872; 46 min
 -> almost all of the Pairformer's lead over the transformer (~0.009) is already there with NO pair update (static pair
    features + per-layer bias readouts); one update adds ~0.001 (= noise level, K181); 2 and 4 updates are worse and
-   slower. Pending: L10 static, T-L14.
+   slower.
+10 layers (eval_mlm): 0 updates (static, 8895974, 45.4M) 0.0850, 48 min | 1 update (k10, 45.2M) 0.0839, 39 min |
+   transformer T-L14 (8885131, 44.5M = parameter-matched) 0.0888, 42 min | T-L10 (31.9M) 0.0945.
+-> at matched parameters the Pairformer (1 update) beats the transformer by 0.0049 at matched steps and is faster per
+   step (39 vs 42 min) -- the clearest compute-matched win so far. Without updates it still beats T-L14 by 0.0038.
+   At 10 layers one update helps by 0.0011 (~noise, as at 20 layers: 0.0010).
 
 ## K66-C / K136-C final-checkpoint arms on the other sets (mean of 3 seeds, experimental MAP@R, unfiltered)
 | set | scale | lr2e-4 P128 | lr4e-4 P128 | lr4e-4 P170 | lr8e-4 P128 |
