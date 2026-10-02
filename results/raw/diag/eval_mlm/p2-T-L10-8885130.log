@@ -1,0 +1,4 @@
+[eval_mlm] /lus/flare/projects/UIC-HPC/khuss/msdelta/data/p2-cap150-half/preprocessed [validation]: 67933 spectra, 3682687 masked of 7365805 peaks, seed 0, mask digest 89e46099fdba (27s to build)
+Loading weights:   0%|          | 0/162 [00:00<?, ?it/s]Loading weights:  31%|███       | 50/162 [00:00<00:00, 469.04it/s]Loading weights:  60%|█████▉    | 97/162 [00:00<00:00, 264.62it/s]Loading weights:  80%|███████▉  | 129/162 [00:00<00:00, 237.53it/s]Loading weights: 100%|██████████| 162/162 [00:00<00:00, 270.45it/s]
+[eval_mlm] transformer   31.92M  eval_loss 0.094521  (67933 spectra, 3682687 masked, 122s)  /lus/flare/projects/UIC-HPC/khuss/msdelta/runs/p2/p2-T-L10-8885130/final
+[eval_mlm] wrote results/raw/diag/eval_mlm/p2-T-L10-8885130.json

@@ -2319,7 +2319,10 @@ K186-P (20 layers x 512, 89.9M params, same setup): L20 k10 (2 pair updates, lay
 in-training eval 2k 0.351, 6k 0.149, 10k 0.114, 20k 0.085. Best so far (L10 k10 0.0839, L14 k7 0.0856); depth keeps
 paying. L20 k20 (1 update, layer 0): 0.0776, 60 min -- beats 2 updates (0.0796) again, by 2x the noise; slow start (2k 0.441
 vs 0.351) then ahead from ~10k (0.111 vs 0.114; 20k 0.083 vs 0.085). Fewer pair updates win at 10 and 20 layers.
-Pending: L20 k5 (4), L20 static (0), transformer L20 (63.4M) for the depth-matched baseline.
+K182 (d) transformer baselines (same setup, no pair stream): T-L10 x 512 (31.9M) 0.0945, 32 min (train_runtime 1941 s vs
+2327 s for L10 k10). vs Pairformer L10 k10 (45.2M) 0.0839: -0.011 at matched steps; at matched wall time (k10 at
+~19.5k steps, in-training eval ~0.090) still ~-0.004 ahead. Parameter-matched check = T-L14 (44.5M), pending.
+Pending: L20 k5 (4), L20 static (0), T-L14, T-L20 (63.4M) for the depth-matched baseline.
 
 ## K66-C / K136-C final-checkpoint arms on the other sets (mean of 3 seeds, experimental MAP@R, unfiltered)
 | set | scale | lr2e-4 P128 | lr4e-4 P128 | lr4e-4 P170 | lr8e-4 P128 |
