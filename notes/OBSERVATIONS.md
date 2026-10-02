@@ -2322,7 +2322,10 @@ vs 0.351) then ahead from ~10k (0.111 vs 0.114; 20k 0.083 vs 0.085). Fewer pair 
 K182 (d) transformer baselines (same setup, no pair stream): T-L10 x 512 (31.9M) 0.0945, 32 min (train_runtime 1941 s vs
 2327 s for L10 k10). vs Pairformer L10 k10 (45.2M) 0.0839: -0.011 at matched steps; at matched wall time (k10 at
 ~19.5k steps, in-training eval ~0.090) still ~-0.004 ahead. Parameter-matched check = T-L14 (44.5M), pending.
-Pending: L20 k5 (4), L20 static (0), T-L14, T-L20 (63.4M) for the depth-matched baseline.
+T-L20 x 512 (63.4M): 0.0872, 46 min (2755 s) vs Pairformer L20 k20 (89.8M) 0.0776 (3596 s): -0.0096 at matched steps;
+matched wall time (k20 at ~17.9k steps, in-training ~0.086 vs T-L20's final in-training 0.0883): ~-0.002 -- smaller
+margin than at 10 layers. Depth gain is the same for both (L10 -> L20: transformer -0.0073, Pairformer -0.0063); the
+Pairformer's lead per step stays ~0.01. Pending: L20 k5 (4), L20 static (0), T-L14 (44.5M, parameter-matched to L10).
 
 ## K66-C / K136-C final-checkpoint arms on the other sets (mean of 3 seeds, experimental MAP@R, unfiltered)
 | set | scale | lr2e-4 P128 | lr4e-4 P128 | lr4e-4 P170 | lr8e-4 P128 |
