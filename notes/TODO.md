@@ -926,10 +926,9 @@ cap 512 against k189 (0.173 / 0.560 s/step).
 - [ ] implement the mixed-band order in msdelta/pretraining/length_grouping.py (+ tests: same multiset per rank per step)
 - [ ] debug run, then P2 validation run (~2 node-h) and cap-512 speed probe
 
-## K195. Review the loss function -- **TODO (user 2026-10-03: "add task for later: review loss function")**
-Context: raised right after the contrastive-loss discussion (SupCon, temperature 0.002, + KL to the pretrained head,
-weight 10, is the default; SigLIP-style sigmoid, C8, was tested at 50m and rejected; LiT-style cross-modal SupCon / MSE
-for the peptide-encoder alignment, A4/A1). Code: msdelta/finetuning/contrastive/contrastive.py (supcon_loss,
-sigmoid_contrastive_loss). Scope to confirm with the user when picked up (contrastive loss assumed; the pretraining
-masked-intensity loss is the other candidate).
+## K195. Review the pretraining masked-intensity loss -- **TODO (user 2026-10-03: "add task for later: review loss function" / "yes I mean pretraining masked intensity")**
+The pretraining objective: msdelta/models/modeling_msdelta.py:~388 (MSDeltaForPreTraining) -- log_softmax over the
+masked peaks' logits, KL (batchmean) to the target intensity distribution (labels from the processor, renormalised over
+the masked positions); collator masks round(0.5 x n) peaks per spectrum (msdelta/models/processing_msdelta.py).
+Shared by the transformer and the Pairformer, and what eval_mlm reports.
 - [ ] review with the user
