@@ -2363,3 +2363,14 @@ Test, mouse and human agree with validation (P170 best or tied, scale helps). Th
 species sets do NOT: no arm wins consistently, scale does not help (yeast: 25m .73 vs 400m .60-.65), and the
 spread between arms is large. So the recipe choice is supported in-distribution only; OOD behaviour is an open
 question (it echoes the earlier "OOD/yeast disagree with validation" note in K134).
+
+## K188-C all-checkpoint scaling with consensus: validation + test (2026-10-03, job 8901080; scored 8902570/1)
+Tables: results/summary/k188_allck_cons_{validation,test}.md (sweeps/allck_cons.py; 3 seeds each; 540k = K163 finals).
+- Pretraining length matters early, then plateaus. 10k -> 120k: library Hit@1 +0.017 to +0.030 and experimental MAP@R
+  +0.042 to +0.056 at every scale. 120k -> 540k: library at most +0.004 (50m) and ~0 at 200m/400m; MAP@R +0.003 to +0.006
+  at 50m/100m, ~0 at 200m/400m. Seed sd is ~0.001.
+- Scale ordering 400m > 200m > 100m > 50m holds at every checkpoint >= 120k, on both sets (val/test agree within ~0.002).
+- 25m@540k (lib 0.940, MAP@R 0.860) is about 50m@50k.
+- With the 20 ppm / iso20 precursor filters everything saturates (lib 0.997-0.999, MAP@R 0.990-0.996); the filtered gaps
+  between checkpoints are <= 0.001 past 10k. No query fails the 20 ppm filter on these in-distribution sets (F n = 0).
+- Pending: oodval, mouse, human, yeast (queued 8902572/3/4, 8902890).
