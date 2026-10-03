@@ -1,5 +1,7 @@
 # K196: storage reduction plan for UIC-HPC (2026-10-03)
 
+**Status 10:00 UTC:** D3, D4, D2 DONE (see DECISIONS K196a-S progress); D1 waits for D1 vs D1-lite.
+
 **This is a plan only. Nothing has been deleted, moved or changed.**
 - Each item needs the user's approval.
 - Deletions follow the deletion protocol: notes/K110_checkpoint_inventory.md §4, using pbs/tools/k110_delete.sh.
@@ -41,8 +43,8 @@ Source: one read-only `find -printf` walk at 08:40 UTC (nice/ionice).
 | **K196-D1** | Intermediate `checkpoint-*` of finished runs (job-ID runs with `final/model.safetensors`, not live, checkpoint not cited anywhere in the repo). The 78 GiB of cited checkpoints (8860522 300/600/900, 8872141, 8851663) are kept. | **1,686** | Only finals are scored. This is the "full K110a" the user described as "we would only need the models". The largest jobs: 8878459 K66 400m 371, 8880712 K155 finished arms 357, 8875261 191, 8882196 K163 182, 8875262 95. |
 | K196-D1-lite (alternative) | Same checkpoints, but keep `encoder/` | 1,143 (keeps 543) | Keeps snapshot evaluation possible. Encoder snapshots could go to tape instead (K196-H5). |
 | **K196-D2** | Paused no-consensus K155 remainder: 48 run dirs of 8880712 with no final, only partial checkpoints | **428** | K188-C (user 2026-10-01): the K155 remainder is not resumed. |
-| **K196-D3** | Regenerable caches. massive_kb arrow cache `huggingface/datasets/parquet/default-3ba6…` (133) and `default-a0d1…` (4.7), from Sept 11; `data/p2-cap150-half/datasets/` (128); `baselines/.uvcache` (7.4) | **273** | Training reads `p2-cap150-half/preprocessed/` (train.py `load_pretraining_datasets_from_disk`), not the cache. Each cache is rebuilt from the hub parquet on demand. Verify first that preprocessed/ loads with the cache renamed. |
-| **K196-D4** | Diag and validation leftovers: runs/armcount 18, armcount12 9, gridexact 8, p2-cost 9, p2-smoke 7, sibling2 3, k168 3, quarantine 3, pf-timing 2, allocfix2 2, ddp2 1, `validate-sweep-*` (35 dirs) 69, plus 189 core dumps (3.2, mostly diag/k114) | **132** | The outputs of pbs/diag/* scripts. Their results are in notes/OBSERVATIONS and results/raw/diag. `runs/allocfix` stays (K110 rule). |
+| **K196-D3** | Regenerable caches. massive_kb arrow cache `huggingface/datasets/parquet/default-3ba6…` (133) and `default-a0d1…` (4.7), from Sept 11; `data/p2-cap150-half/datasets/` (128). (`baselines/.uvcache` dropped: the baseline venvs hardlink into it.) | **265** | Training reads `p2-cap150-half/preprocessed/` (train.py `load_pretraining_datasets_from_disk`), not the cache. Each cache is rebuilt from the hub parquet on demand. Verify first that preprocessed/ loads with the cache renamed. |
+| **K196-D4** | Diag and validation leftovers: runs/armcount 18, armcount12 9, gridexact 8, p2-cost 9, p2-smoke 7, sibling2 3, k168 3, quarantine 3, pf-timing 2, allocfix2 2, ddp2 1, `validate-sweep-*` (35 dirs) 69, plus 2 real core dumps (5.1; diag/k114, diag/k119; the survey's '189' wrongly counted core.py files) | **132** | The outputs of pbs/diag/* scripts. Their results are in notes/OBSERVATIONS and results/raw/diag. `runs/allocfix` stays (K110 rule). |
 | **K196-D5** (later) | Intermediate checkpoints of K188 8901080, after its six scoring jobs finish and the results are committed | ~650–800 | Same rule as D1 |
 
 | Scenario | Frees | Project after |
