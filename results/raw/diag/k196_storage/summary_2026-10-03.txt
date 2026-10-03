@@ -1,0 +1,46 @@
+TOTAL GiB 4897.8  TB 5.26
+   3878.5   126385  2026-10-03  runs
+    448.3     9359  2026-10-03  huggingface
+    209.8     5672  2026-10-01  data
+    208.7   187789  2026-09-27  baselines
+     44.1     2071  2026-09-26  pretrained
+     41.0      822  2026-09-25  rerank-psm
+     19.7      180  2026-09-25  align-targets-400m-oodsel
+     19.7      180  2026-09-25  align-targets-a2-400m-c7final
+     11.6      161  2026-09-24  align-targets-a1-050m-c7s600
+      4.8       49  2026-09-27  embeddings
+      3.2       86  2026-09-29  diag
+      2.8       27  2026-09-26  eval-data
+      1.5        9  2026-09-25  pretrained-random
+      1.4       39  2026-09-21  finetuned
+      0.9   100705  2026-10-03  code-snapshots
+      0.4       22  2026-09-29  tools
+      0.3       10  2026-09-23  align-targets-r1-400m-v2
+      0.3       10  2026-09-23  align-targets-r1-400m
+      0.1       10  2026-09-23  align-targets-r1-050m-v2
+      0.1       10  2026-09-23  align-targets-r1-050m
+      0.1       10  2026-09-19  align-targets-50m
+      0.1       10  2026-09-20  align-targets-contrastive
+      0.1       10  2026-09-23  align-targets-a1-smoke
+      0.1     1365  2026-09-28  dag-trial
+      0.0     1967  2026-09-29  test-scratch
+      0.0       26  2026-09-27  shelf
+      0.0        9  2026-09-30  k110-logs
+      0.0      123  2026-10-02  feeder
+      0.0      109  2026-10-03  manifests
+      0.0       40  2026-09-19  interactive
+      0.0       68  2026-10-03  notifications
+      0.0       17  2026-10-02  logs
+      0.0       14  2026-10-01  tmp
+      0.0        4  2026-09-28  code-refs
+--- runs kinds
+    112.6 other
+    895.8 final
+   2870.1 checkpoint
+--- top subdirs
+    297.4  huggingface/hub
+    165.2  baselines/ms2rescore_out
+    156.1  data/p2-cap150-half
+    150.9  huggingface/datasets
+     44.9  data/massive-kb-contrastive
+     16.9  rerank-psm/a2-400m
