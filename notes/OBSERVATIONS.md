@@ -2290,6 +2290,10 @@ cons minus no-cons, 25m..200m (400m test/oodval not in yet):
     no filter: Hit@1 -0.001..-0.004, MAP@R -0.001..-0.006 (largest at 25m/50m, ~-0.001..-0.003 at 100m+);
     20 ppm and iso 20 ppm: within +-0.001 (passes and failures); open MAP@R on the failing queries: 25m -0.004/-0.006,
     400m ~0. No library search on these sets. -> a small, consistent cost on these labs, not a gain.
+  yeast (86,184 queries; 240 fail the 20 ppm filter; no library search): 25m unchanged (+-0.003); 50m-400m large GAINS:
+    MAP@R no filter +0.059 / +0.075 / +0.089 / +0.078, Hit@1 +0.031..+0.048; 20 ppm +0.020..+0.034, iso 20 ppm
+    +0.038..+0.058; filter failures (n 240) +0.015..+0.022. Yeast is the weakest set for no-consensus models (MAP@R 0.57-0.63)
+    and consensus helps most where the model is weakest -- like oodval.
   -> the experimental cost is in-distribution and open-search only, gone under a precursor filter, and reversed
      out of distribution at 50m+.
 K183-C note: library Hit@1 and experimental MAP@R are different searches (library: R=1, one consensus per peptide;

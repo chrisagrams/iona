@@ -1,0 +1,6 @@
+[score] shard 1/12: 2 of 15 models on xpu
+[score] no consensus rows (or no experimental rows): library search skipped
+Loading weights:   0%|          | 0/138 [00:00<?, ?it/s]Loading weights:  35%|███▍      | 48/138 [00:00<00:00, 421.61it/s]Loading weights:  66%|██████▌   | 91/138 [00:00<00:00, 379.48it/s]Loading weights: 100%|██████████| 138/138 [00:00<00:00, 430.66it/s]
+  s025m_ck540k_lr4e-4_p170k2_cons_seed1: all MAP@R 0.7412  experimental MAP@R 0.7412  20ppm 0.9794  iso20ppm 0.9041  F 240  (1412s)
+Loading weights:   0%|          | 0/330 [00:00<?, ?it/s]Loading weights:  28%|██▊       | 92/330 [00:00<00:00, 838.76it/s]Loading weights:  53%|█████▎    | 176/330 [00:00<00:00, 189.69it/s]Loading weights:  66%|██████▌   | 218/330 [00:01<00:00, 170.39it/s]Loading weights:  75%|███████▍  | 247/330 [00:01<00:00, 170.93it/s]Loading weights:  82%|████████▏ | 272/330 [00:01<00:00, 144.98it/s]Loading weights:  90%|████████▉ | 296/330 [00:01<00:00, 144.96it/s]Loading weights:  95%|█████████▌| 314/330 [00:01<00:00, 149.98it/s]Loading weights: 100%|██████████| 330/330 [00:01<00:00, 179.89it/s]
+  s400m_ck540k_lr4e-4_p170k2_cons_seed1: all MAP@R 0.6900  experimental MAP@R 0.6900  20ppm 0.9721  iso20ppm 0.8891  F 240  (5144s)
