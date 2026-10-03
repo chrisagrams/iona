@@ -932,3 +932,13 @@ masked peaks' logits, KL (batchmean) to the target intensity distribution (label
 the masked positions); collator masks round(0.5 x n) peaks per spectrum (msdelta/models/processing_msdelta.py).
 Shared by the transformer and the Pairformer, and what eval_mlm reports.
 - [ ] review with the user
+- 2026-10-03 points raised: K195a linear-intensity target -> KL dominated by the largest masked peaks; K195b only
+  relative intensities within the masked set; K195c each spectrum weighs the same regardless of peak count; K195d
+  mask ratio 0.50 (code default 0.15).
+- K195a user: "what's a good alternative then? The square of the log ratio? Total variation distance?" Claude's answer:
+  TV keeps linear weighting (same problem) and has sign-only gradients -> no. Squared log ratio = right direction but
+  must be centered (compositional data: compare z_i - mean_M(z) with log I_i - mean_M(log I), Aitchison / CLR) and
+  needs an intensity floor, else noisy low peaks dominate. Recommended first: keep KL, temper the target
+  (t_i proportional to I_i^alpha, alpha = 0.5 = sqrt, the library-search convention) -- one-line change, alpha=1 is
+  today's loss, alpha->0 uniform. Test alpha in {1, 0.5} (+ CLR-MSE) on the cheap P2 setup; judge by downstream
+  retrieval / probes, not eval_mlm (losses are not comparable). Awaiting the user's choice.
