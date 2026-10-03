@@ -17,8 +17,10 @@ SCALES = ["025m", "050m", "100m", "200m", "400m"]
 COLS = [("library/open/full/Hit@1", "lib Hit@1"), ("library/20ppm/full/Hit@1", "lib 20ppm"),
         ("library/iso20ppm/full/Hit@1", "lib iso20"), ("experimental/open/full/MAP@R", "exp MAP@R"),
         ("experimental/20ppm/full/MAP@R", "exp 20ppm"), ("experimental/iso20ppm/full/MAP@R", "exp iso20")]
-FCOLS = [("library/20ppm/F/Hit@1", "lib 20ppm F"), ("library/20ppm/Fbar/Hit@1", "lib 20ppm Fbar"),
-         ("experimental/20ppm/F/MAP@R", "exp 20ppm F"), ("experimental/20ppm/Fbar/MAP@R", "exp 20ppm Fbar")]
+FCOLS = [("library/open/F/Hit@1", "lib F open"), ("library/20ppm/F/Hit@1", "lib F 20ppm"),
+         ("library/iso20ppm/F/Hit@1", "lib F iso20"), ("library/20ppm/Fbar/Hit@1", "lib Fbar 20ppm"),
+         ("experimental/open/F/MAP@R", "exp F open"), ("experimental/20ppm/F/MAP@R", "exp F 20ppm"),
+         ("experimental/iso20ppm/F/MAP@R", "exp F iso20"), ("experimental/20ppm/Fbar/MAP@R", "exp Fbar 20ppm")]
 
 
 def load(path):
@@ -55,12 +57,14 @@ def main():
         if not rows:
             print(f"{s}: no results yet")
             continue
-        nf = max((m or {}).get("library/20ppm/F/n", 0) for _, _, ms_ in rows for m in ms_)
-        cols = COLS + (FCOLS if nf else [])
+        allm = [m for _, _, ms_ in rows for m in ms_ if m]
+        nf = max(max(m.get("library/20ppm/F/n", 0), m.get("experimental/20ppm/F/n", 0)) for m in allm)
+        cols = [c for c in COLS + (FCOLS if nf else []) if any(c[0] in m for m in allm)]  # drop columns a set lacks
         lines = [f"# K188-C all-checkpoint scaling with consensus: {s}", "",
                  "Mean ± sd over the seeds present (n). ck = pretraining checkpoint (thousand steps); 540k rows are the "
                  "K163 consensus finals. lib = library search Hit@1, exp = experimental retrieval MAP@R; open = no "
-                 f"precursor filter, 20ppm / iso20 = filtered. Queries failing the 20 ppm filter: {int(nf)}"
+                 f"precursor filter, 20ppm / iso20 = filtered; F = queries failing the 20 ppm filter, Fbar = passing it, each "
+                 f"scored with no filter / 20 ppm / iso20. Queries failing the 20 ppm filter: {int(nf)}"
                  + ("" if nf else " (so no F/Fbar split)") + ".", "",
                  "| scale | ck | n | " + " | ".join(c for _, c in cols) + " |",
                  "|---|---:|---:|" + "---:|" * len(cols)]

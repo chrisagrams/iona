@@ -2373,4 +2373,11 @@ Tables: results/summary/k188_allck_cons_{validation,test}.md (sweeps/allck_cons.
 - 25m@540k (lib 0.940, MAP@R 0.860) is about 50m@50k.
 - With the 20 ppm / iso20 precursor filters everything saturates (lib 0.997-0.999, MAP@R 0.990-0.996); the filtered gaps
   between checkpoints are <= 0.001 past 10k. No query fails the 20 ppm filter on these in-distribution sets (F n = 0).
-- Pending: oodval, mouse, human, yeast (queued 8902572/3/4, 8902890).
+- oodval (8902572; experimental only; 93 queries fail 20 ppm): noisier (seed sd up to 0.02-0.03 at 50m/100m). 50m keeps
+  improving late (MAP@R 0.743 at 120k -> 0.791-0.793 from 330k on); 200m flat from 120k (0.830-0.837); 400m peaks at
+  181-220k (0.836-0.837) and ends lower at 540k (0.825 +- 0.003); 100m erratic (0.757 at 120k, 0.803 at 138k, 0.794 at 540k).
+  Filtered: 20 ppm 0.987-0.994 everywhere; the 93 F queries 0.70-0.72 under 20 ppm at every checkpoint.
+- mouse (8902573; experimental only; 7,915 of 20,003 queries fail 20 ppm -- mass calibration): small gains continue past
+  120k (MAP@R 120k -> 540k: 50m +0.008, 100m +0.004, 200m +0.007, 400m +0.005). Filtered 20 ppm ~0.824-0.825 and its
+  F queries ~0.573 at every checkpoint (the filter removes their true matches); iso20 0.948-0.959, rising with scale.
+- Pending: human, yeast (8902574, 8902890).

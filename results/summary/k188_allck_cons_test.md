@@ -1,6 +1,6 @@
 # K188-C all-checkpoint scaling with consensus: test
 
-Mean ± sd over the seeds present (n). ck = pretraining checkpoint (thousand steps); 540k rows are the K163 consensus finals. lib = library search Hit@1, exp = experimental retrieval MAP@R; open = no precursor filter, 20ppm / iso20 = filtered. Queries failing the 20 ppm filter: 0 (so no F/Fbar split).
+Mean ± sd over the seeds present (n). ck = pretraining checkpoint (thousand steps); 540k rows are the K163 consensus finals. lib = library search Hit@1, exp = experimental retrieval MAP@R; open = no precursor filter, 20ppm / iso20 = filtered; F = queries failing the 20 ppm filter, Fbar = passing it, each scored with no filter / 20 ppm / iso20. Queries failing the 20 ppm filter: 0 (so no F/Fbar split).
 
 | scale | ck | n | lib Hit@1 | lib 20ppm | lib iso20 | exp MAP@R | exp 20ppm | exp iso20 |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|
