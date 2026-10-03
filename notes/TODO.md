@@ -925,3 +925,11 @@ bands, every rank the same multiset of bands (no rank waits). Validate on P2 dat
 cap 512 against k189 (0.173 / 0.560 s/step).
 - [ ] implement the mixed-band order in msdelta/pretraining/length_grouping.py (+ tests: same multiset per rank per step)
 - [ ] debug run, then P2 validation run (~2 node-h) and cap-512 speed probe
+
+## K195. Review the loss function -- **TODO (user 2026-10-03: "add task for later: review loss function")**
+Context: raised right after the contrastive-loss discussion (SupCon, temperature 0.002, + KL to the pretrained head,
+weight 10, is the default; SigLIP-style sigmoid, C8, was tested at 50m and rejected; LiT-style cross-modal SupCon / MSE
+for the peptide-encoder alignment, A4/A1). Code: msdelta/finetuning/contrastive/contrastive.py (supcon_loss,
+sigmoid_contrastive_loss). Scope to confirm with the user when picked up (contrastive loss assumed; the pretraining
+masked-intensity loss is the other candidate).
+- [ ] review with the user
