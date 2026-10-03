@@ -5,6 +5,8 @@
 #   pbs/tools/k196_delete.sh <mode> <list-file> [--live]     # without --live: dry run
 #   modes: ckpt  -- each line runs/<run>-<job>/checkpoint-<N>; the run must have final/model.safetensors (>1 MB)
 #          run   -- each line runs/<run>-<job>; the run must NOT have final/
+#          ckweights -- each line runs/<run>-<job>/checkpoint-<N>/model.safetensors (D1-lite); the run must have
+#                   final/model.safetensors and the checkpoint must keep encoder/model.safetensors (>1 MB)
 #          path  -- each line any path (dir or file) under the root, outside the never-touch areas below
 # List lines are paths RELATIVE to the root, so the same list runs on the redundant copy (K196_ROOT=<copy>)
 # and live. Every line is re-checked at deletion time; anything failing a check is skipped and reported.
@@ -14,7 +16,7 @@ set -uo pipefail
 MODE=${1:?mode}; LIST=${2:?list}; LIVE=${3:-}
 ROOT=${K196_ROOT:-/lus/flare/projects/UIC-HPC/khuss/msdelta}
 ROOT=${ROOT%/}
-case $MODE in ckpt|run|path) ;; *) echo "bad mode $MODE" >&2; exit 2;; esac
+case $MODE in ckpt|ckweights|run|path) ;; *) echo "bad mode $MODE" >&2; exit 2;; esac
 [[ -f $LIST ]] || { echo "no list $LIST" >&2; exit 2; }
 [[ -d $ROOT && ! -L $ROOT ]] || { echo "bad root $ROOT" >&2; exit 2; }
 
@@ -60,6 +62,16 @@ while IFS= read -r rel || [[ -n $rel ]]; do
                 elif grep -qx "$job" <<<"$live_jobs"; then reason="job $job is live"
                 fi
             fi ;;
+        ckweights)
+            if [[ ! $rel =~ ^runs/[^/]+-([0-9]{7})/checkpoint-[0-9]+/model\.safetensors$ ]]; then reason="not runs/<run>-<job>/checkpoint-N/model.safetensors"
+            else
+                job=${BASH_REMATCH[1]}; ck=${p%/*}; run=${ck%/*}
+                if [[ ! -f $p ]]; then reason="not a file"
+                elif [[ ! -f $ck/encoder/model.safetensors || -L $ck/encoder/model.safetensors || $(stat -c %s "$ck/encoder/model.safetensors") -lt 1000000 ]]; then reason="no encoder/model.safetensors to keep"
+                elif [[ ! -f $run/final/model.safetensors || $(stat -c %s "$run/final/model.safetensors") -lt 1000000 ]]; then reason="run has no final/model.safetensors"
+                elif grep -qx "$job" <<<"$live_jobs"; then reason="job $job is live"
+                fi
+            fi ;;
         run)
             if [[ ! $rel =~ ^runs/[^/]+-([0-9]{7})$ ]]; then reason="not runs/<run>-<job>"
             else
@@ -87,7 +99,7 @@ while IFS= read -r rel || [[ -n $rel ]]; do
     fi
     if [[ -n $reason ]]; then echo "SKIP $rel ($reason)"; skipped=$((skipped+1)); continue; fi
     if [[ $LIVE == --live ]]; then
-        if rm -rf --one-file-system -- "$p" && [[ ! -e $p ]]; then echo "DELETED $rel"; else echo "FAILED $rel"; skipped=$((skipped+1)); continue; fi
+        if { if [[ $MODE == ckweights ]]; then rm -f -- "$p"; else rm -rf --one-file-system -- "$p"; fi; } && [[ ! -e $p ]]; then echo "DELETED $rel"; else echo "FAILED $rel"; skipped=$((skipped+1)); continue; fi
     else
         echo "WOULD DELETE $rel"
     fi

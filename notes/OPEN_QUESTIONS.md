@@ -53,9 +53,8 @@ still uses the plain metric; proposal: leave it (it is a health check, not the t
 Context: the project UIC-HPC is at 10.18 T of a 10 T soft quota (11 T hard). Grace ends around Oct 10
 06:30 UTC, after which every write in the project fails. khuss/msdelta holds 5.26 TB. The full plan,
 with sizes and reasons, is in `notes/K196_storage_plan.md`. Nothing has been done yet. Questions:
-- (a) APPROVED 2026-10-03 ("K196a: green light"). D3, D4 and D2 are done (DECISIONS). Still open: D1 full
-  (delete the 1,603 intermediate checkpoints, 1,685 GiB) or D1-lite (keep their encoder/ weights, ~540 GiB, frees
-  ~1,140)?
+- (a) DONE 2026-10-03: D3, D4, D2, D1-lite (DECISIONS). Later, optional: the remaining encoder/ copies (~529 GiB)
+  and 460 encoder-less denoise/ck-scaling checkpoints (108 GiB) -- delete or tape (H5)?
 - (b) Approve D5: delete K188 8901080's intermediate checkpoints (~0.7 TB) once its scoring is
   committed.
 - (c) HPSS access needs a keytab from ALCF support. Will you email them, or should Claude draft the

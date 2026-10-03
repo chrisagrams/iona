@@ -1,6 +1,6 @@
 # K196: storage reduction plan for UIC-HPC (2026-10-03)
 
-**Status 10:00 UTC:** D3, D4, D2 DONE (see DECISIONS K196a-S progress); D1 waits for D1 vs D1-lite.
+**Status 15:10 UTC:** D3, D4, D2 and D1-lite DONE (DECISIONS K196a-S progress, K196a-D1 DONE). Full D1 not done: the encoder/ copies (~529 GiB) and 460 encoder-less checkpoints (108 GiB) remain.
 
 **This is a plan only. Nothing has been deleted, moved or changed.**
 - Each item needs the user's approval.

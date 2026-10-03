@@ -43,7 +43,13 @@ for r in runs:
         p = f"runs/{r}/{c}"
         if re.fullmatch(r"checkpoint-\d+", c) and os.path.isdir(f"{S}/{p}") and not os.path.islink(f"{S}/{p}") and p not in protect:
             D1.append(p)
-for name, items in (("protect", sorted(protect)), ("D1", D1), ("D2", D2), ("D3", D3), ("D4", D4)):
+# D1-lite (user 2026-10-03 "D1 lite for now"): only checkpoint-N/model.safetensors, and only where checkpoint-N/encoder/
+# model.safetensors exists (the encoder copy stays). Checkpoints without encoder/ (denoise runs) are left whole.
+def big_file(f):
+    return os.path.isfile(f) and not os.path.islink(f) and os.path.getsize(f) > 1_000_000
+D1lite = [f"{c}/model.safetensors" for c in D1
+          if big_file(f"{S}/{c}/model.safetensors") and big_file(f"{S}/{c}/encoder/model.safetensors")]
+for name, items in (("protect", sorted(protect)), ("D1", D1), ("D1lite", D1lite), ("D2", D2), ("D3", D3), ("D4", D4)):
     with open(f"{OUT}/{name}.txt", "w") as f:
         f.write("".join(i + "\n" for i in items))
     print(name, len(items))
