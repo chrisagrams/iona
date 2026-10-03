@@ -2380,4 +2380,8 @@ Tables: results/summary/k188_allck_cons_{validation,test}.md (sweeps/allck_cons.
 - mouse (8902573; experimental only; 7,915 of 20,003 queries fail 20 ppm -- mass calibration): small gains continue past
   120k (MAP@R 120k -> 540k: 50m +0.008, 100m +0.004, 200m +0.007, 400m +0.005). Filtered 20 ppm ~0.824-0.825 and its
   F queries ~0.573 at every checkpoint (the filter removes their true matches); iso20 0.948-0.959, rising with scale.
-- Pending: human, yeast (8902574, 8902890).
+- human (8902574; experimental only; 6,964 queries fail 20 ppm): same shape as mouse but flatter. MAP@R 10k -> 120k
+  +0.011 to +0.016, then 120k -> 540k +0.001 to +0.003 (400m 0.898 -> 0.899; 200m flat at 0.895-0.896); scale order
+  400m > 200m > 100m > 50m holds from 120k (spread only ~0.012). Filtered: 20 ppm 0.832-0.833 everywhere, its F queries
+  0.536 (true matches filtered out), iso20 0.950-0.953 -- checkpoint and scale barely move the filtered numbers.
+- Pending: yeast (8902890).
