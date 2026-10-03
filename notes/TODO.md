@@ -917,3 +917,11 @@ Recall@K is the fraction of QUERIES with at least one hit in the top K. Document
   -> DELETED 2026-09-30 on the user's request (DECISIONS "W&B cleanup"); the WANDB_MODE override is still to find.
 
 - K156-P: eval_mlm gives NaN for the tri-attn P2 final (8881426) while the in-training eval is finite (0.0929); find the NaN (likely all-masked rows in triangle attention at eval_mlm batch shapes).
+
+## K194-P. Mixed length grouping -- **TODO (user 2026-10-03: "try mixed grouping later")**
+Length-grouped global batches cost ~0.002 eval_mlm at matched steps (K189: 0.0859 vs 0.0839, L10 k10 on P2 data) while
+saving ~3x at cap 512. Try: micro 12 x accum 2 (or more), each micro-batch one length band, each optimizer step several
+bands, every rank the same multiset of bands (no rank waits). Validate on P2 data against 8883303 (0.0839) and time at
+cap 512 against k189 (0.173 / 0.560 s/step).
+- [ ] implement the mixed-band order in msdelta/pretraining/length_grouping.py (+ tests: same multiset per rank per step)
+- [ ] debug run, then P2 validation run (~2 node-h) and cap-512 speed probe
