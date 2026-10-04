@@ -1,0 +1,33 @@
+#!/bin/bash -l
+#PBS -N k195-data
+#PBS -A UIC-HPC
+#PBS -l select=1
+#PBS -l walltime=01:00:00
+#PBS -l filesystems=home:flare
+#PBS -j oe
+#PBS -o pbs/logs/
+# K195a-P (user 2026-10-04): cap-512 data for the 25m loss comparison -- MSConsensus-100M train shards 0-19 (~5M spectra;
+# the dataset is shuffled) + validation shard 0, Chris's processor (max_peaks 512), then a fixed 10k validation subset
+# saved as split "validation10k" (the in-run eval set).   qsub -q debug -v REPO_DIR=$PWD pbs/diag/k195_data.pbs
+REPO_DIR=${REPO_DIR:-${PBS_O_WORKDIR:-$PWD}}
+cd "$REPO_DIR" || exit 1
+set -uo pipefail
+S=/lus/flare/projects/UIC-HPC/khuss/msdelta
+SNAP=$S/huggingface/hub/datasets--Gaolaboratory--MSConsensus-100M/snapshots/78b3e74b90021f233747de6417064c837136a9b9
+source pbs/lib/load_frameworks.sh
+D=$S/data/k195-cap512-20sh; mkdir -p "$D/raw"
+for i in $(seq 0 19); do ln -sfn "$SNAP/$(printf 'train-%05d-of-00400.parquet' $i)" "$D/raw/$(printf 'train-%05d-of-00020.parquet' $i)"; done
+ln -sfn "$SNAP/validation-00000-of-00004.parquet" "$D/raw/validation-00000-of-00001.parquet"
+DATASET_CACHE_DIR=$D/datasets PREPROCESSED_DATASET_DIR=$D/preprocessed ARGS_FILE=configs/k195/preprocess.args \
+    HF_HOME=$S/huggingface REPO_DIR=$REPO_DIR bash pbs/aurora-preprocess.pbs || exit 1
+.venv/bin/python - "$D/preprocessed" <<'PY'
+import json, sys
+from pathlib import Path
+from datasets import load_from_disk
+root = Path(sys.argv[1]); dd = load_from_disk(str(root))
+sub = dd["validation"].select(range(10_000))  # the shard is shuffled: first 10k = a fixed random subset
+sub.save_to_disk(str(root / "validation10k"))
+meta = json.loads((root / "dataset_dict.json").read_text()); meta["splits"].append("validation10k")
+(root / "dataset_dict.json").write_text(json.dumps(meta))
+dd = load_from_disk(str(root)); print({k: len(v) for k, v in dd.items()})
+PY

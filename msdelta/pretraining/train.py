@@ -18,6 +18,7 @@ from msdelta.data.data import build_pretraining_datasets, load_pretraining_datas
 from msdelta.models.modeling_msdelta import MSDeltaForPreTraining
 from msdelta.pretraining.length_grouping import GlobalLengthGroupedSampler, spectrum_lengths
 from msdelta.pretraining.posttraining import build_probe_data
+from msdelta.pretraining.proposal_loss import tempered_intensity_kl
 from msdelta.models.processing_msdelta import MSDeltaDataCollatorForPreTraining, MSDeltaProcessor
 from msdelta.pretraining.training_args import DataArguments, ModelArguments, MSDeltaTrainingArguments
 from msdelta.utils.viz import render_bias_panels
@@ -43,6 +44,47 @@ class MSDeltaTrainer(Trainer):
                         * self.args.world_size)
         return GlobalLengthGroupedSampler(spectrum_lengths(dataset), global_batch,
                                           megabatches=self.args.length_group_megabatches, seed=self.args.seed)
+
+    # K195a-P: with proposal_intensity_power set, every forward also computes the proposal loss. The optimised
+    # objective is today's loss (default) or the proposal (train_on_proposal_loss). Logs keep today's loss under its
+    # usual names ('loss', 'eval_loss') and add 'proposal_loss' / 'eval_proposal_loss': spectrum-weighted means since
+    # the last log, summed over all ranks. Without proposal_intensity_power nothing here runs.
+    def compute_loss(self, model, inputs, return_outputs=False, num_items_in_batch=None):
+        power = getattr(self.args, "proposal_intensity_power", None)
+        if power is None:
+            return super().compute_loss(model, inputs, return_outputs=return_outputs,
+                                        num_items_in_batch=num_items_in_batch)
+        loss, outputs = super().compute_loss(model, inputs, return_outputs=True, num_items_in_batch=num_items_in_batch)
+        logits = outputs["logits"] if isinstance(outputs, dict) else outputs[1]
+        proposal = tempered_intensity_kl(logits, inputs["labels"], inputs["mask_positions"], power)
+        n = float(inputs["mz"].shape[0])
+        sums = torch.stack([loss.detach().float() * n, proposal.detach().float() * n, loss.new_tensor(n).float()])
+        key = "train" if model.training else "eval"
+        acc = getattr(self, "_k195_sums", None)
+        if acc is None:
+            acc = self._k195_sums = {}
+        acc[key] = sums if key not in acc else acc[key] + sums
+        # Only training optimises the proposal; evaluation returns today's loss, so eval_loss keeps its meaning.
+        objective = proposal if (self.args.train_on_proposal_loss and model.training) else loss
+        return (objective, outputs) if return_outputs else objective
+
+    def log(self, logs, start_time=None):
+        if getattr(self.args, "proposal_intensity_power", None) is not None and ("loss" in logs or "eval_loss" in logs):
+            key = "eval" if "eval_loss" in logs else "train"
+            acc = getattr(self, "_k195_sums", None) or {}
+            sums = acc.pop(key, None)
+            if sums is None:
+                sums = torch.zeros(3, device=self.args.device)
+            sums = self.accelerator.reduce(sums, reduction="sum")  # collective: log() runs on every rank
+            if float(sums[2]) > 0:
+                mean_loss, mean_proposal = (float(sums[0] / sums[2]), float(sums[1] / sums[2]))
+                if key == "train":
+                    logs["objective_loss"] = logs["loss"]  # what the optimiser saw (Trainer's own running mean)
+                    logs["loss"], logs["proposal_loss"] = round(mean_loss, 6), round(mean_proposal, 6)
+                else:
+                    logs["eval_proposal_loss"] = mean_proposal
+                    logs["eval_loss_check"] = mean_loss  # same quantity as eval_loss, from our own sums
+        return super().log(logs, start_time) if start_time is not None else super().log(logs)
 
     def _build_accelerator_args(self, **kwargs):
         args = super()._build_accelerator_args(**kwargs)

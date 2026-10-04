@@ -1,0 +1,6 @@
+--processor_name_or_path configs/msdelta-base-50m
+--max_peaks 512
+--dataset_repo_id /lus/flare/projects/UIC-HPC/khuss/msdelta/data/k195-cap512-20sh/raw
+--dataset_train_split train
+--dataset_validation_split validation
+--preprocessing_num_workers 96

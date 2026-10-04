@@ -1,0 +1,33 @@
+#!/bin/bash -l
+#PBS -N k195-smoke
+#PBS -A UIC-HPC
+#PBS -l select=2
+#PBS -l place=scatter
+#PBS -l walltime=01:00:00
+#PBS -l filesystems=home:flare
+#PBS -j oe
+#PBS -o pbs/logs/
+# K195a-P: debug smoke of the two 25m loss arms (configs/k195/k195-25m-{A,B}) before their debug-hour runs: the real
+# layout (2 nodes x 12 tiles x micro 2 x accumulation 11 = 528), torch.compile (.venv-2026), stop at SMOKE_STOP, eval
+# every 30 steps, W&B off. Checks: compile, both losses logged in train and eval, eval_loss == eval_loss_check, step time.
+#   qsub -q debug -v REPO_DIR=$PWD pbs/diag/k195_smoke.pbs
+REPO_DIR=${REPO_DIR:-${PBS_O_WORKDIR:-$PWD}}
+cd "$REPO_DIR"
+set -uo pipefail
+S=/lus/flare/projects/UIC-HPC/khuss/msdelta
+JOB=${PBS_JOBID%%.*}; JOB=${JOB:-local}
+SM=$S/runs/k195-smoke/$JOB; mkdir -p "$SM"
+STOP=${SMOKE_STOP:-60}; rc_all=0
+for arm in ${ARMS:-k195-25m-A k195-25m-B}; do
+    sed -e 's/^--eval_steps .*/--eval_steps 30/' -e 's/^--report_to .*/--report_to none/' -e "s/^--save_steps .*/--save_steps $STOP/" \
+        -e 's/^--logging_steps .*/--logging_steps 10/' "configs/k195/$arm/training.args" > "$SM/$arm.args"
+    echo "=== $(date -Is) $arm"
+    timeout 1500 env ARGS_FILE="$SM/$arm.args" CHECKPOINT_DIR="$SM" RUN_NAME="k195smoke-$arm-$JOB" \
+        HF_HOME=$S/huggingface PREPROCESSED_DATASET_DIR=$S/data/k195-cap512-20sh/preprocessed \
+        XPUS_PER_HOST=12 MICRO_BATCH_SIZE=2 GLOBAL_BATCH_SIZE=528 TORCH_COMPILE=1 FRAMEWORKS_MODULE=frameworks/2026.1.0 \
+        VENV_DIR=$REPO_DIR/.venv-2026 PROBE_EXECUTION=off CCL_KVS_MODE=pmi WANDB_MODE=disabled MSDELTA_STOP_AT_STEP=$STOP \
+        bash pbs/aurora-pretrain.pbs > "$SM/$arm.log" 2>&1
+    rc=$?; echo "=== $(date -Is) $arm rc=$rc"; [[ $rc == 0 ]] || rc_all=1
+    grep -E "'loss'|eval_loss|train_runtime|Error|error" "$SM/$arm.log" | tail -12
+done
+exit $rc_all

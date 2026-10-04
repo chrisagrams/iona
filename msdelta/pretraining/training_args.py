@@ -84,6 +84,17 @@ class MSDeltaTrainingArguments(TrainingArguments):
                           "compile_recompile_limit) instead of switching to a dynamic-shape graph."},
     )
     compile_recompile_limit: int = 16
+    proposal_intensity_power: float | None = field(
+        default=None,
+        metadata={"help": "K195a-P: also report 'proposal_loss' (train) / 'eval_proposal_loss' (eval) = KL to a masked-"
+                          "intensity target proportional to intensity ** power (msdelta.pretraining.proposal_loss); "
+                          "'loss' / 'eval_loss' stay today's loss. None = off (unchanged behaviour)."},
+    )
+    train_on_proposal_loss: bool = field(
+        default=False,
+        metadata={"help": "K195a-P: optimise proposal_loss instead of today's loss (needs proposal_intensity_power); "
+                          "both are still logged under their own names."},
+    )
     logarithmic_eval_start_step: int | None = 500
     bias_curve_steps: int = 5000
     probe_steps: int = 0
@@ -121,6 +132,10 @@ class MSDeltaTrainingArguments(TrainingArguments):
             raise ValueError("logarithmic_eval_start_step must be positive")
         if self.probe_batch_size < 1:
             raise ValueError("probe_batch_size must be positive")
+        if self.proposal_intensity_power is not None and self.proposal_intensity_power <= 0:
+            raise ValueError("proposal_intensity_power must be positive")
+        if self.train_on_proposal_loss and self.proposal_intensity_power is None:
+            raise ValueError("train_on_proposal_loss needs proposal_intensity_power")
         if self.probe_execution not in {"inline", "sidecar", "off"}:
             raise ValueError("probe_execution must be inline, sidecar, or off")
         if self.probe_execution == "sidecar":
