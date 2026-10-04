@@ -12,6 +12,7 @@ fusion = alpha * encoder cosine + (1 - alpha) * binned cosine; alpha 0 = binned,
 | oodval | 0.906 | 0.785 | 0.822 | 0.930 (0.8) | 0.936 (0.8) |
 | mouse | 0.916 | 0.835 | 0.868 | 0.924 (0.8) | 0.926 (0.9) |
 | human | 0.809 | 0.881 | 0.899 | 0.903 (0.9) | 0.907 (0.9) |
+| yeast20k | 0.916 | 0.857 | 0.808 | 0.925 (0.8) | 0.923 (0.8) |
 
 ## 2. What the wrong top-1 hit is (share of all queries)
 
@@ -29,6 +30,9 @@ fusion = alpha * encoder cosine + (1 - alpha) * binned cosine; alpha 0 = binned,
 | human | binned0.1 | 0.073 | 0.006 | 0.033 | 0.001 | 0.033 |
 | human | 25m | 0.067 | 0.001 | 0.036 | 0.001 | 0.030 |
 | human | 400m | 0.059 | 0.001 | 0.035 | 0.001 | 0.023 |
+| yeast20k | binned0.1 | 0.035 | 0.001 | 0.009 | 0.001 | 0.024 |
+| yeast20k | 25m | 0.061 | 0.001 | 0.012 | 0.001 | 0.047 |
+| yeast20k | 400m | 0.087 | 0.002 | 0.012 | 0.001 | 0.072 |
 
 ## 3. MAP@R by stratum (share of queries in brackets)
 
@@ -110,6 +114,26 @@ fusion = alpha * encoder cosine + (1 - alpha) * binned cosine; alpha 0 = binned,
 | replicate cos (binned) | 0.6-0.8 | 0.22 | 0.950 | 0.967 | 0.973 | +0.023 |
 | replicate cos (binned) | 0.8-2.0 | 0.00 | 1.000 | 1.000 | 1.000 | +0.000 |
 
+### yeast20k
+
+| stratum | bin | share | binned | 25m | 400m | 400m - binned |
+|---|---|---:|---:|---:|---:|---:|
+| R | 1 | 0.17 | 0.936 | 0.863 | 0.809 | -0.127 |
+| R | 2-4 | 0.38 | 0.942 | 0.887 | 0.834 | -0.108 |
+| R | 5-9 | 0.22 | 0.915 | 0.858 | 0.814 | -0.101 |
+| R | 10-19 | 0.23 | 0.860 | 0.803 | 0.760 | -0.100 |
+| charge | 2 | 0.55 | 0.921 | 0.876 | 0.841 | -0.080 |
+| charge | 3 | 0.36 | 0.914 | 0.848 | 0.786 | -0.128 |
+| charge | 4+ | 0.09 | 0.893 | 0.776 | 0.697 | -0.196 |
+| peaks | <186 | 0.25 | 0.938 | 0.893 | 0.862 | -0.075 |
+| peaks | 186-220 | 0.25 | 0.921 | 0.858 | 0.777 | -0.144 |
+| peaks | 220-252 | 0.25 | 0.917 | 0.855 | 0.799 | -0.118 |
+| peaks | >=252 | 0.26 | 0.890 | 0.824 | 0.795 | -0.095 |
+| replicate cos (binned) | -1.0-0.4 | 0.07 | 0.669 | 0.500 | 0.483 | -0.187 |
+| replicate cos (binned) | 0.4-0.6 | 0.57 | 0.911 | 0.842 | 0.789 | -0.122 |
+| replicate cos (binned) | 0.6-0.8 | 0.36 | 0.967 | 0.944 | 0.894 | -0.073 |
+| replicate cos (binned) | 0.8-2.0 | 0.01 | 0.984 | 0.955 | 0.938 | -0.046 |
+
 ## 4. Queries the 400m misses at top-1 but binned gets right
 
 Wrong top-1 hits: share of queries, and how many of those wrong hits sit within 20 ppm / isotope-tolerant 20 ppm of the query's precursor mass. Then, for a 400-query sample of the queries 400m misses and binned hits: binned cosine (shared peaks) between the query and our wrong hit vs its true replicate, our own cosines, and median peak counts.
@@ -120,3 +144,14 @@ Wrong top-1 hits: share of queries, and how many of those wrong hits sit within 
 | oodval | 0.025 (0.03 / 0.07) | 0.077 (0.01 / 0.02) | 400 | 0.06 / 0.39 | 0.97 / 0.96 | 122 / 81 |
 | mouse | 0.029 (0.22 / 0.49) | 0.057 (0.10 / 0.28) | 400 | 0.26 / 0.50 | 0.98 / 0.97 | 66 / 34 |
 | human | 0.073 (0.16 / 0.51) | 0.059 (0.11 / 0.50) | 400 | 0.35 / 0.49 | 0.98 / 0.98 | 138 / 57 |
+| yeast20k | 0.035 (0.08 / 0.34) | 0.087 (0.04 / 0.16) | 400 | 0.22 / 0.55 | 0.97 / 0.97 | 220 / 220 |
+
+## 5. How well raw spectra already separate replicates from impostors (binned cosine, medians)
+
+| set | to own replicates (mean) | to best wrong spectrum | margin (best replicate - best wrong) | 400m - binned MAP@R |
+|---|---:|---:|---:|---:|
+| test | 0.45 | 0.37 | 0.12 | +0.188 |
+| oodval | 0.47 | 0.30 | 0.27 | -0.084 |
+| mouse | 0.58 | 0.36 | 0.29 | -0.048 |
+| human | 0.53 | 0.43 | 0.18 | +0.090 |
+| yeast20k | 0.57 | 0.35 | 0.26 | -0.108 |

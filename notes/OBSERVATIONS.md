@@ -2423,3 +2423,12 @@ Per query, open search, experimental vs experimental, consensus recipe 540k seed
   nine-species set -- oodval 0.936 (binned 0.906, 400m 0.822), mouse 0.926 (0.916, 0.868), human 0.907 (0.809, 0.899);
   on test it only matches the 400m (0.917) but lifts the 25m 0.864 -> 0.891.
 - Our embedding cosines sit in a narrow band (0.96-0.98 for top hits): the space is a tight cone.
+- Update (yeast20k, 8903748; full yeast needs > 1 h per encoder): binned 0.916, 25m 0.857, 400m 0.808 (25m > 400m
+  again); fusion 0.925 / 0.923. Yeast is DENSE (median 220 peaks) and binned still wins in every peak-count bin, so
+  sparsity is an amplifier, not the cause. Same mechanism though: our wrong top-1 shares few peaks with the query
+  (binned cosine 0.22 vs 0.55 to the true replicate) while our cosine rates it equal (0.97 / 0.97).
+- Unifying variable: how well raw spectra already separate replicates from impostors (median binned-cosine margin,
+  best replicate - best wrong). It orders the sets exactly by our advantage: test 0.12 (+0.188 MAP@R for 400m),
+  human 0.18 (+0.090), yeast20k 0.26 (-0.108), oodval 0.27 (-0.084), mouse 0.29 (-0.048). Where replicates were
+  measured alike (one lab / instrument per species in nine-species), shared peaks nearly solve the task and our
+  learned invariance only adds false friends; where replicates differ across labs (ms-contrastive-100k), it wins.

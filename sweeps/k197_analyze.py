@@ -159,6 +159,14 @@ def main() -> int:
                  f"{w['400m'][0]:.3f} ({w['400m'][1]:.2f} / {w['400m'][2]:.2f}) | {f['n']} | "
                  f"{f['binned_cos_wrong']:.2f} / {f['binned_cos_replicate']:.2f} | {f['our_cos_wrong']:.2f} / "
                  f"{f['our_cos_replicate']:.2f} | {f['peaks_all']:.0f} / {f['peaks_these']:.0f} |")
+    L += ["", "## 5. How well raw spectra already separate replicates from impostors (binned cosine, medians)", "",
+          "| set | to own replicates (mean) | to best wrong spectrum | margin (best replicate - best wrong) | 400m - binned MAP@R |",
+          "|---|---:|---:|---:|---:|"]
+    for s, (meta, summ, res) in got.items():
+        b = res["binned0.1"]; k = b["n_rel"] > 0
+        L.append(f"| {s} | {np.median(b['pos_mean'][k]):.2f} | {np.median(b['neg_max'][k]):.2f} | "
+                 f"{np.median((b['pos_max'] - b['neg_max'])[k]):.2f} | "
+                 f"{summ['methods']['400m']['MAP@R'] - summ['methods']['binned0.1']['MAP@R']:+.3f} |")
     out = ROOT / "results/summary/k197_binned_edge.md"
     out.write_text("\n".join(L) + "\n")
     print("\n".join(L))

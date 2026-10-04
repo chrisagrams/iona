@@ -395,8 +395,11 @@ mouse 0.868 vs 0.916, yeast 0.735 (25m) vs 0.789. We win on validation / test (~
 Question: investigate why (e.g. instrument/resolution mismatch with the training corpus, near-duplicate spectra in
 these sets favouring exact peak matching), or just report it as-is?
 
-Answer so far (OBSERVATIONS K197-C): binned wins on sparse spectra (few peaks), where our encoder maps spectra that
-share no fragment peaks (and differ in precursor mass) to near-identical embeddings. The two are complementary (late
+Answer so far (OBSERVATIONS K197-C): our encoder maps spectra that share few fragment peaks (and differ in
+precursor mass) to near-identical embeddings. That costs us wherever raw spectra already separate replicates from
+impostors well (nine-species: one lab/instrument per species; binned-cosine margin 0.26-0.29 vs 0.12 on test);
+sparse spectra (oodval, mouse) make it worse, but yeast is dense and shows it too. So K197b/c address the cause and
+K197a only the sparse part (updated after yeast20k, 8903748). The two are complementary (late
 fusion beats both on every nine-species set). Ways to bring it into training -- each needs a card + approval:
   K197a  peak-subsampling augmentation in contrastive training (randomly keep the top-k peaks, k ~ 20-100, so the
          model sees sparse spectra; ms-contrastive-100k median is 173 peaks, the failures 34-81). Cheapest test first:
