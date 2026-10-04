@@ -124,11 +124,16 @@ def main(argv=None) -> int:
     print(f"[k197] {cli.set}: {len(rows):,} experimental rows, {int(g.max()) + 1:,} groups on {device}", flush=True)
 
     t0 = time.time()
-    emb = {"binned0.1": F.normalize(binned_embeddings(rows, 0.1), dim=-1).to(device)}
+    emb = {}
     for spec in cli.model:
         name, path = spec.split("=", 1)
         emb[name] = encode(path, rows, device, cli.batch_size)
+        if device.type == "xpu":
+            torch.xpu.empty_cache()
         print(f"[k197] embedded {name} ({time.time() - t0:.0f}s)", flush=True)
+    # the dense binned matrix (rows x 20,000) goes on the device only after the encoders are done: on full yeast
+    # (86k rows, 6.9 GB) next to an encoder's activations it ran a 64 GB tile out of memory (8903703)
+    emb = {"binned0.1": F.normalize(binned_embeddings(rows, 0.1), dim=-1).to(device), **emb}
 
     summ = {"set": cli.set, "data": cli.data, "rows": len(rows), "methods": {}, "fusion": {}}
     for name, e in emb.items():

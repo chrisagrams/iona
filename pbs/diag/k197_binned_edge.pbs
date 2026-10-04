@@ -24,9 +24,11 @@ RUNS=$S/runs; M400=$RUNS/sweep-s400m_ck540k_lr4e-4_p170k2_cons_seed0-8882196/fin
 M25=$RUNS/sweep-s025m_ck540k_lr4e-4_p170k2_cons_seed0-8882196/final
 declare -A DATA=([test]=$S/eval-data/ms-contrastive-100k-test-mp512 [oodval]=$S/baselines/nine_oodval20k/prepared
                  [mouse]=$S/baselines/noble_mouse20k/prepared [human]=$S/baselines/noble_human20k/prepared
-                 [yeast]=$S/baselines/nine_yeast/prepared)
+                 [yeast]=$S/baselines/nine_yeast/prepared
+                 [yeast20k]=$S/baselines/nine_yeast20k/prepared)
 tile=0
-for s in yeast test oodval mouse human; do
+# SETS overrides the list, e.g. -v SETS=yeast20k (full yeast needs > 1 h per encoder)
+for s in ${SETS:-yeast test oodval mouse human}; do
     ZE_AFFINITY_MASK=$tile timeout 3300 "$PY" "$MSDELTA_CODE_DIR"/pbs/diag/k197_binned_edge.py --data "${DATA[$s]}" \
         --set "$s" --out "$O" --model 400m="$M400" --model 25m="$M25" --batch-size 32 > "$O/$s.log" 2>&1 &
     tile=$((tile + 1))
