@@ -1,0 +1,36 @@
+#!/bin/bash -l
+#PBS -N k197-binned-edge
+#PBS -A UIC-HPC
+#PBS -l select=1
+#PBS -l walltime=01:00:00
+#PBS -l filesystems=home:flare
+#PBS -j oe
+#PBS -o pbs/logs/
+# K197-C (user 2026-10-04: "see what edge binned cosine has and how we could incorporate that into our training"):
+# per-query binned cosine 0.1 Da vs the consensus-recipe encoders (400m, 25m; 540k, seed 0) on test / oodval /
+# mouse / human / yeast, plus late fusion. One set per tile, in parallel. Diagnostic only, no training.
+#   qsub -q debug -v REPO_DIR=$PWD pbs/diag/k197_binned_edge.pbs
+REPO_DIR=${REPO_DIR:-${PBS_O_WORKDIR:-$PWD}}
+cd "$REPO_DIR"
+source "$REPO_DIR/pbs/lib/load_frameworks.sh"
+set -uo pipefail
+export ONEAPI_DEVICE_SELECTOR=level_zero:gpu ZE_FLAT_DEVICE_HIERARCHY=FLAT
+export OMP_NUM_THREADS=${OMP_NUM_THREADS:-8} PYTHONPATH=$REPO_DIR${PYTHONPATH:+:$PYTHONPATH}
+source "$REPO_DIR/pbs/lib/code_snapshot.sh"
+PY="$REPO_DIR/.venv/bin/python"
+S=/lus/flare/projects/UIC-HPC/khuss/msdelta
+O=results/raw/diag/k197; mkdir -p "$O"
+RUNS=$S/runs; M400=$RUNS/sweep-s400m_ck540k_lr4e-4_p170k2_cons_seed0-8882196/final
+M25=$RUNS/sweep-s025m_ck540k_lr4e-4_p170k2_cons_seed0-8882196/final
+declare -A DATA=([test]=$S/eval-data/ms-contrastive-100k-test-mp512 [oodval]=$S/baselines/nine_oodval20k/prepared
+                 [mouse]=$S/baselines/noble_mouse20k/prepared [human]=$S/baselines/noble_human20k/prepared
+                 [yeast]=$S/baselines/nine_yeast/prepared)
+tile=0
+for s in yeast test oodval mouse human; do
+    ZE_AFFINITY_MASK=$tile timeout 3300 "$PY" "$MSDELTA_CODE_DIR"/pbs/diag/k197_binned_edge.py --data "${DATA[$s]}" \
+        --set "$s" --out "$O" --model 400m="$M400" --model 25m="$M25" --batch-size 32 > "$O/$s.log" 2>&1 &
+    tile=$((tile + 1))
+done
+wait
+grep -h "^\[k197\]" "$O"/*.log
+exit 0
