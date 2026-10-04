@@ -2385,3 +2385,20 @@ Tables: results/summary/k188_allck_cons_{validation,test}.md (sweeps/allck_cons.
   400m > 200m > 100m > 50m holds from 120k (spread only ~0.012). Filtered: 20 ppm 0.832-0.833 everywhere, its F queries
   0.536 (true matches filtered out), iso20 0.950-0.953 -- checkpoint and scale barely move the filtered numbers.
 - Pending: yeast (8902890).
+
+## K195a-P today's loss vs proposal_loss (KL to intensity^0.5), 25m debug hours (2026-10-04; A 8903620, B 8903621)
+Chris's 25m production-01 recipe on 20 shards (4.6M spectra), global batch 528, compiled, 2 nodes each; both stopped
+by the 1 h walltime at step ~7,000 (checkpoints 2500/5000 kept). Script sweeps/k195_compare.py; figure
+results/processed/figures/P_pretrain/k195a_losses.png; logs results/raw/diag/k195/k195a_{A,B}_log.json.
+- Recipe check: arm A tracks Chris's own 25m curve, slightly lower (train loss at 2k / 5k / 6k: 0.262 / 0.164 / 0.155
+  vs Chris 0.283 / 0.171 / 0.161) -- the reproduction is sound.
+- Eval at step 6,500: A today's loss 0.148, proposal 0.237; B today's loss 0.324, proposal 0.049.
+- The two losses do NOT go down together when training on today's loss: A's proposal_loss stays at ~0.24 the whole
+  run. That is what the targets imply, not a bug: on 3,000 validation spectra (results/raw/diag/k195/k195a_floors.json)
+  a model predicting the linear intensity share EXACTLY scores proposal_loss 0.2415, no better than a uniform
+  prediction (0.2305). Today's loss is dominated by the base peak; it can be nearly solved without ranking the weak
+  peaks, which is what the proposal measures.
+- Training on the proposal (B) moves both: proposal 0.231 -> 0.049, today's loss 0.93 -> 0.32. A perfect proposal
+  model would score 0.231 on today's loss, so B is ~0.09 above the best it could reach on it.
+- So the losses cannot say which pretraining is better; they disagree by construction. The open question is
+  downstream (frozen-encoder retrieval / denoise probes on A vs B checkpoints).

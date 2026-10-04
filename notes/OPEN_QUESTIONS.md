@@ -387,7 +387,7 @@ x 150 peaks x 64 channels that is ~2.3 GB per module, ~45 GB for 10 layers -- mo
 comfortably holds with everything else. So gradient checkpointing (recompute in backward, ~30% slower)
 is required for the Pairformer, not optional.
 
-### K197-C: binned cosine 0.1 Da beats our encoders in open search on oodval / mouse / yeast (open, 2026-10-04)
+### K197-C: binned cosine 0.1 Da beats our encoders in open search on oodval / mouse / yeast (investigating, 2026-10-04: diag 8903703)
 Context: new figures (results/processed/figures/C_contrastive/datasets_*.png). Experimental MAP@R, no precursor
 filter, consensus recipe at 540k (best scale) vs binned cosine 0.1 Da on the same queries: oodval 0.831 vs 0.906,
 mouse 0.868 vs 0.916, yeast 0.735 (25m) vs 0.789. We win on validation / test (~0.91 vs ~0.73) and human

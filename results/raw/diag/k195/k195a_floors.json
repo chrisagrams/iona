@@ -1,0 +1,8 @@
+{
+ "what": "Reference values of both losses on 3,000 validation10k spectra (k195-cap512-20sh), MSDeltaDataCollatorForPreTraining(mask_ratio=0.5), torch seed 0, computed on the login node 2026-10-04 with msdelta.pretraining.proposal_loss.tempered_intensity_kl",
+ "uniform_loss": 0.9338,
+ "uniform_proposal_loss": 0.2305,
+ "proposal_loss_of_a_perfect_todays_loss_model": 0.2415,
+ "todays_loss_of_a_perfect_proposal_model": 0.2309,
+ "meaning": "a model predicting the linear intensity share exactly (today's loss 0) has proposal_loss 0.2415, i.e. no better than uniform; a model predicting the intensity^0.5 share exactly (proposal_loss 0) has today's loss 0.2309"
+}

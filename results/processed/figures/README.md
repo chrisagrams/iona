@@ -63,6 +63,12 @@ pretraining checkpoint; same 25,137 test queries and the same reference lines as
 - `contrastive_scaling.png`, `contrastive_ablation.png`, `contrastive_breadth.png`: separation-ratio era, a metric C0 showed doesn't predict retrieval.
 - `retrieval_vs_separation.png`: the C0 evidence itself.
 
+## P_pretrain — masked-peak pretraining
+
+| figure | what it shows |
+|---|---|
+| `k195a_losses.png` | K195a-P: today's loss vs proposal_loss (KL to intensity^0.5), 25m debug hours, arm A trains on today's loss, arm B on the proposal, vs Chris's 25m curve; dotted = each loss for a model that fits the other target perfectly (script `sweeps/k195_compare.py`) |
+
 ## A_alignment — peptide embeddings
 No figures yet (results are in `notes/OBSERVATIONS.md`, A1/A3).
 
