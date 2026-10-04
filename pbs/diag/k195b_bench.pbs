@@ -1,0 +1,46 @@
+#!/bin/bash -l
+#PBS -N k195b-bench
+#PBS -A UIC-HPC
+#PBS -l select=2
+#PBS -l place=scatter
+#PBS -l walltime=01:00:00
+#PBS -l filesystems=home:flare
+#PBS -j oe
+#PBS -o pbs/logs/
+# K195b-P step S2 (notes/proposals/K195b_full_25m_proposal_loss.md): benchmark the full run's layout on the K195a
+# 20-shard data -- 2 nodes x 8 training tiles (tiles 4,5 / 10,11 of node 0 run the denoise / retrieval probes, Chris's
+# launcher design), global batch 512, micro $MICRO (2 = Chris's exact layout, accumulation 16; 32 = accumulation 1),
+# proposal loss, compiled; ALL built-in probes every 500 steps (linear probes + bias curves inline, retrieval and
+# denoise heads as sidecars on saved checkpoints), stop at step $STOP. Measures step time, memory, probe time / success.
+#   qsub -q debug -v REPO_DIR=$PWD,MICRO=32 pbs/diag/k195b_bench.pbs ; qsub -q debug-scaling -v REPO_DIR=$PWD,MICRO=2 ...
+REPO_DIR=${REPO_DIR:-${PBS_O_WORKDIR:-$PWD}}
+cd "$REPO_DIR"
+set -uo pipefail
+S=/lus/flare/projects/UIC-HPC/khuss/msdelta
+JOB=${PBS_JOBID%%.*}; JOB=${JOB:-local}
+MICRO=${MICRO:?set MICRO}; STOP=${STOP:-2000}
+B=$S/runs/k195b-bench/m$MICRO-$JOB; mkdir -p "$B"
+sed -e 's/^--probe_execution .*/--probe_execution sidecar/' -e 's/^--probe_steps .*/--probe_steps 500/' \
+    -e 's/^--bias_curve_steps .*/--bias_curve_steps 500/' -e 's/^--retrieval_steps .*/--retrieval_steps 500/' \
+    -e 's/^--denoise_steps .*/--denoise_steps 500/' -e 's/^--save_steps .*/--save_steps 500/' \
+    -e 's/^--save_total_limit .*/--save_total_limit 4/' \
+    configs/k195/k195-25m-B/training.args > "$B/training.args"
+cat >> "$B/training.args" <<'ARGS'
+--probe_num_spectra 3000
+--probe_batch_size 1
+--replicate_retrieval_repo chrisagrams/ms2-peptide-replicate-retrieval
+--retrieval_dataset_repo chrisagrams/ms-contrastive-100k
+--denoise_dataset_repo chrisagrams/ms-denoise-100k
+--denoise_max_peaks 1024
+--denoise_peak_pair_budget 4194304
+ARGS
+echo "=== $(date -Is) micro $MICRO"
+timeout 3300 env ARGS_FILE="$B/training.args" CHECKPOINT_DIR="$B" RUN_NAME="k195b-bench-m$MICRO-$JOB" \
+    HF_HOME=$S/huggingface PREPROCESSED_DATASET_DIR=$S/data/k195-cap512-20sh/preprocessed \
+    XPUS_PER_HOST=8 MICRO_BATCH_SIZE=$MICRO GLOBAL_BATCH_SIZE=512 TORCH_COMPILE=1 FRAMEWORKS_MODULE=frameworks/2026.1.0 \
+    VENV_DIR=$REPO_DIR/.venv-2026 PROBE_EXECUTION=sidecar CCL_KVS_MODE=pmi WANDB_ENTITY=CS_Pharm \
+    MSDELTA_STOP_AT_STEP=$STOP bash pbs/aurora-pretrain.pbs > "$B/train.log" 2>&1
+rc=$?; echo "=== $(date -Is) rc=$rc"
+grep -E "'loss'|eval_loss|Started .* probe|probe exited|Error|error" "$B/train.log" | tail -20
+ls "$B"/*-probes 2>/dev/null; tail -5 "$B"/*-probes/*.log 2>/dev/null
+exit $rc

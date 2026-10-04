@@ -1,0 +1,36 @@
+#!/bin/bash -l
+#PBS -N k195b-data
+#PBS -A UIC-HPC
+#PBS -l select=1
+#PBS -l walltime=03:00:00
+#PBS -l filesystems=home:flare
+#PBS -j oe
+#PBS -o pbs/logs/
+# K195b-P step S1 (notes/proposals/K195b_full_25m_proposal_loss.md): the FULL cap-512 pretraining data -- all 400
+# MSConsensus-100M train shards + validation shard 0, Chris's processor (max_peaks 512), then the same fixed 10k
+# validation subset as K195a ("validation10k"). Expect ~400 GB preprocessed + ~600 GB arrow cache (K195a: 20 shards ->
+# 20 + 30 GB). Submit only after storage (K195b-1) is settled.   qsub -q capacity -v REPO_DIR=$PWD pbs/diag/k195b_data.pbs
+REPO_DIR=${REPO_DIR:-${PBS_O_WORKDIR:-$PWD}}
+cd "$REPO_DIR" || exit 1
+set -uo pipefail
+S=/lus/flare/projects/UIC-HPC/khuss/msdelta
+SNAP=$S/huggingface/hub/datasets--Gaolaboratory--MSConsensus-100M/snapshots/78b3e74b90021f233747de6417064c837136a9b9
+source pbs/lib/load_frameworks.sh
+D=$S/data/k195b-cap512-full; mkdir -p "$D/raw"
+for i in $(seq 0 399); do ln -sfn "$SNAP/$(printf 'train-%05d-of-00400.parquet' $i)" "$D/raw/$(printf 'train-%05d-of-00400.parquet' $i)"; done
+ln -sfn "$SNAP/validation-00000-of-00004.parquet" "$D/raw/validation-00000-of-00001.parquet"
+sed "s#k195-cap512-20sh/raw#k195b-cap512-full/raw#" configs/k195/preprocess.args > "$D/preprocess.args"
+DATASET_CACHE_DIR=$D/datasets PREPROCESSED_DATASET_DIR=$D/preprocessed ARGS_FILE=$D/preprocess.args \
+    HF_HOME=$S/huggingface REPO_DIR=$REPO_DIR bash pbs/aurora-preprocess.pbs || exit 1
+.venv/bin/python - "$D/preprocessed" <<'PY'
+import json, sys
+from pathlib import Path
+from datasets import load_from_disk
+root = Path(sys.argv[1]); dd = load_from_disk(str(root))
+sub = dd["validation"].select(range(10_000))  # same shard, same first 10k as K195a's validation10k
+sub.save_to_disk(str(root / "validation10k"))
+meta = json.loads((root / "dataset_dict.json").read_text()); meta["splits"].append("validation10k")
+(root / "dataset_dict.json").write_text(json.dumps(meta))
+dd = load_from_disk(str(root)); print({k: len(v) for k, v in dd.items()})
+PY
+du -sh "$D/preprocessed" "$D/datasets"

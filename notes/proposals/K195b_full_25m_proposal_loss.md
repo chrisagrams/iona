@@ -55,6 +55,9 @@ Choices for you (my recommendation first):
 | K195b-7 | control arm | **none: Chris's 25m is the control** (arm A matched his curve to ~0.007 at 2-6k steps); or also run arm A (today's loss) on the identical setup for step-by-step probe curves (2x compute; capacity allows 2 running jobs) |
 | K195b-8 | downstream | **contrastive (K163 consensus recipe, 3 seeds) only**; or also denoise fine-tuning (D recipe) |
 
+Scripts ready (not submitted): S1 `pbs/diag/k195b_data.pbs`, S2 `pbs/diag/k195b_bench.pbs` (MICRO=2 / 32). S3 and S5
+are written once K195b-2..8 are settled.
+
 ## Cost (to be firmed up by S2)
 
 - K195a measured 2.9 steps/s on 24 tiles at micro 2 -> ~3.4 s per 10 steps. Chris's layout on 16 tiles: ~2 steps/s,
