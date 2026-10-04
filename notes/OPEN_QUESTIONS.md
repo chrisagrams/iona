@@ -387,10 +387,25 @@ x 150 peaks x 64 channels that is ~2.3 GB per module, ~45 GB for 10 layers -- mo
 comfortably holds with everything else. So gradient checkpointing (recompute in backward, ~30% slower)
 is required for the Pairformer, not optional.
 
-### K197-C: binned cosine 0.1 Da beats our encoders in open search on oodval / mouse / yeast (investigating, 2026-10-04: diag 8903703)
+### K197-C: binned cosine 0.1 Da beats our encoders in open search on oodval / mouse / yeast (diagnosed 2026-10-04; training options K197a-d await the user)
 Context: new figures (results/processed/figures/C_contrastive/datasets_*.png). Experimental MAP@R, no precursor
 filter, consensus recipe at 540k (best scale) vs binned cosine 0.1 Da on the same queries: oodval 0.831 vs 0.906,
 mouse 0.868 vs 0.916, yeast 0.735 (25m) vs 0.789. We win on validation / test (~0.91 vs ~0.73) and human
 (0.899 vs 0.809). With the iso-20 ppm filter mouse is ~tied (0.959 vs 0.963) and human still ours (0.953 vs 0.915).
 Question: investigate why (e.g. instrument/resolution mismatch with the training corpus, near-duplicate spectra in
 these sets favouring exact peak matching), or just report it as-is?
+
+Answer so far (OBSERVATIONS K197-C): binned wins on sparse spectra (few peaks), where our encoder maps spectra that
+share no fragment peaks (and differ in precursor mass) to near-identical embeddings. The two are complementary (late
+fusion beats both on every nine-species set). Ways to bring it into training -- each needs a card + approval:
+  K197a  peak-subsampling augmentation in contrastive training (randomly keep the top-k peaks, k ~ 20-100, so the
+         model sees sparse spectra; ms-contrastive-100k median is 173 peaks, the failures 34-81). Cheapest test first:
+         inference-only, subsample test spectra and see if we degrade faster than binned (one debug job).
+  K197b  peak-overlap hard negatives: in each batch, add as negatives the spectra the current model ranks high but that
+         share ~no peaks with the query (binned cosine < ~0.1); or a margin penalty when our cosine is high and binned
+         cosine ~0.
+  K197c  relational distillation from binned cosine: an auxiliary loss making our similarity of non-replicate pairs
+         track binned cosine (weight lambda), so "no shared peaks => far apart" is learned rather than imposed.
+  K197d  no training: ship the fusion (0.8 x ours + 0.2 x binned) as the retrieval score, or as a concatenated
+         embedding [sqrt(a) x ours, sqrt(1-a) x binned] whose cosine is exactly the fusion (binned part sparse 20k-d,
+         or PCA-compressed).

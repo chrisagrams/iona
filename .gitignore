@@ -27,3 +27,4 @@ data/*
 # process core dumps
 core.[0-9]*
 .venv-2026/
+results/raw/diag/k197/*.npz

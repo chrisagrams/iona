@@ -1,0 +1,46 @@
+[k197] yeast: 86,184 experimental rows, 20,978 groups on xpu
+Loading weights:   0%|          | 0/330 [00:00<?, ?it/s]Loading weights: 100%|██████████| 330/330 [00:00<00:00, 10428.17it/s]
+Traceback (most recent call last):
+  File "/lus/flare/projects/UIC-HPC/khuss/msdelta/code-snapshots/8903703/pbs/diag/k197_binned_edge.py", line 156, in <module>
+    raise SystemExit(main())
+                     ^^^^^^
+  File "/lus/flare/projects/UIC-HPC/khuss/msdelta/code-snapshots/8903703/pbs/diag/k197_binned_edge.py", line 130, in main
+    emb[name] = encode(path, rows, device, cli.batch_size)
+                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/lus/flare/projects/UIC-HPC/khuss/msdelta/code-snapshots/8903703/pbs/diag/k197_binned_edge.py", line 55, in encode
+    emb, _ = embed_dataset(model.to(device), rows, ContrastiveCollator(max_peptide_length=64, pad_spectra_to=512),
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/lus/flare/projects/UIC-HPC/khuss/msdelta/code-snapshots/8903703/msdelta/finetuning/contrastive/contrastive.py", line 750, in embed_dataset
+    pooled, _ = model.embed(batch["mz"], batch["log_intensity"],
+                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/lus/flare/projects/UIC-HPC/khuss/msdelta/code-snapshots/8903703/msdelta/finetuning/contrastive/contrastive.py", line 645, in embed
+    hidden = encoder(mz=mz, log_intensity=log_intensity,
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/aurora/26.26.0/frameworks/aurora_frameworks-2025.3.1/lib/python3.12/site-packages/torch/nn/modules/module.py", line 1776, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/aurora/26.26.0/frameworks/aurora_frameworks-2025.3.1/lib/python3.12/site-packages/torch/nn/modules/module.py", line 1787, in _call_impl
+    return forward_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/lus/flare/projects/UIC-HPC/khuss/msdelta/code-snapshots/8903703/msdelta/models/modeling_msdelta.py", line 287, in forward
+    bias = self.bias_module(mz)
+           ^^^^^^^^^^^^^^^^^^^^
+  File "/opt/aurora/26.26.0/frameworks/aurora_frameworks-2025.3.1/lib/python3.12/site-packages/torch/nn/modules/module.py", line 1776, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/aurora/26.26.0/frameworks/aurora_frameworks-2025.3.1/lib/python3.12/site-packages/torch/nn/modules/module.py", line 1787, in _call_impl
+    return forward_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/lus/flare/projects/UIC-HPC/khuss/msdelta/code-snapshots/8903703/msdelta/models/modeling_msdelta.py", line 115, in forward
+    curve = self._curve(self.ff(delta_mz))
+                        ^^^^^^^^^^^^^^^^^
+  File "/opt/aurora/26.26.0/frameworks/aurora_frameworks-2025.3.1/lib/python3.12/site-packages/torch/nn/modules/module.py", line 1776, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/aurora/26.26.0/frameworks/aurora_frameworks-2025.3.1/lib/python3.12/site-packages/torch/nn/modules/module.py", line 1787, in _call_impl
+    return forward_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/lus/flare/projects/UIC-HPC/khuss/msdelta/code-snapshots/8903703/msdelta/models/fourier.py", line 36, in forward
+    return torch.cat([phase.sin(), phase.cos()], dim=-1)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+torch.OutOfMemoryError: XPU out of memory. Tried to allocate 16.00 GiB. GPU 0 has a total capacity of 63.98 GiB of which 15.78 GiB is free. Of the allocated memory 32.15 GiB is allocated by PyTorch, and 16.00 GiB is reserved by PyTorch but unallocated. Please use `empty_cache` to release all unoccupied cached memory.

@@ -8,6 +8,8 @@ Writes results/summary/k197_binned_edge.md:
      modifications, an isobaric peptide (same charge, neutral mass within 20 ppm), or an unrelated peptide
   3. MAP@R by group size R, charge, peak count and replicate similarity (binned cosine of a query to its own
      replicates, i.e. how alike the replicates are as raw spectra)
+  4. the queries the 400m misses at top-1 but binned gets right: precursor mass of our wrong hit, and how many peaks
+     it shares with the query (binned cosine, recomputed from the spectra for a 400-query sample)
 """
 
 from __future__ import annotations
@@ -20,7 +22,7 @@ from pathlib import Path
 import numpy as np
 
 ROOT = Path(__file__).resolve().parents[1]
-SETS = ["test", "oodval", "mouse", "human", "yeast"]
+SETS = ["test", "oodval", "mouse", "human", "yeast", "yeast20k"]
 PROTON = 1.007276
 
 
@@ -70,6 +72,43 @@ def strata(meta, res, binned_pos):
     return {k: [(name, m & keep) for name, m in v] for k, v in out.items()}
 
 
+def binned_vec(mz, li):
+    v = {}
+    for m, i in zip(mz, li):
+        if 0 <= m < 2000:
+            v[int(m / 0.1)] = v.get(int(m / 0.1), 0.0) + max(i, 0.0)
+    n = np.sqrt(sum(x * x for x in v.values()))
+    return {k: x / n for k, x in v.items()}
+
+
+def false_friends(meta, summ, res, sample=400):
+    """Queries the 400m misses at top-1 and binned hits: what our wrong top-1 is."""
+    from datasets import load_from_disk
+
+    a, b = res["400m"], res["binned0.1"]
+    keep = a["n_rel"] > 0
+    ch = meta["charge"]; mass = (meta["precursor"] - PROTON) * ch
+    out = {}
+    for name, r in (("binned0.1", b), ("400m", a)):
+        q = np.flatnonzero(keep & (r["hit1"] == 0)); t = r["top"][q, 0]
+        dm = np.abs(mass[t] - mass[q])
+        iso = np.min(np.abs(dm[:, None] - np.arange(-2, 3)[None, :] * 1.00336), 1) / mass[q] * 1e6
+        out[name] = (len(q) / keep.sum(), float(np.mean(dm / mass[q] * 1e6 <= 20)), float(np.mean(iso <= 20)))
+    q = np.flatnonzero(keep & (a["hit1"] == 0) & (b["hit1"] == 1))
+    q = np.random.default_rng(0).choice(q, min(sample, len(q)), replace=False)
+    rows = load_from_disk(summ["data"])
+    exp = np.flatnonzero(np.array([s == "experimental" for s in rows["source"]]))
+    need = np.unique(np.concatenate([q, a["top"][q, 0], b["top"][q, 0]]))
+    sub = rows.select(exp[need])
+    V = {int(i): binned_vec(sub[j]["mz"], sub[j]["log_intensity"]) for j, i in enumerate(need)}
+    cos = lambda x, y: sum(v * V[y].get(k, 0.0) for k, v in V[x].items())  # noqa: E731
+    wrong = np.median([cos(i, int(a["top"][i, 0])) for i in q])
+    right = np.median([cos(i, int(b["top"][i, 0])) for i in q])
+    return out, dict(n=len(q), binned_cos_wrong=wrong, binned_cos_replicate=right,
+                     our_cos_wrong=float(np.median(a["top_cos"][q, 0])), our_cos_replicate=float(np.median(a["pos_max"][q])),
+                     peaks_all=float(np.median(meta["n_peaks"])), peaks_these=float(np.median(meta["n_peaks"][q])))
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--dir", default=str(ROOT / "results/raw/diag/k197"))
@@ -107,6 +146,19 @@ def main() -> int:
                 L.append(f"| {k} | {name} | {m.sum() / n:.2f} | {v['binned0.1']:.3f} | {v['25m']:.3f} | {v['400m']:.3f} | "
                          f"{v['400m'] - v['binned0.1']:+.3f} |")
         L.append("")
+    L += ["## 4. Queries the 400m misses at top-1 but binned gets right", "",
+          "Wrong top-1 hits: share of queries, and how many of those wrong hits sit within 20 ppm / isotope-tolerant "
+          "20 ppm of the query's precursor mass. Then, for a 400-query sample of the queries 400m misses and binned "
+          "hits: binned cosine (shared peaks) between the query and our wrong hit vs its true replicate, our own "
+          "cosines, and median peak counts.", "",
+          "| set | binned wrong (20ppm / iso) | 400m wrong (20ppm / iso) | sample | binned cos: our wrong hit / true replicate | "
+          "our cos: wrong hit / replicate | peaks: all / these queries |", "|---|---|---|---:|---|---|---|"]
+    for s, (meta, summ, res) in got.items():
+        w, f = false_friends(meta, summ, res)
+        L.append(f"| {s} | {w['binned0.1'][0]:.3f} ({w['binned0.1'][1]:.2f} / {w['binned0.1'][2]:.2f}) | "
+                 f"{w['400m'][0]:.3f} ({w['400m'][1]:.2f} / {w['400m'][2]:.2f}) | {f['n']} | "
+                 f"{f['binned_cos_wrong']:.2f} / {f['binned_cos_replicate']:.2f} | {f['our_cos_wrong']:.2f} / "
+                 f"{f['our_cos_replicate']:.2f} | {f['peaks_all']:.0f} / {f['peaks_these']:.0f} |")
     out = ROOT / "results/summary/k197_binned_edge.md"
     out.write_text("\n".join(L) + "\n")
     print("\n".join(L))

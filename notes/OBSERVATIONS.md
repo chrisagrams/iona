@@ -2402,3 +2402,24 @@ results/processed/figures/P_pretrain/k195a_losses.png; logs results/raw/diag/k19
   model would score 0.231 on today's loss, so B is ~0.09 above the best it could reach on it.
 - So the losses cannot say which pretraining is better; they disagree by construction. The open question is
   downstream (frozen-encoder retrieval / denoise probes on A vs B checkpoints).
+
+## K197-C what edge binned cosine has over our spectrum encoders (2026-10-04; diag 8903703, sweeps/k197_analyze.py)
+Per query, open search, experimental vs experimental, consensus recipe 540k seed 0 (400m, 25m) vs binned cosine
+0.1 Da. Tables: results/summary/k197_binned_edge.md. Yeast pending (full set OOM'd; yeast20k rerun 8903748).
+- Not m/z precision: binned 1 Da ~= 0.1 Da on mouse / yeast (0.909 vs 0.916; 0.790 vs 0.789).
+- Not charge or modification confusion: our wrong top-1 hits are almost all DIFFERENT peptides (oodval 0.075 of
+  0.077), and 98% of them (oodval) lie outside the isotope-tolerant 20 ppm window -- a precursor filter removes them,
+  which is why iso20 brings us level with binned.
+- The failure mode: on queries the 400m misses and binned gets right, our wrong top-1 shares almost no peaks with the
+  query (median binned cosine 0.06 oodval / 0.12 test / 0.26 mouse vs 0.39 / 0.33 / 0.50 to the true replicate), yet
+  our cosine to it (0.96-0.98) equals or beats our cosine to the replicate. The encoder lets spectra with no common
+  fragment peaks look identical.
+- It concentrates on SPARSE spectra: those queries have a median 34-81 peaks vs 66-173 overall. By peak-count quartile
+  the 400m - binned gap is worst in the sparsest quarter (oodval -0.136, mouse -0.139) and turns positive with many
+  peaks (test >= 268 peaks +0.325, human >= 233 +0.194: binned degrades on dense noisy spectra, we don't). Also worst
+  when replicates differ as raw spectra (binned replicate cosine < 0.4: oodval -0.154, mouse -0.262) and at charge 4+
+  (oodval -0.186). oodval / mouse are sparse (median 122 / 66 peaks); test / human denser (173 / 138).
+- The two are complementary: late fusion 0.8-0.9 x our cosine + 0.1-0.2 x binned cosine beats both on every
+  nine-species set -- oodval 0.936 (binned 0.906, 400m 0.822), mouse 0.926 (0.916, 0.868), human 0.907 (0.809, 0.899);
+  on test it only matches the 400m (0.917) but lifts the 25m 0.864 -> 0.891.
+- Our embedding cosines sit in a narrow band (0.96-0.98 for top hits): the space is a tight cone.
