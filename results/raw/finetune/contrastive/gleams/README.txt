@@ -1,0 +1,1 @@
+GLEAMS spectrum-retrieval metrics copied 2026-10-04 from $S/baselines/{gleams,noble_mouse20k,noble_human20k,nine_yeast}/gleams_metrics.json (same queries as cons-<set>; test is missing 2 of 25,848 spectra). Key mp512/experimental: cos_MAP@R / cos_Hit@1.

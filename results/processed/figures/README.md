@@ -33,6 +33,27 @@ encoders' final layer as reference lines. Script: `sweeps/plot_contrastive_100k.
 | `c100k_zeroshot_abtt.png` | Frozen encoders with all-but-the-top (mean + top-D principal directions, fitted on TRAIN, removed before cosine): left, raw vs ABTT per encoder (final layer / best block) against binned cosine and trained C7; right, best-block MAP@R vs D. Numbers: results/processed/tables/zeroshot-layers-abtt/summary.csv. 400m@220k/430k pending |
 | `c100k_transfer.png` | small replicate-corpus eval vs this test, all 69 Stage-1 models (Spearman 0.78) |
 
+**Since submission (K163/K188 consensus recipe: ms-contrastive-100k + consensus spectra, lr 4e-4, P170xK2, every
+pretraining checkpoint; same 25,137 test queries and the same reference lines as above).** Script:
+`sweeps/plot_contrastive_cons.py`.
+
+| figure | what it shows |
+|---|---|
+| `c100k_cons_scale.png` | model size at checkpoint 220k (as `c100k_scale.png`) plus the 540k finals incl. 25m |
+| `c100k_cons_checkpoint.png` | pretraining grad steps, one line per scale (as `c100k_checkpoint.png`); bottom row zoomed |
+| `c100k_cons_filters.png` | experimental MAP@R and library-search Hit@1 with no / 20 ppm / iso-20 ppm precursor filter (no query fails 20 ppm on this split) |
+| `c100k_old_vs_new.png` | **old vs new scaling**: new recipe (solid) vs the paper's replicate-corpus C2/C4 curves (dashed) and C7 (stars) |
+
+**All evaluation sets vs baselines** (script `sweeps/plot_contrastive_datasets.py`; sets: validation, test, oodval
+[new], mouse 20k, human 20k, yeast full 86k; baselines on the same queries: binned cosine 0.1/1 Da, GLEAMS
+(`results/raw/finetune/contrastive/gleams/`), the paper's C7 models as stars).
+
+| figure | what it shows |
+|---|---|
+| `datasets_scale.png` | MAP@R and Hit@1 vs model size at 540k, one column per set, open search |
+| `datasets_checkpoint.png` | MAP@R vs pretraining steps per set (K188), one line per scale |
+| `datasets_filters.png` | mouse / human: no filter vs 20 ppm vs iso-20 ppm, all / F (fail 20 ppm) / Fbar queries, vs binned 0.1 Da |
+
 `C1_recipe/` (script `sweeps/plot_c1.py`), on the small replicate-corpus eval:
 - `c1_width_temperature.png`: batch width × temperature × epochs grid.
 - `c1_scale.png`: 50m vs 400m in that grid.
