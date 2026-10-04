@@ -493,6 +493,9 @@ class MSDeltaForDenoising(MSDeltaPreTrainedModel):
         return MSDeltaForDenoisingOutput(loss=loss, logits=logits)
 
 
+FROZEN_ENCODER_CHUNK = 4
+
+
 class MSDeltaForRetrieval(MSDeltaPreTrainedModel):
     """MSDelta encoder with a spectrum-level contrastive retrieval head."""
 
@@ -541,13 +544,21 @@ class MSDeltaForRetrieval(MSDeltaPreTrainedModel):
         if attention_mask is None:
             attention_mask = torch.ones_like(mz, dtype=torch.long)
         if self._encoder_is_frozen:
+            # K195b-P: the frozen encoder runs in sub-batches of FROZEN_ENCODER_CHUNK spectra. Every spectrum is
+            # encoded independently (per-spectrum attention, per-token norms, eval mode), so the hidden states are
+            # the same as one full-batch pass; only the peak memory differs. One pass over 16 spectra of up to 512
+            # peaks allocated ~29 GB for the delta-m/z bias features and ran the retrieval probe out of memory
+            # (8903970 / 8903971).
             with torch.no_grad():
-                outputs = self.msdelta(
-                    mz=mz,
-                    log_intensity=log_intensity,
-                    attention_mask=attention_mask,
-                    return_dict=True,
-                )
+                outputs = BaseModelOutput(last_hidden_state=torch.cat([
+                    self.msdelta(
+                        mz=mz[start : start + FROZEN_ENCODER_CHUNK],
+                        log_intensity=log_intensity[start : start + FROZEN_ENCODER_CHUNK],
+                        attention_mask=attention_mask[start : start + FROZEN_ENCODER_CHUNK],
+                        return_dict=True,
+                    ).last_hidden_state
+                    for start in range(0, mz.shape[0], FROZEN_ENCODER_CHUNK)
+                ], dim=0))
         else:
             outputs = self.msdelta(
                 mz=mz,
