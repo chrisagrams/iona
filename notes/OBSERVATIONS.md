@@ -2384,7 +2384,11 @@ Tables: results/summary/k188_allck_cons_{validation,test}.md (sweeps/allck_cons.
   +0.011 to +0.016, then 120k -> 540k +0.001 to +0.003 (400m 0.898 -> 0.899; 200m flat at 0.895-0.896); scale order
   400m > 200m > 100m > 50m holds from 120k (spread only ~0.012). Filtered: 20 ppm 0.832-0.833 everywhere, its F queries
   0.536 (true matches filtered out), iso20 0.950-0.953 -- checkpoint and scale barely move the filtered numbers.
-- Pending: yeast (8902890).
+- yeast (8902890, full 86k; 6h27): the outlier. 400m is BEST at its first checkpoint (10k 0.763) and falls with
+  pretraining to 0.684 at 540k; 200m flat 0.71-0.73; 50m / 100m noisy (seed sd up to 0.05) with a dip at 120k; 25m
+  final 0.735 beats every 540k model. Binned 0.1 Da 0.789 beats all. Filters: yeast HAS queries failing 20 ppm, and
+  here plain 20 ppm (0.97-0.98) beats iso20 (0.88-0.91) -- the opposite of mouse / human. Consistent with K197-C:
+  more pretraining = stronger learned invariance, which costs on a set where raw spectra already separate replicates.
 
 ## K195a-P today's loss vs proposal_loss (KL to intensity^0.5), 25m debug hours (2026-10-04; A 8903620, B 8903621)
 Chris's 25m production-01 recipe on 20 shards (4.6M spectra), global batch 528, compiled, 2 nodes each; both stopped
