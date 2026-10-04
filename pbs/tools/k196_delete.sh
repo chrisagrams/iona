@@ -8,6 +8,10 @@
 #          ckweights -- each line runs/<run>-<job>/checkpoint-<N>/model.safetensors (D1-lite); the run must have
 #                   final/model.safetensors and the checkpoint must keep encoder/model.safetensors (>1 MB)
 #          path  -- each line any path (dir or file) under the root, outside the never-touch areas below
+#          scoredft -- (K196b) each line runs/sweep-s<scale>_ck<NNN>k_lr4e-4_p170k2_cons_seed<i>-<job>, NNN != 540: a
+#                   finished consensus fine-tune on an intermediate pretraining checkpoint. Deleted only if, for EVERY
+#                   set in K196_SETS, $K196_SCORED/cons-allck-<set>/<run without 'sweep-' and '-<job>'>.json exists and its "path" is exactly
+#                   <live root>/<line>/final (so the scores are of this very run) and the job is not live
 # List lines are paths RELATIVE to the root, so the same list runs on the redundant copy (K196_ROOT=<copy>)
 # and live. Every line is re-checked at deletion time; anything failing a check is skipped and reported.
 #   K196_ROOT     root (default /lus/flare/projects/UIC-HPC/khuss/msdelta)
@@ -16,7 +20,7 @@ set -uo pipefail
 MODE=${1:?mode}; LIST=${2:?list}; LIVE=${3:-}
 ROOT=${K196_ROOT:-/lus/flare/projects/UIC-HPC/khuss/msdelta}
 ROOT=${ROOT%/}
-case $MODE in ckpt|ckweights|run|path) ;; *) echo "bad mode $MODE" >&2; exit 2;; esac
+case $MODE in ckpt|ckweights|run|path|scoredft) ;; *) echo "bad mode $MODE" >&2; exit 2;; esac
 [[ -f $LIST ]] || { echo "no list $LIST" >&2; exit 2; }
 [[ -d $ROOT && ! -L $ROOT ]] || { echo "bad root $ROOT" >&2; exit 2; }
 
@@ -29,6 +33,14 @@ protect=()
 if [[ -n ${K196_PROTECT:-} ]]; then
     [[ -f $K196_PROTECT ]] || { echo "ABORT: protect file $K196_PROTECT missing" >&2; exit 2; }
     mapfile -t protect < <(grep -v '^\s*$' "$K196_PROTECT")
+fi
+
+LIVE_ROOT=/lus/flare/projects/UIC-HPC/khuss/msdelta   # what the scored JSONs' "path" fields name (copy tests too)
+SCORED=${K196_SCORED:-$(cd "$(dirname "$0")/../.." && pwd)/results/raw/finetune/contrastive}
+read -r -a SETS <<<"${K196_SETS:-validation test oodval mouse human yeast}"
+if [[ $MODE == scoredft ]]; then
+    [[ -d $SCORED ]] || { echo "ABORT: scored dir $SCORED missing" >&2; exit 2; }
+    command -v python3 >/dev/null || { echo "ABORT: no python3 to read the scored JSONs" >&2; exit 2; }
 fi
 
 # Areas never touched in any mode (relative to the root).
@@ -79,6 +91,23 @@ while IFS= read -r rel || [[ -n $rel ]]; do
                 if [[ ! -d $p ]]; then reason="not a dir"
                 elif [[ -e $p/final ]]; then reason="has final/"
                 elif grep -qx "$job" <<<"$live_jobs"; then reason="job $job is live"
+                fi
+            fi ;;
+        scoredft)
+            if [[ ! $rel =~ ^runs/sweep-(s[0-9]+m_ck([0-9]{3})k_lr4e-4_p170k2_cons_seed[0-9])-([0-9]{7})$ ]]; then
+                reason="not runs/sweep-s<scale>_ck<NNN>k_lr4e-4_p170k2_cons_seed<i>-<job>"
+            else
+                name=${BASH_REMATCH[1]}; ck=${BASH_REMATCH[2]}; job=${BASH_REMATCH[3]}
+                if [[ $ck == 540 ]]; then reason="final pretraining checkpoint (540k) -- never in K196b"
+                elif [[ ! -d $p ]]; then reason="not a dir"
+                elif grep -qx "$job" <<<"$live_jobs"; then reason="job $job is live"
+                else
+                    for set in "${SETS[@]}"; do
+                        js=$SCORED/cons-allck-$set/$name.json
+                        if [[ ! -f $js ]]; then reason="not scored on $set"; break; fi
+                        got=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("path",""))' "$js" 2>/dev/null)
+                        if [[ $got != "$LIVE_ROOT/$rel/final" ]]; then reason="$set score is of another run ($got)"; break; fi
+                    done
                 fi
             fi ;;
         path)  # explicit allowlist of shapes (K196 D3/D4); anything else is skipped
