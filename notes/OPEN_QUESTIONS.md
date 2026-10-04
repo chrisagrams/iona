@@ -400,7 +400,7 @@ precursor mass) to near-identical embeddings. That costs us wherever raw spectra
 impostors well (nine-species: one lab/instrument per species; binned-cosine margin 0.26-0.29 vs 0.12 on test);
 sparse spectra (oodval, mouse) make it worse, but yeast is dense and shows it too. So K197b/c address the cause and
 K197a only the sparse part (updated after yeast20k, 8903748). The two are complementary (late
-fusion beats both on every nine-species set). Ways to bring it into training -- each needs a card + approval:
+fusion beats both on every nine-species set). Ways to bring it into training -- each needs a proposal (notes/proposals/) + approval:
   K197a  peak-subsampling augmentation in contrastive training (randomly keep the top-k peaks, k ~ 20-100, so the
          model sees sparse spectra; ms-contrastive-100k median is 173 peaks, the failures 34-81). Cheapest test first:
          inference-only, subsample test spectra and see if we degrade faster than binned (one debug job).
@@ -409,6 +409,6 @@ fusion beats both on every nine-species set). Ways to bring it into training -- 
          cosine ~0.
   K197c  relational distillation from binned cosine: an auxiliary loss making our similarity of non-replicate pairs
          track binned cosine (weight lambda), so "no shared peaks => far apart" is learned rather than imposed.
-  K197d  no training: ship the fusion (0.8 x ours + 0.2 x binned) as the retrieval score, or as a concatenated
+  K197d  [recorded as a potential direction, notes/proposals/K197d_binned_fusion.md, user 2026-10-04] no training: ship the fusion (0.8 x ours + 0.2 x binned) as the retrieval score, or as a concatenated
          embedding [sqrt(a) x ours, sqrt(1-a) x binned] whose cosine is exactly the fusion (binned part sparse 20k-d,
          or PCA-compressed).

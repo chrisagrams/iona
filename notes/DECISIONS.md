@@ -210,6 +210,7 @@ IDs carry a track suffix: -C contrastive (spectrum encoder), -A alignment (pepti
 | 2026-10-04 01:30 | K195a-P runs | Data 8903568 (3 min): 4,611,882 train + 10k validation subset (k195-cap512-20sh). Smoke 8903583 passed (both arms rc 0; loss/proposal_loss in train + eval; objective_loss = loss (A) / proposal_loss (B); eval_loss_check within 3e-4 of eval_loss -- DDP eval padding duplicates in our sums). Debug-hour arms: A 8903620 (debug), B 8903621 (debug-scaling), 2 nodes each, compile, eval every 500, save every 2500, stop = walltime (MSDELTA_STOP_AT_STEP 20000 unreachable; ~5-7k steps expected). Chris's early 25m curve for reference: results/raw/diag/k195/chris25m_log.json | Claude (ops) |
 | 2026-10-04 02:10 | K197-C diag | User: "Sure, maybe see what edge binned cosine has and how we could incorporate that into our training somehow". Diagnostic only (no training): pbs/diag/k197_binned_edge.py, job 8903703 (debug, 1 node, 5 tiles). Claude picked: sets test / oodval / mouse / human / yeast; encoders = consensus-recipe 540k seed 0 at 400m and 25m (best at most sets / best on yeast); binned 0.1 Da; per-query AP@R, Hit@1, top-5 neighbours, cosine to replicates / best wrong; late fusion alpha*encoder + (1-alpha)*binned cosine, alpha 0..1 step 0.1. Any training change that follows gets its own card | Claude (diag) |
 | 2026-10-04 02:40 | K195a-P result | Debug hours done (both walltime-stopped at ~7k steps). A reproduces Chris's 25m curve; A's proposal_loss flat at ~0.24 (= the value of a perfect today's-loss model), B moves both losses (proposal 0.049, today's 0.32 vs its floor 0.23). No decision taken; next step (downstream comparison of A vs B checkpoints, or a longer run) awaits the user | Claude (report) |
+| 2026-10-04 03:30 | K197d / K195b | User: "Record as K197d as a potential direction to explore" -> notes/proposals/K197d_binned_fusion.md. "Don't write 'cards' I want you to write proposals, in notes/proposals". K195b: "let's schedule a full training of a 25m model using the same recipe as before but on the full ds. We then finetune it downstream and compare ... built in eval probes ... as a first eval too. This is the priority now" -> notes/proposals/K195b_full_25m_proposal_loss.md (choices K195b-1..8 await the user; nothing submitted) | user |
 
 ## Settings chosen WITHOUT explicit approval (before this log existed)
 
@@ -222,6 +223,7 @@ Recorded so the record is honest; their results stand but were not the user's ch
 | C20 (sweep-c20) | the three arms (consensus K3, K4 at P64, K3 + KL 0), lr 1e-4, 3 seeds |
 | C23 hp-single (50m) | the 12 one-factor arms and their values |
 | K6 / C24 filter analyses | models, datasets, filter widths (100/25/5/1/0.1 Da; 100/20/10 ppm), isotope k range −2..2 |
+| K197-C diag (8903703, 8903748; 2026-10-04) | submitted to debug without approval of its settings: encoders (400m + 25m, 540k, seed 0), sets, fusion alphas, yeast20k for the rerun |
 
 ## Pending approval
 
