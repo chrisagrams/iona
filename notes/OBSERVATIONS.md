@@ -2436,3 +2436,18 @@ Per query, open search, experimental vs experimental, consensus recipe 540k seed
   human 0.18 (+0.090), yeast20k 0.26 (-0.108), oodval 0.27 (-0.084), mouse 0.29 (-0.048). Where replicates were
   measured alike (one lab / instrument per species in nine-species), shared peaks nearly solve the task and our
   learned invariance only adds false friends; where replicates differ across labs (ms-contrastive-100k), it wins.
+
+## K195b-P S2 benchmarks (2026-10-04; 8903970 micro 32, 8903971 micro 2; 2 nodes x 8 tiles, global 512, proposal loss)
+- Speed between pauses: micro 2 x accum 16 ~2.2 steps/s (0.45 s/step), micro 32 x accum 1 ~2.3 steps/s -- no gain.
+- Not the same trajectory: micro 32 leaves the initial plateau much later (loss at step 1,200: 0.892 vs 0.544 with
+  micro 2; eval at 1,500: 0.525 vs ~0.43 at 2,000 for micro 2). By the approved rule -> Chris's layout, micro 2 x 16.
+- Pauses every 500 steps of 3-8 min (inline linear probes on 3,000 spectra at batch 1 + bias curves + eval + save,
+  with the sidecars starting on node 0). In the full run (inline probes every 5,000) ~11 h over 540k steps.
+- Probes: inline linear probes and bias curves log to W&B; the denoise sidecar completed (step 500, ~11 min; denoise/
+  f1, auroc, ... in W&B; later ones were SIGTERMed at the walltime). The retrieval sidecar ran OUT OF MEMORY at every
+  checkpoint in both jobs: the frozen encoder's single pass over 16 spectra x up to 512 peaks allocated 29 GB for
+  the delta-m/z bias features. Fix: MSDeltaForRetrieval runs a FROZEN encoder in sub-batches of 4 (identical hidden
+  states; tests/test_frozen_retrieval_chunks.py, both architectures; 85 related tests pass in .venv-2026); debug
+  validation 8904056 (micro 2, stop 1,000, probes at 500 / 1,000).
+- The jobs did not exit at the stop step: training waits for running sidecar probes before it ends (fine for S3).
+- Full-run estimate: 540,423 x 0.45 s ~ 68 h + ~11 h inline probes + evals ~ 80 h on 2 nodes.
