@@ -1,7 +1,9 @@
 # K195b-P: full 25m pretraining on the proposal loss, then downstream vs Chris's 25m
 
 Status: **APPROVED 2026-10-04** as recommended ("Proposal looks good, don't do downstream until this pretrain is
-complete. You can delete the intermediate finetunes, then submit the job as described"). S5 waits for S3 to finish. User's request (2026-10-04): "let's schedule a
+complete. You can delete the intermediate finetunes, then submit the job as described"). S5 waits for S3 to finish.
+Progress: S0 done (K196b, 9.11T -> 7.92T); S1 done (8903969); S2 done (8903970/1 + probe fix validated 8904056; layout =
+micro 2 x 16); S3 submitted 2026-10-04 as 8904152 (capacity, 110 h). User's request (2026-10-04): "let's schedule a
 full training of a 25m model using the same recipe as before but on the full ds. We then finetune it downstream and
 compare. Doesn't training also have built in eval probes by default? We could use them as a first eval too. This is the
 priority now".
