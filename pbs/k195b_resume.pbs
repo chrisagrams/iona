@@ -1,0 +1,36 @@
+#!/bin/bash -l
+#PBS -N k195b-25m-B-resume
+#PBS -A UIC-HPC
+#PBS -l select=2
+#PBS -l place=scatter
+#PBS -l filesystems=home:flare
+#PBS -j oe
+#PBS -o /lus/flare/projects/UIC-HPC/khuss/msdelta/runs/k195b/pbs-logs/
+# K195b-P (approved; user 2026-10-05 "Sure do b": run a chunk before the Aurora maintenance, resume after it):
+# continue the full 25m proposal-loss run from its newest COMPLETE checkpoint (trainer_state.json, model.safetensors,
+# optimizer.pt, scheduler.pt and rng state present) in the same run dir / same W&B run (RUN_NAME k195b-25m-B).
+# Refuses to start if there is no complete checkpoint (never restarts from scratch). Same settings as the first chunk.
+#   qsub -q capacity -l walltime=HH:MM:SS -W depend=afterany:<previous job> -v REPO_DIR=$PWD pbs/k195b_resume.pbs
+REPO_DIR=${REPO_DIR:-${PBS_O_WORKDIR:-$PWD}}
+cd "$REPO_DIR" || exit 1
+S=/lus/flare/projects/UIC-HPC/khuss/msdelta
+# Overridable for the debug resume test (K195B_*); defaults = the real run.
+RUN_NAME=${K195B_RUN_NAME:-k195b-25m-B}; CHECKPOINT_DIR=${K195B_CHECKPOINT_DIR:-$S/runs/k195b}
+ARGS_FILE=${K195B_ARGS_FILE:-configs/k195/k195b-25m-B/training.args}
+PREPROCESSED_DATASET_DIR=${K195B_DATA:-$S/data/k195b-cap512-full/preprocessed}
+RUN=$CHECKPOINT_DIR/$RUN_NAME
+ck=
+for d in $(ls -d "$RUN"/checkpoint-* 2>/dev/null | sort -t- -k2 -n -r); do
+    if [[ -f $d/trainer_state.json && -s $d/model.safetensors && -s $d/optimizer.pt && -s $d/scheduler.pt ]] \
+        && [[ -s $d/rng_state_0.pth && -s $d/rng_state_15.pth ]]; then ck=$d; break; fi
+    echo "skipping incomplete $d"
+done
+[[ -n $ck ]] || { echo "ABORT: no complete checkpoint in $RUN"; exit 3; }
+[[ -d $RUN/final ]] && { echo "ABORT: $RUN/final exists -- the run already finished"; exit 3; }
+echo "$(date -Is) resuming from $ck"
+export RUN_NAME CHECKPOINT_DIR HF_HOME=$S/huggingface \
+    PREPROCESSED_DATASET_DIR XPUS_PER_HOST=8 MICRO_BATCH_SIZE=2 \
+    GLOBAL_BATCH_SIZE=512 TORCH_COMPILE=1 FRAMEWORKS_MODULE=frameworks/2026.1.0 VENV_DIR=$REPO_DIR/.venv-2026 \
+    PROBE_EXECUTION=sidecar CCL_KVS_MODE=pmi WANDB_ENTITY=CS_Pharm ARGS_FILE \
+    RESUME_FROM_CHECKPOINT=$ck
+exec bash "$REPO_DIR/pbs/aurora-pretrain.pbs"
