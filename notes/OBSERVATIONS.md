@@ -2451,3 +2451,11 @@ Per query, open search, experimental vs experimental, consensus recipe 540k seed
   validation 8904056 (micro 2, stop 1,000, probes at 500 / 1,000).
 - The jobs did not exit at the stop step: training waits for running sidecar probes before it ends (fine for S3).
 - Full-run estimate: 540,423 x 0.45 s ~ 68 h + ~11 h inline probes + evals ~ 80 h on 2 nodes.
+
+## K195b-P full run, probes during chunk 1 (8905037; 2026-10-05)
+- Retrieval probe works end to end from step 30k (faiss-cpu in .venv-2026; the 10k / 20k probes failed: no faiss, and
+  the 20k process had loaded pytorch_metric_learning before the install). Step 30k: retrieval (ms-contrastive-100k)
+  Hit@1 0.205, MAP@100 0.164, R@5 0.180; replicate retrieval Hit@1 0.342, MAP@100 0.107.
+- Denoise probe: 20k AUROC 0.881 / F1 0.848 / AUPRC 0.931; 30k AUROC 0.878 / F1 0.846 / AUPRC 0.929 (10k failed
+  intermittently in sklearn). No reference yet: the same probes on Chris's 25m final are step S4.
+- To rerun post hoc: retrieval 10k + 20k, denoise 10k.
