@@ -1,6 +1,6 @@
 """K117-P: how much of the SDPA triangle-attention path is copies, and what do copy-free variants give?
 
-    python pbs/diag/triattn_copy_bench.py --out results/raw/diag/triattn_copy_bench/<jobid>.json
+    python pbs/diag/triattn_copy_bench.py --out $MSDELTA_DIAG/triattn_copy_bench/<jobid>.json
 
 Context (notes/OPEN_QUESTIONS.md K116-P / K117-P): the model's SDPA path
 (msdelta/models/pairformer.py, TriangleAttention, pair_tri_attn_impl="sdpa", sdpa_flatten) folds

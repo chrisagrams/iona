@@ -1,10 +1,10 @@
-"""Turn finished denoise sweep runs into the tables under results/.
+"""Turn finished denoise sweep runs into the grid tables in $MSDELTA_DERIVED/denoise/.
 
     python sweeps/summarise_denoise.py --runs /lus/flare/projects/UIC-HPC/$USER/msdelta/runs
 
-Each grid writes one file. The committed files ARE the artifact -- this script needs the
-scratch run directories, which exist only on the machine that ran them, so nobody else
-can regenerate them and they must not be gitignored the way the arm configs are.
+Each grid writes one file, rebuilt from whatever run directories it finds: check that every
+run a table lists is still on /flare before rerunning it over an existing table. K198a moved the
+tables out of git into $MSDELTA_DERIVED/denoise/ (derived data; notes/AGENT_PLAYBOOK_2.md C7).
 
 WHY EVERY TABLE PRINTS `spectra` AND `peaks`. The first 216-arm grid (job 8840345) scored
 1,440 test spectra where every later job scored 8,584 of the same 9,893-row split. Same
@@ -21,10 +21,14 @@ import argparse
 import json
 import re
 import statistics as st
+import sys
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import homes  # noqa: E402  (data homes, configs/homes.env)
+
 REPO = Path(__file__).resolve().parent.parent
-OUT = REPO / "results" / "raw" / "finetune" / "denoise"
+OUT = homes.DERIVED / "denoise"
 
 # job id -> (filename, title, how to split an arm name into columns)
 GRIDS = {
@@ -101,7 +105,7 @@ def write_50m(runs: Path) -> None:
         "THE TOP CLUSTER IS NOT RESOLVED. The best eight arms span "
         f"{max(top8)-min(top8):.4f} across three head",
         "widths and two encoder scales, against a seed noise of 0.0005 measured at a fixed",
-        "configuration (results/raw/finetune/denoise/denoise_scale_seeds.txt). Most of the ranking inside that",
+        "configuration (denoise_scale_seeds.txt). Most of the ranking inside that",
         "cluster is not a measurement. Do not quote a winner without the error bar.",
         "",
         "encoder_lr_scale 0 means a FROZEN encoder: those arms collapse, which is the one",

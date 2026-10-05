@@ -14,6 +14,8 @@ from msdelta.eval_retrieval import score_encoder
 from msdelta.finetune_contrastive import ContrastiveCollator
 from msdelta.processing_msdelta import MSDeltaProcessor
 from msdelta.reranking import build_alignment_datasets
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import homes  # noqa: E402  (data homes, configs/homes.env)
 
 R = "/lus/flare/projects/UIC-HPC/khuss/msdelta/runs"
 arms = sorted(glob.glob(f"{R}/sweep-50m_ck330k_seed*-8851663"))[:3]
@@ -42,5 +44,5 @@ for a in arms:
                   flush=True)
         except Exception as e:
             print(f"  {name} {tag}: FAILED {type(e).__name__}: {e}", flush=True)
-json.dump(out, open("/home/khuss/code/msdelta/results/raw/finetune/contrastive/ckpt_vs_final.json","w"), indent=2)
+json.dump(out, open(homes.EVAL / "contrastive" / "ckpt_vs_final.json", "w"), indent=2)
 print("  wrote ckpt_vs_final.json")

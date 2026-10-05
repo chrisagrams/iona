@@ -1,18 +1,22 @@
 """K188-C: consensus fine-tunes on every pretraining checkpoint, per scale (mean +- sd over 3 seeds).
 
-Arms: results/raw/finetune/contrastive/cons-allck-<set>/s<scale>_ck<NNN>k_lr4e-4_p170k2_cons_seed<i>.json (job 8901080);
+Arms: $MSDELTA_EVAL/contrastive/cons-allck-<set>/s<scale>_ck<NNN>k_lr4e-4_p170k2_cons_seed<i>.json (job 8901080);
 the 540k finals come from the K163 twins in cons-<set>/ (same recipe). Library search and experimental retrieval with
 no filter / 20 ppm / isotope-tolerant 20 ppm; F = queries failing the filter, Fbar = passing it (F columns only when a
-set has failures). Writes results/summary/k188_allck_cons_<set>.md.
+set has failures). Writes results/k188_allck_cons/<set>.md.
 """
 import argparse
 import json
 import re
 import statistics
+import sys
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import homes  # noqa: E402  (data homes, configs/homes.env)
+
 ROOT = Path(__file__).resolve().parents[1]
-R = ROOT / "results/raw/finetune/contrastive"
+R = homes.EVAL / "contrastive"
 SCALES = ["025m", "050m", "100m", "200m", "400m"]
 COLS = [("library/open/full/Hit@1", "lib Hit@1"), ("library/20ppm/full/Hit@1", "lib 20ppm"),
         ("library/iso20ppm/full/Hit@1", "lib iso20"), ("experimental/open/full/MAP@R", "exp MAP@R"),
@@ -71,9 +75,10 @@ def main():
         for sc, ck, mets in rows:
             got = [m for m in mets if m]
             lines.append(f"| {sc} | {ck} | {len(got)} | " + " | ".join(ms([m.get(k) for m in got]) for k, _ in cols) + " |")
-        out = ROOT / f"results/summary/k188_allck_cons_{s}.md"
+        out = homes.RESULTS / "k188_allck_cons" / f"{s}.md"
+        out.parent.mkdir(parents=True, exist_ok=True)
         out.write_text("\n".join(lines) + "\n")
-        print("\n".join(lines) + f"\n-> {out.relative_to(ROOT)}\n")
+        print("\n".join(lines) + f"\n-> {out}\n")
 
 
 if __name__ == "__main__":

@@ -1,6 +1,6 @@
 """K115: numerical accuracy of triangle attention under bf16 (naive vs SDPA vs all-bf16).
 
-    python pbs/diag/triattn_bf16_check.py --out results/raw/diag/triattn_bf16/<jobid>.json
+    python pbs/diag/triattn_bf16_check.py --out $MSDELTA_DIAG/triattn_bf16/<jobid>.json
 
 Stage 0 card dims (c_z = 64, 4 heads x 16, chunk 32), one starting-node and one ending-node
 module. Per (B, N): the SAME inputs and weights for every variant --

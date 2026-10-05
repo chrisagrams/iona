@@ -7,10 +7,10 @@ Arms (Chris's 25m production-01 recipe, 20 shards, global batch 528, compiled; s
 Both log 'loss' (today's KL to the linear intensity share) and 'proposal_loss' (KL to intensity^0.5), train and eval.
 Steps come from trainer_state.json (checkpoint-5000) and, after it, from the logged epoch x steps per epoch.
 
-Reference lines: results/raw/diag/k195/k195a_floors.json (each loss for a model that fits the OTHER target
+Reference lines: $MSDELTA_DERIVED/k195/k195a_floors.json (each loss for a model that fits the OTHER target
 perfectly, and for a uniform prediction).
 
-Writes results/raw/diag/k195/k195a_<arm>_log.json and results/processed/figures/P_pretrain/k195a_losses.png.
+Writes $MSDELTA_DERIVED/k195/k195a_<arm>_log.json and results/pretrain/k195a_losses.png.
 """
 
 from __future__ import annotations
@@ -18,6 +18,7 @@ from __future__ import annotations
 import ast
 import json
 import re
+import sys
 from pathlib import Path
 
 import matplotlib
@@ -25,11 +26,14 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt  # noqa: E402
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import homes  # noqa: E402  (data homes, configs/homes.env)
+
 ROOT = Path(__file__).resolve().parents[1]
 RUNS = Path("/lus/flare/projects/UIC-HPC/khuss/msdelta/runs/k195")
 ARMS = {"A": ("8903620", "A: trains on today's loss", "#2563eb"), "B": ("8903621", "B: trains on proposal_loss", "#dc2626")}
-OUT = ROOT / "results/raw/diag/k195"
-FIGS = ROOT / "results/processed/figures/P_pretrain"
+OUT = homes.DERIVED / "k195"
+FIGS = homes.RESULTS / "pretrain"
 
 
 def load(arm, job):

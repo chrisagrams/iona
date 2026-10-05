@@ -6,7 +6,7 @@
 #        -v REPO_DIR=$PWD pbs/diag/triattn_copy_bench.pbs
 #
 # One tile. Expected < 30 min (the script stops starting new sizes after 40 min and writes what
-# it has). Output: results/raw/diag/triattn_copy_bench/<jobid>.json (+ .log, and
+# it has). Output: $MSDELTA_DIAG/triattn_copy_bench/<jobid>.json (+ .log, and
 # <jobid>_traces/ with the gzipped profiler traces of B=2, N=200).
 
 #PBS -N msdelta-tricopy
@@ -17,6 +17,7 @@
 
 set -uo pipefail
 REPO_DIR=${REPO_DIR:-${PBS_O_WORKDIR:-$PWD}}
+source "${REPO_DIR:-${PBS_O_WORKDIR:-$PWD}}/pbs/lib/homes.sh" || exit 1   # K198a: data homes (configs/homes.env)
 cd "$REPO_DIR"
 
 set +u
@@ -32,7 +33,7 @@ export PYTHONPATH=$REPO_DIR${PYTHONPATH:+:$PYTHONPATH}
 source "$REPO_DIR/pbs/lib/code_snapshot.sh"
 PY="$REPO_DIR/.venv/bin/python"
 JOB=${PBS_JOBID%%.*}; JOB=${JOB:-local}
-O=results/raw/diag/triattn_copy_bench; mkdir -p "$O"
+O=$MSDELTA_DIAG/triattn_copy_bench; mkdir -p "$O"
 
 echo "=== $(date -Is) triattn copy bench on $(hostname), job $JOB"
 # qsub -v cannot carry commas: BENCH_BATCHES / BENCH_PEAKS use "+" between values (e.g. BENCH_PEAKS=150+200).

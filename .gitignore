@@ -27,4 +27,10 @@ data/*
 # process core dumps
 core.[0-9]*
 .venv-2026/
-results/raw/diag/k197/*.npz
+# K198a (notes/AGENT_PLAYBOOK_2.md C7): results/ takes only Markdown and plots; data goes to the homes in
+# configs/homes.env. Files already tracked under results/raw|processed stay tracked until K198b.
+/results/**
+!/results/**/
+!/results/**/*.md
+!/results/**/*.png
+!/results/**/*.svg

@@ -5,6 +5,7 @@
 #PBS -l filesystems=home:flare
 #PBS -j oe
 #PBS -o /home/khuss/code/msdelta/pbs/logs/
+source "${REPO_DIR:-${PBS_O_WORKDIR:-$PWD}}/pbs/lib/homes.sh" || exit 1   # K198a: data homes (configs/homes.env)
 set -uo pipefail
 cd /home/khuss/code/msdelta
 S=/lus/flare/projects/UIC-HPC/khuss/msdelta; D=$S/baselines/nine_yeast20k
@@ -13,7 +14,7 @@ source "${REPO_DIR:-${PBS_O_WORKDIR:-$PWD}}/pbs/lib/load_frameworks.sh"
 export ONEAPI_DEVICE_SELECTOR=level_zero:gpu ZE_FLAT_DEVICE_HIERARCHY=FLAT PYTHONPATH=$PWD OMP_NUM_THREADS=8
 export HF_HOME=$S/huggingface HF_HUB_OFFLINE=1 HF_DATASETS_OFFLINE=1
 [ -d $D/prepared ] || { echo "subset missing: $D"; exit 1; }
-OUT=results/raw/finetune/contrastive/nine20k; mkdir -p $OUT
+OUT=$MSDELTA_EVAL/contrastive/nine20k; mkdir -p $OUT
 n=$(grep -cv '^#' $MODELS); pids=()
 for i in $(seq 0 $((n - 1))); do
   ZE_AFFINITY_MASK=$i .venv/bin/python -m msdelta.eval_grouped_retrieval score --data $D/prepared \

@@ -2,19 +2,21 @@
 
     .venv/bin/python sweeps/package_alignment.py
 
-Read from the per-run result JSONs: student test evals (results/raw/finetune/align/test_*.json) and the
+Read from the per-run result JSONs: student test evals ($MSDELTA_EVAL/align/test_*.json) and the
 cross-modal comparisons vs yHydra (baselines/<dataset>/xmodal/xmodal_*.json on Lustre). Nothing typed in.
 Plotting only (login node).
 
     A_windows.png           Hit@1 vs precursor-mass window, per dataset, ours vs yHydra
     A_teacher_student.png   student Hit@1 vs its teacher's spectrum retrieval (MAP@R), test split
     A_ablations.png         appendix: pooling and loss variants (50M teacher), test Hit@1
+Figures (+ A_teacher_student.md) go to results/summary/, the CSV behind each to $MSDELTA_DERIVED/summary/.
 """
 from __future__ import annotations
 
 import csv
 import json
 import re
+import sys
 from collections import defaultdict
 from pathlib import Path
 
@@ -24,10 +26,14 @@ import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.lines import Line2D
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import homes  # noqa: E402  (data homes, configs/homes.env)
+
 REPO = Path(__file__).resolve().parent.parent
-ALIGN = REPO / "results" / "raw" / "finetune" / "align"
+ALIGN = homes.EVAL / "align"
 BASE = Path("/lus/flare/projects/UIC-HPC/khuss/msdelta/baselines")
-FIG = REPO / "results" / "processed" / "figures" / "SUMMARY"
+FIG = homes.RESULTS / "summary"      # the figures (results/summary/)
+TAB = homes.DERIVED / "summary"      # the CSV behind each figure
 INK, MUTED, GRIDC = "#1f2937", "#6b7280", "#e5e7eb"
 YHYDRA = "#f59e0b"
 STYLE = {"font.family": "DejaVu Sans", "font.size": 10, "axes.edgecolor": "#9ca3af",
@@ -44,7 +50,7 @@ DATASETS = [("yhydra", "ms-contrastive-100k test\n(in-distribution for ours)"),
             ("c11_cap20", "HEK\n(unseen, low-res MS2)"),
             ("nine_yeast", "nine-species yeast\n(unseen, high-res)"),
             ("mouse", "nine-species mouse\n(unseen, high-res)")]
-MOUSE = REPO / "results" / "raw" / "finetune" / "align" / "mouse_yhydra" / "compare_mouse.json"   # job 8870879
+MOUSE = homes.EVAL / "align" / "mouse_yhydra" / "compare_mouse.json"   # job 8870879
 WINDOWS = [("open", "", "open search"), ("1.1Da", "/window_1.1Da", "±1.1 Da"), ("20ppm", "/window_20ppm", "20 ppm")]
 
 
@@ -221,7 +227,7 @@ def fig_ablations(srows):
 
 def write(name, rows):
     keys = list(rows[0])
-    with open(FIG / name, "w", newline="") as fh:
+    with open(TAB / name, "w", newline="") as fh:
         w = csv.DictWriter(fh, keys); w.writeheader()
         for r in rows:
             w.writerow({k: (f"{v:.5f}" if isinstance(v, float) else v) for k, v in r.items()})
@@ -229,6 +235,7 @@ def write(name, rows):
 
 def main():
     FIG.mkdir(parents=True, exist_ok=True)
+    TAB.mkdir(parents=True, exist_ok=True)
     wr = window_rows(); write("A_windows.csv", fig_windows(wr))
     write("A_windows_A2_preview.csv", fig_windows(wr, fixed="ours, 400M teacher", out="A_windows_A2_preview.png"))
     sr = student_rows()

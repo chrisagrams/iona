@@ -3,8 +3,8 @@
     .venv/bin/python sweeps/plot_contrastive_cons.py
 
 New models: lr 4e-4, P170 x K2, ms-contrastive-100k + consensus spectra (K163/K188), 3 seeds per point.
-  results/raw/finetune/contrastive/cons-allck-test/  (job 8901080: every non-final checkpoint, 50m-400m)
-  results/raw/finetune/contrastive/cons-test/        (K163 finals at 540k, 25m-400m)
+  $MSDELTA_EVAL/contrastive/cons-allck-test/  (job 8901080: every non-final checkpoint, 50m-400m)
+  $MSDELTA_EVAL/contrastive/cons-test/        (K163 finals at 540k, 25m-400m)
 Old (paper) models: C2/C4 replicate-corpus-only fine-tunes and C7, in grouped100k-test/ -- the SAME 25,137
 experimental queries (same eval-data dir), so old and new share axes and the paper's reference lines.
 
@@ -26,11 +26,12 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import plot_contrastive_100k as p  # noqa: E402  (style, loaders and helpers of the paper figures)
 from plot_contrastive_100k import plt  # noqa: E402
+import homes  # noqa: E402  (data homes, configs/homes.env)
 
 import glob  # noqa: E402
 import json  # noqa: E402
 
-R = p.REPO / "results" / "raw" / "finetune" / "contrastive"
+R = homes.EVAL / "contrastive"
 FIGS = p.FIGS
 COLOUR = {"25m": "#bfdbfe", **p.SCALE_COLOUR}
 ORDER = ["25m"] + p.ORDER
@@ -184,6 +185,7 @@ def fig_old_vs_new(new, old):
 
 
 def main() -> int:
+    FIGS.mkdir(parents=True, exist_ok=True)
     old = p.load()
     new = load_new()
     for f in (fig_scale, fig_checkpoint, fig_filters, fig_old_vs_new):

@@ -8,7 +8,7 @@ nine-species yeast). Ours: K163 consensus finals (540k, cons-<set>/) and the K18
 (cons-allck-<set>/), 3 seeds, mean +- sd. Baselines, open search, on the same queries:
   binned cosine 0.1 / 1 Da   <set dir>/binned_w0.1.json, binned_w1.0005.json (validation: k90-refcheck/binned01.json)
   GLEAMS                     gleams/<set>.json (copied from $S/baselines; none for validation / oodval)
-  paper's best (C7)          results/processed/figures/SUMMARY/C_benchmarks.csv / C_transfer.csv (400M; 50M where run)
+  paper's best (C7)          $MSDELTA_DERIVED/summary/C_benchmarks.csv / C_transfer.csv (400M; 50M where run)
 With precursor filters (20 ppm, isotope-tolerant 20 ppm; F = queries failing 20 ppm, Fbar = passing): binned 0.1 Da on
 mouse / human from filter-failure/summary.json.
 
@@ -28,6 +28,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import plot_contrastive_100k as p  # noqa: E402
 import plot_contrastive_cons as pc  # noqa: E402
+import homes  # noqa: E402  (data homes, configs/homes.env)
 from plot_contrastive_100k import plt  # noqa: E402
 
 R = pc.R
@@ -65,7 +66,7 @@ def paper_best(s):
         return {}
     f, bench = PAPER[s]
     rows = {}
-    for r in csv.DictReader(open(p.REPO / "results/processed/figures/SUMMARY" / f"{f}.csv")):
+    for r in csv.DictReader(open(homes.DERIVED / "summary" / f"{f}.csv")):
         m = re.search(r"(\d+)M", r["model"])
         if r["benchmark"] == bench and "C7" in (r["note"] + r["model"]) and m:
             rows.setdefault(f"{m.group(1)}m", []).append((float(r["map_at_r"]), float(r["hit_at_1"])))
@@ -163,6 +164,7 @@ def fig_filters():
 
 
 def main() -> int:
+    FIGS.mkdir(parents=True, exist_ok=True)
     for f in (fig_scale, fig_checkpoint, fig_filters):
         print(f())
     return 0

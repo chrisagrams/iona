@@ -17,6 +17,7 @@
 
 set -uo pipefail
 REPO_DIR=${REPO_DIR:-${PBS_O_WORKDIR:-$PWD}}
+source "${REPO_DIR:-${PBS_O_WORKDIR:-$PWD}}/pbs/lib/homes.sh" || exit 1   # K198a: data homes (configs/homes.env)
 cd "$REPO_DIR"
 JOB=${JOB:?set JOB to the sweep job id whose arms to score}
 VENV_DIR=${VENV_DIR:-$REPO_DIR/.venv}
@@ -51,4 +52,4 @@ fi
     --job "$JOB" ${BASELINE:+--baseline "$BASELINE"} \
     ${ARMS:+--arms "$ARMS"} \
     --runs "$SCRATCH_ROOT/runs" \
-    --out "results/raw/finetune/contrastive/retrieval_vs_separation_${JOB}${SUFFIX}.json"
+    --out "$MSDELTA_EVAL/contrastive/retrieval_vs_separation_${JOB}${SUFFIX}.json"

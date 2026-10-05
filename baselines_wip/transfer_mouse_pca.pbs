@@ -9,6 +9,7 @@
 #PBS -l filesystems=home:flare
 #PBS -j oe
 #PBS -o /home/khuss/code/msdelta/pbs/logs/
+source "${REPO_DIR:-${PBS_O_WORKDIR:-$PWD}}/pbs/lib/homes.sh" || exit 1   # K198a: data homes (configs/homes.env)
 set -uo pipefail
 cd /home/khuss/code/msdelta
 S=/lus/flare/projects/UIC-HPC/khuss/msdelta; B=$S/baselines
@@ -17,7 +18,7 @@ source "${REPO_DIR:-${PBS_O_WORKDIR:-$PWD}}/pbs/lib/load_frameworks.sh"
 export ONEAPI_DEVICE_SELECTOR=level_zero:gpu ZE_FLAT_DEVICE_HIERARCHY=FLAT PYTHONPATH=$PWD OMP_NUM_THREADS=8
 export HF_HOME=$S/huggingface HF_HUB_OFFLINE=1 HF_DATASETS_OFFLINE=1
 PY=.venv/bin/python
-R=results/raw/finetune/contrastive
+R=$MSDELTA_EVAL/contrastive
 
 echo "=== $(date -Is) PCA on the existing benchmarks (tiles 8-11, background)"
 pca() {  # tile, then data:outdir pairs run in sequence on that tile

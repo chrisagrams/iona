@@ -15,9 +15,10 @@
 
 set -uo pipefail
 REPO_DIR=${REPO_DIR:-${PBS_O_WORKDIR:-$PWD}}
+source "${REPO_DIR:-${PBS_O_WORKDIR:-$PWD}}/pbs/lib/homes.sh" || exit 1   # K198a: data homes (configs/homes.env)
 cd "$REPO_DIR"
 MODELS=${MODELS:?set MODELS}
-OUT_DIR=${OUT_DIR:-results/raw/finetune/denoise/by-length}
+OUT_DIR=${OUT_DIR:-$MSDELTA_EVAL/denoise/by-length}
 VENV_DIR=${VENV_DIR:-$REPO_DIR/.venv}
 SCRATCH_ROOT=${SCRATCH_ROOT:-/lus/flare/projects/${PROJECT:-UIC-HPC}/$USER/msdelta}
 set +u

@@ -4,7 +4,7 @@
 #   qsub -q debug -l select=1 -l walltime=00:30:00 -A UIC-HPC -l filesystems=home:flare \
 #        -v REPO_DIR=$PWD pbs/diag/triattn_bf16_check.pbs
 #
-# One tile. Output: results/raw/diag/triattn_bf16/<jobid>.json (+ .log).
+# One tile. Output: $MSDELTA_DIAG/triattn_bf16/<jobid>.json (+ .log).
 
 #PBS -N msdelta-tribf16
 #PBS -A UIC-HPC
@@ -14,6 +14,7 @@
 
 set -uo pipefail
 REPO_DIR=${REPO_DIR:-${PBS_O_WORKDIR:-$PWD}}
+source "${REPO_DIR:-${PBS_O_WORKDIR:-$PWD}}/pbs/lib/homes.sh" || exit 1   # K198a: data homes (configs/homes.env)
 cd "$REPO_DIR"
 
 set +u
@@ -29,7 +30,7 @@ export PYTHONPATH=$REPO_DIR${PYTHONPATH:+:$PYTHONPATH}
 source "$REPO_DIR/pbs/lib/code_snapshot.sh"
 PY="$REPO_DIR/.venv/bin/python"
 JOB=${PBS_JOBID%%.*}; JOB=${JOB:-local}
-O=results/raw/diag/triattn_bf16; mkdir -p "$O"
+O=$MSDELTA_DIAG/triattn_bf16; mkdir -p "$O"
 
 echo "=== $(date -Is) triattn bf16 check on $(hostname), job $JOB"
 "$PY" "$MSDELTA_CODE_DIR"/pbs/diag/triattn_bf16_check.py --out "$O/$JOB.json" 2>&1 | tee "$O/$JOB.log"

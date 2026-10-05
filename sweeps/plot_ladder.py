@@ -23,6 +23,7 @@ import glob
 import json
 import os
 import re
+import sys
 from pathlib import Path
 
 import matplotlib
@@ -30,9 +31,12 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import homes  # noqa: E402  (data homes, configs/homes.env)
+
 REPO = Path(__file__).resolve().parent.parent
 RUNS = "/lus/flare/projects/UIC-HPC/khuss/msdelta/runs"
-FIGS = REPO / "results" / "processed" / "figures" / "D_denoise"
+FIGS = homes.RESULTS / "denoise"
 INK, MUTED, GRID = "#1a1a1a", "#6b7280", "#e5e7eb"
 SCALE_COLOUR = {"50m": "#93c5fd", "100m": "#60a5fa", "200m": "#2563eb", "400m": "#1e3a8a"}
 ORDER = ["50m", "100m", "200m", "400m"]
@@ -46,7 +50,7 @@ CONFIG = {"--learning_rate": "2e-4", "--encoder_lr_scale": "0.5",
 
 
 # Jobs whose test scores are not comparable. 8840345 was the first 216-arm grid, scored
-# on a reduced test set (1,440 spectra, not ~8,600) -- results/raw/finetune/README.md marks
+# on a reduced test set (1,440 spectra, not ~8,600) -- $MSDELTA_EVAL/README.md marks
 # it "not comparable". One of its arms (0.8597) sat in the 50m@133k cell and dragged
 # that point from 0.932 to 0.927.
 EXCLUDE_JOBS = {"8840345"}

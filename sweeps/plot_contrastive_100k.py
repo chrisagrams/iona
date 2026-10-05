@@ -3,7 +3,7 @@
     python sweeps/plot_contrastive_100k.py
 
 Reads the per-model JSONs that msdelta.eval_grouped_retrieval wrote under
-results/raw/finetune/contrastive/grouped100k-test/ and draws, for experimental-spectrum
+$MSDELTA_EVAL/contrastive/grouped100k-test/ and draws, for experimental-spectrum
 MAP@R (the headline) and Hit@1:
 
   c100k_scale.png        C2: model size at the frozen recipe (220k), replicate corpus
@@ -22,6 +22,7 @@ import glob
 import json
 import os
 import re
+import sys
 from pathlib import Path
 
 import matplotlib
@@ -29,9 +30,12 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import homes  # noqa: E402  (data homes, configs/homes.env)
+
 REPO = Path(__file__).resolve().parent.parent
-RESULTS = REPO / "results" / "raw" / "finetune" / "contrastive" / "grouped100k-test"
-FIGS = REPO / "results" / "processed" / "figures" / "C_contrastive"
+RESULTS = homes.EVAL / "contrastive" / "grouped100k-test"
+FIGS = homes.RESULTS / "contrastive"
 RUNS = "/lus/flare/projects/UIC-HPC/khuss/msdelta/runs"
 INK, MUTED, GRID = "#1a1a1a", "#6b7280", "#e5e7eb"
 SCALE_COLOUR = {"50m": "#93c5fd", "100m": "#60a5fa", "200m": "#2563eb", "400m": "#1e3a8a"}
@@ -131,7 +135,7 @@ def fig_scale(res):
 def zeroshot_best(key, ck="220k"):
     """Frozen encoder's best-block score per scale (eval_zeroshot_layers output)."""
     out = {}
-    for f in glob.glob(str(REPO / "results" / "raw" / "finetune" / "contrastive" / "zeroshot-layers"
+    for f in glob.glob(str(homes.EVAL / "contrastive" / "zeroshot-layers"
                            / f"zs_*_ck{ck}.json")):
         d = json.load(open(f))
         m = re.match(r"zs_0*(\d+m)_ck", d["name"])
@@ -215,8 +219,7 @@ def fig_transfer(res):
 def fig_zeroshot_layers(res=None):
     """Frozen pretrained encoders: exp MAP@R at every depth (eval_zeroshot_layers)."""
     import matplotlib.lines as mlines
-    files = sorted(glob.glob(str(REPO / "results" / "raw" / "finetune" / "contrastive"
-                                 / "zeroshot-layers" / "zs_*.json")))
+    files = sorted(glob.glob(str(homes.EVAL / "contrastive" / "zeroshot-layers" / "zs_*.json")))
     if not files:
         return None
     key = "experimental/MAP@R"
@@ -264,10 +267,10 @@ def fig_zeroshot_layers(res=None):
 def fig_zeroshot_abtt(res=None):
     """Frozen encoders with all-but-the-top (Mu & Viswanath 2018): mean + top-D principal
     directions (fitted on TRAIN spectra) removed before cosine. eval_zeroshot_layers --abtt.
-    Also writes the numbers to results/processed/tables/zeroshot-layers-abtt/summary.csv."""
+    Also writes the numbers to $MSDELTA_DERIVED/tables/zeroshot-layers-abtt/summary.csv."""
     import csv
     import matplotlib.lines as mlines
-    base = REPO / "results" / "raw" / "finetune" / "contrastive" / "zeroshot-layers-abtt"
+    base = homes.EVAL / "contrastive" / "zeroshot-layers-abtt"
     files = sorted(glob.glob(str(base / "zs_*.json")))
     if not files:
         return None
@@ -289,7 +292,7 @@ def fig_zeroshot_abtt(res=None):
         rows.append(dict(scale=scale, ckpt=ck, best_block=best_block, raw_final=raw["final"],
                          raw_best=raw[best_block], abtt_final=ab_final, abtt_best=ab_best,
                          abtt_best_D=int(ab_d), abtt_best_layer=ab_layer, curve=curve, Ds=ds))
-    table = REPO / "results" / "processed" / "tables" / "zeroshot-layers-abtt"
+    table = homes.DERIVED / "tables" / "zeroshot-layers-abtt"
     table.mkdir(parents=True, exist_ok=True)
     with open(table / "summary.csv", "w", newline="") as fh:
         w = csv.writer(fh)

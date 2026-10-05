@@ -6,6 +6,7 @@
 #PBS -l filesystems=home:flare
 #PBS -j oe
 #PBS -o /home/khuss/code/msdelta/pbs/logs/
+source "${REPO_DIR:-${PBS_O_WORKDIR:-$PWD}}/pbs/lib/homes.sh" || exit 1   # K198a: data homes (configs/homes.env)
 set -uo pipefail
 cd /home/khuss/code/msdelta
 S=/lus/flare/projects/UIC-HPC/khuss/msdelta
@@ -24,7 +25,7 @@ echo "=== $(date -Is) GLEAMS embed (CPU, background)"
     /home/khuss/code/msdelta/baselines_wip/gleams/embed_gleams.py $C/export 96 > $C/gleams_embed.log 2>&1 ) &
 gpid=$!
 echo "=== $(date -Is) ours + binned on 8 tiles"
-OUT=${SCORE_OUT:-results/raw/finetune/contrastive/c11_cap20}; mkdir -p $OUT
+OUT=${SCORE_OUT:-$MSDELTA_EVAL/contrastive/c11_cap20}; mkdir -p $OUT
 pids=()
 for i in $(seq 0 7); do
   ZE_AFFINITY_MASK=$i $PY -m msdelta.eval_grouped_retrieval score --data $C/prepared \

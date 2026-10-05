@@ -11,6 +11,7 @@
 # mouse / human / yeast, plus late fusion. One set per tile, in parallel. Diagnostic only, no training.
 #   qsub -q debug -v REPO_DIR=$PWD pbs/diag/k197_binned_edge.pbs
 REPO_DIR=${REPO_DIR:-${PBS_O_WORKDIR:-$PWD}}
+source "${REPO_DIR:-${PBS_O_WORKDIR:-$PWD}}/pbs/lib/homes.sh" || exit 1   # K198a: data homes (configs/homes.env)
 cd "$REPO_DIR"
 source "$REPO_DIR/pbs/lib/load_frameworks.sh"
 set -uo pipefail
@@ -19,7 +20,7 @@ export OMP_NUM_THREADS=${OMP_NUM_THREADS:-8} PYTHONPATH=$REPO_DIR${PYTHONPATH:+:
 source "$REPO_DIR/pbs/lib/code_snapshot.sh"
 PY="$REPO_DIR/.venv/bin/python"
 S=/lus/flare/projects/UIC-HPC/khuss/msdelta
-O=results/raw/diag/k197; mkdir -p "$O"
+O=$MSDELTA_DIAG/k197; mkdir -p "$O"
 RUNS=$S/runs; M400=$RUNS/sweep-s400m_ck540k_lr4e-4_p170k2_cons_seed0-8882196/final
 M25=$RUNS/sweep-s025m_ck540k_lr4e-4_p170k2_cons_seed0-8882196/final
 declare -A DATA=([test]=$S/eval-data/ms-contrastive-100k-test-mp512 [oodval]=$S/baselines/nine_oodval20k/prepared

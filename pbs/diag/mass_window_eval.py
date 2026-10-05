@@ -25,12 +25,16 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
 import time
 from pathlib import Path
 
 import numpy as np
 import torch
 import torch.nn.functional as F
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "sweeps"))
+import homes  # noqa: E402  (data homes, configs/homes.env)
 
 PROTON = 1.007276
 MASS_WINDOWS_DA = (100, 25, 5, 1, 0.1)
@@ -204,7 +208,7 @@ def main():
     ap.add_argument("--emb-dir", required=True)
     ap.add_argument("--shard", type=int, default=0)
     ap.add_argument("--num-shards", type=int, default=1)
-    ap.add_argument("--out", default="results/raw/finetune/contrastive/mass-window/summary.json")
+    ap.add_argument("--out", default=str(homes.EVAL / "contrastive" / "mass-window" / "summary.json"))
     cli = ap.parse_args()
     return embed(cli) if cli.cmd == "embed" else analyse(cli)
 

@@ -7,12 +7,14 @@
 #   <name>|<after>|<qsub arguments...>
 # <after> is '-' or the name of an earlier line: the job is submitted only after that job has
 # finished with exit status 0; if it fails, this job is marked BLOCKED and never submitted.
-# Commands run from the repo root; "$S" is available in the arguments.
+# Commands run from the repo root; "$S" and the data homes ($MSDELTA_EVAL, $MSDELTA_DIAG, ...; configs/homes.env)
+# are available in the arguments.
 # State (one file per job name, holding the job ID or BLOCKED) lives in $STATE_DIR, so a
 # restarted feeder never submits twice. Exits when every line is submitted or blocked.
 set -u
 PLAN=$1
 REPO=$(cd "$(dirname "$0")/../.." && pwd)
+source "$REPO/pbs/lib/homes.sh" || exit 1   # K198a: $MSDELTA_EVAL etc. for the plan lines
 S=${S:-/lus/flare/projects/UIC-HPC/khuss/msdelta}
 STATE_DIR=${STATE_DIR:-$S/feeder/$(basename "$PLAN" .txt)}
 POLL=${POLL:-180}

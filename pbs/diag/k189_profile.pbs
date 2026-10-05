@@ -5,7 +5,7 @@
 #   qsub -q debug -l select=1 -l walltime=00:45:00 -A UIC-HPC -l filesystems=home:flare \
 #        -v REPO_DIR=$PWD pbs/diag/k189_profile.pbs
 #
-# One tile. Output: results/raw/diag/k189/profile-<jobid>-k<k>.json (+ .log).
+# One tile. Output: $MSDELTA_DIAG/k189/profile-<jobid>-k<k>.json (+ .log).
 
 #PBS -N k189-prof
 #PBS -A UIC-HPC
@@ -15,6 +15,7 @@
 
 set -uo pipefail
 REPO_DIR=${REPO_DIR:-${PBS_O_WORKDIR:-$PWD}}
+source "${REPO_DIR:-${PBS_O_WORKDIR:-$PWD}}/pbs/lib/homes.sh" || exit 1   # K198a: data homes (configs/homes.env)
 cd "$REPO_DIR"
 
 set +u
@@ -29,7 +30,7 @@ export PYTHONPATH=$REPO_DIR${PYTHONPATH:+:$PYTHONPATH}
 source "$REPO_DIR/pbs/lib/code_snapshot.sh"
 PY="$REPO_DIR/.venv/bin/python"
 JOB=${PBS_JOBID%%.*}; JOB=${JOB:-local}
-O=results/raw/diag/k189; mkdir -p "$O"
+O=$MSDELTA_DIAG/k189; mkdir -p "$O"
 
 rc=0
 for k in 10 5 3; do

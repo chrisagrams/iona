@@ -1,14 +1,17 @@
-"""Rebuild results/processed/tables/zeroshot-layers-abtt/summary.csv from every
-results/raw/finetune/contrastive/zeroshot-layers-abtt/zs_*.json
+"""Rebuild $MSDELTA_DERIVED/tables/zeroshot-layers-abtt/summary.csv from every
+$MSDELTA_EVAL/contrastive/zeroshot-layers-abtt/zs_*.json
 (one row per frozen encoder; ABTT numbers from the TRAIN fit). Replaces the 8-encoder summary written
 before the 400M/200M reruns finished.
 
-    python3 sweeps/summarise_zeroshot.py
+    .venv/bin/python sweeps/summarise_zeroshot.py
 """
-import glob, json, os, re
+import glob, json, os, re, sys
 
-D = "results/raw/finetune/contrastive/zeroshot-layers-abtt"
-OUT = "results/processed/tables/zeroshot-layers-abtt"
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import homes  # noqa: E402  (data homes, configs/homes.env)
+
+D = str(homes.EVAL / "contrastive" / "zeroshot-layers-abtt")
+OUT = str(homes.DERIVED / "tables" / "zeroshot-layers-abtt")
 rows = []
 for f in glob.glob(f"{D}/zs_*.json"):
     d = json.load(open(f))

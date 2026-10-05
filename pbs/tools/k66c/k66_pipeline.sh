@@ -1,6 +1,7 @@
 #!/bin/bash
 # K66-C pipeline (approved card): smoke -> 4 capacity jobs (one per scale) -> per-scale scoring on
 # validation / OOD / mouse / human. Stops (does not improvise) if the smoke or a training job fails.
+source "${REPO_DIR:-${PBS_O_WORKDIR:-$PWD}}/pbs/lib/homes.sh" || exit 1   # K198a: data homes (configs/homes.env)
 set -uo pipefail
 cd /home/khuss/code/msdelta
 SMOKE=${1:?smoke job id}
@@ -58,7 +59,7 @@ score_scale() {
     while read -r n q v; do
         [[ -z $n || $n == \#* ]] && continue
         local id; id=$(sub -q $q -l select=1 -l walltime=01:00:00 -N hs${s}$n \
-            -v MODELS=$m,$v,OUT_DIR=results/raw/finetune/contrastive/hp-scale-$s-$n pbs/eval_grouped_retrieval.pbs)
+            -v MODELS=$m,$v,OUT_DIR=$MSDELTA_EVAL/contrastive/hp-scale-$s-$n pbs/eval_grouped_retrieval.pbs)
         log "submitted $s scoring $n: $id"
     done < "$DS"
 }

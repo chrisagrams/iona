@@ -2,22 +2,24 @@
 
     .venv/bin/python sweeps/package_contrastive.py
 
-Everything is read from the per-run result JSONs (results/raw/finetune/contrastive/<benchmark>/)
+Everything is read from the per-run result JSONs ($MSDELTA_EVAL/contrastive/<benchmark>/)
 and GLEAMS's metrics (baselines/<benchmark>/gleams_metrics.json on Lustre); nothing is typed
 in. Metric: experimental-spectrum MAP@R (and Hit@1). Plotting only (login node).
 
-    results/processed/tables/contrastive_results.csv                      every run on every benchmark
-    results/processed/tables/contrastive_zeroshot.csv                     frozen encoders, raw vs ABTT
-    results/processed/figures/SUMMARY/C_benchmarks.png             ours vs GLEAMS vs binned, 4 benchmarks
-    results/processed/figures/SUMMARY/C_pretraining_scaling.png    replicate-corpus recipe x checkpoint x size
-    results/processed/figures/SUMMARY/C_zeroshot.png               frozen encoders, raw vs ABTT
-    results/processed/figures/SUMMARY/C_transfer.png               C7 fine-tuning trajectory, in-dist vs unseen
+    $MSDELTA_DERIVED/tables/contrastive_results.csv     every run on every benchmark
+    $MSDELTA_DERIVED/tables/contrastive_zeroshot.csv    frozen encoders, raw vs ABTT
+    results/summary/C_benchmarks.png                    ours vs GLEAMS vs binned, 4 benchmarks
+    results/summary/C_pretraining_scaling.png           replicate-corpus recipe x checkpoint x size
+    results/summary/C_zeroshot.png                      frozen encoders, raw vs ABTT
+    results/summary/C_transfer.png                      C7 fine-tuning trajectory, in-dist vs unseen
+    (the CSV behind each figure: $MSDELTA_DERIVED/summary/<figure>.csv)
 """
 from __future__ import annotations
 
 import csv
 import json
 import re
+import sys
 from collections import defaultdict
 from pathlib import Path
 
@@ -27,10 +29,14 @@ import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.lines import Line2D
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import homes  # noqa: E402  (data homes, configs/homes.env)
+
 REPO = Path(__file__).resolve().parent.parent
-RES = REPO / "results" / "raw" / "finetune" / "contrastive"
+RES = homes.EVAL / "contrastive"
 BASE = Path("/lus/flare/projects/UIC-HPC/khuss/msdelta/baselines")
-FIG = REPO / "results" / "processed" / "figures" / "SUMMARY"
+FIG = homes.RESULTS / "summary"      # the figures (results/summary/)
+TAB = homes.DERIVED / "summary"      # the CSV behind each figure
 # benchmark key -> (result dir, GLEAMS dir, label)
 BENCH = {
     "ms-contrastive-100k": ("grouped100k-test", "gleams", "ms-contrastive-100k test\n(in-distribution)"),
@@ -181,7 +187,7 @@ def fig_pretraining(rows):
 
 def zeroshot_rows():
     out = []
-    with open(REPO / "results" / "processed" / "tables" / "zeroshot-layers-abtt" / "summary.csv") as fh:
+    with open(homes.DERIVED / "tables" / "zeroshot-layers-abtt" / "summary.csv") as fh:
         for r in csv.DictReader(fh):
             out.append(dict(benchmark="ms-contrastive-100k", encoder=f"{r['scale']}@{r['ckpt'].lstrip('0')}",
                             raw_final=float(r["raw_final"]), raw_best_layer=float(r["raw_best_block"]),
@@ -216,7 +222,7 @@ def fig_zeroshot(zs):
     """Drawn by the paper folder's standalone script from the exported CSV (so the two cannot differ)."""
     import runpy, shutil
     out = REPO / "paper" / "experiments" / "spectrum_embedding" / "0_shot"
-    shutil.copy(FIG / "C_zeroshot.csv", out / "C_zeroshot.csv")
+    shutil.copy(TAB / "C_zeroshot.csv", out / "C_zeroshot.csv")
     runpy.run_path(str(out / "plot_zeroshot.py"), run_name="__main__")
     shutil.copy(out / "C_zeroshot.png", FIG / "C_zeroshot.png")
 
@@ -354,7 +360,7 @@ def as_plot_row(r, model, note=""):
 
 
 def write_plot_csv(name, out_rows, keys=PLOT_KEYS):
-    with open(FIG / name, "w", newline="") as fh:
+    with open(TAB / name, "w", newline="") as fh:
         w = csv.DictWriter(fh, keys); w.writeheader()
         for r in out_rows:
             w.writerow({k: (f"{r[k]:.5f}" if isinstance(r.get(k), float) else r.get(k, "")) for k in keys})
@@ -415,19 +421,21 @@ def export_plot_data(rows, zs, ab):
 
 def main():
     FIG.mkdir(parents=True, exist_ok=True)
+    TAB.mkdir(parents=True, exist_ok=True)
+    (homes.DERIVED / "tables").mkdir(parents=True, exist_ok=True)
     rows = load_rows()
     keys = ["benchmark", "method", "scale", "pretrain_ckpt", "stage", "seed", "map_at_r", "hit_at_1", "queries", "source"]
-    with open(REPO / "results" / "processed" / "tables" / "contrastive_results.csv", "w", newline="") as fh:
+    with open(homes.DERIVED / "tables" / "contrastive_results.csv", "w", newline="") as fh:
         w = csv.DictWriter(fh, keys); w.writeheader()
         for r in rows:
             w.writerow({k: (f"{r[k]:.5f}" if k in ("map_at_r", "hit_at_1") and r[k] is not None else r[k]) for k in keys})
     zs = zeroshot_rows()
-    with open(REPO / "results" / "processed" / "tables" / "contrastive_zeroshot.csv", "w", newline="") as fh:
+    with open(homes.DERIVED / "tables" / "contrastive_zeroshot.csv", "w", newline="") as fh:
         w = csv.DictWriter(fh, list(zs[0])); w.writeheader()
         for r in zs:
             w.writerow({k: (f"{v:.5f}" if isinstance(v, float) else v) for k, v in r.items()})
     ab = ablation_rows()
-    with open(REPO / "results" / "processed" / "tables" / "contrastive_pretraining_ablation.csv", "w", newline="") as fh:
+    with open(homes.DERIVED / "tables" / "contrastive_pretraining_ablation.csv", "w", newline="") as fh:
         w = csv.DictWriter(fh, list(ab[0])); w.writeheader()
         for r in ab:
             w.writerow({k: (f"{v:.5f}" if isinstance(v, float) else v) for k, v in r.items()})

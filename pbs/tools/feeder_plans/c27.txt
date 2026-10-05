@@ -1,5 +1,5 @@
 # C27-C (approved 2026-09-29). c27_smoke's state file is pre-written (8878170, submitted by hand).
 c27_smoke|-|false
 c27_train|c27_smoke|-q capacity -l select=1 -l walltime=10:00:00 -A UIC-HPC -l filesystems=home:flare -N c27 -v REPO_DIR=$PWD,SWEEP_ROOT=configs/sweep-c27,SWEEP_MODULE=msdelta.finetune_contrastive,ARMS_FILE=sweeps/arms/c27.txt pbs/aurora-finetune-sweep.pbs
-ref_validation|-|-q debug -l select=1 -l walltime=01:00:00 -A UIC-HPC -l filesystems=home:flare -v REPO_DIR=$PWD,MODELS=sweeps/arms/score_c27_ref.txt,SPLIT=validation,OUT_DIR=results/raw/finetune/contrastive/c27-validation pbs/eval_grouped_retrieval.pbs
-ref_test|-|-q debug -l select=1 -l walltime=01:00:00 -A UIC-HPC -l filesystems=home:flare -v REPO_DIR=$PWD,MODELS=sweeps/arms/score_c27_ref.txt,SPLIT=test,OUT_DIR=results/raw/finetune/contrastive/c27-test pbs/eval_grouped_retrieval.pbs
+ref_validation|-|-q debug -l select=1 -l walltime=01:00:00 -A UIC-HPC -l filesystems=home:flare -v REPO_DIR=$PWD,MODELS=sweeps/arms/score_c27_ref.txt,SPLIT=validation,OUT_DIR=$MSDELTA_EVAL/contrastive/c27-validation pbs/eval_grouped_retrieval.pbs
+ref_test|-|-q debug -l select=1 -l walltime=01:00:00 -A UIC-HPC -l filesystems=home:flare -v REPO_DIR=$PWD,MODELS=sweeps/arms/score_c27_ref.txt,SPLIT=test,OUT_DIR=$MSDELTA_EVAL/contrastive/c27-test pbs/eval_grouped_retrieval.pbs

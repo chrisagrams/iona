@@ -89,8 +89,13 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--max-rows", type=int, default=2000)
     # DeltaMZBias is O(batch * peaks^2 * n_freqs); 16 x 512 peaks is 8 GiB.
     ap.add_argument("--batch-size", type=int, default=16)
-    ap.add_argument("--out", default="results/raw/finetune/contrastive/retrieval_vs_separation.json")
+    ap.add_argument("--out", help="default: $MSDELTA_EVAL/contrastive/retrieval_vs_separation.json "
+                    "(source pbs/lib/homes.sh for MSDELTA_EVAL)")
     cli = ap.parse_args(argv)
+    if cli.out is None:
+        if not os.environ.get("MSDELTA_EVAL"):
+            ap.error("--out not given and MSDELTA_EVAL is not set (source pbs/lib/homes.sh)")
+        cli.out = os.path.join(os.environ["MSDELTA_EVAL"], "contrastive", "retrieval_vs_separation.json")
 
     from msdelta.finetuning.contrastive.finetune_contrastive import ContrastiveCollator
     from msdelta.models.processing_msdelta import MSDeltaProcessor

@@ -1,6 +1,6 @@
 """K102: memory and time of ONE triangle-attention module, naive vs checkpointed vs SDPA.
 
-    python pbs/diag/triattn_bench.py --out results/raw/diag/triattn_bench/<jobid>.json
+    python pbs/diag/triattn_bench.py --out $MSDELTA_DIAG/triattn_bench/<jobid>.json
 
 Stage 0 card dims (notes/P1_stage0_card.md): c_z = 64, 4 heads x 16, chunk 32. One module
 (starting node), fp32 weights and input under bf16 autocast as in training, padded keys

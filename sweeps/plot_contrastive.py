@@ -28,6 +28,7 @@ import glob
 import json
 import os
 import re
+import sys
 from pathlib import Path
 
 import matplotlib
@@ -35,8 +36,11 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import homes  # noqa: E402  (data homes, configs/homes.env)
+
 REPO = Path(__file__).resolve().parent.parent
-FIGS = REPO / "results" / "processed" / "figures" / "C_contrastive" / "superseded"
+FIGS = homes.RESULTS / "contrastive" / "superseded"
 # Supporting figures: results that closed a question without changing what
 # we do. GradCache is here because more negatives measurably hurt, so the
 # lever is not one we will pull.

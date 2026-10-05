@@ -6,13 +6,14 @@
 #PBS -l filesystems=home:flare
 #PBS -j oe
 #PBS -o /home/khuss/code/msdelta/pbs/logs/
+source "${REPO_DIR:-${PBS_O_WORKDIR:-$PWD}}/pbs/lib/homes.sh" || exit 1   # K198a: data homes (configs/homes.env)
 set -uo pipefail
 cd /home/khuss/code/msdelta
 S=/lus/flare/projects/UIC-HPC/khuss/msdelta; E=$S/eval-data
 source "${REPO_DIR:-${PBS_O_WORKDIR:-$PWD}}/pbs/lib/load_frameworks.sh"
 export ONEAPI_DEVICE_SELECTOR=level_zero:gpu ZE_FLAT_DEVICE_HIERARCHY=FLAT PYTHONPATH=$PWD OMP_NUM_THREADS=8
 export HF_HOME=$S/huggingface HF_HUB_OFFLINE=1 HF_DATASETS_OFFLINE=1
-O=results/raw/finetune/contrastive/zs-probe; mkdir -p $O/val $O/test
+O=$MSDELTA_EVAL/contrastive/zs-probe; mkdir -p $O/val $O/test
 M=$O/models.txt; echo "zs_050m_ck540k /flare/UIC-HPC/khuss/msdelta/pretrained/msdelta-50m-production-01-checkpoint-540423" > $M
 ZE_AFFINITY_MASK=0 .venv/bin/python pbs/diag/zs_timing_probe.py --models $M --data $E/ms-contrastive-100k-validation-mp512 \
   --out-dir $O/val --abtt 8,32,64,128 --fit-data $E/ms-contrastive-100k-train10k-mp512 > $O/val.log 2>&1 &

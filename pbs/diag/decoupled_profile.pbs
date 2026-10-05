@@ -12,6 +12,7 @@
 # One process per setting (a crash keeps the rest). Diagnostic only: no training, no settings chosen for
 # experiments.   qsub -q debug -v REPO_DIR=$PWD pbs/diag/decoupled_profile.pbs
 REPO_DIR=${REPO_DIR:-${PBS_O_WORKDIR:-$PWD}}
+source "${REPO_DIR:-${PBS_O_WORKDIR:-$PWD}}/pbs/lib/homes.sh" || exit 1   # K198a: data homes (configs/homes.env)
 cd "$REPO_DIR"
 source "$REPO_DIR/pbs/lib/load_frameworks.sh"
 set -uo pipefail
@@ -20,7 +21,7 @@ export OMP_NUM_THREADS=${OMP_NUM_THREADS:-8} PYTHONPATH=$REPO_DIR${PYTHONPATH:+:
 source "$REPO_DIR/pbs/lib/code_snapshot.sh"
 PY="$REPO_DIR/.venv/bin/python"
 JOB=${PBS_JOBID%%.*}; JOB=${JOB:-local}
-O=results/raw/diag/decoupled_profile; mkdir -p "$O"
+O=$MSDELTA_DIAG/decoupled_profile; mkdir -p "$O"
 for spec in 1:0 2:0 3:0 5:0 10:0 2:1 5:1; do
     k=${spec%:*}; lag=${spec#*:}
     tag=k${k}_lag${lag}

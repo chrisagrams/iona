@@ -1,15 +1,16 @@
 """Parallel-coordinates view of the 50m denoise hyperparameter grid (job 8840408, 216 arms).
 
-    .venv/bin/python sweeps/plot_hp_parallel.py   # -> results/processed/figures/SUMMARY/D_hp_parallel.png + .csv
+    .venv/bin/python sweeps/plot_hp_parallel.py   # -> results/summary/D_hp_parallel.png + $MSDELTA_DERIVED/summary/D_hp_parallel.csv
 
 One vertical axis per hyperparameter, one line per arm, coloured by test AUROC; the winning
-combination is drawn on top. Values come from the committed grid table
-results/raw/finetune/denoise/grid_denoise_50m.txt (b = effective batch).
+combination is drawn on top. Values come from the grid table
+$MSDELTA_DERIVED/denoise/grid_denoise_50m.txt (sweeps/summarise_denoise.py; b = effective batch).
 Plotting only (login node).
 """
 from __future__ import annotations
 
 import json
+import sys
 from pathlib import Path
 
 import matplotlib
@@ -18,9 +19,13 @@ import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.colors import Normalize
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import homes  # noqa: E402  (data homes, configs/homes.env)
+
 REPO = Path(__file__).resolve().parent.parent
-TABLE = REPO / "results" / "raw" / "finetune" / "denoise" / "grid_denoise_50m.txt"   # job 8840408, 216 arms
-OUT = REPO / "results" / "processed" / "figures" / "SUMMARY"
+TABLE = homes.DERIVED / "denoise" / "grid_denoise_50m.txt"   # job 8840408, 216 arms
+OUT = homes.RESULTS / "summary"
+TAB = homes.DERIVED / "summary"
 AXES = [("learning_rate", "learning rate", lambda v: float(v)),
         ("encoder_lr_scale", "encoder LR scale", lambda v: float(v)),
         ("num_train_epochs", "epochs", lambda v: int(v)),
@@ -103,7 +108,7 @@ def main():
         fig.text(0.125, -0.05, bl, fontsize=8.5, color=muted)
         OUT.mkdir(parents=True, exist_ok=True)
         fig.savefig(OUT / "D_hp_parallel.png"); plt.close(fig)
-    csv = OUT / "D_hp_parallel.csv"
+    csv = TAB / "D_hp_parallel.csv"
     csv.write_text("arm," + ",".join(keys) + ",test_auroc,test_auprc,test_spectra_scored\n" + "".join(
         f"{r['arm']}," + ",".join(str(r[k]) for k in keys) + f",{r['auroc']:.5f},{r['auprc']:.4f},{r['spectra']}\n"
         for r in sorted(rows, key=lambda r: -r["auroc"])))

@@ -1,8 +1,8 @@
 """K197-C: where binned cosine beats our spectrum encoders, from pbs/diag/k197_binned_edge.py's per-query output.
 
-    .venv/bin/python sweeps/k197_analyze.py [--dir results/raw/diag/k197]
+    .venv/bin/python sweeps/k197_analyze.py [--dir $MSDELTA_DIAG/k197]
 
-Writes results/summary/k197_binned_edge.md:
+Writes results/k197_binned_edge/report.md:
   1. MAP@R / Hit@1 per method and late fusion (alpha * encoder + (1 - alpha) * binned cosine) per set
   2. what each method's WRONG top-1 hit is: the same peptide at another charge, the same sequence with other
      modifications, an isobaric peptide (same charge, neutral mass within 20 ppm), or an unrelated peptide
@@ -17,9 +17,13 @@ from __future__ import annotations
 import argparse
 import json
 import re
+import sys
 from pathlib import Path
 
 import numpy as np
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import homes  # noqa: E402  (data homes, configs/homes.env)
 
 ROOT = Path(__file__).resolve().parents[1]
 SETS = ["test", "oodval", "mouse", "human", "yeast", "yeast20k"]
@@ -111,7 +115,7 @@ def false_friends(meta, summ, res, sample=400):
 
 def main() -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--dir", default=str(ROOT / "results/raw/diag/k197"))
+    ap.add_argument("--dir", default=str(homes.DIAG / "k197"))
     d = Path(ap.parse_args().dir)
     L = ["# K197-C: where binned cosine 0.1 Da beats our spectrum encoders", "",
          "Per-query diagnostic (pbs/diag/k197_binned_edge.py): consensus-recipe encoders at 540k, seed 0; experimental "
@@ -167,7 +171,8 @@ def main() -> int:
         L.append(f"| {s} | {np.median(b['pos_mean'][k]):.2f} | {np.median(b['neg_max'][k]):.2f} | "
                  f"{np.median((b['pos_max'] - b['neg_max'])[k]):.2f} | "
                  f"{summ['methods']['400m']['MAP@R'] - summ['methods']['binned0.1']['MAP@R']:+.3f} |")
-    out = ROOT / "results/summary/k197_binned_edge.md"
+    out = homes.RESULTS / "k197_binned_edge" / "report.md"
+    out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text("\n".join(L) + "\n")
     print("\n".join(L))
     return 0

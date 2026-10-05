@@ -20,6 +20,7 @@ import glob
 import json
 import os
 import re
+import sys
 from pathlib import Path
 
 import matplotlib
@@ -27,9 +28,12 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import homes  # noqa: E402  (data homes, configs/homes.env)
+
 REPO = Path(__file__).resolve().parent.parent
 RUNS = "/lus/flare/projects/UIC-HPC/khuss/msdelta/runs"
-FIGS = REPO / "results" / "processed" / "figures" / "C_contrastive" / "C1_recipe"
+FIGS = homes.RESULTS / "contrastive" / "c1_recipe"
 JOBS = ("8856460", "8856643", "8856642")
 METRIC = "retrieval/MAP@R"
 INK, MUTED, GRID = "#1a1a1a", "#6b7280", "#e5e7eb"

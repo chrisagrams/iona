@@ -1,10 +1,11 @@
 """Summary figures + tables for D / C / A / R (2026-09-25). Numbers are the recorded results in
 notes/OBSERVATIONS.md (job ids in the comments); run on the login node (plotting only).
 
-    .venv/bin/python sweeps/plot_summary.py   # -> results/processed/figures/SUMMARY/*.png, results/processed/tables/SUMMARY_TABLES.md
+    .venv/bin/python sweeps/plot_summary.py   # -> results/summary/*.png, results/summary/tables.md
 """
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 
 import matplotlib
@@ -12,9 +13,12 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import homes  # noqa: E402  (data homes, configs/homes.env)
+
 REPO = Path(__file__).resolve().parent.parent
-OUT = REPO / "results" / "processed" / "figures" / "SUMMARY"
-TABLES = REPO / "results" / "processed" / "tables" / "SUMMARY_TABLES.md"
+OUT = homes.RESULTS / "summary"
+TABLES = homes.RESULTS / "summary" / "tables.md"
 OURS, BASE, OTHER, NULL, LIGHT = "#2563eb", "#9ca3af", "#f59e0b", "#d1d5db", "#93c5fd"
 plt.rcParams.update({"figure.dpi": 130, "axes.spines.top": False, "axes.spines.right": False,
                      "font.size": 9})
@@ -51,7 +55,7 @@ C_ZS_ID = {"50m": (0.208, 0.401), "100m": (0.140, 0.328), "200m": (0.191, 0.432)
            "400m": (0.216, 0.414)}   # frozen best block raw -> ABTT, 100k test (400m @10k; 200m @540k)
 C_ZS_OOD = {"50m": (0.385, 0.602), "100m": (0.178, 0.421), "200m": (0.339, 0.654),
             "400m": (0.510, 0.709)}  # yeast 20k, frozen best block raw -> ABTT (50m/100m/400m @220k, 200m @540k);
-                                     # from results/raw/finetune/contrastive/nine20k_zeroshot/
+                                     # from $MSDELTA_EVAL/contrastive/nine20k_zeroshot/
 C_TRAJ_OOD = {0: [0.606, 0.655, 0.596, 0.596]}  # seed0 yeast20k at step 300/600/900/final
 
 # ---------------------------------------------------------------- A (peptide embeddings)
@@ -98,7 +102,7 @@ def save(fig, name):
 
 
 D_CKPTS = [10000, 120000, 220000, 330000, 430000, 540423]   # pretraining steps shared by all four scales
-D_CSV = REPO / "results" / "processed" / "tables" / "denoise_scaling_pretraining.csv"
+D_CSV = homes.DERIVED / "tables" / "denoise_scaling_pretraining.csv"
 
 
 def denoise_cells(metric="test_auroc"):
@@ -164,7 +168,7 @@ def fig_d():
             rows.append(f"{x},{c},{len(u)},{np.mean(u):.5f},{sd(u) if len(u) > 1 else float('nan'):.5f},"
                         f"{min(u):.5f},{max(u):.5f},{' '.join(f'{t:.5f}' for t in u)},"
                         f"{np.mean(a):.5f},{sd(a) if len(a) > 1 else float('nan'):.5f},{' '.join(f'{t:.5f}' for t in a)}")
-    D_CSV.write_text("\n".join(rows).replace("nan", "") + "\n"); print("wrote", D_CSV.relative_to(REPO))
+    D_CSV.write_text("\n".join(rows).replace("nan", "") + "\n"); print("wrote", D_CSV)
 
 
 def fig_c_bench():
@@ -260,7 +264,7 @@ def fig_r():
 
 
 def tables():
-    L = ["# Summary tables (2026-09-25)", "", "Source: notes/OBSERVATIONS.md (job ids there). Figures: results/processed/figures/SUMMARY/.", ""]
+    L = ["# Summary tables (2026-09-25)", "", "Source: notes/OBSERVATIONS.md (job ids there). Figures: results/summary/.", ""]
     L += ["## D: denoise", "", "| scale | pretrained + fine-tuned | from scratch | gain |", "|---|---|---|---|"]
     L += [f"| {s} | {D_SCALE[s]:.4f} | {D_SCRATCH[s]:.4f} | +{D_SCALE[s] - D_SCRATCH[s]:.3f} |" for s in D_SCALE]
     L += ["", "Pretrained: mean ± sd over 6 seeds. Scratch: 3 seeds at 100m–400m; 50m is a single run at the same config (lr 2e-4, eff. batch 12, 4 epochs).",
@@ -287,7 +291,7 @@ def tables():
     L += ["", "| HCT116 ×18 (unseen, high-res), A2, per-run, seed 0 | PSMs |", "|---|---|"] + [f"| {k} | {v:,} |" for k, v in R_HCT.items()]
     L += ["", f"HCT116: lab + A2 real − null = +{530977 - 522353:,} (+{(530977 - 522353) / 522539 * 100:.2f}%); MSFragger features + A2 real − null = +{392350 - 371587:,} (+{(392350 - 371587) / 370982 * 100:.2f}%). Leakage AUROC 0.519 (cosine), 0.499 (null).",
           "Controls: shuffled labels → 0 PSMs; per-run fold seeds 128,991–129,041 (lab); MS2Rescore repeat 128,211 vs 128,209.", ""]
-    TABLES.write_text("\n".join(L) + "\n"); print("wrote", TABLES.relative_to(REPO))
+    TABLES.write_text("\n".join(L) + "\n"); print("wrote", TABLES)
 
 
 if __name__ == "__main__":

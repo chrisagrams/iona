@@ -15,11 +15,12 @@
 
 set -uo pipefail
 REPO_DIR=${REPO_DIR:-${PBS_O_WORKDIR:-$PWD}}
+source "${REPO_DIR:-${PBS_O_WORKDIR:-$PWD}}/pbs/lib/homes.sh" || exit 1   # K198a: data homes (configs/homes.env)
 cd "$REPO_DIR"
 MODELS=${MODELS:-sweeps/arms/mass_window_models.txt}
 SCRATCH_ROOT=${SCRATCH_ROOT:-/lus/flare/projects/UIC-HPC/$USER/msdelta}
 EMB_DIR=${EMB_DIR:-$SCRATCH_ROOT/embeddings/mass-window}
-OUT=${OUT:-results/raw/finetune/contrastive/mass-window/summary.json}
+OUT=${OUT:-$MSDELTA_EVAL/contrastive/mass-window/summary.json}
 SHARDS=${SHARDS:-12}
 DATA=("validation=$SCRATCH_ROOT/eval-data/ms-contrastive-100k-validation-mp512"
       "oodval=$SCRATCH_ROOT/baselines/nine_oodval20k/prepared")

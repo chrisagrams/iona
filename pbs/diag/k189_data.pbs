@@ -7,17 +7,18 @@
 #PBS -j oe
 #PBS -o pbs/logs/
 # K189-P (user 2026-10-01: "run the probe"): (1) peak-count distribution over 8 raw MSConsensus-100M train shards
-# (2M spectra; the dataset is shuffled) -> results/raw/diag/k189/peaks.json; (2) a cap-512 preprocessed probe set
+# (2M spectra; the dataset is shuffled) -> $MSDELTA_DIAG/k189/peaks.json; (2) a cap-512 preprocessed probe set
 # (train shard 0 + validation shard 0, Chris's processor) at $S/data/probe-cap512 for pbs/diag/k189_probe.pbs.
 #   qsub -q debug -v REPO_DIR=$PWD pbs/diag/k189_data.pbs
 REPO_DIR=${REPO_DIR:-${PBS_O_WORKDIR:-$PWD}}
+source "${REPO_DIR:-${PBS_O_WORKDIR:-$PWD}}/pbs/lib/homes.sh" || exit 1   # K198a: data homes (configs/homes.env)
 cd "$REPO_DIR" || exit 1
 set -uo pipefail
 S=/lus/flare/projects/UIC-HPC/khuss/msdelta
 SNAP=$S/huggingface/hub/datasets--Gaolaboratory--MSConsensus-100M/snapshots/78b3e74b90021f233747de6417064c837136a9b9
 source pbs/lib/load_frameworks.sh
-mkdir -p results/raw/diag/k189
-.venv/bin/python pbs/diag/k189_peaks.py results/raw/diag/k189/peaks.json \
+mkdir -p $MSDELTA_DIAG/k189
+.venv/bin/python pbs/diag/k189_peaks.py $MSDELTA_DIAG/k189/peaks.json \
     $(for i in 0 50 100 150 200 250 300 350; do printf "%s/train-%05d-of-00400.parquet " "$SNAP" $i; done)
 D=$S/data/probe-cap512; mkdir -p "$D/raw"
 ln -sfn "$SNAP/train-00000-of-00400.parquet" "$D/raw/train-00000-of-00001.parquet"

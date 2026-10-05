@@ -1,7 +1,7 @@
 """K119: does FlexAttention (torch.nn.attention.flex_attention) work on Aurora's XPU for
 triangle attention, and how does it compare with the SDPA path the model uses?
 
-    python pbs/diag/flexattn_test.py --out results/raw/diag/flexattn/<jobid>.json
+    python pbs/diag/flexattn_test.py --out $MSDELTA_DIAG/flexattn/<jobid>.json
 
 Intel Triton. The project .venv has upstream triton 3.8.0 (no ``backends/intel``), which
 shadows the frameworks module's Intel Triton 3.6.0 in

@@ -19,10 +19,14 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import homes  # noqa: E402  (data homes, configs/homes.env)
+
 RUNS = Path("/lus/flare/projects/UIC-HPC/khuss/msdelta/runs")
-RES = Path(__file__).resolve().parent.parent / "results/raw/finetune/contrastive"
+RES = homes.EVAL / "contrastive"
 PICKS = {
     "400m": dict(run="sweep-cont400m_ep01_seed0-8860522", name="c7b_cont400m_final_seed0",
                  seed=0, arch="20 layers x 1280", width=2560, stage1_epochs=12,

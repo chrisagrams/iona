@@ -79,10 +79,10 @@ for s in SCALES:
             id=f"score_{s}_{name}", deps=[f"train_{s}"],
             script="pbs/eval_grouped_retrieval.pbs",
             vars=dict(MODELS=f"sweeps/arms/score_hp_scale_{s}.txt", **extra,
-                      OUT_DIR=f"results/raw/finetune/contrastive/hp-scale-{s}-{name}"),
+                      OUT_DIR=f"{{scratch}}/eval/contrastive/hp-scale-{s}-{name}"),   # $MSDELTA_EVAL (configs/homes.env)
             nodes=1, runtime_min=30, queues=["debug", "debug-scaling"], approved=CARD,
             rerun_on=("walltime", "killed"), max_retries=1,
-            outputs=[f"{{repo}}/results/raw/finetune/contrastive/hp-scale-{s}-{name}"],
+            outputs=[f"{{scratch}}/eval/contrastive/hp-scale-{s}-{name}"],
             prepare=models_file(s)))
 
 PIPELINE = Pipeline(name="k66c", nodes=nodes, budget_node_hours=80, card=CARD,

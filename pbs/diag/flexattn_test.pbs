@@ -6,7 +6,7 @@
 #   qsub -q debug -l select=1 -l walltime=01:00:00 -A UIC-HPC -l filesystems=home:flare \
 #        -v REPO_DIR=$PWD pbs/diag/flexattn_test.pbs
 #
-# One tile. Output: results/raw/diag/flexattn/<jobid>.json (+ .log).
+# One tile. Output: $MSDELTA_DIAG/flexattn/<jobid>.json (+ .log).
 #
 # Intel Triton, FOR THIS JOB ONLY: the .venv's upstream triton 3.8.0 has no intel backend and
 # shadows the frameworks module's triton 3.6.0 (which has backends/intel). flexattn_test.py,
@@ -23,6 +23,7 @@
 
 set -uo pipefail
 REPO_DIR=${REPO_DIR:-${PBS_O_WORKDIR:-$PWD}}
+source "${REPO_DIR:-${PBS_O_WORKDIR:-$PWD}}/pbs/lib/homes.sh" || exit 1   # K198a: data homes (configs/homes.env)
 cd "$REPO_DIR"
 
 set +u
@@ -37,7 +38,7 @@ export PYTHONPATH=$REPO_DIR${PYTHONPATH:+:$PYTHONPATH}
 source "$REPO_DIR/pbs/lib/code_snapshot.sh"
 PY="$REPO_DIR/.venv/bin/python"
 JOB=${PBS_JOBID%%.*}; JOB=${JOB:-local}
-O=results/raw/diag/flexattn; mkdir -p "$O"
+O=$MSDELTA_DIAG/flexattn; mkdir -p "$O"
 # Job-local compile caches: never mix kernels built by the venv's triton 3.8 into ~/.triton.
 export TRITON_CACHE_DIR=${TMPDIR:-/tmp}/msdelta-k119-$JOB/triton
 export TORCHINDUCTOR_CACHE_DIR=${TMPDIR:-/tmp}/msdelta-k119-$JOB/inductor

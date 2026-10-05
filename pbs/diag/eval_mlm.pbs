@@ -14,6 +14,7 @@
 # Optional -v: DATASET (default the P2 cap-150 set), SPLIT (validation), OUT, MAX_SPECTRA, BATCH_SIZE (32),
 # SEED (0), MASK_RATIO (0.50), PRECISION (bf16), PAD_TO_MULTIPLE_OF.
 REPO_DIR=${REPO_DIR:-${PBS_O_WORKDIR:-$PWD}}
+source "${REPO_DIR:-${PBS_O_WORKDIR:-$PWD}}/pbs/lib/homes.sh" || exit 1   # K198a: data homes (configs/homes.env)
 cd "$REPO_DIR"
 source "$REPO_DIR/pbs/lib/load_frameworks.sh"
 set -uo pipefail
@@ -24,7 +25,7 @@ PY="$REPO_DIR/.venv/bin/python"
 JOB=${PBS_JOBID%%.*}; JOB=${JOB:-local}
 : "${CHECKPOINTS:?set CHECKPOINTS=/path/a+/path/b via qsub -v}"
 DATASET=${DATASET:-/lus/flare/projects/UIC-HPC/khuss/msdelta/data/p2-cap150-half/preprocessed}
-O=results/raw/diag/eval_mlm; mkdir -p "$O"
+O=$MSDELTA_DIAG/eval_mlm; mkdir -p "$O"
 OUT=${OUT:-$O/${JOB}.json}
 args=(--checkpoints "$CHECKPOINTS" --dataset "$DATASET" --split "${SPLIT:-validation}" --out "$OUT"
       --batch_size "${BATCH_SIZE:-32}" --seed "${SEED:-0}" --mask_ratio "${MASK_RATIO:-0.50}"

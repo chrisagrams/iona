@@ -2,6 +2,7 @@
 # K196b deletion protocol step 3: run pbs/tools/k196_delete.sh scoredft for real on a REDUNDANT COPY with trap cases,
 # and verify that only the intended paths vanished and everything else is byte-identical.
 #   bash pbs/tools/k196b_copytest.sh
+source "${REPO_DIR:-${PBS_O_WORKDIR:-$PWD}}/pbs/lib/homes.sh" || exit 1   # K198a: data homes (configs/homes.env)
 set -u
 S=/lus/flare/projects/UIC-HPC/khuss/msdelta; R=$S/runs; C=$S/k196b-copytest; L=$S/k196-logs/k196b
 REPO=$(cd "$(dirname "$0")/../.." && pwd)
@@ -18,7 +19,7 @@ skel sweep-s050m_ck120k_lr4e-4_p170k2_cons_seed1-8901080 sweep-s050m_ck120k_lr4e
 skel sweep-s050m_ck120k_lr4e-4_p170k2_cons_seed2-8901080 sweep-s050m_ck120k_lr4e-4_p170k2_cons_seed2-8901080  # not listed
 ln -s "$C/runs/$T1" "$C/runs/sweep-s100m_ck010k_lr4e-4_p170k2_cons_seed0-8901080"                               # symlink
 mkdir -p "$C/pretrained/x"; echo keep > "$C/pretrained/x/f"
-for s in validation test oodval mouse human yeast; do cp -a "$REPO/results/raw/finetune/contrastive/cons-allck-$s" "$C/scored/"; done
+for s in validation test oodval mouse human yeast; do cp -a "$MSDELTA_EVAL/contrastive/cons-allck-$s" "$C/scored/"; done
 rm "$C/scored/cons-allck-yeast/s050m_ck050k_lr4e-4_p170k2_cons_seed0.json"
 cat > "$C/list.txt" <<LIST
 runs/$T1

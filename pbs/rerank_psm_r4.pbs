@@ -21,6 +21,7 @@
 
 set -uo pipefail
 REPO_DIR=${REPO_DIR:-${PBS_O_WORKDIR:-$PWD}}
+source "${REPO_DIR:-${PBS_O_WORKDIR:-$PWD}}/pbs/lib/homes.sh" || exit 1   # K198a: data homes (configs/homes.env)
 cd "$REPO_DIR"
 TAG=${TAG:?set TAG}; RUNS=${RUNS:?set RUNS}
 REGIME=${REGIME:-global}; REGIME=${REGIME//+/,}
@@ -83,5 +84,5 @@ RUN_LIST=$(echo $RUNS | tr ' ' ',')
 echo "=== $(date -Is) FDR: regime $REGIME, runs $RUN_LIST"
 "$PY" -m msdelta.rerank_psm_fdr --rows "$BASE/rows" --runs "$RUN_LIST" --labfeat "$LAB" \
     --sets ms,lab --models "$MODELS" --regime "$REGIME" --max-neg "$MAX_NEG" --seed "$SEED" \
-    ${VECTORS:+--vectors "$VECTORS"} --out "results/raw/rerank/psm/$OUT_NAME.json"
+    ${VECTORS:+--vectors "$VECTORS"} --out "$MSDELTA_EVAL/rerank/psm/$OUT_NAME.json"
 rc=$?; echo "=== $(date -Is) done rc=$rc"; exit $rc

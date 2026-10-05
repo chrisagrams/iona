@@ -2,7 +2,7 @@
 
     .venv/bin/python sweeps/package_rerank.py
 
-Reads the committed per-run rescoring results (results/raw/rerank/psm/*.json; A2 seed 0 from its log)
+Reads the per-run rescoring results ($MSDELTA_EVAL/rerank/psm/*.json; A2 seed 0 from its log)
 and the MS2Rescore baseline (baselines_wip/results_ms2rescore.json). Nothing typed in. Plotting only.
 
     R_embedding_gain.png / .csv   % more PSMs at 1% FDR from adding our embedding features vs a null control
@@ -18,6 +18,7 @@ from __future__ import annotations
 import csv
 import json
 import re
+import sys
 from pathlib import Path
 
 import matplotlib
@@ -25,9 +26,13 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import homes  # noqa: E402  (data homes, configs/homes.env)
+
 REPO = Path(__file__).resolve().parent.parent
-PSM = REPO / "results" / "raw" / "rerank" / "psm"
-FIG = REPO / "results" / "processed" / "figures" / "SUMMARY"
+PSM = homes.EVAL / "rerank" / "psm"
+FIG = homes.RESULTS / "summary"      # the figures (results/summary/)
+TAB = homes.DERIVED / "summary"      # the CSV behind each figure
 INK, MUTED, GRIDC = "#1f2937", "#6b7280", "#e5e7eb"
 STYLE = {"font.family": "DejaVu Sans", "font.size": 10, "axes.edgecolor": "#9ca3af", "axes.linewidth": 0.8,
          "axes.labelcolor": INK, "text.color": INK, "xtick.color": MUTED, "ytick.color": MUTED,
@@ -143,17 +148,19 @@ def fig_benchmark(rows):
     import importlib.util
     spec = importlib.util.spec_from_file_location("plot_reranking", REPO / "paper" / "experiments" / "reranking" / "plot_reranking.py")
     mod = importlib.util.module_from_spec(spec); spec.loader.exec_module(mod)
-    mod.benchmark(csv_path=FIG / "R_benchmark.csv", out_path=FIG / "R_benchmark.png")
+    mod.benchmark(csv_path=TAB / "R_benchmark.csv", out_path=FIG / "R_benchmark.png")
 
 
 def write(name, rows):
-    with open(FIG / name, "w", newline="") as fh:
+    TAB.mkdir(parents=True, exist_ok=True)
+    with open(TAB / name, "w", newline="") as fh:
         w = csv.DictWriter(fh, list(rows[0])); w.writeheader()
         for r in rows:
             w.writerow({k: (f"{v:.4f}" if isinstance(v, float) else v) for k, v in r.items()})
 
 
 def main():
+    FIG.mkdir(parents=True, exist_ok=True)
     g = gain_rows(); write("R_embedding_gain.csv", g); fig_gain(g)
     b = benchmark_rows(); write("R_benchmark.csv", b); fig_benchmark(b)
     for ds in dict.fromkeys(r["dataset"] for r in g):

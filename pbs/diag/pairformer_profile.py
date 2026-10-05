@@ -1,6 +1,6 @@
 """K114: per-block forward and backward time and peak memory, Pairformer vs transformer.
 
-    python pbs/diag/pairformer_profile.py --out results/raw/diag/pairformer_profile/<jobid>.json
+    python pbs/diag/pairformer_profile.py --out $MSDELTA_DIAG/pairformer_profile/<jobid>.json
 
 Purpose (user, K114): calibrate how many single blocks take as long as one pair update, at
 each N. Whole pretraining steps (MSDeltaForPreTraining, masked-intensity loss, bf16 autocast

@@ -39,6 +39,8 @@ import torch.nn.functional as F
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import mass_window_eval as mwe  # noqa: E402
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "sweeps"))
+import homes  # noqa: E402  (data homes, configs/homes.env)
 
 from msdelta.eval.filtered_retrieval import (FILTERS, ISO_K, ISOTOPE, PPM, SUBSETS,  # noqa: E402,F401
                                              filtered_metrics, make_filters, positive_outside,
@@ -215,7 +217,7 @@ def main():
     ap.add_argument("--num-shards", type=int, default=1)
     ap.add_argument("--low-res", nargs="*", default=["hek"],
                     help="datasets that also get binned cosine at 1.0 Da")
-    ap.add_argument("--out", default="results/raw/finetune/contrastive/filter-failure/summary.json")
+    ap.add_argument("--out", default=str(homes.EVAL / "contrastive" / "filter-failure" / "summary.json"))
     cli = ap.parse_args()
     if cli.cmd == "selftest":
         return selftest()

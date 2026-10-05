@@ -26,9 +26,9 @@ PIPELINE = Pipeline(name="dagtrial", budget_node_hours=3, card=CARD, nodes=[
     Node(id="score", deps=["smoke"], script="pbs/eval_grouped_retrieval.pbs",
          vars=dict(COMMON, MODELS="sweeps/arms/dagtrial_models.txt", SPLIT="validation",
                    DATA=f"{MAIN}/eval-data/ms-contrastive-100k-validation-mp512",
-                   OUT_DIR="results/raw/finetune/contrastive/dagtrial-validation"),
+                   OUT_DIR="{scratch}/eval/contrastive/dagtrial-validation"),   # $MSDELTA_EVAL (configs/homes.env)
          nodes=1, runtime_min=23, queues=["debug", "debug-scaling"], approved=CARD,
          max_retries=0,
-         outputs=["{repo}/results/raw/finetune/contrastive/dagtrial-validation/c8c19_mass_seed0.json",
-                  "{repo}/results/raw/finetune/contrastive/dagtrial-validation/c8c19_mass_seed1.json"]),
+         outputs=["{scratch}/eval/contrastive/dagtrial-validation/c8c19_mass_seed0.json",
+                  "{scratch}/eval/contrastive/dagtrial-validation/c8c19_mass_seed1.json"]),
 ])

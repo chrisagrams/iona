@@ -13,6 +13,7 @@
 #     each with SYCL_UR_TRACE=1 for (a); plus `ldd` of the compiled launcher .so files it leaves behind.
 #   qsub -q debug -v REPO_DIR=$PWD pbs/diag/k128_rerun.pbs
 REPO_DIR=${REPO_DIR:-${PBS_O_WORKDIR:-$PWD}}
+source "${REPO_DIR:-${PBS_O_WORKDIR:-$PWD}}/pbs/lib/homes.sh" || exit 1   # K198a: data homes (configs/homes.env)
 cd "$REPO_DIR"
 source "$REPO_DIR/pbs/lib/load_frameworks.sh"
 set -uo pipefail
@@ -21,7 +22,7 @@ export PYTHONPATH=$REPO_DIR${PYTHONPATH:+:$PYTHONPATH}
 source "$REPO_DIR/pbs/lib/code_snapshot.sh"
 PY="$REPO_DIR/.venv/bin/python"
 JOB=${PBS_JOBID%%.*}; JOB=${JOB:-local}
-P=results/raw/diag/pairformer_profile; F=results/raw/diag/flexattn; mkdir -p "$P" "$F"
+P=$MSDELTA_DIAG/pairformer_profile; F=$MSDELTA_DIAG/flexattn; mkdir -p "$P" "$F"
 declare -A RC
 
 for n in 150 256 512; do

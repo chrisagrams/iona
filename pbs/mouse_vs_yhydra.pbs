@@ -8,13 +8,14 @@
 #PBS -l filesystems=home:flare
 #PBS -j oe
 #PBS -o /home/khuss/code/msdelta/pbs/logs/
+source "${REPO_DIR:-${PBS_O_WORKDIR:-$PWD}}/pbs/lib/homes.sh" || exit 1   # K198a: data homes (configs/homes.env)
 set -uo pipefail
 REPO=/home/khuss/code/msdelta; cd $REPO
 SC=/lus/flare/projects/UIC-HPC/khuss/msdelta
 ZIP=$SC/eval-data/nine-species-noble/nine-species-balanced.zip
 D=${D:-$SC/baselines/mouse_noble}
 YE=$SC/baselines/yhydra
-OUT=results/raw/finetune/align/mouse_yhydra; mkdir -p $OUT
+OUT=$MSDELTA_EVAL/align/mouse_yhydra; mkdir -p $OUT
 PE=$SC/shelf/portable_eval/mouse
 source "${REPO_DIR:-${PBS_O_WORKDIR:-$PWD}}/pbs/lib/load_frameworks.sh"
 source pbs/load_keys.sh

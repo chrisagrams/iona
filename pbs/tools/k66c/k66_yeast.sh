@@ -1,5 +1,6 @@
 #!/bin/bash
 # K66-C yeast scoring (K76-C canonical full yeast, K81-C capacity 3 h): after each scale's training succeeds.
+source "${REPO_DIR:-${PBS_O_WORKDIR:-$PWD}}/pbs/lib/homes.sh" || exit 1   # K198a: data homes (configs/homes.env)
 set -uo pipefail
 cd /home/khuss/code/msdelta
 S=/lus/flare/projects/UIC-HPC/khuss/msdelta
@@ -18,7 +19,7 @@ while (( n < ${#JOB[@]} )); do
       m=sweeps/arms/score_hp_scale_$s.txt
       until [[ -f $m ]]; do sleep 60; done          # written by the main pipeline
       until out=$(qsub -q capacity -l select=1 -l walltime=03:00:00 -N hs${s}yeast \
-            -v MODELS=$m,DATA=$Y,OUT_DIR=results/raw/finetune/contrastive/hp-scale-$s-yeast pbs/eval_grouped_retrieval.pbs 2>&1) \
+            -v MODELS=$m,DATA=$Y,OUT_DIR=$MSDELTA_EVAL/contrastive/hp-scale-$s-yeast pbs/eval_grouped_retrieval.pbs 2>&1) \
             && [[ $out == *aurora-pbs* ]]; do
         [[ $out == *"would exceed"* ]] || { log "$s qsub REJECTED: $out"; break; }
         sleep 300

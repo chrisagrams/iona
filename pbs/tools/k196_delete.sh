@@ -36,7 +36,8 @@ if [[ -n ${K196_PROTECT:-} ]]; then
 fi
 
 LIVE_ROOT=/lus/flare/projects/UIC-HPC/khuss/msdelta   # what the scored JSONs' "path" fields name (copy tests too)
-SCORED=${K196_SCORED:-$(cd "$(dirname "$0")/../.." && pwd)/results/raw/finetune/contrastive}
+source "$(cd "$(dirname "$0")/../.." && pwd)/pbs/lib/homes.sh" || exit 1   # K198a: data homes (configs/homes.env)
+SCORED=${K196_SCORED:-$MSDELTA_EVAL/contrastive}
 read -r -a SETS <<<"${K196_SETS:-validation test oodval mouse human yeast}"
 if [[ $MODE == scoredft ]]; then
     [[ -d $SCORED ]] || { echo "ABORT: scored dir $SCORED missing" >&2; exit 2; }
