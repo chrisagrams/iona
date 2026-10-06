@@ -10,12 +10,15 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 import torch
 from accelerate.utils import DeepSpeedPlugin
+from datasets import Dataset
 from transformers import HfArgumentParser, Trainer, set_seed
+from transformers.trainer_pt_utils import LengthGroupedSampler
 
 from iona.callbacks import SidecarCallback, WalltimeCheckpointCallback, build_callbacks
 from iona.configuration_iona import IonaConfig
 from iona.data import (
     build_pretraining_datasets,
+    column_as_numpy,
     load_pretraining_datasets_from_disk,
 )
 from iona.modeling_iona import IonaForPreTraining
@@ -47,6 +50,32 @@ class IonaTrainer(Trainer):
                 plugins["retrieval"] = DeepSpeedPlugin(hf_ds_config=self.args.deepspeed)
             args["deepspeed_plugin"] = plugins
         return args
+
+    def _length_grouped_sampler(self, dataset, batch_size: int) -> LengthGroupedSampler | None:
+        """Group by length from a numpy copy of the length column; None defers to Trainer.
+
+        Trainer passes ``dataset["length"]`` straight to the sampler. In datasets 5 that is a
+        lazy Column, which the sampler indexes once per row (~80 us each): hours at 100M rows,
+        on every rank and every epoch.
+        """
+        if (
+            self.args.train_sampling_strategy != "group_by_length"
+            or not isinstance(dataset, Dataset)
+            or self.args.length_column_name not in dataset.column_names
+        ):
+            return None
+        lengths = column_as_numpy(dataset, self.args.length_column_name)
+        return LengthGroupedSampler(batch_size, dataset=dataset, lengths=lengths)
+
+    def _get_train_sampler(self, train_dataset=None):
+        dataset = train_dataset if train_dataset is not None else self.train_dataset
+        batch_size = self.args.train_batch_size * self.args.gradient_accumulation_steps
+        sampler = self._length_grouped_sampler(dataset, batch_size)
+        return sampler if sampler is not None else super()._get_train_sampler(train_dataset)
+
+    def _get_eval_sampler(self, eval_dataset):
+        sampler = self._length_grouped_sampler(eval_dataset, self.args.eval_batch_size)
+        return sampler if sampler is not None else super()._get_eval_sampler(eval_dataset)
 
     def _save_rng_state(self, output_dir: str) -> None:
         """Create the checkpoint directory once before ranks write their RNG states.
