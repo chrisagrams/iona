@@ -92,18 +92,28 @@ class DeltaMZBias(nn.Module):
             ]
         )
 
-    def _curve(self, feats: Tensor) -> Tensor:
-        feats = feats.to(next(self.head_mlps.parameters()).dtype)
-        return torch.cat([mlp(feats) for mlp in self.head_mlps], dim=-1)
+    def _compute_dtype(self, device: torch.device) -> torch.dtype:
+        if torch.is_autocast_enabled(device.type):
+            return torch.get_autocast_dtype(device.type)
+        return self.head_mlps[0][0].weight.dtype
+
+    def _curve(self, delta_mz: Tensor) -> Tensor:
+        feats = self.ff(delta_mz, dtype=self._compute_dtype(delta_mz.device))
+        # Stack the per-head MLPs so the features feed one GEMM instead of eight; the
+        # block-diagonal second layer keeps each head reading only its own hidden units.
+        w1 = torch.cat([mlp[0].weight for mlp in self.head_mlps])
+        b1 = torch.cat([mlp[0].bias for mlp in self.head_mlps])
+        w2 = torch.block_diag(*[mlp[2].weight for mlp in self.head_mlps])
+        b2 = torch.cat([mlp[2].bias for mlp in self.head_mlps])
+        return F.linear(F.gelu(F.linear(feats, w1, b1)), w2, b2)
 
     def forward(self, mz: Tensor) -> Tensor:
         delta_mz = mz.unsqueeze(-1) - mz.unsqueeze(-2)
-        curve = self._curve(self.ff(delta_mz))
-        return curve.permute(0, 3, 1, 2).contiguous()
+        return self._curve(delta_mz).permute(0, 3, 1, 2).contiguous()
 
     def evaluate(self, delta_mz_grid: Tensor) -> Tensor:
         """Evaluate every attention-head bias curve on a delta m/z grid."""
-        return self._curve(self.ff(delta_mz_grid)).float()
+        return self._curve(delta_mz_grid).float()
 
 
 class BiasedMHA(nn.Module):
