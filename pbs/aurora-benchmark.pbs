@@ -1,0 +1,136 @@
+#!/bin/bash -l
+# Peak memory and throughput of main, #46, and #48+#46 (eager and torch.compile) for
+# inference and training: 12 independent experiments, one per XPU tile of one node.
+# Submit from the repository root on the branch under test:
+#
+#   qsub -A PROJECT -q debug -l select=1 -l walltime=03:00:00 \
+#     -l filesystems=home:flare:daos_user_fs -j oe -o pbs/logs/ \
+#     -v CHECKPOINT=/flare/PROJECT/iona-release/iona-base-25m,DATASET_DIR=/path/to/msdelta-preprocessed,OUT_DIR=/flare/PROJECT/$USER/iona-bench \
+#     pbs/aurora-benchmark.pbs
+#
+# DATASET_DIR is a load_from_disk directory of preprocessed spectra (the pretraining
+# msdelta-preprocessed DatasetDict). Alternatively set DAOS_POOL (and DAOS_CONT) to mount the
+# pretraining container and default DATASET_DIR to its hf-cache, as aurora-pretrain.pbs does.
+# "main" runs the code at MAIN_REF (default: the merge base with origin/main), extracted with
+# git archive; #46 and #48+#46 run this checkout, without and with length-sorted batches.
+# Results append to $OUT_DIR/results.csv as each measurement finishes, then
+#   python scripts/plot_memory_throughput.py $OUT_DIR/results.csv --out $OUT_DIR/memory_vs_batch.pdf
+# draws the figure (the job does this at the end).
+
+#PBS -N iona-benchmark
+#PBS -l place=scatter
+#PBS -j oe
+
+module use /soft/modulefiles
+module load frameworks/2026.1.0
+
+set -euo pipefail
+
+REPO_DIR=${REPO_DIR:-${PBS_O_WORKDIR:-$PWD}}
+VENV_DIR=${VENV_DIR:-$REPO_DIR/.venv}
+CHECKPOINT=${CHECKPOINT:?set CHECKPOINT to the iona-base-25m checkpoint directory}
+JOB_ID=${PBS_JOBID:-local}
+JOB_ID=${JOB_ID%%.*}
+OUT_DIR=${OUT_DIR:?set OUT_DIR to a shared-filesystem directory for results}/$JOB_ID
+POOL_SIZE=${POOL_SIZE:-30000}
+GRID=${GRID:-4,8,16,32,64,128}
+MAX_SEARCH=${MAX_SEARCH:-1}
+
+if [[ -n ${DAOS_POOL:-} ]]; then
+    set +u  # Lmod reads unset variables
+    module load daos
+    set -u
+    DAOS_CONT=${DAOS_CONT:-msdelta-training}
+    launch-dfuse-with-caching.sh "${DAOS_POOL}:${DAOS_CONT}"
+    DATASET_DIR=${DATASET_DIR:-/tmp/$DAOS_POOL/$DAOS_CONT/hf-cache/datasets/msdelta-preprocessed}
+fi
+DATASET_DIR=${DATASET_DIR:?set DATASET_DIR (or DAOS_POOL) to the preprocessed spectra}
+for path in "$CHECKPOINT" "$DATASET_DIR"; do
+    [[ -d $path ]] || { echo "not found: $path" >&2; exit 2; }
+done
+[[ -x $VENV_DIR/bin/python ]] || { echo "Python interpreter not found: $VENV_DIR/bin/python" >&2; exit 2; }
+
+cd "$REPO_DIR"
+MAIN_REF=${MAIN_REF:-$(git merge-base HEAD origin/main)}
+WORK=${WORK:-/tmp/iona-bench-$USER-$JOB_ID}
+mkdir -p "$OUT_DIR/logs" "$WORK/main-src"
+git archive "$MAIN_REF" iona | tar -x -C "$WORK/main-src"
+
+export ONEAPI_DEVICE_SELECTOR=${ONEAPI_DEVICE_SELECTOR:-level_zero:gpu}
+export ZE_FLAT_DEVICE_HIERARCHY=FLAT
+unset SYCL_DEVICE_FILTER
+export OMP_NUM_THREADS=${OMP_NUM_THREADS:-4}
+export MKL_NUM_THREADS=${MKL_NUM_THREADS:-4}
+# multiprocessing binds AF_UNIX sockets under TMPDIR, which must stay short.
+export TMPDIR=${IONA_TMPDIR:-/tmp}
+export HF_HUB_OFFLINE=${HF_HUB_OFFLINE:-1}
+export HF_DATASETS_OFFLINE=${HF_DATASETS_OFFLINE:-1}
+
+PY=$VENV_DIR/bin/python
+BENCH=$REPO_DIR/scripts/bench_memory_throughput.py
+VISIBLE_XPUS=$(env -u ZE_AFFINITY_MASK "$PY" -c 'import torch; print(torch.xpu.device_count())')
+if ((VISIBLE_XPUS < 12)); then
+    echo "need 12 XPU tiles, found $VISIBLE_XPUS" >&2
+    exit 2
+fi
+
+{
+    echo "$(date -Is) job=${PBS_JOBID:-local} host=$(hostname)"
+    echo "branch=$(git rev-parse --abbrev-ref HEAD) head=$(git rev-parse HEAD) main_ref=$MAIN_REF"
+    echo "checkpoint=$CHECKPOINT dataset=$DATASET_DIR grid=$GRID max_search=$MAX_SEARCH"
+    "$PY" -c 'import torch; print(f"torch={torch.__version__}")'
+} | tee "$OUT_DIR/run-info.txt"
+
+# Preprocess the spectrum pool once so the 12 experiments share identical inputs.
+PYTHONPATH=$REPO_DIR "$PY" "$BENCH" pool --dataset-dir "$DATASET_DIR" \
+    --pool-size "$POOL_SIZE" --pool "$WORK/pool.pkl"
+
+# 12 experiments: {infer,train} x {main,#46,#48+#46} x {eager,compiled}, one per tile.
+# Fields: mode variant code-dir sorted compile
+EXPERIMENTS=()
+for mode in infer train; do
+    for compile in 0 1; do
+        EXPERIMENTS+=("$mode main $WORK/main-src 0 $compile")
+        EXPERIMENTS+=("$mode 46 $REPO_DIR 0 $compile")
+        EXPERIMENTS+=("$mode 46+48 $REPO_DIR 1 $compile")
+    done
+done
+# Per-tile CPU cores, as in aurora-pretrain.pbs with 12 tiles per host.
+CPU_LISTS=(4-7 8-11 12-15 16-19 20-23 24-27 56-59 60-63 64-67 68-71 72-75 76-79)
+
+pids=()
+for tile in "${!EXPERIMENTS[@]}"; do
+    read -r mode variant code_dir sorted compile <<<"${EXPERIMENTS[$tile]}"
+    name=$mode-$variant-$([[ $compile == 1 ]] && echo compiled || echo eager)
+    flags=()
+    [[ $compile == 1 ]] && flags+=(--compile)
+    [[ $sorted == 1 ]] && flags+=(--sorted)
+    [[ $MAX_SEARCH == 1 ]] || flags+=(--no-max-search)
+    ZE_AFFINITY_MASK=$tile PYTHONPATH=$code_dir TORCHINDUCTOR_CACHE_DIR=$WORK/inductor-$name \
+        taskset -c "${CPU_LISTS[$tile]}" \
+        "$PY" "$BENCH" experiment --mode "$mode" --variant "$variant" --checkpoint "$CHECKPOINT" \
+        --pool "$WORK/pool.pkl" --grid "$GRID" --csv "$OUT_DIR/logs/results-$name.csv" "${flags[@]}" \
+        >"$OUT_DIR/logs/$name.out" 2>"$OUT_DIR/logs/$name.err" &
+    pids+=($!)
+    echo "tile $tile: $name (pid $!)"
+done
+
+failed=0
+for pid in "${pids[@]}"; do
+    wait "$pid" || failed=1
+done
+
+# Merge the per-experiment CSVs (written as each measurement finishes; each has a header).
+first=1
+for f in "$OUT_DIR"/logs/results-*.csv; do
+    if ((first)); then cat "$f"; first=0; else tail -n +2 "$f"; fi
+done >"$OUT_DIR/results.csv"
+"$PY" "$REPO_DIR/scripts/plot_memory_throughput.py" "$OUT_DIR/results.csv" \
+    --out "$OUT_DIR/memory_vs_batch.pdf" || failed=1
+
+echo "$(date -Is) results: $OUT_DIR/results.csv"
+grep -h "largest batch" "$OUT_DIR"/logs/*.out || true
+if ((failed)); then
+    echo "an experiment failed; see $OUT_DIR/logs/*.err" >&2
+    exit 1
+fi
