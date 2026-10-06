@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Callable
 from functools import partial
 
 import numpy as np
+import pyarrow.compute as pc
 import torch
 from datasets import Dataset, DatasetDict, load_dataset, load_from_disk
 
@@ -60,6 +62,7 @@ def _preprocess_example(example: dict, processor: IonaProcessor) -> dict:
         "mz": values["mz"],
         "log_intensity": values["log_intensity"],
         "labels": values["labels"],
+        "length": len(values["mz"]),
         "charge": charge_index(pc),
         "precursor_mz": precursor_mz(pc),
         "log_tic": float(torch.log1p(intensity.sum())) if intensity.numel() else 0.0,
@@ -111,6 +114,39 @@ def build_preprocessed_dataset(
         load_from_cache_file=load_from_cache_file,
         desc="drop empty spectra",
     )
+
+
+def map_length_sorted(
+    dataset: Dataset,
+    function: Callable[[list[dict]], dict],
+    batch_size: int,
+) -> Dataset:
+    """Run ``function`` on batches of similar-length spectra and return its outputs in input order.
+
+    ``function`` takes a list of row dicts and returns a dict of per-row output columns.
+    Sorting by peak count keeps padding, and its quadratic attention cost, small. Rows run
+    longest first so an out-of-memory error surfaces on the first batch.
+    """
+    if "length" in dataset.column_names:
+        lengths = np.asarray(dataset.with_format("numpy")["length"])
+    else:
+        lengths = np.concatenate([
+            np.zeros(0, dtype=np.int64),
+            *(pc.list_value_length(b["mz"]).to_numpy(zero_copy_only=False)
+              for b in dataset.with_format("arrow").iter(65_536)),
+        ])
+    # select(argsort) is what Dataset.sort does, minus add_column's flatten of any indices mapping.
+    order = np.argsort(-lengths, kind="stable")
+    outputs = dataset.select(order).map(
+        lambda batch: function([dict(zip(batch, row)) for row in zip(*batch.values())]),
+        batched=True,
+        batch_size=batch_size,
+        remove_columns=dataset.column_names,
+        keep_in_memory=True,
+        load_from_cache_file=False,
+        desc="length-sorted inference",
+    )
+    return outputs.select(np.argsort(order))
 
 
 def build_pretraining_datasets(

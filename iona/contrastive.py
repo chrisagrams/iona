@@ -9,12 +9,13 @@ from __future__ import annotations
 import numpy as np
 import torch
 import torch.nn.functional as F
+from datasets import Dataset
 from pytorch_metric_learning.losses import SupConLoss
 from torch import Tensor, nn
 from torch.utils.checkpoint import get_device_states, set_device_states
 from torch.utils.data import Sampler
 
-from iona.data import peptide_key
+from iona.data import map_length_sorted, peptide_key
 from iona.reranking import group_separation_metrics, pool_sequence
 from iona.retrieval import retrieval_metrics
 
@@ -169,25 +170,32 @@ def embed_dataset(model, dataset, collator, device, max_rows: int = 2000,
     """Embed rows and return (embeddings, group ids)."""
     was_training = model.training
     model.eval()
-    rows = list(dataset)[:max_rows]
-    embeddings = []
+    if not isinstance(dataset, Dataset):
+        dataset = Dataset.from_list(list(dataset))
+    rows = dataset.select(range(min(len(dataset), max_rows)))
+    if not len(rows):
+        return None, None
+    dtype = None
+
+    def forward(chunk):
+        nonlocal dtype
+        batch = {k: v.to(device) for k, v in collator(chunk).items()}
+        pooled, _ = model.embed(batch["mz"], batch["log_intensity"], batch["attention_mask"])
+        dtype = pooled.dtype
+        return {"embedding": pooled.float().cpu().numpy()}
+
     try:
         # no_grad is required: otherwise the graph is kept alive through .cpu().
         with torch.no_grad():
-            for start in range(0, len(rows), batch_size):
-                chunk = rows[start : start + batch_size]
-                batch = {k: v.to(device) for k, v in collator(chunk).items()}
-                pooled, _ = model.embed(batch["mz"], batch["log_intensity"],
-                                        batch["attention_mask"])
-                embeddings.append(pooled.cpu())
+            out = map_length_sorted(rows, forward, batch_size)
     finally:
         model.train(was_training)
-    if not embeddings:
-        return None, None
+    embeddings = torch.from_numpy(np.stack(out["embedding"])).to(dtype)
+    charges = rows["charge"] if "charge" in rows.column_names else [0] * len(rows)
     groups = np.unique(
-        np.array([peptide_key(r["peptide"], int(r.get("charge", 0))) for r in rows]),
+        np.array([peptide_key(p, int(c or 0)) for p, c in zip(rows["peptide"], charges)]),
         return_inverse=True)[1]
-    return torch.cat(embeddings), groups
+    return embeddings, groups
 
 
 def retrieval_summary(model, dataset, collator, device, max_rows: int = 2000,

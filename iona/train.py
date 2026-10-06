@@ -14,7 +14,10 @@ from transformers import HfArgumentParser, Trainer, set_seed
 
 from iona.callbacks import SidecarCallback, WalltimeCheckpointCallback, build_callbacks
 from iona.configuration_iona import IonaConfig
-from iona.data import build_pretraining_datasets, load_pretraining_datasets_from_disk
+from iona.data import (
+    build_pretraining_datasets,
+    load_pretraining_datasets_from_disk,
+)
 from iona.modeling_iona import IonaForPreTraining
 from iona.posttraining import build_probe_data
 from iona.processing_iona import IonaDataCollatorForPreTraining, IonaProcessor

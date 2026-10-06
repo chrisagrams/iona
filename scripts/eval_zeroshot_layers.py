@@ -21,7 +21,7 @@ import torch.nn.functional as F
 from datasets import load_from_disk
 
 from iona.contrastive import encoder_layer_states
-from iona.data import group_ids
+from iona.data import group_ids, map_length_sorted
 from iona.finetune_contrastive import ContrastiveCollator
 from iona.modeling_iona import IonaForPreTraining
 from iona.reranking import pool_sequence
@@ -75,11 +75,12 @@ def main(argv: list[str] | None = None) -> int:
     groups = group_ids(rows)
     experimental = np.array([s == "experimental" for s in rows["source"]])
     collator = ContrastiveCollator(max_peptide_length=64, pad_spectra_to=512)
-    features = list(rows)
+    features = rows
     fit_features = []
     if abtt:
         fit_rows = load_from_disk(cli.fit_data)
-        fit_features = [f for f in fit_rows if f["source"] == "experimental"]
+        fit_features = fit_rows.select(
+            np.flatnonzero(np.array(fit_rows["source"]) == "experimental"))
         print(f"abtt D={abtt}: fit on {len(fit_features):,} experimental train spectra",
               flush=True)
 
@@ -92,19 +93,24 @@ def main(argv: list[str] | None = None) -> int:
         encoder = getattr(model, "iona", model)
         def embed(feats, raw):
             """Pooled vectors per layer: unit-norm halves, or raw float32 for abtt."""
-            per_layer: dict[str, list] = {}
+            def embed_batch(chunk):
+                batch = collator(chunk)
+                mz, li, mask = (batch[k].to(device) for k in
+                                ("mz", "log_intensity", "attention_mask"))
+                states, final = encoder_layer_states(encoder, mz, li, mask)
+                per_layer = {}
+                for key, state in [*((f"block{i:02d}", s) for i, s in enumerate(states)),
+                                   ("final", final)]:
+                    pooled = pool_sequence(state, mask, cli.pooling).float()
+                    pooled = pooled.cpu() if raw else F.normalize(pooled, dim=-1).half().cpu()
+                    per_layer[key] = pooled.float().numpy()
+                return per_layer
+
+            if not len(feats):
+                return {}
             with torch.no_grad():
-                for start in range(0, len(feats), cli.batch_size):
-                    batch = collator(feats[start:start + cli.batch_size])
-                    mz, li, mask = (batch[k].to(device) for k in
-                                    ("mz", "log_intensity", "attention_mask"))
-                    states, final = encoder_layer_states(encoder, mz, li, mask)
-                    for key, state in [*((f"block{i:02d}", s) for i, s in enumerate(states)),
-                                       ("final", final)]:
-                        pooled = pool_sequence(state, mask, cli.pooling).float()
-                        pooled = pooled.cpu() if raw else F.normalize(pooled, dim=-1).half().cpu()
-                        per_layer.setdefault(key, []).append(pooled)
-            return {k: torch.cat(v).float() for k, v in per_layer.items()}
+                out = map_length_sorted(feats, embed_batch, cli.batch_size)
+            return {k: torch.from_numpy(np.stack(out[k])) for k in out.column_names}
 
         per_layer = embed(features, raw=bool(abtt))
         fit_layer = embed(fit_features, raw=True) if abtt else {}
