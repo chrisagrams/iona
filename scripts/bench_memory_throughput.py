@@ -6,7 +6,8 @@ Three stages, normally driven by ``pbs/aurora-benchmark.pbs``:
 * ``experiment``: sweep batch sizes for one (mode, variant, compile, sorted) configuration,
   then search for the largest batch whose whole timed set fits, appending one CSV row per
   measurement. Every measurement runs in a fresh ``measure`` subprocess so an out-of-memory
-  error cannot leak allocator state into the next one.
+  error cannot leak allocator state into the next one. Any failure, including the segfault
+  XPUs sometimes raise instead of an out-of-memory error, counts as "does not fit".
 * ``measure``: run one batch size and print a ``RESULT`` JSON line.
 
 The model code under test is whatever ``iona`` resolves to on ``PYTHONPATH``, so one copy of
@@ -21,16 +22,18 @@ import csv
 import json
 import os
 import pickle
+import signal
 import subprocess
 import sys
 import time
+import traceback
 from pathlib import Path
 
 GRID = (4, 8, 16, 32, 64, 128)
 CSV_FIELDS = (
     "mode", "variant", "compiled", "sorted", "batch", "kind", "status", "peak_gib",
     "spectra_per_s", "n_batches", "padded_lengths", "device", "device_total_gib",
-    "torch_version", "iona_path",
+    "torch_version", "iona_path", "detail",
 )
 
 
@@ -208,10 +211,10 @@ def measure(args) -> dict:
 def measure_main(args) -> None:
     try:
         result = measure(args)
-    except Exception as error:  # noqa: BLE001 - reported to the driver, never swallowed
-        if not is_oom(error):
-            raise
-        result = {"status": "oom"}
+    except Exception as error:  # noqa: BLE001 - the driver records it and treats it as not fitting
+        result = {"status": "oom" if is_oom(error) else "error",
+                  "detail": f"{type(error).__name__}: {str(error)[:300]}"}
+        traceback.print_exc()
     print("RESULT " + json.dumps(result), flush=True)
 
 
@@ -239,7 +242,9 @@ def experiment(args) -> None:
         for line in proc.stdout.splitlines():
             if line.startswith("RESULT "):
                 return json.loads(line[7:])
-        return {"status": "error"}
+        code = proc.returncode
+        detail = f"killed by {signal.Signals(-code).name}" if code < 0 else f"exit code {code}"
+        return {"status": "crash", "detail": detail}
 
     def record(batch: int, kind: str, result: dict) -> None:
         writer.writerow({**base, "batch": batch, "kind": kind,
@@ -248,31 +253,31 @@ def experiment(args) -> None:
         print(f"[{args.variant} {args.mode} compile={int(args.compile)}] {kind} B={batch}: "
               f"{json.dumps(result)}", flush=True)
 
+    # Any failure means "does not fit": XPUs can segfault or raise a generic runtime error when
+    # memory runs out, not just a clean OutOfMemoryError. The status column keeps which it was.
+    # A failure at the smallest batch is almost surely a real bug, so that one aborts.
     results: dict[int, dict] = {}
     for batch in args.grid:
-        if any(r["status"] == "oom" for r in results.values()):
-            record(batch, "grid", {"status": "skipped"})  # a smaller batch already ran out of memory
+        if any(r["status"] != "ok" for r in results.values()):
+            record(batch, "grid", {"status": "skipped"})  # a smaller batch already failed
             continue
         results[batch] = run(batch)
         record(batch, "grid", results[batch])
-        if results[batch]["status"] == "error":
-            raise SystemExit(f"measurement failed at batch {batch}; see stderr")
+        if batch == args.grid[0] and results[batch]["status"] != "ok":
+            raise SystemExit(f"smallest batch {batch} failed ({results[batch].get('detail')}); "
+                             "likely a bug, not memory; see stderr")
     ok = [b for b, r in results.items() if r["status"] == "ok"]
     if not args.max_search or not ok:
         return
     lo, hi = max(ok), max(ok) * 2
     while True:  # grow until a batch size fails, then bisect
         results[hi] = run(hi)
-        if results[hi]["status"] == "error":
-            raise SystemExit(f"measurement failed at batch {hi}; see stderr")
         if results[hi]["status"] != "ok":
             break
         lo, hi = hi, hi * 2
     while hi - lo > 1:
         mid = (lo + hi) // 2
         results[mid] = run(mid)
-        if results[mid]["status"] == "error":
-            raise SystemExit(f"measurement failed at batch {mid}; see stderr")
         lo, hi = (mid, hi) if results[mid]["status"] == "ok" else (lo, mid)
     record(lo, "max", results[lo])
     print(f"[{args.variant} {args.mode} compile={int(args.compile)}] largest batch {lo}", flush=True)
