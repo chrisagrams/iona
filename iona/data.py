@@ -116,6 +116,16 @@ def build_preprocessed_dataset(
     )
 
 
+def column_as_numpy(dataset: Dataset, name: str) -> np.ndarray:
+    """Return one column as a numpy array in row order, following any index mapping.
+
+    ``dataset[name]`` is a lazy ``Column`` whose items decode one at a time (tens of
+    microseconds each), and ``np.asarray`` on it walks every row; a formatted slice converts
+    the whole column at once.
+    """
+    return dataset.select_columns([name]).with_format("numpy")[:][name]
+
+
 def map_length_sorted(
     dataset: Dataset,
     function: Callable[[list[dict]], dict],
@@ -128,7 +138,7 @@ def map_length_sorted(
     longest first so an out-of-memory error surfaces on the first batch.
     """
     if "length" in dataset.column_names:
-        lengths = np.asarray(dataset.with_format("numpy")["length"])
+        lengths = column_as_numpy(dataset, "length")
     else:
         lengths = np.concatenate([
             np.zeros(0, dtype=np.int64),
