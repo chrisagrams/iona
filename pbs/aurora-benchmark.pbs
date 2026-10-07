@@ -11,7 +11,7 @@
 # BASELINE_REF/CANDIDATE_REF default to the local main and dev branches; fetch
 # before submitting. Their iona/ trees are exported with git archive and run by
 # this branch's scripts/benchmark_eval.py. Results land in $OUT_DIR/$JOB_ID.
-# BENCH_ARGS passes extra flags, e.g. "--max-samples 20000 --no-compile".
+# BENCH_ARGS passes extra flags, e.g. "--sample-fraction 0.1 --no-compile".
 
 #PBS -N iona-benchmark
 #PBS -A UIC-HPC

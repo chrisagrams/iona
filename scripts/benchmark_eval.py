@@ -44,6 +44,11 @@ def run(args: argparse.Namespace) -> None:
     if not isinstance(datasets, DatasetDict):
         raise TypeError(f"Expected a DatasetDict at {args.dataset_dir}")
     dataset = datasets[args.split].select_columns(["mz", "log_intensity", "labels"])
+    if args.sample_fraction < 1:
+        n = max(1, int(len(dataset) * args.sample_fraction))
+        order = np.random.default_rng(args.seed).permutation(len(dataset))
+        # Sorted indices keep reads from the Arrow table close to sequential.
+        dataset = dataset.select(np.sort(order[:n]))
     if args.max_samples:
         dataset = dataset.select(range(min(args.max_samples, len(dataset))))
     collator = IonaDataCollatorForPreTraining(
@@ -112,6 +117,7 @@ def run(args: argparse.Namespace) -> None:
         "source": str(source),
         "checkpoint": args.checkpoint,
         "split": args.split,
+        "sample_fraction": args.sample_fraction,
         "params": n_params,
         "spectra": int(kl.size),
         "batch_size": args.batch_size,
@@ -188,6 +194,9 @@ def main() -> None:
     run_parser.add_argument("--expect-source", help="fail unless iona is imported from here")
     run_parser.add_argument("--device", default="xpu")
     run_parser.add_argument("--batch-size", type=int, default=8)
+    run_parser.add_argument(
+        "--sample-fraction", type=float, default=1.0, help="seeded random subset of the split"
+    )
     run_parser.add_argument("--max-samples", type=int, default=0, help="0 uses the whole split")
     run_parser.add_argument("--mask-ratio", type=float, default=0.5)
     run_parser.add_argument("--pad-to-multiple-of", type=int, default=64)
@@ -205,6 +214,8 @@ def main() -> None:
     compare_parser.set_defaults(func=compare)
 
     args = parser.parse_args()
+    if args.command == "run" and not 0 < args.sample_fraction <= 1:
+        parser.error("--sample-fraction must be in (0, 1]")
     args.func(args)
 
 
