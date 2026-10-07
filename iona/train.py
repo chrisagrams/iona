@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 import os
 import sys
 from dataclasses import asdict
@@ -20,6 +21,7 @@ from iona.data import (
     build_pretraining_datasets,
     column_as_numpy,
     load_pretraining_datasets_from_disk,
+    subsample_train,
 )
 from iona.modeling_iona import IonaForPreTraining
 from iona.posttraining import build_probe_data
@@ -27,6 +29,15 @@ from iona.processing_iona import IonaDataCollatorForPreTraining, IonaProcessor
 from iona.training_args import DataArguments, IonaTrainingArguments, ModelArguments
 from iona.viz import render_bias_panels
 from iona.wandb_distributed import init_wandb_run
+
+
+def full_data_max_steps(n_examples: int, args: IonaTrainingArguments) -> int:
+    """Optimizer steps Trainer would take for n_examples at the configured epochs."""
+    per_step = args.per_device_train_batch_size * args.world_size
+    rounding = math.floor if args.dataloader_drop_last else math.ceil
+    batches = max(rounding(n_examples / per_step), 1)
+    steps_per_epoch = math.ceil(batches / args.gradient_accumulation_steps)
+    return math.ceil(args.num_train_epochs * steps_per_epoch)
 
 
 class IonaTrainer(Trainer):
@@ -176,6 +187,23 @@ def main(argv: list[str] | None = None) -> int:
                     num_proc=data_args.preprocessing_num_workers or None,
                     cache_dir=data_args.dataset_cache_dir,
                 )
+        if data_args.train_fraction < 1:
+            full_n = len(train_ds)
+            # Hold the step budget at the full-data run so only unique data varies.
+            if training_args.max_steps <= 0:
+                training_args.max_steps = full_data_max_steps(full_n, training_args)
+                resolved["training"]["max_steps"] = training_args.max_steps
+            train_ds = subsample_train(
+                train_ds, data_args.train_fraction, data_args.train_subset_seed
+            )
+            if training_args.process_index == 0:
+                print(
+                    f"[data] train_fraction={data_args.train_fraction}: "
+                    f"{len(train_ds):,} of {full_n:,} spectra, "
+                    f"max_steps={training_args.max_steps:,}",
+                    flush=True,
+                )
+        resolved["data"]["train_examples"] = len(train_ds)
         include_probes = training_args.probe_execution == "inline"
         denoising_datasets = denoising_processor = None
         retrieval_datasets = retrieval_evaluation_datasets = None

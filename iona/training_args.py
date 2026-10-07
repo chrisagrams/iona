@@ -49,6 +49,22 @@ class DataArguments:
     )
     preprocessing_num_workers: int = 24
     max_peaks: int | None = None
+    train_fraction: float = field(
+        default=1.0,
+        metadata={
+            "help": (
+                "Fraction of the training split to train on. Subsets are nested, and "
+                "max_steps defaults to the full-data step count."
+            )
+        },
+    )
+    train_subset_seed: int = field(
+        default=0, metadata={"help": "Seed for choosing the train_fraction subset."}
+    )
+
+    def __post_init__(self):
+        if not 0 < self.train_fraction <= 1:
+            raise ValueError("train_fraction must be in (0, 1]")
 
 
 @dataclass

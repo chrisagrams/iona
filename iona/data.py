@@ -201,6 +201,16 @@ def load_pretraining_datasets_from_disk(
     return datasets[train_split], datasets[validation_split]
 
 
+def subsample_train(dataset: Dataset, fraction: float, seed: int = 0) -> Dataset:
+    """Select a random subset; smaller fractions are nested in larger ones."""
+    if fraction >= 1.0:
+        return dataset
+    n = max(1, int(len(dataset) * fraction))
+    order = np.random.default_rng(seed).permutation(len(dataset))
+    # Sorted indices keep reads from the Arrow table close to sequential.
+    return dataset.select(np.sort(order[:n]))
+
+
 def build_denoising_datasets(
     repo_id: str,
     processor: IonaProcessor,
