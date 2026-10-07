@@ -92,18 +92,24 @@ class DeltaMZBias(nn.Module):
             ]
         )
 
-    def _curve(self, feats: Tensor) -> Tensor:
-        feats = feats.to(next(self.head_mlps.parameters()).dtype)
-        return torch.cat([mlp(feats) for mlp in self.head_mlps], dim=-1)
+    def _curve(self, delta_mz: Tensor) -> Tensor:
+        feats = self.ff(delta_mz).to(self.head_mlps[0][0].weight.dtype)
+        # Equivalent to torch.cat([mlp(feats) for mlp in self.head_mlps], dim=-1),
+        # but stacked into one GEMM.
+        w_in = torch.cat([mlp[0].weight for mlp in self.head_mlps])
+        b_in = torch.cat([mlp[0].bias for mlp in self.head_mlps])
+        w_out = torch.cat([mlp[2].weight for mlp in self.head_mlps])
+        b_out = torch.cat([mlp[2].bias for mlp in self.head_mlps])
+        hidden = F.gelu(F.linear(feats, w_in, b_in)).unflatten(-1, (self.n_heads, -1))
+        return (hidden * w_out).sum(-1) + b_out
 
     def forward(self, mz: Tensor) -> Tensor:
         delta_mz = mz.unsqueeze(-1) - mz.unsqueeze(-2)
-        curve = self._curve(self.ff(delta_mz))
-        return curve.permute(0, 3, 1, 2).contiguous()
+        return self._curve(delta_mz).permute(0, 3, 1, 2).contiguous()
 
     def evaluate(self, delta_mz_grid: Tensor) -> Tensor:
         """Evaluate every attention-head bias curve on a delta m/z grid."""
-        return self._curve(self.ff(delta_mz_grid)).float()
+        return self._curve(delta_mz_grid).float()
 
 
 class BiasedMHA(nn.Module):
