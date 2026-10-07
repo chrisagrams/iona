@@ -1,0 +1,138 @@
+#!/bin/bash -l
+# Benchmark eval-split speed and loss for two git refs on the same checkpoints.
+# Submit from the repository root:
+# qsub -q debug \
+#   -v CHECKPOINT_ROOT=/flare/UIC-HPC/homes/cgrams/iona-release,DAOS_POOL=GenSLM,DAOS_CONT=msfound,OUT_DIR=/flare/UIC-HPC/homes/cgrams/iona-bench \
+#   pbs/aurora-benchmark.pbs
+# Each model in SIZES (space-separated, default "25m 100m 200m 400m") loads
+# $CHECKPOINT_ROOT/iona-base-$size. CHECKPOINT=<one model dir> also works and
+# uses its parent as CHECKPOINT_ROOT. Every (size, ref) pair runs on its own XPU
+# tile; a size's two refs share one card (tiles 2i and 2i+1), so up to 6 sizes.
+# BASELINE_REF/CANDIDATE_REF default to the local main and dev branches; fetch
+# before submitting. Their iona/ trees are exported with git archive and run by
+# this branch's scripts/benchmark_eval.py. Results land in $OUT_DIR/$JOB_ID.
+# BENCH_ARGS passes extra flags, e.g. "--max-samples 20000 --no-compile".
+
+#PBS -N iona-benchmark
+#PBS -A UIC-HPC
+#PBS -l select=1
+#PBS -l place=scatter
+#PBS -l walltime=01:00:00
+#PBS -l filesystems=home:flare:daos_user_fs
+#PBS -j oe
+#PBS -o pbs/logs/
+
+module use /soft/modulefiles
+module load daos
+module load frameworks/2026.1.0
+
+set -euo pipefail
+
+REPO_DIR=${REPO_DIR:-${PBS_O_WORKDIR:-$PWD}}
+VENV_DIR=${VENV_DIR:-$REPO_DIR/.venv}
+DAOS_POOL=${DAOS_POOL:?set DAOS_POOL to the project DAOS pool}
+DAOS_CONT=${DAOS_CONT:?set DAOS_CONT to the container holding the preprocessed dataset}
+OUT_DIR=${OUT_DIR:?set OUT_DIR to a shared-filesystem results directory}
+if [[ -n ${CHECKPOINT:-} ]]; then
+    CHECKPOINT_ROOT=${CHECKPOINT_ROOT:-$(dirname "$CHECKPOINT")}
+fi
+CHECKPOINT_ROOT=${CHECKPOINT_ROOT:?set CHECKPOINT_ROOT (or CHECKPOINT) to the release checkpoints}
+SIZES=${SIZES:-25m 100m 200m 400m}
+BASELINE_REF=${BASELINE_REF:-main}
+CANDIDATE_REF=${CANDIDATE_REF:-dev}
+SPLIT=${SPLIT:-validation}
+read -r -a BENCH_EXTRA <<<"${BENCH_ARGS:-}"
+
+if [[ ! -x $VENV_DIR/bin/python ]]; then
+    echo "Python interpreter not found: $VENV_DIR/bin/python" >&2
+    exit 2
+fi
+read -r -a SIZE_LIST <<<"$SIZES"
+if ((${#SIZE_LIST[@]} < 1 || ${#SIZE_LIST[@]} > 6)); then
+    echo "SIZES must name 1 to 6 models (two tiles each)" >&2
+    exit 2
+fi
+for size in "${SIZE_LIST[@]}"; do
+    if [[ ! -f $CHECKPOINT_ROOT/iona-base-$size/config.json ]]; then
+        echo "checkpoint not found: $CHECKPOINT_ROOT/iona-base-$size" >&2
+        exit 2
+    fi
+done
+
+launch-dfuse-with-caching.sh "${DAOS_POOL}:${DAOS_CONT}"
+DAOS_ROOT=/tmp/$DAOS_POOL/$DAOS_CONT
+HF_HOME=${HF_HOME:-$DAOS_ROOT/hf-cache}
+PREPROCESSED_DATASET_DIR=${PREPROCESSED_DATASET_DIR:-$HF_HOME/datasets/msdelta-preprocessed}
+if [[ ! -d $PREPROCESSED_DATASET_DIR ]]; then
+    echo "preprocessed dataset not found: $PREPROCESSED_DATASET_DIR" >&2
+    exit 2
+fi
+
+JOB_ID=${PBS_JOBID:-local}
+JOB_ID=${JOB_ID%%.*}
+RESULTS_DIR=$OUT_DIR/$JOB_ID
+SRC_ROOT=$RESULTS_DIR/src
+mkdir -p "$RESULTS_DIR" "$SRC_ROOT"
+
+# Export each ref's package so the two runs differ only in iona/.
+declare -A REFS=([main]=$BASELINE_REF [dev]=$CANDIDATE_REF)
+for label in main dev; do
+    sha=$(git -C "$REPO_DIR" rev-parse --verify "${REFS[$label]}^{commit}")
+    mkdir -p "$SRC_ROOT/$label"
+    git -C "$REPO_DIR" archive "$sha" iona | tar -x -C "$SRC_ROOT/$label"
+    echo "$label ${REFS[$label]} $sha" | tee -a "$RESULTS_DIR/refs.txt"
+done
+
+# One CPU core group per tile, matching aurora-pretrain.pbs.
+CPU_LISTS=(4-7 8-11 12-15 16-19 20-23 24-27 56-59 60-63 64-67 68-71 72-75 76-79)
+export ONEAPI_DEVICE_SELECTOR=level_zero:gpu
+export ZE_FLAT_DEVICE_HIERARCHY=FLAT
+unset SYCL_DEVICE_FILTER
+export OMP_NUM_THREADS=${OMP_NUM_THREADS:-4}
+export MKL_NUM_THREADS=${MKL_NUM_THREADS:-4}
+export OPENBLAS_NUM_THREADS=${OPENBLAS_NUM_THREADS:-4}
+export HF_HOME
+export HF_HUB_OFFLINE=1
+export HF_DATASETS_OFFLINE=1
+export TMPDIR=${IONA_TMPDIR:-/tmp}
+
+echo "$(date -Is) job=${PBS_JOBID:-local} sizes=${SIZE_LIST[*]} split=$SPLIT results=$RESULTS_DIR"
+echo "daos=${DAOS_POOL}:${DAOS_CONT} dataset=$PREPROCESSED_DATASET_DIR checkpoints=$CHECKPOINT_ROOT"
+
+pids=()
+names=()
+for i in "${!SIZE_LIST[@]}"; do
+    size=${SIZE_LIST[$i]}
+    for offset in 0 1; do
+        label=$([[ $offset == 0 ]] && echo main || echo dev)
+        tile=$((2 * i + offset))
+        run_dir=$RESULTS_DIR/$size/$label
+        mkdir -p "$run_dir"
+        echo "launching $size/$label on tile $tile (cpus ${CPU_LISTS[$tile]})"
+        ZE_AFFINITY_MASK=$tile \
+            PYTHONPATH=$SRC_ROOT/$label \
+            TORCHINDUCTOR_CACHE_DIR=/tmp/torchinductor-$USER-$JOB_ID-$size-$label \
+            taskset -c "${CPU_LISTS[$tile]}" \
+            "$VENV_DIR/bin/python" "$REPO_DIR/scripts/benchmark_eval.py" run \
+            --expect-source "$SRC_ROOT/$label" \
+            --checkpoint "$CHECKPOINT_ROOT/iona-base-$size" \
+            --dataset-dir "$PREPROCESSED_DATASET_DIR" \
+            --split "$SPLIT" \
+            --out-dir "$run_dir" \
+            "${BENCH_EXTRA[@]}" \
+            >"$run_dir/bench.log" 2>&1 &
+        pids+=($!)
+        names+=("$size/$label")
+    done
+done
+
+failed=0
+for j in "${!pids[@]}"; do
+    if ! wait "${pids[$j]}"; then
+        echo "FAILED: ${names[$j]}; see $RESULTS_DIR/${names[$j]}/bench.log" >&2
+        failed=1
+    fi
+done
+
+"$VENV_DIR/bin/python" "$REPO_DIR/scripts/benchmark_eval.py" compare "$RESULTS_DIR"
+exit $failed
