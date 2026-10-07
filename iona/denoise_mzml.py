@@ -69,17 +69,21 @@ class SpectrumDenoiser:
         noise_threshold: float = 0.5,
         peak_pair_budget: int = 4_194_304,
         distributed_state: PartialState | None = None,
+        compile_model: bool = True,
     ):
         if not 0.0 < noise_threshold <= 1.0:
             raise ValueError("noise_threshold must be in (0, 1]")
         if peak_pair_budget < processor.max_peaks**2:
             raise ValueError("peak_pair_budget must fit one spectrum of max_peaks peaks")
-        self.model = model.eval()
+        self.device = next(model.parameters()).device
+        model = model.eval()
+        if compile_model:
+            model = torch.compile(model, dynamic=True)
+        self.model = model
         self.processor = processor
         self.noise_threshold = noise_threshold
         self.peak_pair_budget = peak_pair_budget
         self.distributed_state = distributed_state
-        self.device = next(model.parameters()).device
 
     def _windows(self, length: int) -> list[slice]:
         """Cover a peak sequence with the minimum number of evenly overlapping windows."""
@@ -263,6 +267,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="spectra read into memory between model batches (default: 1024)",
     )
     parser.add_argument("--device", help="torch device (default: cuda if available)")
+    parser.add_argument("--no-compile", action="store_true", help="skip torch.compile")
     parser.add_argument(
         "--summary", type=Path, help="write per-file peak and spectrum counts to this JSON file"
     )
@@ -287,6 +292,7 @@ def main(argv: list[str] | None = None) -> int:
         distributed_state=state,
         noise_threshold=args.noise_threshold,
         peak_pair_budget=args.peak_pair_budget,
+        compile_model=not args.no_compile,
     )
     if args.output_dir is not None and state.is_main_process:
         args.output_dir.mkdir(parents=True, exist_ok=True)
