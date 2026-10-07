@@ -94,13 +94,12 @@ class DeltaMZBias(nn.Module):
 
     def _curve(self, delta_mz: Tensor) -> Tensor:
         feats = self.ff(delta_mz).to(self.head_mlps[0][0].weight.dtype)
-        # Stack the per-head MLPs so the features feed one GEMM instead of one per head.
+        # Equivalent to torch.cat([mlp(feats) for mlp in self.head_mlps], dim=-1),
+        # but stacked into one GEMM.
         w_in = torch.cat([mlp[0].weight for mlp in self.head_mlps])
         b_in = torch.cat([mlp[0].bias for mlp in self.head_mlps])
         w_out = torch.cat([mlp[2].weight for mlp in self.head_mlps])
         b_out = torch.cat([mlp[2].bias for mlp in self.head_mlps])
-        # Each head's second layer is a weighted sum over its own hidden units, so split the
-        # hidden axis per head and reduce it rather than going through a block-diagonal GEMM.
         hidden = F.gelu(F.linear(feats, w_in, b_in)).unflatten(-1, (self.n_heads, -1))
         return (hidden * w_out).sum(-1) + b_out
 
