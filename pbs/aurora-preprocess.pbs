@@ -9,7 +9,7 @@
 #   pbs/aurora-preprocess.pbs
 # Set PROBES_ONLY=1 to prepare probes without rebuilding the existing main dataset.
 
-module load frameworks
+module load frameworks/2026.1.0
 
 set -euo pipefail
 

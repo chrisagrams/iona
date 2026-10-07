@@ -2,12 +2,25 @@ name: release-please
 
 on:
   push:
-    branches: [main]
+    branches: [dev, main]
 
 permissions: {}
 
 jobs:
-  release-please:
+  release-pr:
+    if: github.ref == 'refs/heads/dev'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - uses: googleapis/release-please-action@v5
+        with:
+          target-branch: dev
+          skip-github-release: true
+
+  release:
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -16,12 +29,16 @@ jobs:
       release_created: ${{ steps.release.outputs.release_created }}
       tag_name: ${{ steps.release.outputs.tag_name }}
     steps:
+      # Release PRs are merged into dev, so look for them there.
       - uses: googleapis/release-please-action@v5
         id: release
+        with:
+          target-branch: dev
+          skip-github-pull-request: true
 
   publish:
-    needs: release-please
-    if: needs.release-please.outputs.release_created == 'true'
+    needs: release
+    if: needs.release.outputs.release_created == 'true'
     runs-on: ubuntu-latest
     environment:
       name: pypi
@@ -31,9 +48,11 @@ jobs:
       id-token: write
     steps:
       - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.release.outputs.tag_name }}
       - uses: astral-sh/setup-uv@v10.2.0
       - run: uv build
       - run: uv publish
-      - run: gh release upload "${{ needs.release-please.outputs.tag_name }}" dist/*
+      - run: gh release upload "${{ needs.release.outputs.tag_name }}" dist/*
         env:
           GH_TOKEN: ${{ github.token }}

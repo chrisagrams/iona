@@ -49,6 +49,22 @@ class DataArguments:
     )
     preprocessing_num_workers: int = 24
     max_peaks: int | None = None
+    train_fraction: float = field(
+        default=1.0,
+        metadata={
+            "help": (
+                "Fraction of the training split to train on. Subsets are nested, and "
+                "max_steps defaults to the full-data step count."
+            )
+        },
+    )
+    train_subset_seed: int = field(
+        default=0, metadata={"help": "Seed for choosing the train_fraction subset."}
+    )
+
+    def __post_init__(self):
+        if not 0 < self.train_fraction <= 1:
+            raise ValueError("train_fraction must be in (0, 1]")
 
 
 @dataclass
@@ -68,6 +84,10 @@ class IonaTrainingArguments(TrainingArguments):
     sidecar_denoise_device: str | None = None
     sidecar_retrieval_device: str | None = None
     mask_ratio: float = 0.15
+    pad_to_multiple_of: int | None = field(
+        default=None,
+        metadata={"help": "Pad pretraining batches to a multiple of this many peaks."},
+    )
     logarithmic_eval_start_step: int | None = 500
     bias_curve_steps: int = 5000
     probe_steps: int = 0

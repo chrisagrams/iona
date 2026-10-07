@@ -3,7 +3,7 @@
 
 set -euo pipefail
 
-REPO=/home/cgrams/msdelta
+REPO=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 cd "$REPO"
 
 # Limit the BLAS threads.
