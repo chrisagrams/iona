@@ -76,7 +76,7 @@ class IonaTrainer(Trainer):
         ):
             return None
         lengths = column_as_numpy(dataset, self.args.length_column_name)
-        return LengthGroupedSampler(batch_size, dataset=dataset, lengths=lengths)
+        return LengthGroupedSampler(batch_size, lengths=lengths)  # pyright: ignore[reportArgumentType]
 
     def _get_train_sampler(self, train_dataset=None):
         dataset = train_dataset if train_dataset is not None else self.train_dataset
