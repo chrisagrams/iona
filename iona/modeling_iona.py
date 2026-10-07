@@ -93,13 +93,7 @@ class DeltaMZBias(nn.Module):
         )
 
     def _curve(self, delta_mz: Tensor) -> Tensor:
-        device_type = delta_mz.device.type
-        # Under autocast, build the features directly in the autocast dtype to skip a full-size fp32 copy.
-        if torch.is_autocast_enabled(device_type):
-            dtype = torch.get_autocast_dtype(device_type)
-        else:
-            dtype = self.head_mlps[0][0].weight.dtype
-        feats = self.ff(delta_mz, dtype=dtype)
+        feats = self.ff(delta_mz).to(self.head_mlps[0][0].weight.dtype)
         # Stack the per-head MLPs so the features feed one GEMM instead of one per head.
         w_in = torch.cat([mlp[0].weight for mlp in self.head_mlps])
         b_in = torch.cat([mlp[0].bias for mlp in self.head_mlps])

@@ -29,21 +29,8 @@ class FourierFeatures(nn.Module):
         self.out_dim = 2 * n_freqs
         self.clamp_abs = clamp_abs
 
-    def forward(
-        self, x: Tensor, dtype: torch.dtype = torch.float32, chunk_size: int = 32
-    ) -> Tensor:
-        """Return features with shape ``(..., 2 * n_freqs)``; phases are always computed in float32."""
-        x = x.float().clamp(-self.clamp_abs, self.clamp_abs).unsqueeze(-1)
-        if torch.compiler.is_compiling():
-            # Inductor fuses this into one kernel without float32 intermediates; the chunked
-            # loop below compiles to a kernel about 2x slower than eager.
-            phase = 2.0 * math.pi * x * self.freqs.float()
-            return torch.cat([phase.sin(), phase.cos()], dim=-1).to(dtype)
-        feats = x.new_empty(*x.shape[:-1], self.out_dim, dtype=dtype)
-        # Fill a few frequencies at a time so full-size float32 intermediates never exist.
-        for start in range(0, self.n_freqs, chunk_size):
-            stop = min(start + chunk_size, self.n_freqs)
-            phase = 2.0 * math.pi * x * self.freqs[start:stop].float()
-            feats[..., start:stop] = phase.sin()
-            feats[..., self.n_freqs + start : self.n_freqs + stop] = phase.cos()
-        return feats
+    def forward(self, x: Tensor) -> Tensor:
+        """Return float32 features with shape ``(..., 2 * n_freqs)``."""
+        x = x.float().clamp(-self.clamp_abs, self.clamp_abs)
+        phase = 2.0 * math.pi * x.unsqueeze(-1) * self.freqs.float()
+        return torch.cat([phase.sin(), phase.cos()], dim=-1)
