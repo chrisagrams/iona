@@ -60,6 +60,7 @@ def _preprocess_example(example: dict, processor: IonaProcessor) -> dict:
         "mz": values["mz"],
         "log_intensity": values["log_intensity"],
         "labels": values["labels"],
+        "length": len(values["mz"]),
         "charge": charge_index(pc),
         "precursor_mz": precursor_mz(pc),
         "log_tic": float(torch.log1p(intensity.sum())) if intensity.numel() else 0.0,
