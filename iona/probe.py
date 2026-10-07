@@ -7,9 +7,11 @@ import re
 
 import numpy as np
 import torch
+from datasets import Dataset
 from sklearn.linear_model import LogisticRegression, Ridge
 from sklearn.metrics import accuracy_score, f1_score, r2_score, roc_auc_score
 from sklearn.preprocessing import StandardScaler
+from torch.nn.utils.rnn import pad_sequence
 
 from iona.chemistry import (
     ISOTOPES,
@@ -18,7 +20,8 @@ from iona.chemistry import (
     RESIDUE_MASSES,
     WATER_MASS,
 )
-from iona.embedding import encode_batch, pool_tokens
+from iona.embedding import pool_tokens
+from iona.inference import PredictionTrainer, collate_spectra
 from iona.modeling_iona import IonaModel
 
 _C13 = ISOTOPES["¹³C"]
@@ -65,7 +68,34 @@ def _isotope_labels(mz_sorted_idx, mz: np.ndarray, z: int, tol: float = 0.01) ->
     return out
 
 
-@torch.no_grad()
+def _collate_probe(rows: list[dict]) -> dict[str, torch.Tensor]:
+    """Pad spectra and the sampled peak and pair indices of a batch."""
+    batch = collate_spectra(rows)
+    for key in ("peak_index", "pair_i", "pair_j"):
+        batch[key] = pad_sequence(
+            [torch.as_tensor(r[key], dtype=torch.long) for r in rows], batch_first=True
+        )
+    return batch
+
+
+def _predict_probe(model, inputs):
+    """Pool every spectrum and gather the tokens of its sampled peaks and pairs."""
+    mask = inputs["attention_mask"]
+    tokens = model(
+        mz=inputs["mz"], log_intensity=inputs["log_intensity"], attention_mask=mask
+    ).last_hidden_state
+
+    def gather(index):
+        return tokens.gather(1, index[..., None].expand(-1, -1, tokens.shape[-1])).float()
+
+    return {
+        "pooled": pool_tokens(tokens, mask).float(),
+        "peaks": gather(inputs["peak_index"]),
+        "pair_i": gather(inputs["pair_i"]),
+        "pair_j": gather(inputs["pair_j"]),
+    }
+
+
 def extract_representations(
     enc: IonaModel,
     dataset,
@@ -76,75 +106,79 @@ def extract_representations(
     max_pair_samples: int = 80_000,
     seed: int = 0,
 ) -> dict[str, np.ndarray]:
-    """Extract spectrum, peak, and peak-pair representations."""
+    """Extract spectrum, peak, and peak-pair representations.
+
+    Every process of a distributed run must call this: encoding is sharded across ranks.
+    """
     was_training = enc.training
     enc.to(device).eval()
     rng = np.random.default_rng(seed)
 
-    spec, prec, pcount, logtic, charge, maxmz = [], [], [], [], [], []
-    peak_rep, peak_iso, peak_mz = [], [], []
-    pair_rep, pair_loss = [], []
+    prec, pcount, logtic, charge, maxmz = [], [], [], [], []
+    peak_iso, peak_mz, pair_loss = [], [], []
     loss_vals = np.array(list(_LOSSES.values()))
 
-    buf: list[tuple] = []
-
-    def flush():
-        if not buf:
-            return
-        tokens, mask = encode_batch(enc, [t[0] for t in buf], [t[1] for t in buf], device)
-        pooled = pool_tokens(tokens, mask).float().cpu().numpy()
-        tok_cpu = tokens.float().cpu().numpy()
-        for b, (m, _log_intensity, meta) in enumerate(buf):
-            k = m.numel()
-            spec.append(pooled[b])
-            prec.append(meta["prec"])
-            pcount.append(k)
-            logtic.append(meta["logtic"])
-            charge.append(meta["z"])
-            maxmz.append(float(m.max()))
-            mzb = m.numpy()
-            if len(peak_iso) < max_peak_samples and meta["z"]:
-                order = np.argsort(mzb)
-                iso = _isotope_labels(order, mzb, meta["z"])
-                take = min(k, max(1, max_peak_samples // n_spectra * 4))
-                sel = rng.choice(k, size=min(take, k), replace=False)
-                for s in sel:
-                    peak_rep.append(tok_cpu[b, s])
-                    peak_iso.append(int(iso[s]))
-                    peak_mz.append(float(mzb[s]))
-            if len(pair_loss) < max_pair_samples and k >= 4:
-                dm = mzb[:, None] - mzb[None, :]
-                ii, jj = np.where(dm > 0)
-                d = dm[ii, jj]
-                pos = np.abs(d[:, None] - loss_vals).min(1) < 0.01
-                pidx = np.where(pos)[0]
-                nidx = np.where(~pos)[0]
-                npos = min(len(pidx), 4)
-                if npos:
-                    psel = rng.choice(pidx, npos, replace=False)
-                    nsel = rng.choice(nidx, min(npos, len(nidx)), replace=False)
-                    for q in np.concatenate([psel, nsel]):
-                        r = np.concatenate([tok_cpu[b, ii[q]], tok_cpu[b, jj[q]]])
-                        pair_rep.append(r)
-                        pair_loss.append(int(pos[q]))
-        buf.clear()
-
+    # Sample peaks and pairs in dataset order before encoding, which runs length-sorted: the
+    # global sample caps would otherwise fill with the longest spectra first.
+    rows = []
     for row in itertools.islice(dataset, n_spectra):
-        mz_p = torch.tensor(row["mz"], dtype=torch.float32)
-        li_p = torch.tensor(row["log_intensity"], dtype=torch.float32)
-        if mz_p.numel() == 0:
+        mzb = np.asarray(row["mz"], dtype=np.float32)
+        k = len(mzb)
+        if k == 0:
             continue
         pc = row["peptide_charge"]
         z = parse_charge(pc)
-        meta = {
-            "prec": precursor_mz(pc) or np.nan,
-            "logtic": float(row["log_tic"]),
-            "z": z if (z and 1 <= z <= 5) else 0,
-        }
-        buf.append((mz_p, li_p, meta))
-        if len(buf) >= batch_size:
-            flush()
-    flush()
+        z = z if (z and 1 <= z <= 5) else 0
+        prec.append(precursor_mz(pc) or np.nan)
+        pcount.append(k)
+        logtic.append(float(row["log_tic"]))
+        charge.append(z)
+        maxmz.append(float(mzb.max()))
+        peak_index, pair_i, pair_j = [], [], []
+        if len(peak_iso) < max_peak_samples and z:
+            iso = _isotope_labels(np.argsort(mzb), mzb, z)
+            take = min(k, max(1, max_peak_samples // n_spectra * 4))
+            for s in rng.choice(k, size=min(take, k), replace=False):
+                peak_index.append(int(s))
+                peak_iso.append(int(iso[s]))
+                peak_mz.append(float(mzb[s]))
+        if len(pair_loss) < max_pair_samples and k >= 4:
+            dm = mzb[:, None] - mzb[None, :]
+            ii, jj = np.where(dm > 0)
+            d = dm[ii, jj]
+            pos = np.abs(d[:, None] - loss_vals).min(1) < 0.01
+            pidx = np.where(pos)[0]
+            nidx = np.where(~pos)[0]
+            npos = min(len(pidx), 4)
+            if npos:
+                psel = rng.choice(pidx, npos, replace=False)
+                nsel = rng.choice(nidx, min(npos, len(nidx)), replace=False)
+                for q in np.concatenate([psel, nsel]):
+                    pair_i.append(int(ii[q]))
+                    pair_j.append(int(jj[q]))
+                    pair_loss.append(int(pos[q]))
+        rows.append({
+            "mz": row["mz"],
+            "log_intensity": row["log_intensity"],
+            "peak_index": peak_index,
+            "pair_i": pair_i,
+            "pair_j": pair_j,
+        })
+
+    spec, peak_rep, pair_rep = [], [], []
+    if rows:
+        trainer = PredictionTrainer(
+            enc, _predict_probe, data_collator=_collate_probe, batch_size=batch_size,
+            device=device,
+        )
+        out = trainer.predict_sorted(Dataset.from_list(rows))
+        for i, row in enumerate(rows):
+            n_peaks, n_pairs = len(row["peak_index"]), len(row["pair_i"])
+            spec.append(out["pooled"][i])
+            peak_rep.extend(out["peaks"][i, :n_peaks])
+            pair_rep.extend(np.concatenate(
+                [out["pair_i"][i, :n_pairs], out["pair_j"][i, :n_pairs]], axis=1
+            ))
 
     if was_training:
         enc.train()
@@ -210,15 +244,8 @@ def _classification(X, y, name) -> dict[str, float]:
     return out
 
 
-def run_all_probes(
-    enc: IonaModel,
-    dataset,
-    device: torch.device,
-    n_spectra: int = 4000,
-    batch_size: int = 128,
-) -> dict[str, float]:
-    """Run all linear probes and return metrics."""
-    d = extract_representations(enc, dataset, n_spectra, batch_size, device)
+def probe_metrics(d: dict[str, np.ndarray]) -> dict[str, float]:
+    """Fit all linear probes on ``extract_representations`` output and return metrics."""
     X = d["spec"]
     metrics: dict[str, float] = {}
     metrics.update(_regression(X, d["prec"], "precursor_mz", baseline_pred=d["maxmz"]))

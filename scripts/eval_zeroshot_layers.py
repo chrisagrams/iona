@@ -22,9 +22,9 @@ from datasets import load_from_disk
 
 from iona.contrastive import encoder_layer_states
 from iona.data import group_ids
-from iona.finetune_contrastive import ContrastiveCollator
-from iona.modeling_iona import IonaForPreTraining
-from iona.reranking import pool_sequence
+from iona.finetune.contrastive import ContrastiveCollator
+from iona.inference import PredictionTrainer
+from iona.modeling_iona import IonaForPreTraining, pool_sequence
 from iona.retrieval import retrieval_metrics
 
 
@@ -75,12 +75,11 @@ def main(argv: list[str] | None = None) -> int:
     groups = group_ids(rows)
     experimental = np.array([s == "experimental" for s in rows["source"]])
     collator = ContrastiveCollator(max_peptide_length=64, pad_spectra_to=512)
-    features = list(rows)
-    fit_features = []
+    fit_rows = None
     if abtt:
         fit_rows = load_from_disk(cli.fit_data)
-        fit_features = [f for f in fit_rows if f["source"] == "experimental"]
-        print(f"abtt D={abtt}: fit on {len(fit_features):,} experimental train spectra",
+        fit_rows = fit_rows.select(np.flatnonzero(np.array(fit_rows["source"]) == "experimental"))
+        print(f"abtt D={abtt}: fit on {len(fit_rows):,} experimental train spectra",
               flush=True)
 
     for name, path in models:
@@ -90,24 +89,25 @@ def main(argv: list[str] | None = None) -> int:
         t0 = time.time()
         model = IonaForPreTraining.from_pretrained(path).to(device).eval()
         encoder = getattr(model, "iona", model)
-        def embed(feats, raw):
+        def embed(rows, raw):
             """Pooled vectors per layer: unit-norm halves, or raw float32 for abtt."""
-            per_layer: dict[str, list] = {}
-            with torch.no_grad():
-                for start in range(0, len(feats), cli.batch_size):
-                    batch = collator(feats[start:start + cli.batch_size])
-                    mz, li, mask = (batch[k].to(device) for k in
-                                    ("mz", "log_intensity", "attention_mask"))
-                    states, final = encoder_layer_states(encoder, mz, li, mask)
-                    for key, state in [*((f"block{i:02d}", s) for i, s in enumerate(states)),
-                                       ("final", final)]:
-                        pooled = pool_sequence(state, mask, cli.pooling).float()
-                        pooled = pooled.cpu() if raw else F.normalize(pooled, dim=-1).half().cpu()
-                        per_layer.setdefault(key, []).append(pooled)
-            return {k: torch.cat(v).float() for k, v in per_layer.items()}
+            def predict(enc, x):
+                mask = x["attention_mask"]
+                states, final = encoder_layer_states(enc, x["mz"], x["log_intensity"], mask)
+                out = {}
+                for key, state in [*((f"block{i:02d}", s) for i, s in enumerate(states)),
+                                   ("final", final)]:
+                    pooled = pool_sequence(state, mask, cli.pooling).float()
+                    out[key] = pooled if raw else F.normalize(pooled, dim=-1).half()
+                return out
 
-        per_layer = embed(features, raw=bool(abtt))
-        fit_layer = embed(fit_features, raw=True) if abtt else {}
+            per_layer = PredictionTrainer(encoder, predict, data_collator=collator,
+                                          batch_size=cli.batch_size,
+                                          device=device).predict_sorted(rows)
+            return {k: torch.from_numpy(v).float() for k, v in per_layer.items()}
+
+        per_layer = embed(rows, raw=bool(abtt))
+        fit_layer = embed(fit_rows, raw=True) if abtt else {}
         t_embed = time.time() - t0
         del model
         if device.type == "xpu":
@@ -123,7 +123,7 @@ def main(argv: list[str] | None = None) -> int:
         for key, emb in per_layer.items():
             result["layers"][key] = score(emb[mask])
         if abtt:
-            result["abtt"] = {"components": abtt, "fit_spectra": {"train": len(fit_features),
+            result["abtt"] = {"components": abtt, "fit_spectra": {"train": len(fit_layer["final"]),
                               "test": int(mask.sum())}, "train": {}, "test": {}}
             for key, emb in per_layer.items():
                 x = emb[mask].to(device)

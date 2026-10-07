@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import numpy as np
 import torch
-from torch.nn.utils.rnn import pad_sequence
+from datasets import Dataset
+
+from iona.inference import PredictionTrainer, collate_spectra
 
 
 def pool_tokens(tokens: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
@@ -17,40 +19,25 @@ def pool_tokens(tokens: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
     return torch.cat([mean, mx], dim=-1)
 
 
-@torch.no_grad()
-def encode_batch(model, mzs, log_intensities, device):
-    """Pad and encode one batch of peak lists."""
-    mz = pad_sequence(mzs, batch_first=True)
-    log_intensity = pad_sequence(log_intensities, batch_first=True)
-    lens = torch.tensor([m.numel() for m in mzs])
-    mask = torch.arange(mz.shape[1])[None, :] < lens[:, None]
-    attention_mask = mask.to(device)
-    outputs = model(
-        mz=mz.to(device),
-        log_intensity=log_intensity.to(device),
-        attention_mask=attention_mask,
-    )
-    return outputs.last_hidden_state, attention_mask
-
-
-@torch.no_grad()
 def embed_spectra(enc, specs, device, *, batch_size=128):
-    """Return one float32 vector for each spectrum."""
+    """Return one float32 vector for each spectrum; spectra without peaks embed as zeros."""
     enc.to(device).eval()
-    n = len(specs)
-    emb = None
-    for s in range(0, n, batch_size):
-        e = min(s + batch_size, n)
-        mzs = [m for m, _ in specs[s:e]]
-        lis = [log_intensity for _, log_intensity in specs[s:e]]
-        if max((m.numel() for m in mzs), default=0) == 0:
-            continue
-        tokens, mask = encode_batch(enc, mzs, lis, device)
-        pooled = pool_tokens(tokens, mask).float().cpu().numpy().astype(np.float32)
-        if emb is None:
-            emb = np.zeros((n, pooled.shape[1]), dtype=np.float32)
-        nonempty = mask.any(dim=1).cpu().numpy()
-        emb[np.arange(s, e)[nonempty]] = pooled[nonempty]
-    if emb is None:
+    nonempty = np.flatnonzero([m.numel() for m, _ in specs])
+    if not len(nonempty):
         raise RuntimeError("no spectrum produced any peaks after preprocessing")
+    rows = Dataset.from_dict({
+        "mz": [specs[i][0].tolist() for i in nonempty],
+        "log_intensity": [specs[i][1].tolist() for i in nonempty],
+    })
+
+    def predict(model, inputs):
+        tokens = model(**inputs).last_hidden_state
+        return pool_tokens(tokens, inputs["attention_mask"]).float()
+
+    trainer = PredictionTrainer(
+        enc, predict, data_collator=collate_spectra, batch_size=batch_size, device=device
+    )
+    pooled = trainer.predict_sorted(rows)
+    emb = np.zeros((len(specs), pooled.shape[1]), dtype=np.float32)
+    emb[nonempty] = pooled
     return emb

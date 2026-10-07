@@ -2,7 +2,7 @@
 # Score alignment students on the ms-contrastive-100k test split (scripts/eval_align_test.py).
 #
 #   qsub -q debug-scaling -l select=1 -l walltime=00:30:00 \
-#        -v RUNS="dir1 dir2",CACHE=/lus/.../align-targets-x,ARGS_FILE=configs/.../training.args \
+#        -v RUNS="dir1 dir2",CACHE=/lus/.../align-targets-x \
 #        scripts/eval_align_test.pbs
 #
 # One student per tile, in parallel; outputs to results/finetune/align/.
@@ -19,7 +19,6 @@ REPO_DIR=${REPO_DIR:-${PBS_O_WORKDIR:-$PWD}}
 cd "$REPO_DIR"
 RUNS=${RUNS:?set RUNS to space-separated alignment run dirs}
 CACHE=${CACHE:?set CACHE}
-ARGS_FILE=${ARGS_FILE:?set ARGS_FILE}
 VENV_DIR=${VENV_DIR:-$REPO_DIR/.venv}
 SCRATCH_ROOT=${SCRATCH_ROOT:-/lus/flare/projects/${PROJECT:-UIC-HPC}/$USER/msdelta}
 DATA=${DATA:-$SCRATCH_ROOT/eval-data/ms-contrastive-100k-test-mp512}
@@ -42,7 +41,7 @@ i=0; pids=()
 for run in $RUNS; do
     name=$(basename "$run")
     ZE_AFFINITY_MASK=$i "$VENV_DIR/bin/python" "$REPO_DIR/scripts/eval_align_test.py" --run "$run" \
-        --cache "$CACHE" --args_file "$ARGS_FILE" --data "$DATA" \
+        --cache "$CACHE" --data "$DATA" \
         --out "results/finetune/align/test_$name.json" > "results/finetune/align/.test_$name.log" 2>&1 &
     pids+=($!); i=$((i + 1))
 done

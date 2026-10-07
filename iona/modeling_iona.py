@@ -7,7 +7,6 @@ from dataclasses import dataclass
 import torch
 import torch.nn.functional as F
 from pytorch_metric_learning.losses import SupConLoss
-from sentence_transformers.sentence_transformer.modules import Pooling
 from torch import Tensor, nn
 from torch.distributed.nn.functional import all_gather as distributed_all_gather
 from transformers import PretrainedConfig, PreTrainedModel
@@ -15,11 +14,47 @@ from transformers.modeling_outputs import BaseModelOutput
 from transformers.utils.generic import ModelOutput
 
 from .configuration_iona import (
+    POOLING_MODES,
     IonaConfig,
     IonaDenoisingConfig,
+    IonaPeptideConfig,
     IonaRetrievalConfig,
 )
 from .fourier import FourierFeatures
+
+# 20 standard residues plus `n`, which this corpus uses as an N-terminal marker.
+RESIDUES = "ACDEFGHIKLMNPQRSTVWYn"
+PAD, UNK = 0, 1
+RESIDUE_TO_ID = {residue: index + 2 for index, residue in enumerate(RESIDUES)}
+VOCAB_SIZE = len(RESIDUE_TO_ID) + 2
+
+
+def pool_sequence(tokens: Tensor, mask: Tensor, mode: str = "mean+max") -> Tensor:
+    """Reduce variable-length token embeddings to one vector. Both towers must use the same mode."""
+    if mode not in POOLING_MODES:
+        raise ValueError(f"pooling must be one of {POOLING_MODES}, got {mode!r}")
+    mask = mask.bool().unsqueeze(-1)
+    mean = (tokens * mask).sum(1) / mask.sum(1).clamp_min(1)
+    if mode == "mean":
+        return mean
+    maximum = torch.nan_to_num(tokens.masked_fill(~mask, float("-inf")).max(1).values,
+                               neginf=0.0)
+    return torch.cat([mean, maximum], dim=-1)
+
+
+def pooled_width(hidden_size: int, mode: str) -> int:
+    """Width `pool_sequence` produces, so the projection can be sized without a forward."""
+    return 2 * hidden_size if mode == "mean+max" else hidden_size
+
+
+def head_kl(logits: Tensor, reference_logits: Tensor, attention_mask: Tensor) -> Tensor:
+    """KL(reference || current) over each spectrum's distribution across its real peaks."""
+    valid = attention_mask.bool()
+    current = logits.float().masked_fill(~valid, float("-inf")).log_softmax(dim=-1)
+    reference = reference_logits.float().masked_fill(~valid, float("-inf")).log_softmax(dim=-1)
+    # Termwise rather than F.kl_div, which gives NaN at the -inf padded positions.
+    terms = reference.exp() * (reference - current)
+    return torch.where(valid, terms, torch.zeros_like(terms)).sum(-1).mean()
 
 
 @dataclass
@@ -48,6 +83,24 @@ class IonaForRetrievalOutput(ModelOutput):
 
     loss: Tensor | None = None
     embeddings: Tensor | None = None
+    contrastive: Tensor | None = None
+    kl: Tensor | None = None
+
+
+@dataclass
+class IonaPeptideEncoderOutput(ModelOutput):
+    """Unit-length peptide embeddings."""
+
+    embeddings: Tensor | None = None
+
+
+@dataclass
+class IonaPeptideForAlignmentOutput(ModelOutput):
+    """Output of aligning peptide embeddings onto spectrum-encoder targets."""
+
+    loss: Tensor | None = None
+    embeddings: Tensor | None = None
+    target: Tensor | None = None
 
 
 class PeakEmbed(nn.Module):
@@ -270,32 +323,20 @@ class PeakDenoisingHead(nn.Module):
 
 
 class SpectrumRetrievalHead(nn.Module):
-    """Pool peak tokens and project them into a normalized retrieval space."""
+    """Project pooled peak tokens into the retrieval space."""
 
     def __init__(self, config: IonaRetrievalConfig):
         super().__init__()
-        self.pooling = Pooling(config.encoder.hidden_size, pooling_mode=("mean", "max"))
         self.projection = nn.Sequential(
-            nn.Linear(2 * config.encoder.hidden_size, config.projection_hidden_size),
+            nn.Linear(pooled_width(config.encoder.hidden_size, config.pooling),
+                      config.projection_hidden_size),
             nn.GELU(),
             nn.Dropout(config.head_dropout),
             nn.Linear(config.projection_hidden_size, config.embedding_size),
         )
 
-    def forward(self, hidden_states: Tensor, attention_mask: Tensor) -> Tensor:
-        mask = attention_mask.bool()
-        pooled = self.pooling(
-            {
-                "token_embeddings": hidden_states,
-                "attention_mask": mask,
-                # Keep empty-spectrum mean pooling finite, including in float16.
-                "token_weights_sum": mask.sum(dim=1).clamp_min(1).to(hidden_states.dtype),
-            }
-        )["sentence_embedding"]
-        # Max pooling yields -inf when a spectrum has no valid peaks.
-        pooled = torch.nan_to_num(pooled, neginf=0.0)
-        embeddings = self.projection(pooled)
-        return F.normalize(embeddings.float(), dim=-1)
+    def forward(self, pooled: Tensor) -> Tensor:
+        return self.projection(pooled)
 
 
 class IonaForPreTraining(IonaPreTrainedModel):
@@ -429,7 +470,13 @@ class IonaForDenoising(IonaPreTrainedModel):
 
 
 class IonaForRetrieval(IonaPreTrainedModel):
-    """Iona encoder with a spectrum-level contrastive retrieval head."""
+    """Iona encoder trained with supervised contrastive loss for spectrum retrieval.
+
+    Covers both the frozen-encoder probe (projection head, encoder frozen) and encoder
+    fine-tuning (no head, embedding is the pooled encoder output). With `kl_weight > 0`,
+    a KL term to a frozen reference model's intensity head keeps the encoder's peak
+    predictions; the reference is never saved.
+    """
 
     config_class: type[PretrainedConfig] | None = IonaRetrievalConfig
 
@@ -438,18 +485,52 @@ class IonaForRetrieval(IonaPreTrainedModel):
         config: IonaRetrievalConfig,
         encoder: IonaModel | None = None,
         freeze_encoder: bool = False,
+        intensity_head: IntensityHead | None = None,
+        reference: IonaForPreTraining | None = None,
     ):
         super().__init__(config)
+        if config.kl_weight <= 0 and (intensity_head is not None or reference is not None):
+            raise ValueError("intensity_head and reference are only used when kl_weight > 0")
         self.iona = encoder if encoder is not None else IonaModel(config.encoder)
-        self.retrieval_head = SpectrumRetrievalHead(config)
+        self.retrieval_head = SpectrumRetrievalHead(config) if config.projection_head else None
+        new_intensity_head = config.kl_weight > 0 and intensity_head is None
+        if config.kl_weight > 0:
+            self.intensity_head = (intensity_head if intensity_head is not None
+                                   else IntensityHead(config.encoder.hidden_size))
         self.contrastive_loss = SupConLoss(temperature=config.temperature)
         self._encoder_is_frozen = False
         if encoder is None:
             self.post_init()
         else:
-            self.retrieval_head.apply(self._init_weights)
+            if self.retrieval_head is not None:
+                self.retrieval_head.apply(self._init_weights)
+            if new_intensity_head:
+                self.intensity_head.apply(self._init_weights)
+        self.reference = reference
+        if reference is not None:
+            # Frozen and in eval mode so the KL target does not move.
+            reference.requires_grad_(False)
+            reference.eval()
+            self._keys_to_ignore_on_save = {f"reference.{k}" for k in reference.state_dict()}
         if freeze_encoder:
             self.freeze_encoder()
+
+    @classmethod
+    def from_pretraining(
+        cls,
+        pretrained: IonaForPreTraining,
+        config: IonaRetrievalConfig,
+        reference: IonaForPreTraining | None = None,
+        freeze_encoder: bool = False,
+    ) -> IonaForRetrieval:
+        """Wrap a pretrained model, sharing its encoder (and intensity head, for the KL term)."""
+        return cls(
+            config,
+            encoder=pretrained.iona,
+            freeze_encoder=freeze_encoder,
+            intensity_head=pretrained.intensity_head if config.kl_weight > 0 else None,
+            reference=reference,
+        )
 
     def freeze_encoder(self) -> None:
         """Freeze the encoder and keep its stochastic layers disabled."""
@@ -461,7 +542,29 @@ class IonaForRetrieval(IonaPreTrainedModel):
         super().train(mode)
         if self._encoder_is_frozen:
             self.iona.eval()
+        if self.reference is not None:
+            self.reference.eval()
         return self
+
+    def _encode(self, mz: Tensor, log_intensity: Tensor, attention_mask: Tensor) -> Tensor:
+        with torch.set_grad_enabled(torch.is_grad_enabled() and not self._encoder_is_frozen):
+            return self.iona(
+                mz=mz, log_intensity=log_intensity, attention_mask=attention_mask, return_dict=True
+            ).last_hidden_state
+
+    def _pool(self, hidden: Tensor, attention_mask: Tensor) -> Tensor:
+        embeddings = pool_sequence(hidden, attention_mask, self.config.pooling)
+        if self.retrieval_head is not None:
+            embeddings = self.retrieval_head(embeddings)
+        return F.normalize(embeddings.float(), dim=-1)
+
+    def embed(
+        self, mz: Tensor, log_intensity: Tensor, attention_mask: Tensor | None = None
+    ) -> Tensor:
+        """Return unit-length spectrum embeddings."""
+        if attention_mask is None:
+            attention_mask = torch.ones_like(mz, dtype=torch.long)
+        return self._pool(self._encode(mz, log_intensity, attention_mask), attention_mask)
 
     def forward(
         self,
@@ -475,47 +578,160 @@ class IonaForRetrieval(IonaPreTrainedModel):
             return_dict = self.config.return_dict
         if attention_mask is None:
             attention_mask = torch.ones_like(mz, dtype=torch.long)
-        if self._encoder_is_frozen:
+        hidden = self._encode(mz, log_intensity, attention_mask)
+        embeddings = self._pool(hidden, attention_mask)
+        if group_ids is None:
+            return IonaForRetrievalOutput(embeddings=embeddings) if return_dict else (embeddings,)
+
+        if group_ids.ndim != 1 or group_ids.shape[0] != embeddings.shape[0]:
+            raise ValueError("group_ids must contain one value per spectrum")
+        loss_embeddings = embeddings
+        labels = group_ids.long()
+        if (self.config.gather_across_ranks and torch.distributed.is_available()
+                and torch.distributed.is_initialized()):
+            world_size = torch.distributed.get_world_size()
+            rank = torch.distributed.get_rank()
+            # Each rank's collator assigns its own batch-local group IDs.
+            labels = labels * world_size + rank
+            # Gather with autograd so remote candidates receive gradients.
+            loss_embeddings = torch.cat(distributed_all_gather(embeddings), dim=0)
+            gathered_labels = [torch.empty_like(labels) for _ in range(world_size)]
+            torch.distributed.all_gather(gathered_labels, labels)
+            labels = torch.cat(gathered_labels)
+        contrastive = self.contrastive_loss(loss_embeddings, labels)
+        kl = embeddings.new_zeros(())
+        if self.config.kl_weight > 0:
+            if self.reference is None:
+                raise ValueError("kl_weight > 0 needs a reference model")
             with torch.no_grad():
-                outputs = self.iona(
-                    mz=mz,
-                    log_intensity=log_intensity,
-                    attention_mask=attention_mask,
-                    return_dict=True,
-                )
-        else:
-            outputs = self.iona(
-                mz=mz,
-                log_intensity=log_intensity,
-                attention_mask=attention_mask,
-                return_dict=True,
-            )
-        embeddings = self.retrieval_head(outputs.last_hidden_state, attention_mask)
-        loss = None
-        if group_ids is not None:
-            if group_ids.ndim != 1 or group_ids.shape[0] != embeddings.shape[0]:
-                raise ValueError("group_ids must contain one value per spectrum")
-            loss_embeddings = embeddings
-            labels = group_ids.long()
-            if torch.distributed.is_available() and torch.distributed.is_initialized():
-                world_size = torch.distributed.get_world_size()
-                rank = torch.distributed.get_rank()
-                # Each rank's collator assigns its own batch-local group IDs.
-                labels = labels * world_size + rank
-                # Gather with autograd so remote candidates receive gradients.
-                loss_embeddings = torch.cat(distributed_all_gather(embeddings), dim=0)
-                gathered_labels = [torch.empty_like(labels) for _ in range(world_size)]
-                torch.distributed.all_gather(gathered_labels, labels)
-                labels = torch.cat(gathered_labels)
-            loss = self.contrastive_loss(loss_embeddings, labels)
+                reference_hidden = self.reference.iona(
+                    mz=mz, log_intensity=log_intensity, attention_mask=attention_mask
+                ).last_hidden_state
+                reference_logits = self.reference.intensity_head(reference_hidden)
+            kl = head_kl(self.intensity_head(hidden), reference_logits, attention_mask)
+        loss = contrastive + self.config.kl_weight * kl
 
         if not return_dict:
-            result = (embeddings,)
+            return (loss, embeddings, contrastive.detach(), kl.detach())
+        return IonaForRetrievalOutput(
+            loss=loss, embeddings=embeddings, contrastive=contrastive.detach(), kl=kl.detach()
+        )
+
+
+class IonaPeptidePreTrainedModel(PreTrainedModel):
+    """Shared Hugging Face behavior for the peptide encoder classes."""
+
+    config_class: type[PretrainedConfig] | None = IonaPeptideConfig
+    base_model_prefix = "sequence_encoder"
+    main_input_name = "residues"
+
+    @torch.no_grad()
+    def _init_weights(self, module: nn.Module) -> None:
+        # PyTorch's default initialization, which the peptide encoder has always trained from.
+        if isinstance(module, nn.MultiheadAttention):
+            module._reset_parameters()
+        elif hasattr(module, "reset_parameters"):
+            module.reset_parameters()  # ty: ignore[call-non-callable]
+
+
+class IonaPeptideEncoder(IonaPeptidePreTrainedModel):
+    """Encode a modified peptide plus its charge into a fixed-size unit embedding."""
+
+    def __init__(self, config: IonaPeptideConfig):
+        super().__init__(config)
+        hidden_size = config.hidden_size
+        self.residue = nn.Embedding(VOCAB_SIZE, hidden_size, padding_idx=PAD)
+        self.position = nn.Embedding(config.max_position_embeddings, hidden_size)
+        self.charge = nn.Embedding(config.n_charges, hidden_size)
+        # 1e-2..1e3 spans a whole modification down to fine isotopic structure.
+        self.mod_features = FourierFeatures(config.mod_n_freqs, 1e-2, 1e3)
+        self.mod_projection = nn.Linear(self.mod_features.out_dim, hidden_size)
+
+        layer = nn.TransformerEncoderLayer(
+            d_model=hidden_size, nhead=config.num_attention_heads,
+            dim_feedforward=4 * hidden_size, dropout=config.dropout, batch_first=True,
+            norm_first=True, activation="gelu",
+        )
+        self.encoder = nn.TransformerEncoder(layer, num_layers=config.num_hidden_layers,
+                                             enable_nested_tensor=False)
+        self.norm = nn.LayerNorm(hidden_size)
+        width = pooled_width(hidden_size, config.pooling)
+        self.projection = nn.Sequential(
+            nn.Linear(width, width), nn.GELU(), nn.Dropout(config.dropout),
+            nn.Linear(width, config.embedding_size),
+        )
+        self.post_init()
+
+    def forward(
+        self,
+        residues: Tensor,
+        modifications: Tensor,
+        sequence_mask: Tensor,
+        charge: Tensor,
+        return_dict: bool | None = None,
+    ) -> IonaPeptideEncoderOutput | tuple[Tensor, ...]:
+        if return_dict is None:
+            return_dict = self.config.return_dict
+        length = residues.shape[1]
+        position = torch.arange(length, device=residues.device).clamp_max(
+            self.position.num_embeddings - 1
+        )
+        hidden = self.residue(residues) + self.position(position)[None]
+        # Only modified residues get a mass contribution.
+        modified = (modifications.abs() > 1e-6).unsqueeze(-1)
+        mod = self.mod_projection(self.mod_features(modifications).to(hidden.dtype))
+        hidden = hidden + mod * modified
+        hidden = hidden + self.charge(charge.clamp(0, self.charge.num_embeddings - 1))[:, None]
+        # Autocast off, activations cast to the weights' dtype: the fused eval fast path
+        # ignores autocast on XPU and fails on a dtype mismatch.
+        param_dtype = next(self.encoder.parameters()).dtype
+        with torch.autocast(device_type=hidden.device.type, enabled=False):
+            hidden = hidden.to(param_dtype)
+            hidden = self.norm(self.encoder(hidden, src_key_padding_mask=~sequence_mask.bool()))
+        pooled = pool_sequence(hidden, sequence_mask, self.config.pooling)
+        embeddings = F.normalize(self.projection(pooled).float(), dim=-1)
+
+        if not return_dict:
+            return (embeddings,)
+        return IonaPeptideEncoderOutput(embeddings=embeddings)
+
+
+class IonaPeptideForAlignment(IonaPeptidePreTrainedModel):
+    """Peptide encoder trained onto precomputed teacher targets with L2 on unit vectors."""
+
+    def __init__(self, config: IonaPeptideConfig):
+        super().__init__(config)
+        self.sequence_encoder = IonaPeptideEncoder(config)
+        self.post_init()
+
+    def forward(
+        self,
+        residues: Tensor,
+        modifications: Tensor,
+        sequence_mask: Tensor,
+        charge: Tensor,
+        target: Tensor | None = None,
+        return_dict: bool | None = None,
+    ) -> IonaPeptideForAlignmentOutput | tuple[Tensor, ...]:
+        if return_dict is None:
+            return_dict = self.config.return_dict
+        predicted = self.sequence_encoder(
+            residues, modifications, sequence_mask, charge, return_dict=True
+        ).embeddings
+        loss = None
+        if target is not None:
+            target = F.normalize(target.float(), dim=-1)
+            # Mean squared L2; equals 2 - 2cos on unit vectors.
+            loss = ((predicted - target) ** 2).sum(dim=-1).mean()
+
+        if not return_dict:
+            result = (predicted,) if target is None else (predicted, target)
             return ((loss,) + result) if loss is not None else result
-        return IonaForRetrievalOutput(loss=loss, embeddings=embeddings)
+        return IonaPeptideForAlignmentOutput(loss=loss, embeddings=predicted, target=target)
 
 
 IonaModel.register_for_auto_class("AutoModel")
 IonaForPreTraining.register_for_auto_class("AutoModelForPreTraining")
 IonaForDenoising.register_for_auto_class("AutoModelForTokenClassification")
 IonaForRetrieval.register_for_auto_class("AutoModel")
+IonaPeptideEncoder.register_for_auto_class("AutoModel")

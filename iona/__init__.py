@@ -11,6 +11,7 @@ from transformers import (
 from iona.configuration_iona import (
     IonaConfig,
     IonaDenoisingConfig,
+    IonaPeptideConfig,
     IonaRetrievalConfig,
 )
 from iona.modeling_iona import (
@@ -21,6 +22,11 @@ from iona.modeling_iona import (
     IonaForRetrieval,
     IonaForRetrievalOutput,
     IonaModel,
+    IonaPeptideEncoder,
+    IonaPeptideEncoderOutput,
+    IonaPeptideForAlignment,
+    IonaPeptideForAlignmentOutput,
+    IonaPeptidePreTrainedModel,
     IonaPreTrainedModel,
 )
 from iona.processing_iona import (
@@ -42,8 +48,10 @@ AutoConfig.register(
     IonaRetrievalConfig,
     exist_ok=True,
 )
+AutoConfig.register(IonaPeptideConfig.model_type, IonaPeptideConfig, exist_ok=True)
 AutoModel.register(IonaConfig, IonaModel, exist_ok=True)
 AutoModel.register(IonaRetrievalConfig, IonaForRetrieval, exist_ok=True)
+AutoModel.register(IonaPeptideConfig, IonaPeptideEncoder, exist_ok=True)
 AutoModelForPreTraining.register(IonaConfig, IonaForPreTraining, exist_ok=True)
 AutoModelForTokenClassification.register(
     IonaDenoisingConfig,
@@ -57,6 +65,7 @@ AutoProcessor.register(IonaRetrievalConfig, IonaProcessor, exist_ok=True)
 __all__ = [
     "IonaConfig",
     "IonaDenoisingConfig",
+    "IonaPeptideConfig",
     "IonaRetrievalConfig",
     "IonaDataCollatorForPreTraining",
     "IonaDataCollatorForRetrieval",
@@ -67,6 +76,11 @@ __all__ = [
     "IonaForRetrieval",
     "IonaForRetrievalOutput",
     "IonaModel",
+    "IonaPeptideEncoder",
+    "IonaPeptideEncoderOutput",
+    "IonaPeptideForAlignment",
+    "IonaPeptideForAlignmentOutput",
+    "IonaPeptidePreTrainedModel",
     "IonaPreTrainedModel",
     "IonaProcessor",
 ]

@@ -13,20 +13,19 @@ from pathlib import Path
 import numpy as np
 import torch
 from datasets import load_from_disk
-from transformers import HfArgumentParser, Trainer, TrainingArguments, set_seed
+from transformers import HfArgumentParser, TrainingArguments, set_seed
 
+from iona.configuration_iona import IonaPeptideConfig
 from iona.data import load_spectrum_datasets, peptide_key
-from iona.finetune_denoise import subset_splits
-from iona.modeling_iona import IonaForPreTraining
+from iona.finetune.denoise import subset_splits
+from iona.inference import SortedPredictionTrainer
+from iona.modeling_iona import IonaForPreTraining, IonaPeptideForAlignment, pooled_width
 from iona.processing_iona import IonaProcessor
 from iona.reranking import (
     AlignmentCollator,
-    PeptideEncoder,
-    SequenceAlignmentModel,
     attach_teacher_embeddings,
     cross_modal_metrics,
     group_separation_metrics,
-    pooled_width,
 )
 from iona.wandb_distributed import init_wandb_run
 
@@ -65,38 +64,36 @@ class AlignTrainingArguments(TrainingArguments):
     eval_alignment_rows: int = 2000
 
 
-class SequenceAlignmentTrainer(Trainer):
+class SequenceAlignmentTrainer(SortedPredictionTrainer):
     """Scores ranking rather than the loss."""
 
     @torch.no_grad()
     def evaluate_alignment(self, dataset, max_rows: int = 2000) -> dict[str, float]:
-        """Rank candidate sequences against each spectrum, one candidate per peptide."""
-        model = self.model
-        was_training = model.training
-        model.eval()
-        device = next(model.sequence_encoder.parameters()).device
-        rows = list(dataset.select(range(min(len(dataset), max_rows))))
-        step = max(1, self.args.per_device_eval_batch_size)
-        spectra, sequences, peptides, charges = [], [], [], []
-        try:
-            for start in range(0, len(rows), step):
-                chunk = rows[start : start + step]
-                batch = {k: v.to(device) for k, v in self.data_collator(chunk).items()}
-                out = model(**batch)
-                spectra.append(out["target"].cpu())
-                sequences.append(out["embeddings"].cpu())
-                peptides.extend(f["peptide"] for f in chunk)
-                charges.extend(int(f.get("charge", 0)) for f in chunk)
-        finally:
-            model.train(was_training)
-        if not spectra:
+        """Rank candidate sequences against each spectrum, one candidate per peptide.
+
+        Every process of a distributed run must call this: encoding is sharded across ranks.
+        """
+        rows = dataset.select(range(min(len(dataset), max_rows)))
+        if not len(rows):
             return {}
+        was_training = self.model.training
+        try:
+            # IonaPeptideForAlignmentOutput without its loss: (embeddings, target).
+            sequences, spectra = self.predict_sorted(
+                rows, ignore_keys=["loss"], metric_key_prefix="crossmodal"
+            )
+        finally:
+            self.model.train(was_training)
+        peptides = list(rows["peptide"])
+        charges = ([int(c) for c in rows["charge"]] if "charge" in rows.column_names
+                   else [0] * len(rows))
         first: dict[str, int] = {}
         for index, peptide in enumerate(peptides):
             first.setdefault(peptide, index)
         keep = sorted(first.values())
         slot = {peptides[i]: n for n, i in enumerate(keep)}
-        sequence_embeddings, spectrum_embeddings = torch.cat(sequences), torch.cat(spectra)
+        sequence_embeddings = torch.from_numpy(sequences)
+        spectrum_embeddings = torch.from_numpy(spectra)
         metrics = cross_modal_metrics(
             sequence_embeddings[keep], spectrum_embeddings,
             np.array([slot[p] for p in peptides]), np.arange(len(keep)),
@@ -141,14 +138,14 @@ def main(argv: list[str] | None = None) -> int:
     else:
         teacher = IonaForPreTraining.from_pretrained(model_args.pretrained_path)
         embedding_size = pooled_width(teacher.config.hidden_size, model_args.pooling)
-    model = SequenceAlignmentModel(
-        PeptideEncoder(embedding_size=embedding_size,
-                       hidden_size=model_args.sequence_hidden_size,
-                       num_layers=model_args.sequence_num_layers,
-                       num_heads=model_args.sequence_num_heads,
-                       max_length=model_args.max_peptide_length,
-                       dropout=model_args.sequence_dropout,
-                       pooling=model_args.pooling))
+    model = IonaPeptideForAlignment(IonaPeptideConfig(
+        embedding_size=embedding_size,
+        hidden_size=model_args.sequence_hidden_size,
+        num_hidden_layers=model_args.sequence_num_layers,
+        num_attention_heads=model_args.sequence_num_heads,
+        max_position_embeddings=model_args.max_peptide_length,
+        dropout=model_args.sequence_dropout,
+        pooling=model_args.pooling))
     collator = AlignmentCollator(max_peptide_length=model_args.max_peptide_length)
     # `target` is the label, so evaluation reports eval_loss; no metrics need the predictions.
     training_args.label_names = ["target"]
@@ -164,8 +161,7 @@ def main(argv: list[str] | None = None) -> int:
         )
     try:
         if training_args.process_index == 0:
-            print(f"[align] embedding size {model.sequence_encoder.projection[-1].out_features}",
-                  flush=True)
+            print(f"[align] embedding size {model.config.embedding_size}", flush=True)
 
         if teacher is None:
             datasets = {name: load_from_disk(str(cached / name))
@@ -203,13 +199,14 @@ def main(argv: list[str] | None = None) -> int:
         )
         trainer.train()
 
-        if trainer.is_world_process_zero() and datasets.get("validation") is not None:
+        if datasets.get("validation") is not None:
             metrics = trainer.evaluate_alignment(
                 datasets["validation"], max_rows=training_args.eval_alignment_rows
             )
-            print(f"[align] cross-modal: {metrics}", flush=True)
-            trainer.log(metrics)
-            trainer.save_metrics("crossmodal", metrics)
+            if trainer.is_world_process_zero():
+                print(f"[align] cross-modal: {metrics}", flush=True)
+                trainer.log(metrics)
+                trainer.save_metrics("crossmodal", metrics)
         if trainer.is_world_process_zero():
             trainer.save_model(str(out_dir / "final"))
             print(f"[align] saved to {out_dir / 'final'}", flush=True)
