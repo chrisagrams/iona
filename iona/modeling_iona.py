@@ -100,13 +100,15 @@ class DeltaMZBias(nn.Module):
         else:
             dtype = self.head_mlps[0][0].weight.dtype
         feats = self.ff(delta_mz, dtype=dtype)
-        # Stack the per-head MLPs so the features feed one GEMM instead of eight; the
-        # block-diagonal second layer keeps each head reading only its own hidden units.
-        w1 = torch.cat([mlp[0].weight for mlp in self.head_mlps])
-        b1 = torch.cat([mlp[0].bias for mlp in self.head_mlps])
-        w2 = torch.block_diag(*[mlp[2].weight for mlp in self.head_mlps])
-        b2 = torch.cat([mlp[2].bias for mlp in self.head_mlps])
-        return F.linear(F.gelu(F.linear(feats, w1, b1)), w2, b2)
+        # Stack the per-head MLPs so the features feed one GEMM instead of one per head.
+        w_in = torch.cat([mlp[0].weight for mlp in self.head_mlps])
+        b_in = torch.cat([mlp[0].bias for mlp in self.head_mlps])
+        w_out = torch.cat([mlp[2].weight for mlp in self.head_mlps])
+        b_out = torch.cat([mlp[2].bias for mlp in self.head_mlps])
+        # Each head's second layer is a weighted sum over its own hidden units, so split the
+        # hidden axis per head and reduce it rather than going through a block-diagonal GEMM.
+        hidden = F.gelu(F.linear(feats, w_in, b_in)).unflatten(-1, (self.n_heads, -1))
+        return (hidden * w_out).sum(-1) + b_out
 
     def forward(self, mz: Tensor) -> Tensor:
         delta_mz = mz.unsqueeze(-1) - mz.unsqueeze(-2)
