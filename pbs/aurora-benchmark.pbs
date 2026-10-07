@@ -5,8 +5,7 @@
 #   -v CHECKPOINT_ROOT=/flare/UIC-HPC/homes/cgrams/iona-release,DAOS_POOL=GenSLM,DAOS_CONT=msfound,OUT_DIR=/flare/UIC-HPC/homes/cgrams/iona-bench \
 #   pbs/aurora-benchmark.pbs
 # Each model in SIZES (space-separated, default "25m 100m 200m 400m") loads
-# $CHECKPOINT_ROOT/iona-base-$size. CHECKPOINT=<one model dir> also works and
-# uses its parent as CHECKPOINT_ROOT. Every (size, ref) pair runs on its own XPU
+# $CHECKPOINT_ROOT/iona-base-$size. Every (size, ref) pair runs on its own XPU
 # tile; a size's two refs share one card (tiles 2i and 2i+1), so up to 6 sizes.
 # BASELINE_REF/CANDIDATE_REF default to the local main and dev branches; fetch
 # before submitting. Their iona/ trees are exported with git archive and run by
@@ -33,10 +32,7 @@ VENV_DIR=${VENV_DIR:-$REPO_DIR/.venv}
 DAOS_POOL=${DAOS_POOL:?set DAOS_POOL to the project DAOS pool}
 DAOS_CONT=${DAOS_CONT:?set DAOS_CONT to the container holding the preprocessed dataset}
 OUT_DIR=${OUT_DIR:?set OUT_DIR to a shared-filesystem results directory}
-if [[ -n ${CHECKPOINT:-} ]]; then
-    CHECKPOINT_ROOT=${CHECKPOINT_ROOT:-$(dirname "$CHECKPOINT")}
-fi
-CHECKPOINT_ROOT=${CHECKPOINT_ROOT:?set CHECKPOINT_ROOT (or CHECKPOINT) to the release checkpoints}
+CHECKPOINT_ROOT=${CHECKPOINT_ROOT:?set CHECKPOINT_ROOT to the directory holding iona-base-<size>}
 SIZES=${SIZES:-25m 100m 200m 400m}
 BASELINE_REF=${BASELINE_REF:-main}
 CANDIDATE_REF=${CANDIDATE_REF:-dev}
