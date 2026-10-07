@@ -21,7 +21,7 @@
 # Export comma-separated lists before qsub; commas also delimit qsub -v entries.
 # Set PROBE_EXECUTION=inline to retain synchronous probes, or off to disable heads.
 # Telegraf is no longer provided on Aurora; set TELEGRAF_BIN to a portable
-# binary on a shared filesystem (see pbs/install-telegraf.sh).
+# binary on a shared filesystem.
 # The launch follows the ALCF Aurora PyTorch DDP guidance:
 # https://docs.alcf.anl.gov/aurora/data-science/frameworks/pytorch/
 
