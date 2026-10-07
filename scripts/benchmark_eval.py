@@ -187,7 +187,7 @@ def main() -> None:
     run_parser.add_argument("--split", default="validation")
     run_parser.add_argument("--expect-source", help="fail unless iona is imported from here")
     run_parser.add_argument("--device", default="xpu")
-    run_parser.add_argument("--batch-size", type=int, default=64)
+    run_parser.add_argument("--batch-size", type=int, default=8)
     run_parser.add_argument("--max-samples", type=int, default=0, help="0 uses the whole split")
     run_parser.add_argument("--mask-ratio", type=float, default=0.5)
     run_parser.add_argument("--pad-to-multiple-of", type=int, default=64)
