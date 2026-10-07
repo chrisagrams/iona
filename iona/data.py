@@ -114,16 +114,6 @@ def build_preprocessed_dataset(
     )
 
 
-def column_as_numpy(dataset: Dataset, name: str) -> np.ndarray:
-    """Return one column as a numpy array in row order, following any index mapping.
-
-    ``dataset[name]`` is a lazy ``Column`` whose items decode one at a time (tens of
-    microseconds each), and ``np.asarray`` on it walks every row; a formatted slice converts
-    the whole column at once.
-    """
-    return dataset.select_columns([name]).with_format("numpy")[:][name]
-
-
 def build_pretraining_datasets(
     repo_id: str,
     processor: IonaProcessor,

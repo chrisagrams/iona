@@ -19,7 +19,6 @@ from iona.callbacks import SidecarCallback, WalltimeCheckpointCallback, build_ca
 from iona.configuration_iona import IonaConfig
 from iona.data import (
     build_pretraining_datasets,
-    column_as_numpy,
     load_pretraining_datasets_from_disk,
     subsample_train,
 )
@@ -75,7 +74,9 @@ class IonaTrainer(Trainer):
             or self.args.length_column_name not in dataset.column_names
         ):
             return None
-        lengths = column_as_numpy(dataset, self.args.length_column_name)
+        # A numpy-formatted slice converts the whole column at once, following any index mapping.
+        name = self.args.length_column_name
+        lengths = dataset.select_columns([name]).with_format("numpy")[:][name]
         return LengthGroupedSampler(batch_size, lengths=lengths)  # pyright: ignore[reportArgumentType]
 
     def _get_train_sampler(self, train_dataset=None):
