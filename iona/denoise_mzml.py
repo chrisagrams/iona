@@ -78,9 +78,6 @@ class SpectrumDenoiser:
         self.device = next(model.parameters()).device
         model = model.eval()
         if compile_model:
-            # Batch shape varies in both spectrum count and padded peak count, so compile
-            # once dynamically instead of recompiling per shape. CPU gains almost nothing
-            # and still pays the warmup, so prefer --no-compile there.
             model = torch.compile(model, dynamic=True)
         self.model = model
         self.processor = processor
