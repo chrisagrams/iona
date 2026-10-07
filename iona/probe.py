@@ -7,7 +7,6 @@ import re
 
 import numpy as np
 import torch
-from datasets import Dataset
 from sklearn.linear_model import LogisticRegression, Ridge
 from sklearn.metrics import accuracy_score, f1_score, r2_score, roc_auc_score
 from sklearn.preprocessing import StandardScaler
@@ -19,7 +18,6 @@ from iona.chemistry import (
     RESIDUE_MASSES,
     WATER_MASS,
 )
-from iona.data import map_length_sorted
 from iona.embedding import encode_batch, pool_tokens
 from iona.modeling_iona import IonaModel
 
@@ -88,71 +86,65 @@ def extract_representations(
     pair_rep, pair_loss = [], []
     loss_vals = np.array(list(_LOSSES.values()))
 
-    rows, metas = [], []
+    buf: list[tuple] = []
+
+    def flush():
+        if not buf:
+            return
+        tokens, mask = encode_batch(enc, [t[0] for t in buf], [t[1] for t in buf], device)
+        pooled = pool_tokens(tokens, mask).float().cpu().numpy()
+        tok_cpu = tokens.float().cpu().numpy()
+        for b, (m, _log_intensity, meta) in enumerate(buf):
+            k = m.numel()
+            spec.append(pooled[b])
+            prec.append(meta["prec"])
+            pcount.append(k)
+            logtic.append(meta["logtic"])
+            charge.append(meta["z"])
+            maxmz.append(float(m.max()))
+            mzb = m.numpy()
+            if len(peak_iso) < max_peak_samples and meta["z"]:
+                order = np.argsort(mzb)
+                iso = _isotope_labels(order, mzb, meta["z"])
+                take = min(k, max(1, max_peak_samples // n_spectra * 4))
+                sel = rng.choice(k, size=min(take, k), replace=False)
+                for s in sel:
+                    peak_rep.append(tok_cpu[b, s])
+                    peak_iso.append(int(iso[s]))
+                    peak_mz.append(float(mzb[s]))
+            if len(pair_loss) < max_pair_samples and k >= 4:
+                dm = mzb[:, None] - mzb[None, :]
+                ii, jj = np.where(dm > 0)
+                d = dm[ii, jj]
+                pos = np.abs(d[:, None] - loss_vals).min(1) < 0.01
+                pidx = np.where(pos)[0]
+                nidx = np.where(~pos)[0]
+                npos = min(len(pidx), 4)
+                if npos:
+                    psel = rng.choice(pidx, npos, replace=False)
+                    nsel = rng.choice(nidx, min(npos, len(nidx)), replace=False)
+                    for q in np.concatenate([psel, nsel]):
+                        r = np.concatenate([tok_cpu[b, ii[q]], tok_cpu[b, jj[q]]])
+                        pair_rep.append(r)
+                        pair_loss.append(int(pos[q]))
+        buf.clear()
+
     for row in itertools.islice(dataset, n_spectra):
-        if len(row["mz"]) == 0:
+        mz_p = torch.tensor(row["mz"], dtype=torch.float32)
+        li_p = torch.tensor(row["log_intensity"], dtype=torch.float32)
+        if mz_p.numel() == 0:
             continue
         pc = row["peptide_charge"]
         z = parse_charge(pc)
-        rows.append({"mz": row["mz"], "log_intensity": row["log_intensity"]})
-        metas.append({
+        meta = {
             "prec": precursor_mz(pc) or np.nan,
             "logtic": float(row["log_tic"]),
             "z": z if (z and 1 <= z <= 5) else 0,
-        })
-
-    def forward(batch):
-        tokens, mask = encode_batch(
-            enc,
-            [torch.tensor(r["mz"], dtype=torch.float32) for r in batch],
-            [torch.tensor(r["log_intensity"], dtype=torch.float32) for r in batch],
-            device,
-        )
-        pooled = pool_tokens(tokens, mask).float().cpu().numpy()
-        tok_cpu = tokens.float().cpu().numpy()
-        return {"pooled": pooled, "tokens": [t[: len(r["mz"])] for t, r in zip(tok_cpu, batch)]}
-
-    # Encode in length-sorted batches, but sample peaks and pairs in dataset order: the global
-    # sample caps would otherwise fill with the shortest spectra first.
-    encoded = (
-        map_length_sorted(Dataset.from_list(rows), forward, batch_size).with_format("numpy")
-        if rows else []
-    )
-    for b, (row, meta) in enumerate(zip(rows, metas)):
-        m = torch.tensor(row["mz"], dtype=torch.float32)
-        out = encoded[b]
-        k = m.numel()
-        spec.append(out["pooled"])
-        prec.append(meta["prec"])
-        pcount.append(k)
-        logtic.append(meta["logtic"])
-        charge.append(meta["z"])
-        maxmz.append(float(m.max()))
-        mzb = m.numpy()
-        if len(peak_iso) < max_peak_samples and meta["z"]:
-            order = np.argsort(mzb)
-            iso = _isotope_labels(order, mzb, meta["z"])
-            take = min(k, max(1, max_peak_samples // n_spectra * 4))
-            sel = rng.choice(k, size=min(take, k), replace=False)
-            for s in sel:
-                peak_rep.append(out["tokens"][s])
-                peak_iso.append(int(iso[s]))
-                peak_mz.append(float(mzb[s]))
-        if len(pair_loss) < max_pair_samples and k >= 4:
-            dm = mzb[:, None] - mzb[None, :]
-            ii, jj = np.where(dm > 0)
-            d = dm[ii, jj]
-            pos = np.abs(d[:, None] - loss_vals).min(1) < 0.01
-            pidx = np.where(pos)[0]
-            nidx = np.where(~pos)[0]
-            npos = min(len(pidx), 4)
-            if npos:
-                psel = rng.choice(pidx, npos, replace=False)
-                nsel = rng.choice(nidx, min(npos, len(nidx)), replace=False)
-                for q in np.concatenate([psel, nsel]):
-                    r = np.concatenate([out["tokens"][ii[q]], out["tokens"][jj[q]]])
-                    pair_rep.append(r)
-                    pair_loss.append(int(pos[q]))
+        }
+        buf.append((mz_p, li_p, meta))
+        if len(buf) >= batch_size:
+            flush()
+    flush()
 
     if was_training:
         enc.train()

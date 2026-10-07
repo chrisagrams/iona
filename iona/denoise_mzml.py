@@ -25,10 +25,9 @@ import numpy as np
 import torch
 from accelerate import PartialState
 from accelerate.utils import gather_object
-from datasets import Dataset
 from tqdm.auto import tqdm
 
-from iona.data import map_length_sorted
+from iona.denoising import PeakBudgetBatchSampler
 from iona.modeling_iona import IonaForDenoising
 from iona.mzml import MzMLRewriter, Spectrum
 from iona.processing_iona import IonaProcessor
@@ -68,17 +67,17 @@ class SpectrumDenoiser:
         processor: IonaProcessor,
         *,
         noise_threshold: float = 0.5,
-        batch_size: int = 16,
+        peak_pair_budget: int = 4_194_304,
         distributed_state: PartialState | None = None,
     ):
         if not 0.0 < noise_threshold <= 1.0:
             raise ValueError("noise_threshold must be in (0, 1]")
-        if batch_size < 1:
-            raise ValueError("batch_size must be at least 1")
+        if peak_pair_budget < processor.max_peaks**2:
+            raise ValueError("peak_pair_budget must fit one spectrum of max_peaks peaks")
         self.model = model.eval()
         self.processor = processor
         self.noise_threshold = noise_threshold
-        self.batch_size = batch_size
+        self.peak_pair_budget = peak_pair_budget
         self.distributed_state = distributed_state
         self.device = next(model.parameters()).device
 
@@ -94,26 +93,23 @@ class SpectrumDenoiser:
     def _local_noise_probabilities(
         self, spectra: list[tuple[np.ndarray, np.ndarray]]
     ) -> list[np.ndarray]:
-        if not spectra:
-            return []
-        rows = Dataset.from_dict({
-            "mz": [mz for mz, _ in spectra],
-            "intensity": [intensity for _, intensity in spectra],
-        })
-
-        def forward(batch):
+        lengths = [mz.size for mz, _ in spectra]
+        results: list[np.ndarray | None] = [None] * len(spectra)
+        sampler = PeakBudgetBatchSampler(lengths, self.peak_pair_budget, seed=0)
+        for batch in sampler:
             inputs = self.processor(
-                [np.asarray(r["mz"]) for r in batch],
-                [np.asarray(r["intensity"]) for r in batch],
+                [spectra[i][0] for i in batch],
+                [spectra[i][1] for i in batch],
                 padding=True,
                 return_tensors="pt",
             ).to(self.device)
             logits = self.model(**inputs, return_dict=True).logits
             probabilities = torch.sigmoid(logits.float()).cpu().numpy()
-            return {"noise": [p[: len(r["mz"])] for p, r in zip(probabilities, batch)]}
-
-        noise = map_length_sorted(rows, forward, self.batch_size).with_format("numpy")["noise"]
-        return [np.asarray(probability, dtype=np.float32) for probability in noise]
+            for row, i in enumerate(batch):
+                results[i] = probabilities[row, : lengths[i]]
+        if any(result is None for result in results):
+            raise RuntimeError("inference did not return every local spectrum window")
+        return [result for result in results if result is not None]
 
     @torch.inference_mode()
     def noise_probabilities(self, spectra: list[tuple[np.ndarray, np.ndarray]]) -> list[np.ndarray]:
@@ -255,10 +251,10 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="remove peaks whose noise probability is at least this value (default: 0.5)",
     )
     parser.add_argument(
-        "--batch-size",
+        "--peak-pair-budget",
         type=int,
-        default=16,
-        help="spectra per model batch, after sorting by peak count (default: 16)",
+        default=4_194_304,
+        help="maximum padded peak pairs per model batch (default: 4194304)",
     )
     parser.add_argument(
         "--chunk-size",
@@ -290,7 +286,7 @@ def main(argv: list[str] | None = None) -> int:
         device=args.device,
         distributed_state=state,
         noise_threshold=args.noise_threshold,
-        batch_size=args.batch_size,
+        peak_pair_budget=args.peak_pair_budget,
     )
     if args.output_dir is not None and state.is_main_process:
         args.output_dir.mkdir(parents=True, exist_ok=True)

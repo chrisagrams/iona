@@ -4,10 +4,7 @@ from __future__ import annotations
 
 import numpy as np
 import torch
-from datasets import Dataset
 from torch.nn.utils.rnn import pad_sequence
-
-from iona.data import map_length_sorted
 
 
 def pool_tokens(tokens: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
@@ -38,25 +35,22 @@ def encode_batch(model, mzs, log_intensities, device):
 
 @torch.no_grad()
 def embed_spectra(enc, specs, device, *, batch_size=128):
-    """Return one float32 vector for each spectrum; spectra without peaks embed as zeros."""
+    """Return one float32 vector for each spectrum."""
     enc.to(device).eval()
-    rows = Dataset.from_dict({
-        "mz": [m.tolist() for m, _ in specs],
-        "log_intensity": [log_intensity.tolist() for _, log_intensity in specs],
-    })
-
-    def forward(batch):
-        mzs = [torch.tensor(r["mz"], dtype=torch.float32) for r in batch]
-        if max(m.numel() for m in mzs) == 0:
-            return {"emb": [None] * len(batch)}
-        lis = [torch.tensor(r["log_intensity"], dtype=torch.float32) for r in batch]
+    n = len(specs)
+    emb = None
+    for s in range(0, n, batch_size):
+        e = min(s + batch_size, n)
+        mzs = [m for m, _ in specs[s:e]]
+        lis = [log_intensity for _, log_intensity in specs[s:e]]
+        if max((m.numel() for m in mzs), default=0) == 0:
+            continue
         tokens, mask = encode_batch(enc, mzs, lis, device)
-        pooled = pool_tokens(tokens, mask).float().cpu().numpy()
+        pooled = pool_tokens(tokens, mask).float().cpu().numpy().astype(np.float32)
+        if emb is None:
+            emb = np.zeros((n, pooled.shape[1]), dtype=np.float32)
         nonempty = mask.any(dim=1).cpu().numpy()
-        return {"emb": [p if keep else None for p, keep in zip(pooled, nonempty)]}
-
-    vectors = list(map_length_sorted(rows, forward, batch_size)["emb"]) if len(rows) else []
-    width = next((len(v) for v in vectors if v is not None), None)
-    if width is None:
+        emb[np.arange(s, e)[nonempty]] = pooled[nonempty]
+    if emb is None:
         raise RuntimeError("no spectrum produced any peaks after preprocessing")
-    return np.stack([np.zeros(width) if v is None else v for v in vectors]).astype(np.float32)
+    return emb

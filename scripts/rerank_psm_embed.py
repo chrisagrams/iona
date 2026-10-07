@@ -18,11 +18,9 @@ import numpy as np
 import pyarrow as pa
 import pyarrow.parquet as pq
 import torch
-from datasets import Dataset
 from huggingface_hub import hf_hub_download, snapshot_download
 from safetensors.torch import load_file
 
-from iona.data import map_length_sorted
 from iona.modeling_iona import IonaForPreTraining
 from iona.processing_iona import IonaProcessor
 from iona.reranking import AlignmentCollator, PeptideCollator, PeptideEncoder, embed_spectrum
@@ -117,14 +115,13 @@ def main(argv: list[str] | None = None) -> int:
         if m and isinstance(m[0], list):
             m, li = m[0], li[0]
         feats.append({"mz": m, "log_intensity": li, "peptide": "A", "charge": 2})
-    def embed_batch(chunk):
-        b = collator(chunk)
-        return {"spec": embed_spectrum(encoder, b["mz"].to(device), b["log_intensity"].to(device),
-                                       b["attention_mask"].to(device), pooling).float().cpu().numpy()}
-
+    spec = []
     with torch.no_grad():
-        spec = map_length_sorted(Dataset.from_list(feats), embed_batch, cli.batch_size)
-    spec = torch.from_numpy(np.stack(spec["spec"]))
+        for s in range(0, len(feats), cli.batch_size):
+            b = collator(feats[s:s + cli.batch_size])
+            spec.append(embed_spectrum(encoder, b["mz"].to(device), b["log_intensity"].to(device),
+                                       b["attention_mask"].to(device), pooling).cpu())
+    spec = torch.cat(spec)
     print(f"[embed] spectra embedded ({time.time() - t0:.0f}s)", flush=True)
 
     # --- candidates -> cosine to their spectrum ------------------------------------------

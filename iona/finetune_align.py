@@ -15,7 +15,7 @@ import torch
 from datasets import load_from_disk
 from transformers import HfArgumentParser, Trainer, TrainingArguments, set_seed
 
-from iona.data import load_spectrum_datasets, map_length_sorted, peptide_key
+from iona.data import load_spectrum_datasets, peptide_key
 from iona.finetune_denoise import subset_splits
 from iona.modeling_iona import IonaForPreTraining
 from iona.processing_iona import IonaProcessor
@@ -75,31 +75,28 @@ class SequenceAlignmentTrainer(Trainer):
         was_training = model.training
         model.eval()
         device = next(model.sequence_encoder.parameters()).device
-        rows = dataset.select(range(min(len(dataset), max_rows)))
-        if not len(rows):
-            return {}
-        dtypes = {}
-
-        def forward(chunk):
-            batch = {k: v.to(device) for k, v in self.data_collator(chunk).items()}
-            out = model(**batch)
-            dtypes.update(target=out["target"].dtype, embeddings=out["embeddings"].dtype)
-            return {k: out[k].float().cpu().numpy() for k in ("target", "embeddings")}
-
+        rows = list(dataset.select(range(min(len(dataset), max_rows))))
+        step = max(1, self.args.per_device_eval_batch_size)
+        spectra, sequences, peptides, charges = [], [], [], []
         try:
-            out = map_length_sorted(rows, forward, max(1, self.args.per_device_eval_batch_size))
+            for start in range(0, len(rows), step):
+                chunk = rows[start : start + step]
+                batch = {k: v.to(device) for k, v in self.data_collator(chunk).items()}
+                out = model(**batch)
+                spectra.append(out["target"].cpu())
+                sequences.append(out["embeddings"].cpu())
+                peptides.extend(f["peptide"] for f in chunk)
+                charges.extend(int(f.get("charge", 0)) for f in chunk)
         finally:
             model.train(was_training)
-        spectrum_embeddings = torch.from_numpy(np.stack(out["target"])).to(dtypes["target"])
-        sequence_embeddings = torch.from_numpy(np.stack(out["embeddings"])).to(dtypes["embeddings"])
-        peptides = list(rows["peptide"])
-        charges = ([int(c) for c in rows["charge"]] if "charge" in rows.column_names
-                   else [0] * len(rows))
+        if not spectra:
+            return {}
         first: dict[str, int] = {}
         for index, peptide in enumerate(peptides):
             first.setdefault(peptide, index)
         keep = sorted(first.values())
         slot = {peptides[i]: n for n, i in enumerate(keep)}
+        sequence_embeddings, spectrum_embeddings = torch.cat(sequences), torch.cat(spectra)
         metrics = cross_modal_metrics(
             sequence_embeddings[keep], spectrum_embeddings,
             np.array([slot[p] for p in peptides]), np.arange(len(keep)),
