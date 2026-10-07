@@ -270,11 +270,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="spectra read into memory between model batches (default: 1024)",
     )
     parser.add_argument("--device", help="torch device (default: cuda if available)")
-    parser.add_argument(
-        "--no-compile",
-        action="store_true",
-        help="skip torch.compile; avoids a few seconds of warmup on very small inputs",
-    )
+    parser.add_argument("--no-compile", action="store_true", help="skip torch.compile")
     parser.add_argument(
         "--summary", type=Path, help="write per-file peak and spectrum counts to this JSON file"
     )
