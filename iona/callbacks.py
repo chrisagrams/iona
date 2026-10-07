@@ -22,7 +22,7 @@ import wandb
 from iona.alignment import alignment_metrics
 from iona.denoising import run_denoising_probe
 from iona.posttraining import denoise_training_args, retrieval_training_args
-from iona.probe import run_all_probes
+from iona.probe import extract_representations, probe_metrics
 from iona.retrieval import run_retrieval_probe
 from iona.training_args import IonaTrainingArguments
 from iona.viz import render_bias_panels
@@ -111,9 +111,10 @@ class EvaluationCacheCallback(TrainerCallback):
 
 
 class _InlineCallback(TrainerCallback):
-    """Run a diagnostic at a specified interval on the main process."""
+    """Run a diagnostic at a specified interval on the main process, or on every process."""
 
     empty_cache_before: bool = False
+    all_processes: bool = False
 
     def __init__(self, module: nn.Module, every: int, *, dataset=None, out_dir: Path | None = None):
         self.module = module
@@ -134,7 +135,8 @@ class _InlineCallback(TrainerCallback):
             wandb.log({**payload, "train/global_step": step})
 
     def on_step_end(self, args, state, control, **kwargs):
-        if not state.is_world_process_zero or not self.every:
+        self.is_main_process = state.is_world_process_zero
+        if not (self.is_main_process or self.all_processes) or not self.every:
             return
         step = state.global_step
         if step <= 0 or step % self.every != 0:
@@ -151,9 +153,13 @@ class _InlineCallback(TrainerCallback):
 
 
 class LinearProbeCallback(_InlineCallback):
-    """Run linear probes on the frozen encoder."""
+    """Run linear probes on the frozen encoder.
+
+    Every process encodes its shard of the probe spectra; the main process fits the probes.
+    """
 
     empty_cache_before = True
+    all_processes = True
 
     def __init__(self, module, every, dataset, n_spectra, batch_size):
         super().__init__(module, every, dataset=dataset)
@@ -161,13 +167,12 @@ class LinearProbeCallback(_InlineCallback):
         self.batch_size = batch_size
 
     def run(self, step):
-        m = run_all_probes(
-            self.encoder,
-            self.dataset,
-            self.device,
-            n_spectra=self.n_spectra,
-            batch_size=self.batch_size,
+        representations = extract_representations(
+            self.encoder, self.dataset, self.n_spectra, self.batch_size, self.device
         )
+        if not self.is_main_process:
+            return
+        m = probe_metrics(representations)
         self._wlog(m, step)
 
         def key(k):

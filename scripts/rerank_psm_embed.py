@@ -18,8 +18,10 @@ import numpy as np
 import pyarrow as pa
 import pyarrow.parquet as pq
 import torch
+from datasets import Dataset
 from huggingface_hub import hf_hub_download, snapshot_download
 
+from iona.inference import PredictionTrainer
 from iona.modeling_iona import IonaForPreTraining, IonaPeptideEncoder
 from iona.processing_iona import IonaProcessor
 from iona.reranking import AlignmentCollator, PeptideCollator, embed_spectrum
@@ -109,13 +111,11 @@ def main(argv: list[str] | None = None) -> int:
         if m and isinstance(m[0], list):
             m, li = m[0], li[0]
         feats.append({"mz": m, "log_intensity": li, "peptide": "A", "charge": 2})
-    spec = []
-    with torch.no_grad():
-        for s in range(0, len(feats), cli.batch_size):
-            b = collator(feats[s:s + cli.batch_size])
-            spec.append(embed_spectrum(encoder, b["mz"].to(device), b["log_intensity"].to(device),
-                                       b["attention_mask"].to(device), pooling).cpu())
-    spec = torch.cat(spec)
+    spec = torch.from_numpy(PredictionTrainer(
+        encoder,
+        lambda m, x: embed_spectrum(m, x["mz"], x["log_intensity"], x["attention_mask"], pooling),
+        data_collator=collator, batch_size=cli.batch_size, device=device,
+    ).predict_sorted(Dataset.from_list(feats)))
     print(f"[embed] spectra embedded ({time.time() - t0:.0f}s)", flush=True)
 
     # --- candidates -> cosine to their spectrum ------------------------------------------

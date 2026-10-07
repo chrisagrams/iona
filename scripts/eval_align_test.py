@@ -16,6 +16,7 @@ import torch
 from datasets import load_from_disk
 
 from iona.data import group_ids
+from iona.inference import PredictionTrainer
 from iona.modeling_iona import IonaForPreTraining, IonaPeptideEncoder
 from iona.reranking import (
     AlignmentCollator,
@@ -63,14 +64,14 @@ def main(argv: list[str] | None = None) -> int:
     candidates = list(slot)
     spectrum_group = np.array([slot[k] for k in keys])
 
-    spectra, sequences = [], []
+    spectrum_emb = torch.from_numpy(PredictionTrainer(
+        teacher,
+        lambda m, x: embed_spectrum(m, x["mz"], x["log_intensity"], x["attention_mask"],
+                                    manifest["pooling"]),
+        data_collator=collator, batch_size=cli.batch_size, device=device,
+    ).predict_sorted(rows))
+    sequences = []
     with torch.no_grad():
-        for start in range(0, len(features), cli.batch_size):
-            batch = collator(features[start:start + cli.batch_size])
-            spectra.append(embed_spectrum(teacher, batch["mz"].to(device),
-                                          batch["log_intensity"].to(device),
-                                          batch["attention_mask"].to(device),
-                                          manifest["pooling"]).cpu())
         peptide_collator = PeptideCollator(max_length=max_peptide_length)
         for start in range(0, len(candidates), 256):
             chunk = candidates[start:start + 256]
@@ -79,7 +80,7 @@ def main(argv: list[str] | None = None) -> int:
                                      batch["modifications"].to(device),
                                      batch["sequence_mask"].to(device),
                                      batch["charge"].to(device)).embeddings.cpu())
-    spectrum_emb, sequence_emb = torch.cat(spectra), torch.cat(sequences)
+    sequence_emb = torch.cat(sequences)
 
     if cli.save_embeddings:
         np.savez(cli.save_embeddings, spectrum=spectrum_emb.numpy(),

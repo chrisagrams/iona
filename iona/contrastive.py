@@ -4,10 +4,12 @@ from __future__ import annotations
 
 import numpy as np
 import torch
+from datasets import Dataset
 from torch import Tensor, nn
 from torch.utils.data import Sampler
 
 from iona.data import peptide_key
+from iona.inference import PredictionTrainer
 from iona.reranking import group_separation_metrics
 from iona.retrieval import retrieval_metrics
 
@@ -94,28 +96,30 @@ def group_separation_summary(model, dataset, collator, device, max_rows: int = 2
 
 def embed_dataset(model, dataset, collator, device, max_rows: int = 2000,
                   batch_size: int = 16):
-    """Embed rows and return (embeddings, group ids)."""
+    """Embed rows and return (embeddings, group ids).
+
+    Every process of a distributed run must call this: encoding is sharded across ranks.
+    """
+    if not isinstance(dataset, Dataset):
+        dataset = Dataset.from_list(list(dataset))
+    rows = dataset.select(range(min(len(dataset), max_rows)))
+    if not len(rows):
+        return None, None
     was_training = model.training
-    model.eval()
-    rows = list(dataset)[:max_rows]
-    embeddings = []
+    trainer = PredictionTrainer(
+        model,
+        lambda m, x: m.embed(x["mz"], x["log_intensity"], x["attention_mask"]),
+        data_collator=collator, batch_size=batch_size, device=device,
+    )
     try:
-        # no_grad is required: otherwise the graph is kept alive through .cpu().
-        with torch.no_grad():
-            for start in range(0, len(rows), batch_size):
-                chunk = rows[start : start + batch_size]
-                batch = {k: v.to(device) for k, v in collator(chunk).items()}
-                pooled = model.embed(batch["mz"], batch["log_intensity"],
-                                     batch["attention_mask"])
-                embeddings.append(pooled.cpu())
+        embeddings = trainer.predict_sorted(rows)
     finally:
         model.train(was_training)
-    if not embeddings:
-        return None, None
+    charges = rows["charge"] if "charge" in rows.column_names else [0] * len(rows)
     groups = np.unique(
-        np.array([peptide_key(r["peptide"], int(r.get("charge", 0))) for r in rows]),
+        np.array([peptide_key(p, int(c)) for p, c in zip(rows["peptide"], charges)]),
         return_inverse=True)[1]
-    return torch.cat(embeddings), groups
+    return torch.from_numpy(embeddings), groups
 
 
 def retrieval_summary(model, dataset, collator, device, max_rows: int = 2000,
