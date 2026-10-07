@@ -77,10 +77,10 @@ class SpectrumDenoiser:
             raise ValueError("peak_pair_budget must fit one spectrum of max_peaks peaks")
         self.device = next(model.parameters()).device
         model = model.eval()
-        if compile_model and self.device.type != "cpu":
-            # Batches vary in both spectrum count and padded peak count, so compile dynamically
-            # rather than recompiling per shape. Warmup costs a few seconds and pays for itself
-            # after roughly a thousand spectra.
+        if compile_model:
+            # Batch shape varies in both spectrum count and padded peak count, so compile
+            # once dynamically instead of recompiling per shape. CPU gains almost nothing
+            # and still pays the warmup, so prefer --no-compile there.
             model = torch.compile(model, dynamic=True)
         self.model = model
         self.processor = processor
