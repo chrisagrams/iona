@@ -47,6 +47,11 @@ class WalltimeCheckpointCallback(TrainerCallback):
         self.clock = clock
         self._requested = False
 
+    @property
+    def requested(self) -> bool:
+        """Whether this callback stopped training ahead of the deadline."""
+        return self._requested
+
     def on_step_end(self, args, state, control, **kwargs):
         if self._requested or self.clock() < self.deadline_epoch - self.margin_seconds:
             return control

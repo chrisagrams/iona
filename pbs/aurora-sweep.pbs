@@ -1,0 +1,27 @@
+#!/bin/bash -l
+# Run W&B sweep trials on Aurora, NODES_PER_RUN whole nodes per trial, as many at
+# once as the job's nodes allow. Create the sweep first from a login node:
+#   uv run wandb sweep <sweep config>
+# then submit from the repository root with the printed entity/project/sweep_id.
+# Example (8 nodes, 4 concurrent 2-node trials):
+# qsub -A PROJECT -q QUEUE \
+#   -l select=8 -l place=scatter -l walltime=12:00:00 \
+#   -l filesystems=home:flare:daos_user_fs -j oe -o /path/to/pbs/logs \
+#   -v SWEEP_ID=ENTITY/iona-pretrain/SWEEP,NODES_PER_RUN=2,ARGS_FILE=configs/iona-base-50m/training.args,DAOS_POOL=POOL,LOG_ROOT=/flare/PROJECT/msdelta-runs \
+#   pbs/aurora-sweep.pbs
+# Several jobs may serve the same sweep; W&B hands each agent a distinct trial.
+# A trial still running at the walltime margin checkpoints, marks itself
+# preempting and exits nonzero; W&B requeues it with the same run ID, and the next
+# agent to pick it up (in this or a later job) resumes from that checkpoint. Every
+# job serving a sweep must therefore share DAOS_POOL, DAOS_CONT and ARGS_FILE.
+# Each trial logs to $LOG_ROOT/<run name>-<W&B run id>/logs and the driver logs to
+# $LOG_ROOT/sweeps/<job id>. Trials ignore RUN_NAME and LOG_DIR.
+# PROBE_EXECUTION defaults to inline because sidecars need saved checkpoints,
+# which sweep trials normally skip. All other settings match aurora-pretrain.pbs.
+
+PROBE_EXECUTION=${PROBE_EXECUTION:-inline}
+source "${REPO_DIR:-${PBS_O_WORKDIR:-$PWD}}/pbs/aurora-env.sh"
+
+exec "$VENV_DIR/bin/python" -m iona.sweep \
+    --sweep_id "${SWEEP_ID:?set SWEEP_ID to entity/project/sweep_id}" \
+    --nodes_per_run "${NODES_PER_RUN:-1}"

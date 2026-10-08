@@ -146,6 +146,8 @@ def main(argv: list[str] | None = None) -> int:
     }
 
     sidecar_callback = None
+    walltime_callback = None
+    preempted = False
     wandb_run = None
     if training_args.wandb_project:
         wandb_run = init_wandb_run(
@@ -233,7 +235,8 @@ def main(argv: list[str] | None = None) -> int:
         )
         if deadline := os.environ.get("IONA_JOB_DEADLINE_EPOCH"):
             margin = float(os.environ.get("IONA_CHECKPOINT_MARGIN_SECONDS", "900"))
-            callbacks.append(WalltimeCheckpointCallback(float(deadline), margin))
+            walltime_callback = WalltimeCheckpointCallback(float(deadline), margin)
+            callbacks.append(walltime_callback)
         if training_args.probe_execution == "sidecar":
             sidecar_callback = SidecarCallback(out_dir, resolved)
             callbacks.append(sidecar_callback)
@@ -257,6 +260,14 @@ def main(argv: list[str] | None = None) -> int:
 
         trainer.train(resume_from_checkpoint=training_args.resume_from_checkpoint)
 
+        # A run cut short by the walltime has only saved a resumable checkpoint, so it
+        # marks itself preempting and exits nonzero instead of finishing.
+        preempted = walltime_callback is not None and walltime_callback.requested
+        if preempted:
+            if trainer.is_world_process_zero() and wandb_run is not None:
+                wandb_run.mark_preempting()
+            return 1
+
         if trainer.is_world_process_zero():
             trainer.save_model(str(out_dir / "final"))
             panels = render_bias_panels(model.iona.bias_module, trainer.state.global_step)
@@ -268,7 +279,7 @@ def main(argv: list[str] | None = None) -> int:
         if sidecar_callback is not None:
             sidecar_callback.close()
         if wandb_run is not None:
-            wandb_run.finish()
+            wandb_run.finish(exit_code=1 if preempted else None)
 
 
 if __name__ == "__main__":
