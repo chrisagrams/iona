@@ -40,13 +40,21 @@ def sweep_trial(
     )
 
 
+# A new sweep is not RUNNING until an agent connects, so only these end it.
+SWEEP_ENDED_STATES = {"FINISHED", "CANCELED", "FAILED", "CRASHED"}
+
+
 def sweep_running(sweep_id: str) -> bool:
     try:
-        return wandb.Api().sweep(sweep_id).state.upper() == "RUNNING"
+        state = wandb.Api().sweep(sweep_id).state.upper()
     except Exception:
         # An agent exits promptly on a finished sweep, so keep going on API errors.
         logger.exception("Could not read state of sweep %s", sweep_id)
         return True
+    if state in SWEEP_ENDED_STATES:
+        logger.info("Sweep %s is %s; starting no more trials", sweep_id, state)
+        return False
+    return True
 
 
 def main(argv: list[str] | None = None) -> int:
