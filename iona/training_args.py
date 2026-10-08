@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass, field
+from pathlib import Path
 
 from transformers import TrainingArguments
 
@@ -158,6 +160,10 @@ class IonaTrainingArguments(TrainingArguments):
                     raise ValueError("sidecars require checkpoint saves at integer step intervals")
                 if any(interval and interval % self.save_steps for interval in intervals):
                     raise ValueError("posttraining intervals must be multiples of save_steps")
-            if self.deepspeed or self.fsdp:
-                raise ValueError("sidecars currently support unsharded DDP checkpoints")
+            deepspeed_config = self.deepspeed
+            if isinstance(deepspeed_config, str):
+                deepspeed_config = json.loads(Path(deepspeed_config).read_text())
+            zero_stage = (deepspeed_config or {}).get("zero_optimization", {}).get("stage", 0)
+            if self.fsdp or zero_stage == 3:
+                raise ValueError("sidecars need unsharded checkpoints; use DDP or ZeRO stage 0-2")
         super().__post_init__()

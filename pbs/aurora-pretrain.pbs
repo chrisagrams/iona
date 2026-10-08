@@ -22,8 +22,10 @@
 # Set PROBE_EXECUTION=inline to retain synchronous probes, or off to disable heads.
 # Telegraf is no longer provided on Aurora; set TELEGRAF_BIN to a portable
 # binary on a shared filesystem.
-# The launch follows the ALCF Aurora PyTorch DDP guidance:
-# https://docs.alcf.anl.gov/aurora/data-science/frameworks/pytorch/
+# DEEPSPEED_CONFIG defaults to configs/deepspeed-zero0.json and overrides any
+# --deepspeed in ARGS_FILE.
+# The launch follows the ALCF Aurora DeepSpeed guidance:
+# https://docs.alcf.anl.gov/aurora/data-science/frameworks/deepspeed/
 
 module use /soft/modulefiles
 module load daos
@@ -71,6 +73,7 @@ VENV_DIR=${VENV_DIR:-$REPO_DIR/.venv}
 ARGS_FILE=${ARGS_FILE:?set ARGS_FILE to an Iona training args file}
 DAOS_POOL=${DAOS_POOL:?set DAOS_POOL to the project DAOS pool}
 DAOS_CONT=${DAOS_CONT:-msdelta-training}
+DEEPSPEED_CONFIG=${DEEPSPEED_CONFIG:-$REPO_DIR/configs/deepspeed-zero0.json}
 
 if ! command -v launch-dfuse-with-caching.sh >/dev/null 2>&1; then
     echo "launch-dfuse-with-caching.sh is required for Hugging Face mmap access" >&2
@@ -99,8 +102,15 @@ fi
 if [[ $CHECKPOINT_DIR != /* ]]; then
     CHECKPOINT_DIR=$REPO_DIR/$CHECKPOINT_DIR
 fi
+if [[ $DEEPSPEED_CONFIG != /* ]]; then
+    DEEPSPEED_CONFIG=$REPO_DIR/$DEEPSPEED_CONFIG
+fi
 if [[ ! -f $ARGS_FILE ]]; then
     echo "arguments file not found: $ARGS_FILE" >&2
+    exit 2
+fi
+if [[ ! -f $DEEPSPEED_CONFIG ]]; then
+    echo "DeepSpeed config not found: $DEEPSPEED_CONFIG" >&2
     exit 2
 fi
 if [[ ! -x $VENV_DIR/bin/python ]]; then
@@ -143,8 +153,12 @@ def argument(name: str, default: str | None = None) -> str | None:
 
 
 run_name = argument("--run_name", path.parent.name)
+micro_batch_size = int(argument("--per_device_train_batch_size", "0"))
 wandb_project = argument("--wandb_project", "")
+if micro_batch_size < 1:
+    raise ValueError("--per_device_train_batch_size must be a positive integer")
 print(run_name)
+print(micro_batch_size)
 print(wandb_project)
 print(argument("--probe_execution", "sidecar"))
 print(argument("--denoise_steps", "0"))
@@ -152,11 +166,11 @@ print(argument("--retrieval_steps", "0"))
 PY
 )
 CONFIG_RUN_NAME=${CONFIG_VALUES[0]}
-MICRO_BATCH_SIZE=${MICRO_BATCH_SIZE:-64}
-CONFIG_WANDB_PROJECT=${CONFIG_VALUES[1]}
-PROBE_EXECUTION=${PROBE_EXECUTION:-${CONFIG_VALUES[2]}}
-DENOISE_STEPS=${CONFIG_VALUES[3]}
-RETRIEVAL_STEPS=${CONFIG_VALUES[4]}
+MICRO_BATCH_SIZE=${MICRO_BATCH_SIZE:-${CONFIG_VALUES[1]}}
+CONFIG_WANDB_PROJECT=${CONFIG_VALUES[2]}
+PROBE_EXECUTION=${PROBE_EXECUTION:-${CONFIG_VALUES[3]}}
+DENOISE_STEPS=${CONFIG_VALUES[4]}
+RETRIEVAL_STEPS=${CONFIG_VALUES[5]}
 if [[ $PROBE_EXECUTION != off ]]; then
     for spec in "$DENOISE_STEPS:denoise" "$RETRIEVAL_STEPS:retrieval"; do
         steps=${spec%%:*}
@@ -199,14 +213,6 @@ PY
     echo "resuming latest checkpoint: $RESUME_FROM_CHECKPOINT"
 fi
 TORCHINDUCTOR_CACHE_DIR=${TORCHINDUCTOR_CACHE_DIR:-/tmp/torchinductor-$USER}
-DDP_ARGS_FILE=$RUN_DIR/training-ddp.args
-{
-    awk '
-        $1 != "--deepspeed" &&
-        $1 != "--logging_nan_inf_filter"
-    ' "$ARGS_FILE"
-    printf '%s\n' '--logging_nan_inf_filter false'
-} >"$DDP_ARGS_FILE"
 
 cd "$REPO_DIR"
 NODE_LIST=$RUN_DIR/pbs-nodes
@@ -289,10 +295,10 @@ fi
 echo "$(date -Is) job=${PBS_JOBID:-local} hosts=$NUM_HOSTS xpus_per_host=$XPUS_PER_HOST total_xpus=$TOTAL_XPUS global_batch=$GLOBAL_BATCH_SIZE micro_batch=$MICRO_BATCH_SIZE accumulation=$GRADIENT_ACCUMULATION_STEPS run=$RUN_NAME"
 echo "daos=${DAOS_POOL}:${DAOS_CONT} dataset=$PREPROCESSED_DATASET_DIR checkpoints=$CHECKPOINT_DIR"
 echo "walltime=${JOB_WALLTIME_SECONDS}s checkpoint_margin=${CHECKPOINT_MARGIN_SECONDS}s deadline=$IONA_JOB_DEADLINE_EPOCH"
-echo "inductor_cache=$TORCHINDUCTOR_CACHE_DIR"
+echo "inductor_cache=$TORCHINDUCTOR_CACHE_DIR deepspeed_config=$DEEPSPEED_CONFIG"
 echo "nodes:"
 sed 's/^/  /' "$NODE_LIST"
-"$VENV_DIR/bin/python" -c 'import torch; print(f"torch={torch.__version__} xccl={torch.distributed.is_xccl_available()}")'
+"$VENV_DIR/bin/python" -c 'import deepspeed, torch; print(f"torch={torch.__version__} deepspeed={deepspeed.__version__} xccl={torch.distributed.is_xccl_available()}")'
 
 export OMP_NUM_THREADS=${OMP_NUM_THREADS:-4}
 export MKL_NUM_THREADS=${MKL_NUM_THREADS:-4}
@@ -338,7 +344,8 @@ export WANDB_RUN_ID=${WANDB_RUN_ID:-$RUN_NAME}
 export WANDB_PROJECT=${WANDB_PROJECT:-$CONFIG_WANDB_PROJECT}
 
 TRAIN_ARGS=(
-    --args_file "$DDP_ARGS_FILE"
+    --args_file "$ARGS_FILE"
+    --deepspeed "$DEEPSPEED_CONFIG"
     --dataset_cache_dir "$DATASET_CACHE_DIR"
     --preprocessed_dataset_dir "$PREPROCESSED_DATASET_DIR"
     --preprocessed_probe_dir "$PREPROCESSED_PROBE_DIR"
