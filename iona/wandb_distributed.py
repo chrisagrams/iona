@@ -70,7 +70,9 @@ def init_wandb_run(
         project=project,
         id=run_id,
         entity=entity,
-        name=run_name if is_primary else None,
+        # Every training node sends the name: in a sweep, a client without one
+        # carries the sweep's generated name and can overwrite the primary's.
+        name=run_name if role == "pretrain" else None,
         config=run_config,
         settings=settings,
     )
