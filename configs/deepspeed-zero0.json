@@ -9,5 +9,10 @@
   },
   "zero_optimization": {
     "stage": 0
+  },
+  "timers": {
+    "throughput": {
+      "enabled": false
+    }
   }
 }
