@@ -1,0 +1,27 @@
+# Data scaling for iona-base-25m on Aurora: one 2-node trial per train_fraction.
+# Create with `uv run wandb sweep sweeps/train-fraction-25m-aurora.yaml`, then submit
+# pbs/aurora-sweep.pbs with ARGS_FILE=configs/iona-base-25m/training.args,
+# NODES_PER_RUN=2 and PROBE_EXECUTION=off.
+program: iona/train.py
+
+project: iona-pretrain
+name: 25m-train-fraction
+
+method: grid
+metric:
+  name: eval/loss
+  goal: minimize
+
+parameters:
+  train_fraction:
+    values: [0.01, 0.02, 0.05, 0.1, 0.2, 0.5, 1.0]
+
+command:
+  - bash
+  - pbs/aurora-run.sh
+  - --train_sampling_strategy=random
+  - --num_train_epochs=1
+  - --per_device_eval_batch_size=16
+  - --probe_execution=off
+  - --probe_steps=0
+  - ${args}
