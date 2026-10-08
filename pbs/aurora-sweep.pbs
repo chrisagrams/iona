@@ -22,6 +22,8 @@
 PROBE_EXECUTION=${PROBE_EXECUTION:-inline}
 source "${REPO_DIR:-${PBS_O_WORKDIR:-$PWD}}/pbs/aurora-env.sh"
 
+# Parsl starts interchange.py and process_worker_pool.py from PATH.
+export PATH=$VENV_DIR/bin:$PATH
 exec "$VENV_DIR/bin/python" -m iona.sweep \
     --sweep_id "${SWEEP_ID:?set SWEEP_ID to entity/project/sweep_id}" \
     --nodes_per_run "${NODES_PER_RUN:-1}"
