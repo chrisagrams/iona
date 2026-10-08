@@ -5,7 +5,6 @@
 
 from __future__ import annotations
 
-import os
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
@@ -24,6 +23,7 @@ from iona.contrastive import (
     subset_by_group,
 )
 from iona.data import group_ids, load_spectrum_datasets, peptide_key
+from iona.env import RankEnv
 from iona.modeling_iona import IonaForPreTraining
 from iona.processing_iona import IonaProcessor
 from iona.reranking import AlignmentCollator
@@ -173,9 +173,6 @@ def main(argv: list[str] | None = None) -> int:
         args=argv, args_file_flag="--args_file")
     out_dir = Path(training_args.output_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
-    if training_args.wandb_project:
-        os.environ.setdefault("WANDB_PROJECT", training_args.wandb_project)
-        os.environ.setdefault("WANDB_DIR", str(out_dir))
     set_seed(training_args.seed)
 
     processor = IonaProcessor.from_pretrained(
@@ -193,6 +190,7 @@ def main(argv: list[str] | None = None) -> int:
         wandb_run = init_wandb_run(
             project=training_args.wandb_project, run_name=training_args.run_name,
             entity=training_args.wandb_entity,
+            dir=RankEnv().wandb_dir or out_dir,
             config={"model": asdict(model_args), "data": asdict(data_args)})
     try:
         with training_args.main_process_first(local=False, desc="contrastive data"):

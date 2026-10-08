@@ -6,7 +6,6 @@ Each peak gets one logit trained with BCE. Noise is the positive class (label 1)
 from __future__ import annotations
 
 import copy
-import os
 import sys
 from dataclasses import asdict, dataclass
 from pathlib import Path
@@ -22,6 +21,7 @@ from transformers import (DataCollatorWithPadding, HfArgumentParser, Trainer,
 from iona.configuration_iona import IonaConfig, IonaDenoisingConfig
 from iona.data import build_denoising_datasets
 from iona.denoising import DenoisingTrainer
+from iona.env import RankEnv
 from iona.modeling_iona import IonaForDenoising, IonaForPreTraining
 from iona.processing_iona import IonaProcessor
 from iona.wandb_distributed import init_wandb_run
@@ -229,12 +229,6 @@ def main(argv: list[str] | None = None) -> int:
 
     out_dir = Path(training_args.output_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
-    if training_args.wandb_project:
-        os.environ.setdefault("WANDB_PROJECT", training_args.wandb_project)
-        os.environ.setdefault("WANDB_DIR", str(out_dir))
-    if training_args.wandb_entity:
-        os.environ.setdefault("WANDB_ENTITY", training_args.wandb_entity)
-
     set_seed(training_args.seed)
 
     processor = IonaProcessor.from_pretrained(
@@ -249,6 +243,7 @@ def main(argv: list[str] | None = None) -> int:
             project=training_args.wandb_project,
             run_name=training_args.run_name,
             entity=training_args.wandb_entity,
+            dir=RankEnv().wandb_dir or out_dir,
             config={
                 "model": model_args.pretrained_path,
                 "random_init": model_args.random_init,

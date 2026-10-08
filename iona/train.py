@@ -22,6 +22,7 @@ from iona.data import (
     load_pretraining_datasets_from_disk,
     subsample_train,
 )
+from iona.env import RankEnv
 from iona.modeling_iona import IonaForPreTraining
 from iona.posttraining import build_probe_data
 from iona.processing_iona import IonaDataCollatorForPreTraining, IonaProcessor
@@ -105,9 +106,9 @@ class IonaTrainer(Trainer):
 
 
 def main(argv: list[str] | None = None) -> int:
-    local_rank = int(os.environ.get("LOCAL_RANK", "-1"))
-    if local_rank >= 0 and torch.xpu.is_available():
-        torch.xpu.set_device(local_rank)
+    env = RankEnv()
+    if env.local_rank is not None and torch.xpu.is_available():
+        torch.xpu.set_device(env.local_rank)
 
     parser = HfArgumentParser(
         (ModelArguments, DataArguments, IonaTrainingArguments)  # pyright: ignore[reportArgumentType]
@@ -120,10 +121,6 @@ def main(argv: list[str] | None = None) -> int:
     out_dir = Path(training_args.output_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     (out_dir / "figs").mkdir(exist_ok=True)
-
-    if training_args.wandb_project:
-        os.environ.setdefault("WANDB_PROJECT", training_args.wandb_project)
-        os.environ.setdefault("WANDB_DIR", str(out_dir))
 
     set_seed(training_args.seed)
     model_config = IonaConfig.from_pretrained(model_args.config_name)
@@ -153,6 +150,7 @@ def main(argv: list[str] | None = None) -> int:
             run_name=training_args.run_name,
             config=resolved,
             shared=training_args.probe_execution == "sidecar",
+            dir=env.wandb_dir or out_dir,
         )
 
     try:
@@ -231,9 +229,10 @@ def main(argv: list[str] | None = None) -> int:
             retrieval_evaluation_datasets=retrieval_evaluation_datasets,
             include_probes=include_probes,
         )
-        if deadline := os.environ.get("IONA_JOB_DEADLINE_EPOCH"):
-            margin = float(os.environ.get("IONA_CHECKPOINT_MARGIN_SECONDS", "900"))
-            callbacks.append(WalltimeCheckpointCallback(float(deadline), margin))
+        if env.job_deadline_epoch is not None:
+            callbacks.append(
+                WalltimeCheckpointCallback(env.job_deadline_epoch, env.checkpoint_margin_seconds)
+            )
         if training_args.probe_execution == "sidecar":
             sidecar_callback = SidecarCallback(out_dir, resolved)
             callbacks.append(sidecar_callback)

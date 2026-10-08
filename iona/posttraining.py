@@ -2,7 +2,6 @@
 
 import argparse
 import json
-import os
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -16,6 +15,7 @@ from iona.data import (
     build_retrieval_evaluation_datasets,
 )
 from iona.denoising import run_denoising_probe
+from iona.env import RankEnv
 from iona.modeling_iona import IonaForPreTraining
 from iona.processing_iona import IonaProcessor
 from iona.retrieval import run_retrieval_probe
@@ -126,16 +126,17 @@ def main(argv: list[str] | None = None) -> int:
     args = SimpleNamespace(**resolved["training"])
     data_args = SimpleNamespace(**resolved["data"])
     out_dir = Path(args.output_dir)
-    local_rank = int(os.environ.get("LOCAL_RANK", "0"))
+    env = RankEnv()
+    local_rank = env.local_rank or 0
     if cli.device != "cpu":
         backend = torch.xpu if cli.device == "xpu" else torch.cuda
-        if backend.device_count() != int(os.environ.get("LOCAL_WORLD_SIZE", "1")):
+        if backend.device_count() != env.local_world_size:
             raise ValueError("Posttraining requires one visible accelerator per local worker")
         backend.set_device(local_rank)
     device = torch.device(cli.device if cli.device == "cpu" else f"{cli.device}:{local_rank}")
     set_seed(args.denoise_seed if cli.probe == "denoise" else args.retrieval_seed)
     run = None
-    if cli.wandb and int(os.environ.get("RANK", "0")) == 0:
+    if cli.wandb and env.rank == 0:
         run = init_wandb_run(
             project=cli.wandb_project,
             run_name="",

@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
-import os
 import socket
+from pathlib import Path
 from typing import Any
 
 import wandb
+
+from iona.env import RankEnv
 
 
 def init_wandb_run(
@@ -18,12 +20,14 @@ def init_wandb_run(
     role: str = "pretrain",
     run_id: str | None = None,
     entity: str | None = None,
+    dir: Path | None = None,
 ) -> wandb.Run | None:
     """Create one W&B client per node, sharing a run across multiple nodes."""
-    rank = int(os.environ.get("RANK", "0"))
-    world_size = int(os.environ.get("WORLD_SIZE", "1"))
-    local_rank = int(os.environ.get("LOCAL_RANK", "0"))
-    local_world_size = int(os.environ.get("LOCAL_WORLD_SIZE", "1"))
+    env = RankEnv()
+    rank = env.rank
+    world_size = env.world_size
+    local_rank = env.local_rank or 0
+    local_world_size = env.local_world_size
 
     # A single client can monitor every GPU visible on its physical host.
     if local_rank != 0:
@@ -31,7 +35,7 @@ def init_wandb_run(
 
     is_multinode = world_size > local_world_size
     is_primary = rank == 0 and role == "pretrain"
-    xpu_metrics_url = os.environ.get("IONA_XPU_METRICS_URL")
+    xpu_metrics_url = env.xpu_metrics_url
     run_config = (
         {
             **config,
@@ -52,7 +56,7 @@ def init_wandb_run(
     if xpu_metrics_url and role == "pretrain":
         settings_kwargs["x_stats_open_metrics_endpoints"] = {"xpu": xpu_metrics_url}
     if is_multinode or shared or role != "pretrain":
-        run_id = run_id or os.environ.get("WANDB_RUN_ID")
+        run_id = run_id or env.wandb_run_id
         if not run_id:
             raise RuntimeError("WANDB_RUN_ID is required for shared W&B logging")
         settings_kwargs.update(
@@ -70,6 +74,7 @@ def init_wandb_run(
         project=project,
         id=run_id,
         entity=entity,
+        dir=dir,
         name=run_name if is_primary else None,
         config=run_config,
         settings=settings,

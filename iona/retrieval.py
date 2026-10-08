@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import copy
-import os
 import random
 from pathlib import Path
 from typing import cast
@@ -20,6 +19,7 @@ from tqdm.auto import tqdm
 from transformers import ProgressCallback, Trainer, TrainingArguments
 
 from iona.configuration_iona import IonaConfig, IonaRetrievalConfig
+from iona.env import RankEnv
 from iona.modeling_iona import (
     IonaForPreTraining,
     IonaForRetrieval,
@@ -178,11 +178,7 @@ def run_retrieval_probe(
             trainer.args.dataloader_drop_last = False
             trainer.eval_dataset = evaluation_datasets
             # Rank 0 owns the FAISS indexes on this node's allocated GPUs.
-            gpus = (
-                list(range(int(os.environ.get("LOCAL_WORLD_SIZE", "1"))))
-                if device.type == "cuda"
-                else None
-            )
+            gpus = list(range(RankEnv().local_world_size)) if device.type == "cuda" else None
 
             def compute_metrics(prediction):
                 if device.type == "cuda":

@@ -5,7 +5,6 @@ Only the peptide encoder learns. Watch `crossmodal/hit@1`, not the loss.
 
 from __future__ import annotations
 
-import os
 import sys
 from dataclasses import asdict, dataclass
 from pathlib import Path
@@ -16,6 +15,7 @@ from datasets import load_from_disk
 from transformers import HfArgumentParser, Trainer, TrainingArguments, set_seed
 
 from iona.data import load_spectrum_datasets, peptide_key
+from iona.env import RankEnv
 from iona.finetune_denoise import subset_splits
 from iona.modeling_iona import IonaForPreTraining
 from iona.processing_iona import IonaProcessor
@@ -118,9 +118,6 @@ def main(argv: list[str] | None = None) -> int:
     )
     out_dir = Path(training_args.output_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
-    if training_args.wandb_project:
-        os.environ.setdefault("WANDB_PROJECT", training_args.wandb_project)
-        os.environ.setdefault("WANDB_DIR", str(out_dir))
     set_seed(training_args.seed)
 
     processor = IonaProcessor.from_pretrained(
@@ -159,6 +156,7 @@ def main(argv: list[str] | None = None) -> int:
         wandb_run = init_wandb_run(
             project=training_args.wandb_project, run_name=training_args.run_name,
             entity=training_args.wandb_entity,
+            dir=RankEnv().wandb_dir or out_dir,
             config={"model": asdict(model_args), "data": asdict(data_args),
                     "training": training_args.to_dict()},
         )
