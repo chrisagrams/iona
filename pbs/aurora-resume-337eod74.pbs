@@ -1,0 +1,39 @@
+#!/bin/bash -l
+# One-off: resume the seven crashed trials of grid sweep CS_Pharm/iona-pretrain/337eod74
+# (50m train_fraction) by run ID, one 2-node group per trial. The sweep is FINISHED, so
+# no agent will hand these runs out again; each resumes its latest checkpoint and W&B run.
+# Submit from the repository root:
+# qsub -A PROJECT -q QUEUE \
+#   -l select=14 -l place=scatter -l walltime=06:00:00 \
+#   -l filesystems=home:flare:daos_user_fs -j oe -o /path/to/pbs/logs \
+#   -v ARGS_FILE=configs/iona-base-50m/training.args,DAOS_POOL=GenSLM,DAOS_CONT=msfound,LOG_ROOT=/flare/PROJECT/msdelta-runs,PROBE_EXECUTION=off \
+#   pbs/aurora-resume-337eod74.pbs
+# Remove any partial checkpoint-N directory first: the newest one with a
+# trainer_state.json is resumed. Launcher output goes to
+# $LOG_ROOT/iona-base-50m-<run id>/logs/resume-<job id>.log.
+
+source "${REPO_DIR:-${PBS_O_WORKDIR:-$PWD}}/pbs/aurora-env.sh"
+unset WANDB_SWEEP_ID
+
+IFS=, read -r -a HOSTS <<<"$JOB_HOSTS"
+RUNS=(tvg5wytu:0.01 yt5prlto:0.02 s35mwsjm:0.05 os3gbksb:0.1 mtwuj711:0.2 5hl195hc:0.5 hqv140o8:1)
+if ((${#HOSTS[@]} < 2 * ${#RUNS[@]})); then
+    echo "need $((2 * ${#RUNS[@]})) nodes, got ${#HOSTS[@]}" >&2
+    exit 2
+fi
+
+i=0
+for entry in "${RUNS[@]}"; do
+    id=${entry%%:*}
+    frac=${entry#*:}
+    # Matches the sweep's command; RUN_NAME selects the trial's existing directories.
+    RUN_NAME=$CONFIG_RUN_NAME-$id WANDB_RUN_ID=$id RESUME_FROM_CHECKPOINT=latest \
+        IONA_HOSTS=${HOSTS[i]},${HOSTS[i + 1]} \
+        bash "$REPO_DIR/pbs/aurora-run.sh" \
+        --train_sampling_strategy=random --num_train_epochs=1 \
+        --per_device_eval_batch_size=16 --probe_execution=off --probe_steps=0 \
+        --train_fraction="$frac" \
+        >"$LOG_ROOT/$CONFIG_RUN_NAME-$id/logs/resume-$JOB_ID.log" 2>&1 &
+    i=$((i + 2))
+done
+wait
