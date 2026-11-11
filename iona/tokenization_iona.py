@@ -56,7 +56,6 @@ class IonaPeptideTokenizer(TokenizersBackend):
         if vocab is None:
             tokens = (pad, eos, unk, *TOKEN_MASSES)
             vocab = {token: index for index, token in enumerate(tokens)}
-        self._vocab = vocab
         self._tokenizer = Tokenizer(WordLevel(vocab=vocab, unk_token=unk))
         self._tokenizer.pre_tokenizer = pre_tokenizers.Split(
             Regex(TOKEN_PATTERN), behavior="isolated"

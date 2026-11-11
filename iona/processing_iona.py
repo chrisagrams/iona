@@ -295,7 +295,6 @@ class IonaDataCollatorForRetrieval:
         }
 
 
-@dataclass
 class IonaDataCollatorForDenovo:
     """Pad preprocessed spectra and their peptide token ids for de novo sequencing.
 

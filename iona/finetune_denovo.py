@@ -5,7 +5,6 @@ Trains on MassIVE-KB and evaluates on nine-species. Watch `eval_peptide_recall`,
 
 from __future__ import annotations
 
-import copy
 import os
 import sys
 from dataclasses import asdict, dataclass
@@ -68,10 +67,8 @@ def build_denovo_model(
         pretrained = IonaForPreTraining(IonaConfig.from_pretrained(model_args.pretrained_path))
     else:
         pretrained = IonaForPreTraining.from_pretrained(model_args.pretrained_path)
-    encoder_config = (pretrained.config if isinstance(pretrained.config, IonaConfig)
-                      else IonaConfig(**pretrained.config.to_dict()))
     config = IonaDenovoConfig(
-        encoder=copy.deepcopy(encoder_config),
+        encoder=pretrained.config,
         vocab_size=len(tokenizer),
         pad_token_id=tokenizer.pad_token_id,
         eos_token_id=tokenizer.eos_token_id,
@@ -165,7 +162,6 @@ def main(argv: list[str] | None = None) -> int:
             eval_dataset=evaluation,
             data_collator=IonaDataCollatorForDenovo(),
             processing_class=tokenizer,
-            peptide_tokenizer=tokenizer,
             decode_rows=training_args.decode_rows,
             precursor_tolerance_ppm=training_args.precursor_tolerance_ppm,
         )
@@ -174,7 +170,6 @@ def main(argv: list[str] | None = None) -> int:
 
         if trainer.is_world_process_zero():
             trainer.save_model(str(out_dir / "final"))
-            tokenizer.save_pretrained(str(out_dir / "final"))
             processor.save_pretrained(str(out_dir / "final"))
             print(f"[denovo] saved to {out_dir / 'final'}", flush=True)
         return 0

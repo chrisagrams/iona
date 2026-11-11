@@ -54,15 +54,13 @@ def match_residues(
     return matched
 
 
-def residue_masses(ids, token_masses: list[float], eos_token_id: int, pad_token_id: int):
+def residue_masses(ids, token_masses: list[float], eos_token_id: int):
     """Masses of the residue tokens before EOS."""
     masses = []
     for index in ids:
-        index = int(index)
         if index == eos_token_id:
             break
-        if index != pad_token_id and index != -100:
-            masses.append(token_masses[index])
+        masses.append(token_masses[index])
     return masses
 
 
@@ -72,13 +70,11 @@ class DenovoTrainer(IonaTrainer):
     def __init__(
         self,
         *args,
-        peptide_tokenizer,
         decode_rows: int = 2000,
         precursor_tolerance_ppm: float = 50.0,
         **kwargs,
     ):
         super().__init__(*args, **kwargs)
-        self.peptide_tokenizer = peptide_tokenizer
         self.decode_rows = decode_rows
         self.precursor_tolerance_ppm = precursor_tolerance_ppm
 
@@ -99,9 +95,7 @@ class DenovoTrainer(IonaTrainer):
     def decoding_metrics(self, dataset) -> dict[str, float]:
         """Decode the first decode_rows spectra, split across processes, and score them."""
         model = self.accelerator.unwrap_model(self.model)
-        was_training = model.training
-        model.eval()
-        tokenizer = self.peptide_tokenizer
+        tokenizer = self.processing_class
         token_masses = tokenizer.token_masses
         rows = range(min(len(dataset), self.decode_rows))
         shard = rows[self.args.process_index :: self.args.world_size]
@@ -109,34 +103,26 @@ class DenovoTrainer(IonaTrainer):
         # predictions that fit the precursor
         counts = torch.zeros(6, dtype=torch.long, device=self.args.device)
         step = self.args.per_device_eval_batch_size
-        try:
-            for start in range(0, len(shard), step):
-                batch = self.data_collator([dataset[index] for index in shard[start : start + step]])
-                labels = batch.pop("labels")
-                batch = {key: value.to(self.args.device) for key, value in batch.items()}
-                with self.autocast_smart_context_manager():
-                    output = model.generate(
-                        **batch,
-                        tokenizer=tokenizer,
-                        precursor_tolerance_ppm=self.precursor_tolerance_ppm,
-                    )
-                for sequence, label, fits in zip(
-                    output.sequences.tolist(), labels.tolist(), output.precursor_match.tolist()
-                ):
-                    predicted = residue_masses(
-                        sequence, token_masses, tokenizer.eos_token_id, tokenizer.pad_token_id
-                    )
-                    true = residue_masses(
-                        label, token_masses, tokenizer.eos_token_id, tokenizer.pad_token_id
-                    )
-                    matched = match_residues(predicted, true)
-                    counts += torch.tensor(
-                        [1, int(bool(matched) and all(matched)), sum(matched), len(predicted),
-                         len(true), int(fits)],
-                        device=counts.device,
-                    )
-        finally:
-            model.train(was_training)
+        for start in range(0, len(shard), step):
+            batch = self.data_collator([dataset[index] for index in shard[start : start + step]])
+            labels = batch.pop("labels")
+            batch = {key: value.to(self.args.device) for key, value in batch.items()}
+            with self.autocast_smart_context_manager():
+                output = model.generate(
+                    **batch,
+                    tokenizer=tokenizer,
+                    precursor_tolerance_ppm=self.precursor_tolerance_ppm,
+                )
+            for sequence, label, fits in zip(
+                output.sequences.tolist(), labels.tolist(), output.precursor_match.tolist()
+            ):
+                predicted = residue_masses(sequence, token_masses, tokenizer.eos_token_id)
+                true = residue_masses(label, token_masses, tokenizer.eos_token_id)
+                matched = match_residues(predicted, true)
+                counts += torch.tensor(
+                    [1, int(all(matched)), sum(matched), len(predicted), len(true), int(fits)],
+                    device=counts.device,
+                )
         spectra, peptides, residues, predicted, true, fits = (
             self.accelerator.reduce(counts, reduction="sum").tolist()
         )

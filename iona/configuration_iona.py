@@ -158,16 +158,6 @@ class IonaDenovoConfig(PretrainedConfig):
         self.precursor_f_min = precursor_f_min
         self.precursor_f_max = precursor_f_max
         self.max_precursor_mass = max_precursor_mass
-        if decoder_hidden_size <= 0 or decoder_num_layers <= 0 or decoder_intermediate_size <= 0:
-            raise ValueError("decoder dimensions must be positive")
-        if decoder_hidden_size % decoder_num_heads:
-            raise ValueError("decoder_hidden_size must be divisible by decoder_num_heads")
-        if not 0.0 <= decoder_dropout < 1.0:
-            raise ValueError("decoder_dropout must be in [0, 1)")
-        if max_peptide_length <= 0 or max_charge <= 0:
-            raise ValueError("max_peptide_length and max_charge must be positive")
-        if not 0 < precursor_f_min < precursor_f_max:
-            raise ValueError("precursor_f_min and precursor_f_max must satisfy 0 < min < max")
 
     @property
     def initializer_range(self) -> float:
