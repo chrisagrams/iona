@@ -9,7 +9,7 @@
 #        -v ARGS_FILE=configs/finetune/denoise-50m/training.args,PRETRAINED_PATH=/path/to/ckpt \
 #        scripts/aurora-finetune.pbs
 #
-# Optional: MAX_STEPS or MAX_SAMPLES (smoke runs), EVAL_STEPS, SEED, PRECOMPUTE_CACHE (align).
+# Optional: PRETRAINED_PATH (overrides the args file), MAX_STEPS or MAX_SAMPLES (smoke runs), EVAL_STEPS, SEED, PRECOMPUTE_CACHE (align).
 
 #PBS -N iona-denoise-ft
 #PBS -A UIC-HPC
@@ -26,7 +26,9 @@ VENV_DIR=${VENV_DIR:-$REPO_DIR/.venv}
 PROJECT=${PROJECT:-UIC-HPC}
 SCRATCH_ROOT=${SCRATCH_ROOT:-/lus/flare/projects/$PROJECT/$USER/msdelta}
 ARGS_FILE=${ARGS_FILE:?set ARGS_FILE to a finetune args file}
-PRETRAINED_PATH=${PRETRAINED_PATH:?set PRETRAINED_PATH to the checkpoint to fine-tune from}
+# PRETRAINED_PATH overrides the --pretrained_path in ARGS_FILE; leave unset to use the file's.
+PRETRAINED_ARGS=()
+[[ -n ${PRETRAINED_PATH:-} ]] && PRETRAINED_ARGS=(--pretrained_path "$PRETRAINED_PATH")
 # All 12 tiles of an Aurora node.
 XPUS_PER_HOST=${XPUS_PER_HOST:-12}
 MODULE=${MODULE:-iona.finetune_denoise}
@@ -129,7 +131,7 @@ if [[ -n ${PRECOMPUTE_CACHE:-} ]]; then
         echo "  precompute : reusing $PRECOMPUTE_CACHE"
     else
         echo "  precompute : building $PRECOMPUTE_CACHE (one process, one tile)"
-        ZE_AFFINITY_MASK=0 "$VENV_DIR/bin/python" "$REPO_DIR/scripts/precompute_align.py"             --args_file "$ARGS_FILE" --pretrained_path "$PRETRAINED_PATH" --target_cache "$PRECOMPUTE_CACHE"             --batch_size "${PRECOMPUTE_BATCH:-16}" "${EXTRA_PRE[@]}"             || { echo "precompute failed" >&2; exit 2; }
+        ZE_AFFINITY_MASK=0 "$VENV_DIR/bin/python" "$REPO_DIR/scripts/precompute_align.py"             --args_file "$ARGS_FILE" "${PRETRAINED_ARGS[@]}" --target_cache "$PRECOMPUTE_CACHE"             --batch_size "${PRECOMPUTE_BATCH:-16}" "${EXTRA_PRE[@]}"             || { echo "precompute failed" >&2; exit 2; }
     fi
 fi
 
@@ -165,7 +167,7 @@ exec mpiexec \
         exec "$@"
     ' _ "$VENV_DIR/bin/python" -m "$MODULE" \
         --args_file "$ARGS_FILE" \
-        --pretrained_path "$PRETRAINED_PATH" \
+        "${PRETRAINED_ARGS[@]}" \
         --run_name "$RUN_NAME" \
         --output_dir "$RUN_DIR" \
         "${EXTRA[@]}" \

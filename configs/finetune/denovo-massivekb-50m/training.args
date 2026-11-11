@@ -1,3 +1,4 @@
+--pretrained_path Gaolaboratory/iona-base-50m
 --train_dataset_repo chrisagrams/massive_kb_v1_shuffled
 --eval_dataset_repo InstaDeepAI/ms_ninespecies_benchmark
 --eval_split validation
