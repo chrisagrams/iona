@@ -12,7 +12,7 @@
 --decoder_num_heads 8
 --decoder_intermediate_size 2048
 --decoder_dropout 0.1
---max_peptide_length 64
+--max_peptide_length 72
 --max_charge 10
 --learning_rate 3e-4
 --lr_scheduler_type cosine
