@@ -117,6 +117,64 @@ class IonaRetrievalConfig(PretrainedConfig):
         return self.encoder.initializer_range
 
 
+class IonaDenovoConfig(PretrainedConfig):
+    """Compose an Iona encoder configuration with an autoregressive peptide decoder."""
+
+    model_type = "iona-denovo"
+    sub_configs = {"encoder": IonaConfig}
+
+    def __init__(
+        self,
+        encoder: IonaConfig | dict | None = None,
+        vocab_size: int | None = None,
+        pad_token_id: int = 0,
+        eos_token_id: int = 1,
+        decoder_hidden_size: int = 512,
+        decoder_num_layers: int = 6,
+        decoder_num_heads: int = 8,
+        decoder_intermediate_size: int = 2048,
+        decoder_dropout: float = 0.1,
+        max_peptide_length: int = 64,
+        max_charge: int = 10,
+        precursor_n_freqs: int = 64,
+        precursor_f_min: float = 1e-4,
+        precursor_f_max: float = 10.0,
+        max_precursor_mass: float = 10000.0,
+        **kwargs,
+    ):
+        super().__init__(**kwargs)
+        self.encoder = encoder if isinstance(encoder, IonaConfig) else IonaConfig(**(encoder or {}))
+        self.vocab_size = vocab_size
+        self.pad_token_id = pad_token_id
+        self.eos_token_id = eos_token_id
+        self.decoder_hidden_size = decoder_hidden_size
+        self.decoder_num_layers = decoder_num_layers
+        self.decoder_num_heads = decoder_num_heads
+        self.decoder_intermediate_size = decoder_intermediate_size
+        self.decoder_dropout = decoder_dropout
+        self.max_peptide_length = max_peptide_length
+        self.max_charge = max_charge
+        self.precursor_n_freqs = precursor_n_freqs
+        self.precursor_f_min = precursor_f_min
+        self.precursor_f_max = precursor_f_max
+        self.max_precursor_mass = max_precursor_mass
+        if decoder_hidden_size <= 0 or decoder_num_layers <= 0 or decoder_intermediate_size <= 0:
+            raise ValueError("decoder dimensions must be positive")
+        if decoder_hidden_size % decoder_num_heads:
+            raise ValueError("decoder_hidden_size must be divisible by decoder_num_heads")
+        if not 0.0 <= decoder_dropout < 1.0:
+            raise ValueError("decoder_dropout must be in [0, 1)")
+        if max_peptide_length <= 0 or max_charge <= 0:
+            raise ValueError("max_peptide_length and max_charge must be positive")
+        if not 0 < precursor_f_min < precursor_f_max:
+            raise ValueError("precursor_f_min and precursor_f_max must satisfy 0 < min < max")
+
+    @property
+    def initializer_range(self) -> float:
+        return self.encoder.initializer_range
+
+
 IonaConfig.register_for_auto_class()
 IonaDenoisingConfig.register_for_auto_class()
 IonaRetrievalConfig.register_for_auto_class()
+IonaDenovoConfig.register_for_auto_class()

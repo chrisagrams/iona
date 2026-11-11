@@ -295,4 +295,43 @@ class IonaDataCollatorForRetrieval:
         }
 
 
+@dataclass
+class IonaDataCollatorForDenovo:
+    """Pad preprocessed spectra and their peptide token ids for de novo sequencing.
+
+    Labels are padded with -100 so padded positions are ignored by the loss.
+    """
+
+    def __call__(self, features: list[dict]) -> dict[str, torch.Tensor]:
+        batch_size = len(features)
+        n_peaks = max(len(feature["mz"]) for feature in features)
+        n_tokens = max(len(feature["labels"]) for feature in features)
+        mz = torch.zeros(batch_size, n_peaks, dtype=torch.float32)
+        log_intensity = torch.zeros_like(mz)
+        attention_mask = torch.zeros(batch_size, n_peaks, dtype=torch.long)
+        labels = torch.full((batch_size, n_tokens), -100, dtype=torch.long)
+        for row, feature in enumerate(features):
+            length = len(feature["mz"])
+            mz[row, :length] = torch.as_tensor(feature["mz"], dtype=torch.float32)
+            log_intensity[row, :length] = torch.as_tensor(
+                feature["log_intensity"], dtype=torch.float32
+            )
+            attention_mask[row, :length] = 1
+            labels[row, : len(feature["labels"])] = torch.as_tensor(
+                feature["labels"], dtype=torch.long
+            )
+        return {
+            "mz": mz,
+            "log_intensity": log_intensity,
+            "attention_mask": attention_mask,
+            "precursor_mz": torch.tensor(
+                [feature["precursor_mz"] for feature in features], dtype=torch.float32
+            ),
+            "precursor_charge": torch.tensor(
+                [feature["precursor_charge"] for feature in features], dtype=torch.long
+            ),
+            "labels": labels,
+        }
+
+
 IonaProcessor.register_for_auto_class("AutoProcessor")
