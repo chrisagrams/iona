@@ -37,9 +37,7 @@ MODULE=${MODULE:-iona.finetune_denoise}
 [[ -x $VENV_DIR/bin/python ]] || { echo "no venv at $VENV_DIR" >&2; exit 2; }
 
 TASK=${TASK:-$(basename "${MODULE#*finetune_}")}
-RUN_PREFIX=${RUN_PREFIX:-v2_}
 RUN_NAME=${RUN_NAME:-$TASK-ft-$(basename "$(dirname "$ARGS_FILE")")}
-[[ $RUN_NAME == "$RUN_PREFIX"* ]] || RUN_NAME=$RUN_PREFIX$RUN_NAME
 JOB_ID=${PBS_JOBID:-local}; JOB_ID=${JOB_ID%%.*}
 RUN_DIR=$SCRATCH_ROOT/runs/$RUN_NAME-$JOB_ID
 LOG_DIR=$RUN_DIR/logs
