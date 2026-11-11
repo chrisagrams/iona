@@ -10,7 +10,7 @@ import sys
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
-from datasets import load_dataset
+from datasets import DatasetDict, load_dataset, load_from_disk
 from transformers import HfArgumentParser, TrainingArguments, set_seed
 
 from iona.configuration_iona import IonaConfig, IonaDenovoConfig
@@ -47,6 +47,8 @@ class DenovoDataArguments:
     # 0 keeps every row; MassIVE-KB is already shuffled, so leading rows are a random sample.
     max_train_samples: int = 0
     max_eval_samples: int = 0
+    # Output of scripts/preprocess_denovo.py; when set, the splits are loaded instead of built.
+    preprocessed_dataset_dir: str | None = None
 
 
 @dataclass
@@ -85,6 +87,31 @@ def build_denovo_model(
         encoder=pretrained.iona,
         freeze_encoder=model_args.freeze_encoder,
     )
+
+
+def build_denovo_datasets(
+    model_args: DenovoModelArguments,
+    data_args: DenovoDataArguments,
+    processor: IonaProcessor,
+    tokenizer: IonaPeptideTokenizer,
+) -> DatasetDict:
+    """Tokenize MassIVE-KB for training and nine-species for evaluation."""
+    num_proc = data_args.preprocessing_num_workers or None
+    train = load_dataset(data_args.train_dataset_repo, split="train")
+    if data_args.max_train_samples > 0:
+        train = train.select(range(min(data_args.max_train_samples, len(train))))
+    train = build_massive_kb_denovo_split(
+        train, processor, tokenizer, max_peptide_length=model_args.max_peptide_length,
+        max_charge=model_args.max_charge, num_proc=num_proc,
+    )
+    evaluation = load_dataset(data_args.eval_dataset_repo, split=data_args.eval_split)
+    if data_args.max_eval_samples > 0:
+        evaluation = evaluation.select(range(min(data_args.max_eval_samples, len(evaluation))))
+    evaluation = build_ninespecies_denovo_split(
+        evaluation, processor, tokenizer, max_peptide_length=model_args.max_peptide_length,
+        max_charge=model_args.max_charge, num_proc=num_proc,
+    )
+    return DatasetDict(train=train, evaluation=evaluation)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -132,25 +159,12 @@ def main(argv: list[str] | None = None) -> int:
             print(f"[denovo] {total / 1e6:.2f}M params, {trainable / 1e6:.2f}M trainable; "
                   f"encoder from {origin}; freeze_encoder={model_args.freeze_encoder}", flush=True)
 
-        num_proc = data_args.preprocessing_num_workers or None
-        with training_args.main_process_first(local=False, desc="de novo data"):
-            train = load_dataset(data_args.train_dataset_repo, split="train")
-            if data_args.max_train_samples > 0:
-                train = train.select(range(min(data_args.max_train_samples, len(train))))
-            train = build_massive_kb_denovo_split(
-                train, processor, tokenizer, max_peptide_length=model_args.max_peptide_length,
-                max_charge=model_args.max_charge, num_proc=num_proc,
-            )
-            evaluation = load_dataset(data_args.eval_dataset_repo, split=data_args.eval_split)
-            if data_args.max_eval_samples > 0:
-                evaluation = evaluation.select(
-                    range(min(data_args.max_eval_samples, len(evaluation)))
-                )
-            evaluation = build_ninespecies_denovo_split(
-                evaluation, processor, tokenizer,
-                max_peptide_length=model_args.max_peptide_length,
-                max_charge=model_args.max_charge, num_proc=num_proc,
-            )
+        if data_args.preprocessed_dataset_dir:
+            datasets = load_from_disk(data_args.preprocessed_dataset_dir)
+        else:
+            with training_args.main_process_first(local=False, desc="de novo data"):
+                datasets = build_denovo_datasets(model_args, data_args, processor, tokenizer)
+        train, evaluation = datasets["train"], datasets["evaluation"]
         if training_args.process_index == 0:
             print(f"[denovo] train={len(train):,} eval={len(evaluation):,} "
                   f"({data_args.eval_dataset_repo}:{data_args.eval_split})", flush=True)

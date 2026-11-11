@@ -6,7 +6,7 @@
 --preprocessing_num_workers 24
 --run_name denovo-massivekb-50m
 --output_dir ./runs/denovo-massivekb-50m
---freeze_encoder true
+--freeze_encoder false
 --decoder_hidden_size 512
 --decoder_num_layers 6
 --decoder_num_heads 8
