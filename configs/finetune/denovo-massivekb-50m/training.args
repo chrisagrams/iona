@@ -27,6 +27,7 @@
 --train_sampling_strategy group_by_length
 --dataloader_num_workers 4
 --bf16 true
+--torch_compile true
 --eval_strategy steps
 --eval_steps 2000
 --save_strategy steps
