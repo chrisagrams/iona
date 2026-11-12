@@ -3,6 +3,7 @@
 --eval_dataset_repo InstaDeepAI/ms_ninespecies_benchmark
 --eval_split validation
 --max_peaks 512
+--pad_to_multiple_of 64
 --preprocessing_num_workers 24
 --run_name denovo-massivekb-50m
 --output_dir ./runs/denovo-massivekb-50m

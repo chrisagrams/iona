@@ -43,6 +43,7 @@ class DenovoDataArguments:
     eval_dataset_repo: str = "InstaDeepAI/ms_ninespecies_benchmark"
     eval_split: str = "validation"
     max_peaks: int = 512
+    pad_to_multiple_of: int | None = None
     preprocessing_num_workers: int = 24
     # 0 keeps every row; MassIVE-KB is already shuffled, so leading rows are a random sample.
     max_train_samples: int = 0
@@ -174,7 +175,10 @@ def main(argv: list[str] | None = None) -> int:
             args=training_args,
             train_dataset=train,
             eval_dataset=evaluation,
-            data_collator=IonaDataCollatorForDenovo(),
+            data_collator=IonaDataCollatorForDenovo(
+                max_peptide_length=model_args.max_peptide_length,
+                pad_to_multiple_of=data_args.pad_to_multiple_of,
+            ),
             processing_class=tokenizer,
             decode_rows=training_args.decode_rows,
             precursor_tolerance_ppm=training_args.precursor_tolerance_ppm,
