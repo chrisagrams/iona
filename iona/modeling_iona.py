@@ -11,12 +11,15 @@ from sentence_transformers.sentence_transformer.modules import Pooling
 from torch import Tensor, nn
 from torch.distributed.nn.functional import all_gather as distributed_all_gather
 from transformers import PretrainedConfig, PreTrainedModel
+from transformers.cache_utils import DynamicCache, EncoderDecoderCache
 from transformers.modeling_outputs import BaseModelOutput
 from transformers.utils.generic import ModelOutput
 
+from .chemistry import ISOTOPES, PROTON_MASS, WATER_MASS
 from .configuration_iona import (
     IonaConfig,
     IonaDenoisingConfig,
+    IonaDenovoConfig,
     IonaRetrievalConfig,
 )
 from .fourier import FourierFeatures
@@ -191,6 +194,10 @@ class IonaPreTrainedModel(PreTrainedModel):
         elif isinstance(module, nn.LayerNorm):
             module.bias.data.zero_()
             module.weight.data.fill_(1.0)
+        elif isinstance(module, nn.Embedding):
+            module.weight.data.normal_(mean=0.0, std=self.config.initializer_range)
+            if module.padding_idx is not None:
+                module.weight.data[module.padding_idx].zero_()
         elif isinstance(module, PeakEmbed):
             module.mask_token.data.normal_(mean=0.0, std=self.config.initializer_range)
 
@@ -521,7 +528,356 @@ class IonaForRetrieval(IonaPreTrainedModel):
         return IonaForRetrievalOutput(loss=loss, embeddings=embeddings)
 
 
+@dataclass
+class IonaForDenovoOutput(ModelOutput):
+    """Output of teacher-forced peptide decoding."""
+
+    loss: Tensor | None = None
+    logits: Tensor | None = None
+
+
+@dataclass
+class IonaDenovoGenerationOutput(ModelOutput):
+    """Greedy-decoded peptide per spectrum.
+
+    `sequences` holds token ids ending with EOS, padded; `precursor_match` says whether the
+    peptide mass fits the precursor.
+    """
+
+    sequences: Tensor | None = None
+    precursor_match: Tensor | None = None
+
+
+class PrecursorEmbed(nn.Module):
+    """Embed the precursor neutral mass and charge as the first decoder token."""
+
+    def __init__(self, config: IonaDenovoConfig):
+        super().__init__()
+        hidden_size = config.decoder_hidden_size
+        self.mass_features = FourierFeatures(
+            config.precursor_n_freqs,
+            config.precursor_f_min,
+            config.precursor_f_max,
+            clamp_abs=config.max_precursor_mass,
+        )
+        self.mass_mlp = nn.Sequential(
+            nn.Linear(self.mass_features.out_dim, hidden_size),
+            nn.GELU(),
+            nn.Linear(hidden_size, hidden_size),
+        )
+        self.charge = nn.Embedding(config.max_charge + 1, hidden_size)
+
+    def forward(self, neutral_mass: Tensor, charge: Tensor) -> Tensor:
+        # Fourier features are computed in float32; bf16 cannot resolve sub-dalton masses.
+        features = self.mass_features(neutral_mass).to(self.mass_mlp[0].weight.dtype)
+        return self.mass_mlp(features) + self.charge(charge)
+
+
+class DecoderSelfAttention(nn.Module):
+    """Causal multi-head self-attention over peptide tokens, with an optional KV cache."""
+
+    def __init__(self, config: IonaDenovoConfig):
+        super().__init__()
+        hidden_size = config.decoder_hidden_size
+        self.n_heads = config.decoder_num_heads
+        self.d_head = hidden_size // config.decoder_num_heads
+        self.qkv = nn.Linear(hidden_size, 3 * hidden_size)
+        self.out = nn.Linear(hidden_size, hidden_size)
+        self.attn_dropout = config.decoder_dropout
+        self.proj_dropout = nn.Dropout(config.decoder_dropout)
+
+    def forward(
+        self,
+        hidden_states: Tensor,
+        past_key_values: EncoderDecoderCache | None,
+        layer_idx: int,
+    ) -> Tensor:
+        batch_size, n_tokens, _ = hidden_states.shape
+        qkv = self.qkv(hidden_states).reshape(batch_size, n_tokens, 3, self.n_heads, self.d_head)
+        query, key, value = (x.transpose(1, 2) for x in qkv.unbind(dim=2))
+        if past_key_values is not None:
+            key, value = past_key_values.self_attention_cache.update(key, value, layer_idx)
+        context = F.scaled_dot_product_attention(
+            query,
+            key,
+            value,
+            is_causal=n_tokens > 1,
+            dropout_p=self.attn_dropout if self.training else 0.0,
+        )
+        context = context.transpose(1, 2).reshape(batch_size, n_tokens, -1)
+        return self.proj_dropout(self.out(context))
+
+
+class DecoderCrossAttention(nn.Module):
+    """Multi-head attention from peptide tokens to encoded peaks."""
+
+    def __init__(self, config: IonaDenovoConfig):
+        super().__init__()
+        hidden_size = config.decoder_hidden_size
+        self.n_heads = config.decoder_num_heads
+        self.d_head = hidden_size // config.decoder_num_heads
+        self.query = nn.Linear(hidden_size, hidden_size)
+        self.key_value = nn.Linear(hidden_size, 2 * hidden_size)
+        self.out = nn.Linear(hidden_size, hidden_size)
+        self.attn_dropout = config.decoder_dropout
+        self.proj_dropout = nn.Dropout(config.decoder_dropout)
+
+    def forward(
+        self,
+        hidden_states: Tensor,
+        memory: Tensor,
+        memory_mask: Tensor,
+        past_key_values: EncoderDecoderCache | None,
+        layer_idx: int,
+    ) -> Tensor:
+        """Attend from `hidden_states` to `memory`.
+
+        With a cache, peak keys and values are projected on the first step and reused after.
+        """
+        batch_size, n_tokens, _ = hidden_states.shape
+        if past_key_values is not None and past_key_values.is_updated.get(layer_idx):
+            layer = past_key_values.cross_attention_cache.layers[layer_idx]
+            key, value = layer.keys, layer.values
+        else:
+            key_value = self.key_value(memory).reshape(
+                batch_size, memory.shape[1], 2, self.n_heads, self.d_head
+            )
+            key, value = (x.transpose(1, 2) for x in key_value.unbind(dim=2))
+            if past_key_values is not None:
+                past_key_values.cross_attention_cache.update(key, value, layer_idx)
+                past_key_values.is_updated[layer_idx] = True
+        query = self.query(hidden_states).reshape(batch_size, n_tokens, self.n_heads, self.d_head)
+        context = F.scaled_dot_product_attention(
+            query.transpose(1, 2),
+            key,
+            value,
+            attn_mask=memory_mask,
+            dropout_p=self.attn_dropout if self.training else 0.0,
+        )
+        context = context.transpose(1, 2).reshape(batch_size, n_tokens, -1)
+        return self.proj_dropout(self.out(context))
+
+
+class DecoderBlock(nn.Module):
+    def __init__(self, config: IonaDenovoConfig):
+        super().__init__()
+        hidden_size = config.decoder_hidden_size
+        eps = config.encoder.layer_norm_eps
+        self.norm1 = nn.LayerNorm(hidden_size, eps=eps)
+        self.self_attn = DecoderSelfAttention(config)
+        self.norm2 = nn.LayerNorm(hidden_size, eps=eps)
+        self.cross_attn = DecoderCrossAttention(config)
+        self.norm3 = nn.LayerNorm(hidden_size, eps=eps)
+        self.ffn = nn.Sequential(
+            nn.Linear(hidden_size, config.decoder_intermediate_size),
+            nn.GELU(),
+            nn.Dropout(config.decoder_dropout),
+            nn.Linear(config.decoder_intermediate_size, hidden_size),
+            nn.Dropout(config.decoder_dropout),
+        )
+
+    def forward(
+        self,
+        hidden_states: Tensor,
+        memory: Tensor,
+        memory_mask: Tensor,
+        past_key_values: EncoderDecoderCache | None,
+        layer_idx: int,
+    ) -> Tensor:
+        hidden_states = hidden_states + self.self_attn(
+            self.norm1(hidden_states), past_key_values, layer_idx
+        )
+        hidden_states = hidden_states + self.cross_attn(
+            self.norm2(hidden_states), memory, memory_mask, past_key_values, layer_idx
+        )
+        return hidden_states + self.ffn(self.norm3(hidden_states))
+
+
+class PeptideDecoder(nn.Module):
+    """Autoregressive transformer over peptide tokens, conditioned on the precursor and peaks.
+
+    Position 0 is the precursor token; position t > 0 is the (t-1)th peptide token.
+    """
+
+    def __init__(self, config: IonaDenovoConfig):
+        super().__init__()
+        hidden_size = config.decoder_hidden_size
+        eps = config.encoder.layer_norm_eps
+        self.memory_projection = nn.Sequential(
+            nn.Linear(config.encoder.hidden_size, hidden_size),
+            nn.LayerNorm(hidden_size, eps=eps),
+        )
+        self.precursor = PrecursorEmbed(config)
+        self.token_embedding = nn.Embedding(
+            config.vocab_size, hidden_size, padding_idx=config.pad_token_id
+        )
+        self.position_embedding = nn.Embedding(config.max_peptide_length + 1, hidden_size)
+        self.blocks = nn.ModuleList(
+            [DecoderBlock(config) for _ in range(config.decoder_num_layers)]
+        )
+        self.norm = nn.LayerNorm(hidden_size, eps=eps)
+
+    def embed_precursor(self, neutral_mass: Tensor, charge: Tensor) -> Tensor:
+        position = self.position_embedding.weight[0]
+        return (self.precursor(neutral_mass, charge) + position).unsqueeze(1)
+
+    def embed_tokens(self, input_ids: Tensor, start_position: int) -> Tensor:
+        positions = torch.arange(
+            start_position, start_position + input_ids.shape[1], device=input_ids.device
+        )
+        return self.token_embedding(input_ids) + self.position_embedding(positions)
+
+    def forward(
+        self,
+        hidden_states: Tensor,
+        memory: Tensor,
+        memory_mask: Tensor,
+        past_key_values: EncoderDecoderCache | None = None,
+    ) -> Tensor:
+        """Decode `hidden_states` against projected peaks, updating `past_key_values` if given."""
+        for layer_idx, block in enumerate(self.blocks):
+            hidden_states = block(hidden_states, memory, memory_mask, past_key_values, layer_idx)
+        return self.norm(hidden_states)
+
+
+class IonaForDenovo(IonaPreTrainedModel):
+    """Iona encoder with an autoregressive peptide decoder for de novo sequencing."""
+
+    config_class: type[PretrainedConfig] | None = IonaDenovoConfig
+
+    def __init__(
+        self,
+        config: IonaDenovoConfig,
+        encoder: IonaModel | None = None,
+        freeze_encoder: bool = False,
+    ):
+        super().__init__(config)
+        self.iona = encoder if encoder is not None else IonaModel(config.encoder)
+        self.decoder = PeptideDecoder(config)
+        self.lm_head = nn.Linear(config.decoder_hidden_size, config.vocab_size)
+        self._encoder_is_frozen = False
+        if encoder is None:
+            self.post_init()
+        else:
+            self.decoder.apply(self._init_weights)
+            self.lm_head.apply(self._init_weights)
+        # The mask token is only used by masked-intensity pretraining.
+        self.iona.embed.mask_token.requires_grad_(False)
+        if freeze_encoder:
+            self.freeze_encoder()
+
+    def freeze_encoder(self) -> None:
+        """Freeze the encoder and keep its stochastic layers disabled."""
+        self._encoder_is_frozen = True
+        self.iona.requires_grad_(False)
+        self.iona.eval()
+
+    def train(self, mode: bool = True):
+        super().train(mode)
+        if self._encoder_is_frozen:
+            self.iona.eval()
+        return self
+
+    @staticmethod
+    def neutral_mass(precursor_mz: Tensor, precursor_charge: Tensor) -> Tensor:
+        return (precursor_mz - PROTON_MASS) * precursor_charge
+
+    def _encode(
+        self, mz: Tensor, log_intensity: Tensor, attention_mask: Tensor
+    ) -> tuple[Tensor, Tensor]:
+        """Encode peaks and project them to the decoder width, with their attention mask."""
+        states = self.iona(
+            mz=mz, log_intensity=log_intensity, attention_mask=attention_mask, return_dict=True
+        ).last_hidden_state
+        memory_mask = attention_mask.bool()[:, None, None, :]
+        return self.decoder.memory_projection(states), memory_mask
+
+    def forward(
+        self,
+        mz: Tensor,
+        log_intensity: Tensor,
+        precursor_mz: Tensor,
+        precursor_charge: Tensor,
+        labels: Tensor,
+        attention_mask: Tensor,
+    ) -> IonaForDenovoOutput:
+        """Teacher-forced decoding: predict each label from the precursor and earlier labels."""
+        shifted = labels[:, :-1]
+        decoder_input_ids = shifted.masked_fill(shifted == -100, self.config.pad_token_id)
+
+        memory, memory_mask = self._encode(mz, log_intensity, attention_mask)
+        neutral_mass = self.neutral_mass(precursor_mz, precursor_charge)
+        hidden_states = torch.cat(
+            [
+                self.decoder.embed_precursor(neutral_mass, precursor_charge),
+                self.decoder.embed_tokens(decoder_input_ids, start_position=1),
+            ],
+            dim=1,
+        )
+        hidden_states = self.decoder(hidden_states, memory, memory_mask)
+        logits = self.lm_head(hidden_states).float()
+        loss = F.cross_entropy(logits.flatten(0, 1), labels.flatten(), ignore_index=-100)
+        return IonaForDenovoOutput(loss=loss, logits=logits)
+
+    @torch.no_grad()
+    def generate(
+        self,
+        mz: Tensor,
+        log_intensity: Tensor,
+        precursor_mz: Tensor,
+        precursor_charge: Tensor,
+        tokenizer,
+        attention_mask: Tensor,
+        precursor_tolerance_ppm: float = 50.0,
+    ) -> IonaDenovoGenerationOutput:
+        """Greedy decoding, as in Casanovo: take the most likely token until every peptide ends.
+
+        Precursor mass does not constrain decoding; `precursor_match` only reports whether each
+        peptide fits the precursor within tolerance, allowing a 0 or 1 isotope error.
+        """
+        config = self.config
+        max_length = config.max_peptide_length
+        device, eos, pad = mz.device, config.eos_token_id, config.pad_token_id
+        # Special tokens never appear mid-peptide, and N-terminal mods only come first.
+        blocked = torch.zeros(config.vocab_size, dtype=torch.bool, device=device)
+        blocked[tokenizer.all_special_ids] = True
+        n_terminal = torch.zeros_like(blocked)
+        n_terminal[tokenizer.n_terminal_token_ids] = True
+        later = blocked | n_terminal
+        later[eos] = False
+
+        memory, memory_mask = self._encode(mz, log_intensity, attention_mask)
+        precursor_mass = self.neutral_mass(precursor_mz, precursor_charge)
+        hidden_states = self.decoder.embed_precursor(precursor_mass, precursor_charge)
+        cache = EncoderDecoderCache(DynamicCache(), DynamicCache())
+        tokens = []
+        done = torch.zeros(mz.shape[0], dtype=torch.bool, device=device)
+        for step in range(max_length + 1):
+            hidden_states = self.decoder(hidden_states, memory, memory_mask, cache)
+            logits = self.lm_head(hidden_states[:, -1])
+            token = logits.masked_fill(later if step else blocked, float("-inf")).argmax(dim=-1)
+            if step == max_length:
+                token.fill_(eos)
+            token = token.masked_fill(done, pad)
+            tokens.append(token)
+            done |= token == eos
+            if done.all():
+                break
+            hidden_states = self.decoder.embed_tokens(token[:, None], start_position=step + 1)
+
+        sequences = torch.stack(tokens, dim=1)
+        token_masses = torch.tensor(tokenizer.token_masses, dtype=torch.float32, device=device)
+        peptide_mass = token_masses[sequences].sum(dim=1) + WATER_MASS
+        shifts = torch.tensor([0.0, ISOTOPES["¹³C"]], device=device)
+        error = (peptide_mass[:, None] + shifts - precursor_mass[:, None]).abs()
+        tolerance = precursor_mass * precursor_tolerance_ppm * 1e-6
+        return IonaDenovoGenerationOutput(
+            sequences=sequences, precursor_match=(error <= tolerance[:, None]).any(dim=-1)
+        )
+
+
 IonaModel.register_for_auto_class("AutoModel")
 IonaForPreTraining.register_for_auto_class("AutoModelForPreTraining")
 IonaForDenoising.register_for_auto_class("AutoModelForTokenClassification")
 IonaForRetrieval.register_for_auto_class("AutoModel")
+IonaForDenovo.register_for_auto_class("AutoModel")

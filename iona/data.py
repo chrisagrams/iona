@@ -441,3 +441,116 @@ def load_spectrum_datasets(dataset_format: str, repo_id: str, processor, *,
     return build_grouped_datasets(repo_id, processor, include_consensus=include_consensus,
                                   exclude_peptides=exclude, num_proc=num_proc,
                                   splits=("train", "validation"))
+
+
+# De novo sequencing: one spectrum and its peptide per row, peptides in MassIVE-KB notation.
+
+# Nine-species modification spellings and their MassIVE-KB equivalents.
+NINESPECIES_MODIFICATIONS = {
+    "C(+57.02)": "C[+57.021]",
+    "M(+15.99)": "M[+15.995]",
+    "N(+.98)": "N[+0.984]",
+    "Q(+.98)": "Q[+0.984]",
+}
+
+
+def ninespecies_to_massive_kb(peptide: str) -> str:
+    """Rewrite a nine-species modified sequence in MassIVE-KB notation."""
+    for theirs, ours in NINESPECIES_MODIFICATIONS.items():
+        peptide = peptide.replace(theirs, ours)
+    if "(" in peptide:
+        raise ValueError(f"unmapped nine-species modification in {peptide!r}")
+    return peptide
+
+
+def top_peaks(mz, intensity, max_peaks: int) -> tuple[torch.Tensor, torch.Tensor]:
+    """Keep the max_peaks most intense peaks, in their original order."""
+    mz = torch.as_tensor(np.asarray(mz, dtype=np.float32))
+    intensity = torch.as_tensor(np.asarray(intensity, dtype=np.float32))
+    if mz.numel() > max_peaks:
+        keep = intensity.topk(max_peaks).indices.sort().values
+        mz, intensity = mz[keep], intensity[keep]
+    return mz, intensity
+
+
+def preprocess_denovo_batch(
+    mzs: list,
+    intensities: list,
+    peptides: list[str],
+    charges: list[int],
+    precursor_mzs: list[float] | None,
+    *,
+    processor: IonaProcessor,
+    tokenizer,
+    max_peptide_length: int,
+    max_charge: int,
+) -> dict[str, list]:
+    """Process spectra and tokenize peptides, raising on anything the model cannot represent.
+
+    Without measured precursor m/z values, the theoretical m/z is computed from the peptide.
+    """
+    encoded = tokenizer(peptides)["input_ids"]
+    masses = tokenizer.token_masses
+    out: dict[str, list] = {key: [] for key in (
+        "mz", "log_intensity", "labels", "precursor_mz", "precursor_charge", "length"
+    )}
+    for row, (peptide, ids) in enumerate(zip(peptides, encoded)):
+        if tokenizer.unk_token_id in ids:
+            raise ValueError(f"unknown token in {peptide!r}")
+        residues = ids[:-1]
+        if len(residues) > max_peptide_length:
+            raise ValueError(f"{len(residues)} tokens exceeds max_peptide_length="
+                             f"{max_peptide_length}: {peptide!r}")
+        charge = int(charges[row])
+        if not 1 <= charge <= max_charge:
+            raise ValueError(f"precursor charge {charge} is outside [1, {max_charge}]: {peptide!r}")
+        if precursor_mzs is None:
+            neutral = sum(masses[index] for index in residues) + WATER_MASS
+            precursor = (neutral + charge * PROTON_MASS) / charge
+        else:
+            precursor = float(precursor_mzs[row])
+
+        mz, intensity = top_peaks(mzs[row], intensities[row], processor.max_peaks)
+        values = processor(mz, intensity, padding=False)
+        out["mz"].append(values["mz"])
+        out["log_intensity"].append(values["log_intensity"])
+        out["labels"].append(ids)
+        out["precursor_mz"].append(precursor)
+        out["precursor_charge"].append(charge)
+        out["length"].append(len(values["mz"]))
+    return out
+
+
+def build_massive_kb_denovo_split(split: Dataset, processor: IonaProcessor, tokenizer, *,
+                                  max_peptide_length: int, max_charge: int,
+                                  num_proc: int | None = None) -> Dataset:
+    """Preprocess a MassIVE-KB split; precursor m/z is theoretical, since none is stored."""
+
+    def prepare(batch):
+        peptides, charges = zip(*(value.rsplit("_", 1) for value in batch["peptide_charge"]))
+        return preprocess_denovo_batch(
+            batch["m/z"], batch["int"], list(peptides), [int(c) for c in charges], None,
+            processor=processor, tokenizer=tokenizer, max_peptide_length=max_peptide_length,
+            max_charge=max_charge,
+        )
+
+    return split.map(prepare, batched=True, remove_columns=split.column_names,
+                     num_proc=num_proc, desc="preprocess MassIVE-KB de novo")
+
+
+def build_ninespecies_denovo_split(split: Dataset, processor: IonaProcessor, tokenizer, *,
+                                   max_peptide_length: int, max_charge: int,
+                                   num_proc: int | None = None) -> Dataset:
+    """Preprocess a nine-species split, keeping its measured precursor m/z."""
+
+    def prepare(batch):
+        return preprocess_denovo_batch(
+            batch["mz_array"], batch["intensity_array"],
+            [ninespecies_to_massive_kb(p) for p in batch["modified_sequence"]],
+            batch["precursor_charge"], batch["precursor_mz"],
+            processor=processor, tokenizer=tokenizer, max_peptide_length=max_peptide_length,
+            max_charge=max_charge,
+        )
+
+    return split.map(prepare, batched=True, remove_columns=split.column_names,
+                     num_proc=num_proc, desc="preprocess nine-species de novo")
