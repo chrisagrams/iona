@@ -30,7 +30,7 @@ from accelerate.utils import gather_object
 from tqdm.auto import tqdm
 
 from iona.chemistry import PROTON_MASS, WATER_MASS
-from iona.data import normalize_annotation
+from iona.data import normalize_annotation, top_peaks
 from iona.denovo import DenovoMetrics, area_under_precision_coverage, residue_masses
 from iona.modeling_iona import IonaForDenovo
 from iona.processing_iona import IonaDataCollatorForDenovo, IonaProcessor
@@ -101,20 +101,15 @@ class DenovoPredictor:
 
     def _features(self, source: Path, spectrum: InputSpectrum) -> dict:
         """Model inputs for one spectrum; raises ValueError if the model cannot take it."""
-        max_charge, max_peaks = self.model.config.max_charge, self.processor.max_peaks
+        max_charge = self.model.config.max_charge
         if spectrum.charge > max_charge:
             raise ValueError(f"{describe(source, spectrum)}: charge {spectrum.charge} exceeds "
                              f"the model's max_charge={max_charge}")
-        if spectrum.mz.size > max_peaks:
-            raise ValueError(f"{describe(source, spectrum)}: {spectrum.mz.size} peaks exceed "
-                             f"max_peaks={max_peaks}")
+        # Keep the max_peaks most intense peaks, as Casanovo does. top_peaks returns tensors,
+        # which the processor needs: it reads a numpy array as a batch of scalars.
+        mz, intensity = top_peaks(spectrum.mz, spectrum.intensity, self.processor.max_peaks)
         try:
-            # The processor reads a numpy array as a batch of scalars, so pass tensors.
-            values = self.processor(
-                torch.as_tensor(spectrum.mz, dtype=torch.float32),
-                torch.as_tensor(spectrum.intensity, dtype=torch.float32),
-                padding=False,
-            )
+            values = self.processor(mz, intensity, padding=False)
         except ValueError as error:
             raise ValueError(f"{describe(source, spectrum)}: {error}") from None
         return {
