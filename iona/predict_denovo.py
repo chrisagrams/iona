@@ -82,8 +82,13 @@ class DenovoPredictor:
         *,
         batch_size: int = 256,
         precursor_tolerance_ppm: float = 50.0,
+        compile_model: bool = True,
     ):
         self.model = model.eval()
+        if compile_model:
+            # generate() is a Python loop over a growing KV cache, so compile only the
+            # encoder, which does most of the work.
+            self.model.iona.compile(dynamic=True)
         self.device = next(model.parameters()).device
         self.processor = processor
         self.tokenizer = tokenizer
@@ -301,6 +306,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="spectra read into memory at a time (default: 8192)",
     )
     parser.add_argument("--device", help="torch device (default: cuda, then xpu, then cpu)")
+    parser.add_argument("--no-compile", action="store_true", help="skip torch.compile")
     parser.add_argument("--no-progress", action="store_true", help="disable progress bars")
     return parser.parse_args(argv)
 
@@ -316,6 +322,7 @@ def main(argv: list[str] | None = None) -> int:
         IonaPeptideTokenizer(),
         batch_size=args.batch_size,
         precursor_tolerance_ppm=args.precursor_tolerance_ppm,
+        compile_model=not args.no_compile,
     )
 
     rows: list[dict] = []
