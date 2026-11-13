@@ -299,13 +299,20 @@ class IonaDataCollatorForRetrieval:
 class IonaDataCollatorForDenovo:
     """Pad preprocessed spectra and their peptide token ids for de novo sequencing.
 
-    Labels are padded with -100 so padded positions are ignored by the loss.
+    Peaks are padded to a multiple of pad_to_multiple_of and labels to max_peptide_length
+    residues plus EOS, so torch.compile sees few shapes. Labels are padded with -100 so
+    padded positions are ignored by the loss.
     """
+
+    max_peptide_length: int
+    pad_to_multiple_of: int | None = None
 
     def __call__(self, features: list[dict]) -> dict[str, torch.Tensor]:
         batch_size = len(features)
         n_peaks = max(len(feature["mz"]) for feature in features)
-        n_tokens = max(len(feature["labels"]) for feature in features)
+        if self.pad_to_multiple_of:
+            n_peaks = -(-n_peaks // self.pad_to_multiple_of) * self.pad_to_multiple_of
+        n_tokens = self.max_peptide_length + 1
         mz = torch.zeros(batch_size, n_peaks, dtype=torch.float32)
         log_intensity = torch.zeros_like(mz)
         attention_mask = torch.zeros(batch_size, n_peaks, dtype=torch.long)

@@ -1,89 +1,237 @@
 #!/bin/bash -l
-# Fine-tune a pretrained encoder on Aurora (denoise, contrastive or align; set MODULE).
+# Submit from the repository root and provide scheduler policy through qsub.
+# Example (8 XPU tiles per node, global batch size 512):
+# qsub -A PROJECT -q QUEUE \
+#   -l select=4 -l place=scatter -l walltime=01:00:00 \
+#   -l filesystems=home:flare:daos_user_fs -j oe -o /path/to/pbs/logs \
+#   -v ARGS_FILE=configs/finetune/denovo-massivekb-50m/training.args,MODULE=iona.finetune_denovo,DAOS_POOL=POOL,DAOS_CONT=msdelta-training,LOG_ROOT=/flare/PROJECT/msdelta-runs,XPUS_PER_HOST=8,GLOBAL_BATCH_SIZE=512 \
+#   scripts/aurora-finetune.pbs
+# HF_HOME defaults to /tmp/$DAOS_POOL/$DAOS_CONT/hf-cache. Copy the encoder checkpoint and
+# the fine-tune datasets there; for iona.finetune_denovo, that includes the
+# datasets/denovo-preprocessed output of scripts/aurora-preprocess-denovo.pbs.
+# Set LOG_ROOT to the Flare base directory. Logs and W&B files are created at
+# $LOG_ROOT/$RUN_NAME/logs; RUN_NAME defaults to the configured run name + job ID.
+# LOG_DIR may override the complete path. Checkpoints remain in DAOS.
+# Set RESUME_FROM_CHECKPOINT=latest with a stable RUN_NAME to resume the highest
+# complete checkpoint-N directory.
 #
-#   qsub -q debug -l select=1 -l walltime=01:00:00 \
-#        -v ARGS_FILE=configs/finetune/denoise-50m/training.args,PRETRAINED_PATH=/path/to/ckpt,MAX_STEPS=60 \
-#        scripts/aurora-finetune.pbs
-#
-#   qsub -q capacity -l select=1 -l walltime=06:00:00 \
-#        -v ARGS_FILE=configs/finetune/denoise-50m/training.args,PRETRAINED_PATH=/path/to/ckpt \
-#        scripts/aurora-finetune.pbs
-#
-# Optional: PRETRAINED_PATH (overrides the args file), MAX_STEPS or MAX_SAMPLES (smoke runs), EVAL_STEPS, SEED, PRECOMPUTE_CACHE (align).
+# MODULE selects the fine-tune (default iona.finetune_denoise). PRETRAINED_PATH overrides
+# the args file's encoder checkpoint. EVAL_BATCH_SIZE defaults to MICRO_BATCH_SIZE, and
+# EVAL_STEPS sets both the evaluation and the checkpoint interval.
+# Telegraf is no longer provided on Aurora; set TELEGRAF_BIN to a portable
+# binary on a shared filesystem.
+# The launch follows the ALCF Aurora PyTorch DDP guidance:
+# https://docs.alcf.anl.gov/aurora/data-science/frameworks/pytorch/
 
-#PBS -N iona-denoise-ft
-#PBS -A UIC-HPC
-#PBS -l place=scatter
-#PBS -l filesystems=home:flare
-#PBS -j oe
-#PBS -o pbs/logs/
+module use /soft/modulefiles
+module load daos
+module load frameworks/2026.1.0
+module load xpu-smi
 
 set -euo pipefail
 
 REPO_DIR=${REPO_DIR:-${PBS_O_WORKDIR:-$PWD}}
-cd "$REPO_DIR"
 VENV_DIR=${VENV_DIR:-$REPO_DIR/.venv}
-PROJECT=${PROJECT:-UIC-HPC}
-SCRATCH_ROOT=${SCRATCH_ROOT:-/lus/flare/projects/$PROJECT/$USER/msdelta}
-ARGS_FILE=${ARGS_FILE:?set ARGS_FILE to a finetune args file}
-# PRETRAINED_PATH overrides the --pretrained_path in ARGS_FILE; leave unset to use the file's.
-PRETRAINED_ARGS=()
-[[ -n ${PRETRAINED_PATH:-} ]] && PRETRAINED_ARGS=(--pretrained_path "$PRETRAINED_PATH")
-# All 12 tiles of an Aurora node.
-XPUS_PER_HOST=${XPUS_PER_HOST:-12}
+ARGS_FILE=${ARGS_FILE:?set ARGS_FILE to an Iona fine-tune args file}
 MODULE=${MODULE:-iona.finetune_denoise}
-[[ $ARGS_FILE == /* ]] || ARGS_FILE=$REPO_DIR/$ARGS_FILE
-[[ -f $ARGS_FILE ]]    || { echo "args file not found: $ARGS_FILE" >&2; exit 2; }
-[[ -x $VENV_DIR/bin/python ]] || { echo "no venv at $VENV_DIR" >&2; exit 2; }
+DAOS_POOL=${DAOS_POOL:?set DAOS_POOL to the project DAOS pool}
+DAOS_CONT=${DAOS_CONT:-msdelta-training}
 
-TASK=${TASK:-$(basename "${MODULE#*finetune_}")}
-RUN_PREFIX=${RUN_PREFIX:-v2_}
-RUN_NAME=${RUN_NAME:-$TASK-ft-$(basename "$(dirname "$ARGS_FILE")")}
-[[ $RUN_NAME == "$RUN_PREFIX"* ]] || RUN_NAME=$RUN_PREFIX$RUN_NAME
-JOB_ID=${PBS_JOBID:-local}; JOB_ID=${JOB_ID%%.*}
-RUN_DIR=$SCRATCH_ROOT/runs/$RUN_NAME-$JOB_ID
-LOG_DIR=$RUN_DIR/logs
-mkdir -p "$LOG_DIR" "$REPO_DIR/pbs/logs"
+if ! command -v launch-dfuse-with-caching.sh >/dev/null 2>&1; then
+    echo "launch-dfuse-with-caching.sh is required for Hugging Face mmap access" >&2
+    exit 2
+fi
+launch-dfuse-with-caching.sh "${DAOS_POOL}:${DAOS_CONT}"
+DAOS_ROOT=/tmp/$DAOS_POOL/$DAOS_CONT
+if [[ ! -d $DAOS_ROOT ]]; then
+    echo "DAOS dfuse mount not found: $DAOS_ROOT" >&2
+    exit 2
+fi
 
-NUM_HOSTS=$(wc -l < "${PBS_NODEFILE:?PBS_NODEFILE is required}")
+CHECKPOINT_DIR=${CHECKPOINT_DIR:-$DAOS_ROOT/checkpoints}
+HF_HOME=${HF_HOME:-$DAOS_ROOT/hf-cache}
+DATASET_CACHE_DIR=${DATASET_CACHE_DIR:-$HF_HOME/datasets}
+PREPROCESSED_DATASET_DIR=${PREPROCESSED_DATASET_DIR:-$DATASET_CACHE_DIR/denovo-preprocessed}
+if [[ $MODULE == iona.finetune_denovo && ! -d $PREPROCESSED_DATASET_DIR ]]; then
+    echo "preprocessed dataset not found: $PREPROCESSED_DATASET_DIR" >&2
+    exit 2
+fi
+
+if [[ $ARGS_FILE != /* ]]; then
+    ARGS_FILE=$REPO_DIR/$ARGS_FILE
+fi
+if [[ $CHECKPOINT_DIR != /* ]]; then
+    CHECKPOINT_DIR=$REPO_DIR/$CHECKPOINT_DIR
+fi
+if [[ ! -f $ARGS_FILE ]]; then
+    echo "arguments file not found: $ARGS_FILE" >&2
+    exit 2
+fi
+if [[ ! -x $VENV_DIR/bin/python ]]; then
+    echo "Python interpreter not found: $VENV_DIR/bin/python" >&2
+    exit 2
+fi
+XPU_TELEGRAF_CONFIG=${IONA_XPU_TELEGRAF_CONFIG:-$REPO_DIR/pbs/xpu-telegraf.conf}
+TELEGRAF_BIN=${TELEGRAF_BIN:-$(command -v telegraf || true)}
+if [[ -n $TELEGRAF_BIN && ! -x $TELEGRAF_BIN ]]; then
+    echo "TELEGRAF_BIN is not executable: $TELEGRAF_BIN" >&2
+    exit 2
+fi
+if [[ ! -f $XPU_TELEGRAF_CONFIG ]]; then
+    echo "XPU Telegraf configuration not found: $XPU_TELEGRAF_CONFIG" >&2
+    exit 2
+fi
+if ! command -v mpiexec >/dev/null 2>&1; then
+    echo "mpiexec is required for an Aurora launch" >&2
+    exit 2
+fi
+if [[ ! -f ${PBS_NODEFILE:-} ]]; then
+    echo "PBS_NODEFILE is required for an Aurora launch" >&2
+    exit 2
+fi
+
+JOB_ID=${PBS_JOBID:-local}
+JOB_ID=${JOB_ID%%.*}
+mapfile -t CONFIG_VALUES < <(
+    "$VENV_DIR/bin/python" - "$ARGS_FILE" <<'PY'
+import sys
+from pathlib import Path
+
+path = Path(sys.argv[1])
+tokens = path.read_text().split()
+
+
+def argument(name: str, default: str | None = None) -> str | None:
+    values = [tokens[index + 1] for index, token in enumerate(tokens[:-1]) if token == name]
+    return values[-1] if values else default
+
+
+run_name = argument("--run_name", path.parent.name)
+wandb_project = argument("--wandb_project", "")
+print(run_name)
+print(wandb_project)
+PY
+)
+CONFIG_RUN_NAME=${CONFIG_VALUES[0]}
+MICRO_BATCH_SIZE=${MICRO_BATCH_SIZE:-64}
+EVAL_BATCH_SIZE=${EVAL_BATCH_SIZE:-$MICRO_BATCH_SIZE}
+CONFIG_WANDB_PROJECT=${CONFIG_VALUES[1]}
+RUN_NAME=${RUN_NAME:-${CONFIG_RUN_NAME}-${JOB_ID}}
+RUN_DIR=$CHECKPOINT_DIR/$RUN_NAME
+LOG_DIR=${LOG_DIR:-${LOG_ROOT:?set LOG_ROOT to a Flare base directory for logs}/$RUN_NAME/logs}
+if [[ $LOG_DIR != /* ]]; then
+    echo "LOG_DIR (or LOG_ROOT) must be an absolute shared-filesystem path" >&2
+    exit 2
+fi
+mkdir -p "$RUN_DIR" "$LOG_DIR" "$HF_HOME" "$DATASET_CACHE_DIR"
+if [[ ${RESUME_FROM_CHECKPOINT:-} == latest ]]; then
+    RESUME_FROM_CHECKPOINT=$("$VENV_DIR/bin/python" - "$RUN_DIR" <<'PY'
+import re
+import sys
+from pathlib import Path
+
+run_dir = Path(sys.argv[1])
+candidates = []
+for path in run_dir.glob("checkpoint-*"):
+    match = re.fullmatch(r"checkpoint-(\d+)", path.name)
+    if match and path.is_dir() and (path / "trainer_state.json").is_file():
+        candidates.append((int(match.group(1)), path))
+if not candidates:
+    raise SystemExit(f"no complete checkpoint-N directories found in {run_dir}")
+print(max(candidates)[1])
+PY
+    )
+    echo "resuming latest checkpoint: $RESUME_FROM_CHECKPOINT"
+fi
+TORCHINDUCTOR_CACHE_DIR=${TORCHINDUCTOR_CACHE_DIR:-/tmp/torchinductor-$USER}
+
+cd "$REPO_DIR"
+NODE_LIST=$RUN_DIR/pbs-nodes
+awk '!seen[$0]++ {print $0}' "$PBS_NODEFILE" >"$NODE_LIST"
+NUM_HOSTS=$(wc -l <"$NODE_LIST")
+XPUS_PER_HOST=${XPUS_PER_HOST:-8}
+if ((XPUS_PER_HOST < 1 || XPUS_PER_HOST > 12)); then
+    echo "XPUS_PER_HOST must be between 1 and 12 on Aurora" >&2
+    exit 2
+fi
 TOTAL_XPUS=$((NUM_HOSTS * XPUS_PER_HOST))
+if [[ $XPUS_PER_HOST == 8 ]]; then
+    PRETRAIN_XPU_TILES=${ZE_AFFINITY_MASK:-0,1,2,3,6,7,8,9}
+elif [[ $XPUS_PER_HOST == 12 ]]; then
+    PRETRAIN_XPU_TILES=${ZE_AFFINITY_MASK:-0,1,2,3,4,5,6,7,8,9,10,11}
+else
+    PRETRAIN_XPU_TILES=${ZE_AFFINITY_MASK:-$(seq -s, 0 $((XPUS_PER_HOST - 1)))}
+fi
 
-set +u
-source /usr/share/lmod/lmod/init/bash
-module load "${FRAMEWORKS_MODULE:-frameworks/2025.3.1}"
-set -u
+GLOBAL_BATCH_SIZE=${GLOBAL_BATCH_SIZE:-512}
+DENOMINATOR=$((MICRO_BATCH_SIZE * TOTAL_XPUS))
+if ((GLOBAL_BATCH_SIZE % DENOMINATOR != 0)); then
+    echo "global batch size $GLOBAL_BATCH_SIZE is not divisible by" \
+        "$MICRO_BATCH_SIZE micro-batch x $TOTAL_XPUS XPUs" >&2
+    exit 2
+fi
+GRADIENT_ACCUMULATION_STEPS=$((GLOBAL_BATCH_SIZE / DENOMINATOR))
+if ((GRADIENT_ACCUMULATION_STEPS < 1)); then
+    echo "global batch size $GLOBAL_BATCH_SIZE is smaller than one distributed micro-batch" >&2
+    exit 2
+fi
 
-# Level Zero only; the module default also lists OpenCL and double-counts tiles.
-export ONEAPI_DEVICE_SELECTOR=level_zero:gpu
-export ZE_FLAT_DEVICE_HIERARCHY=FLAT
-# Job-wide mask: every rank sees all tiles and picks its own by LOCAL_RANK.
-export ZE_AFFINITY_MASK=${ZE_AFFINITY_MASK:-$(seq -s, 0 $((XPUS_PER_HOST - 1)))}
+if [[ $XPUS_PER_HOST == 8 ]]; then
+    export ZE_AFFINITY_MASK=$PRETRAIN_XPU_TILES
+    export CPU_BIND=${CPU_BIND:-verbose,list:4-7:8-11:12-15:16-19:56-59:60-63:64-67:68-71}
+elif [[ $XPUS_PER_HOST == 12 ]]; then
+    export ZE_AFFINITY_MASK=$PRETRAIN_XPU_TILES
+    export CPU_BIND=${CPU_BIND:-verbose,list:4-7:8-11:12-15:16-19:20-23:24-27:56-59:60-63:64-67:68-71:72-75:76-79}
+else
+    ZE_AFFINITY_MASK=$PRETRAIN_XPU_TILES
+    export ZE_AFFINITY_MASK
+    export CPU_BIND=${CPU_BIND:-none}
+fi
+export ONEAPI_DEVICE_SELECTOR=${ONEAPI_DEVICE_SELECTOR:-level_zero:gpu}
+export ZE_FLAT_DEVICE_HIERARCHY=${ZE_FLAT_DEVICE_HIERARCHY:-FLAT}
+unset SYCL_DEVICE_FILTER
+
+VISIBLE_XPUS=$("$VENV_DIR/bin/python" -c 'import torch; print(torch.xpu.device_count())')
+if [[ $VISIBLE_XPUS != "$XPUS_PER_HOST" ]]; then
+    echo "expected $XPUS_PER_HOST visible XPU tiles, found $VISIBLE_XPUS" >&2
+    exit 2
+fi
+
+echo "$(date -Is) job=${PBS_JOBID:-local} hosts=$NUM_HOSTS xpus_per_host=$XPUS_PER_HOST total_xpus=$TOTAL_XPUS global_batch=$GLOBAL_BATCH_SIZE micro_batch=$MICRO_BATCH_SIZE eval_batch=$EVAL_BATCH_SIZE accumulation=$GRADIENT_ACCUMULATION_STEPS run=$RUN_NAME"
+echo "module=$MODULE daos=${DAOS_POOL}:${DAOS_CONT} hf_home=$HF_HOME checkpoints=$CHECKPOINT_DIR"
+echo "inductor_cache=$TORCHINDUCTOR_CACHE_DIR"
+echo "nodes:"
+sed 's/^/  /' "$NODE_LIST"
+"$VENV_DIR/bin/python" -c 'import torch; print(f"torch={torch.__version__} xccl={torch.distributed.is_xccl_available()}")'
+
 export OMP_NUM_THREADS=${OMP_NUM_THREADS:-4}
 export MKL_NUM_THREADS=${MKL_NUM_THREADS:-4}
 export OPENBLAS_NUM_THREADS=${OPENBLAS_NUM_THREADS:-4}
-export CCL_PROCESS_LAUNCHER=pmix CCL_ATL_TRANSPORT=mpi CCL_KVS_MODE=mpi
+export CCL_PROCESS_LAUNCHER=pmix
+export CCL_ATL_TRANSPORT=mpi
 export FI_MR_CACHE_MONITOR=${FI_MR_CACHE_MONITOR:-userfaultfd}
-# ALCF-recommended CXI settings for many-rank jobs.
-export FI_CXI_DEFAULT_CQ_SIZE=${FI_CXI_DEFAULT_CQ_SIZE:-131072}
-export FI_CXI_OFLOW_BUF_SIZE=${FI_CXI_OFLOW_BUF_SIZE:-8388608}
-export FI_CXI_CQ_FILL_PERCENT=${FI_CXI_CQ_FILL_PERCENT:-20}
-export ZES_ENABLE_SYSMAN=${ZES_ENABLE_SYSMAN:-1}
-export TMPDIR=${TMPDIR:-/tmp}
-# oneCCL's Level Zero IPC path causes GPU page faults when all-reducing the encoder.
 unset CCL_ZE_IPC
 unset CCL_ZE_IPC_EXCHANGE
-export MASTER_ADDR=${MASTER_ADDR:-$(head -n 1 "$PBS_NODEFILE")}
+export HF_HOME
+export HF_DATASETS_CACHE=$DATASET_CACHE_DIR
+export HF_HUB_CACHE=$HF_HOME/hub
+export HF_HUB_OFFLINE=${HF_HUB_OFFLINE:-1}
+export HF_DATASETS_OFFLINE=${HF_DATASETS_OFFLINE:-1}
+export TORCHINDUCTOR_CACHE_DIR
+# Python multiprocessing binds AF_UNIX sockets under TMPDIR, which must stay
+# well under the 107-byte socket path limit; the PBS job TMPDIR can exceed it.
+export TMPDIR=${IONA_TMPDIR:-/tmp}
+export PYTHONPATH=$REPO_DIR${PYTHONPATH:+:$PYTHONPATH}
+export MASTER_ADDR=${MASTER_ADDR:-$(head -n 1 "$NODE_LIST")}
 export MASTER_PORT=${MASTER_PORT:-29500}
 export IONA_XPUS_PER_HOST=$XPUS_PER_HOST
 export IONA_WORLD_SIZE=$TOTAL_XPUS
-export PYTHONPATH=$REPO_DIR${PYTHONPATH:+:$PYTHONPATH}
+export IONA_XPU_TELEGRAF_CONFIG=$XPU_TELEGRAF_CONFIG
+export IONA_TELEGRAF_BIN=$TELEGRAF_BIN
+export IONA_TELEGRAF_STARTUP_SECONDS=${IONA_TELEGRAF_STARTUP_SECONDS:-120}
+export IONA_XPU_METRICS_PORT=${IONA_XPU_METRICS_PORT:-9274}
+export LOG_DIR
 
-# Datasets come from the populated cache; only W&B needs the network.
-export HF_HOME=${HF_HOME:-$SCRATCH_ROOT/huggingface}
-export HF_HUB_OFFLINE=${HF_HUB_OFFLINE:-1}
-export HF_DATASETS_OFFLINE=${HF_DATASETS_OFFLINE:-1}
-
-# Outbound internet for W&B.
 ALCF_PROXY=${ALCF_PROXY:-http://proxy.alcf.anl.gov:3128}
 export HTTP_PROXY=${HTTP_PROXY:-$ALCF_PROXY}
 export HTTPS_PROXY=${HTTPS_PROXY:-$ALCF_PROXY}
@@ -96,79 +244,86 @@ export NO_PROXY="${NO_PROXY:-$no_proxy},127.0.0.1"
 
 export WANDB_DIR=${WANDB_DIR:-$LOG_DIR}
 export WANDB_RESUME=${WANDB_RESUME:-allow}
-export WANDB_RUN_ID=${WANDB_RUN_ID:-$RUN_NAME-$JOB_ID}
+export WANDB_RUN_ID=${WANDB_RUN_ID:-$RUN_NAME}
+export WANDB_PROJECT=${WANDB_PROJECT:-$CONFIG_WANDB_PROJECT}
 
-echo "=== iona finetune: $MODULE ==="
-echo "  job        : $JOB_ID"
-echo "  hosts      : $NUM_HOSTS x $XPUS_PER_HOST tiles = $TOTAL_XPUS ranks"
-echo "  args       : $ARGS_FILE"
-echo "  run dir    : $RUN_DIR"
-echo "  wandb run  : $WANDB_RUN_ID"
-sed 's/^/  node: /' "$PBS_NODEFILE"
-
-# Preflight: tile count, and W&B key and outbound route when W&B is on.
-"$VENV_DIR/bin/python" -c "
-import torch, sys
-n = torch.xpu.device_count()
-print(f'  torch={torch.__version__} xpus={n} xccl={torch.distributed.is_xccl_available()}')
-if n != $XPUS_PER_HOST:
-    sys.exit(f'  visible tiles {n} != XPUS_PER_HOST $XPUS_PER_HOST; set_device(LOCAL_RANK) would go out of range')
-"
-if [[ -n ${WANDB_PROJECT:-} ]]; then
-    # Any HTTP response means the proxy works; api.wandb.ai returns 404 to a bare GET.
-    wandb_code=$(curl --silent --show-error --max-time 30 -o /dev/null -w '%{http_code}' https://api.wandb.ai || echo 000)
-    [[ $wandb_code != 000 ]] \
-        || { echo "no outbound route to api.wandb.ai through $ALCF_PROXY" >&2; exit 2; }
-    echo "  wandb      : reachable (HTTP $wandb_code)"
+TRAIN_ARGS=(
+    --args_file "$ARGS_FILE"
+    --run_name "$RUN_NAME"
+    --output_dir "$RUN_DIR"
+    --per_device_train_batch_size "$MICRO_BATCH_SIZE"
+    --per_device_eval_batch_size "$EVAL_BATCH_SIZE"
+    --gradient_accumulation_steps "$GRADIENT_ACCUMULATION_STEPS"
+    --ddp_backend xccl
+)
+if [[ $MODULE == iona.finetune_denovo ]]; then
+    TRAIN_ARGS+=(--preprocessed_dataset_dir "$PREPROCESSED_DATASET_DIR")
 fi
-echo "  preflight  : ok"
-
-# Optional: build the teacher-embedding cache in one process before training.
-if [[ -n ${PRECOMPUTE_CACHE:-} ]]; then
-    EXTRA_PRE=()
-    [[ -n ${MAX_SAMPLES:-} ]] && EXTRA_PRE+=(--max_samples "$MAX_SAMPLES")
-    if [[ -d $PRECOMPUTE_CACHE/train ]]; then
-        echo "  precompute : reusing $PRECOMPUTE_CACHE"
-    else
-        echo "  precompute : building $PRECOMPUTE_CACHE (one process, one tile)"
-        ZE_AFFINITY_MASK=0 "$VENV_DIR/bin/python" "$REPO_DIR/scripts/precompute_align.py"             --args_file "$ARGS_FILE" "${PRETRAINED_ARGS[@]}" --target_cache "$PRECOMPUTE_CACHE"             --batch_size "${PRECOMPUTE_BATCH:-16}" "${EXTRA_PRE[@]}"             || { echo "precompute failed" >&2; exit 2; }
-    fi
+if [[ -n ${PRETRAINED_PATH:-} ]]; then
+    TRAIN_ARGS+=(--pretrained_path "$PRETRAINED_PATH")
 fi
-
-EXTRA=()
-[[ -n ${WANDB_PROJECT:-} ]] && EXTRA+=(--wandb_project "$WANDB_PROJECT")
-[[ -n ${WANDB_ENTITY:-} ]] && EXTRA+=(--wandb_entity "$WANDB_ENTITY")
-[[ -n ${PRECOMPUTE_CACHE:-} ]] && EXTRA+=(--target_cache "$PRECOMPUTE_CACHE")
-[[ -n ${EVAL_STEPS:-} ]] && EXTRA+=(--eval_steps "$EVAL_STEPS" --save_steps "$EVAL_STEPS")
-# MAX_SAMPLES runs real epochs on a small subset; MAX_STEPS only measures throughput.
-if [[ -n ${MAX_SAMPLES:-} ]]; then
-    EXTRA+=(--max_samples "$MAX_SAMPLES"
-            --eval_steps "${SMOKE_EVAL_STEPS:-25}" --save_steps "${SMOKE_EVAL_STEPS:-25}"
-            --logging_steps 5)
-elif [[ -n ${MAX_STEPS:-} ]]; then
-    EXTRA+=(--max_steps "$MAX_STEPS" --save_strategy no --load_best_model_at_end false)
+if [[ -n ${EVAL_STEPS:-} ]]; then
+    TRAIN_ARGS+=(--eval_steps "$EVAL_STEPS" --save_steps "$EVAL_STEPS")
 fi
-[[ -n ${SEED:-} ]] && EXTRA+=(--seed "$SEED" --data_seed "$SEED")
+if [[ -n $WANDB_PROJECT ]]; then
+    TRAIN_ARGS+=(--wandb_project "$WANDB_PROJECT")
+fi
+if [[ -n ${RESUME_FROM_CHECKPOINT:-} ]]; then
+    TRAIN_ARGS+=(--resume_from_checkpoint "$RESUME_FROM_CHECKPOINT")
+fi
 
 exec mpiexec \
+    --verbose \
     --envall \
     --pmi=pmix \
+    --no-vni \
     -n "$TOTAL_XPUS" \
     --ppn "$XPUS_PER_HOST" \
-    --cpu-bind depth --depth "${CPU_DEPTH:-8}" \
+    --cpu-bind "$CPU_BIND" \
     --hostfile="$PBS_NODEFILE" \
-    /usr/bin/env bash -c '
+    /usr/bin/env \
+    bash -c '
         set -euo pipefail
         export RANK="${PMIX_RANK:-${PALS_RANKID:-${PMI_RANK:-}}}"
-        [[ -n $RANK ]] || { echo "launcher provided no rank" >&2; exit 2; }
+        if [[ -z $RANK ]]; then
+            echo "Aurora launcher did not provide PMIX_RANK, PALS_RANKID, or PMI_RANK" >&2
+            exit 2
+        fi
         export WORLD_SIZE="$IONA_WORLD_SIZE"
         export LOCAL_RANK="${PALS_LOCAL_RANKID:-${MPI_LOCALRANKID:-$((RANK % IONA_XPUS_PER_HOST))}}"
         export LOCAL_WORLD_SIZE="$IONA_XPUS_PER_HOST"
+        if [[ $LOCAL_RANK == 0 && -z $IONA_TELEGRAF_BIN ]]; then
+            echo "warning: telegraf not found (set TELEGRAF_BIN); skipping XPU metrics" >&2
+        elif [[ $LOCAL_RANK == 0 ]]; then
+            telegraf_bin=/tmp/telegraf-$USER
+            cp "$IONA_TELEGRAF_BIN" "$telegraf_bin"
+            "$telegraf_bin" --config "$IONA_XPU_TELEGRAF_CONFIG" \
+                >"$LOG_DIR/xpu-telegraf-${HOSTNAME}.log" 2>&1 &
+            telegraf_pid=$!
+            trap '\''kill "$telegraf_pid" 2>/dev/null || true; wait "$telegraf_pid" 2>/dev/null || true'\'' EXIT
+            export IONA_XPU_METRICS_URL="http://127.0.0.1:${IONA_XPU_METRICS_PORT}/metrics"
+            for ((attempt = 0; attempt < IONA_TELEGRAF_STARTUP_SECONDS * 2; attempt++)); do
+                if curl --noproxy 127.0.0.1 --fail --silent \
+                    "$IONA_XPU_METRICS_URL" >/dev/null; then
+                    metrics_endpoint_ready=1
+                    break
+                fi
+                if ! kill -0 "$telegraf_pid" 2>/dev/null; then
+                    break
+                fi
+                sleep 0.5
+            done
+            if [[ ${metrics_endpoint_ready:-0} != 1 ]]; then
+                echo "XPU metrics endpoint failed to start; see $LOG_DIR/xpu-telegraf-${HOSTNAME}.log" >&2
+                exit 2
+            fi
+            "$@"
+            exit $?
+        fi
         exec "$@"
-    ' _ "$VENV_DIR/bin/python" -m "$MODULE" \
-        --args_file "$ARGS_FILE" \
-        "${PRETRAINED_ARGS[@]}" \
-        --run_name "$RUN_NAME" \
-        --output_dir "$RUN_DIR" \
-        "${EXTRA[@]}" \
-    2>&1 | tee "$LOG_DIR/train.log"
+    ' bash \
+    "$VENV_DIR/bin/python" \
+    -m "$MODULE" \
+    "${TRAIN_ARGS[@]}" \
+    >"$LOG_DIR/train-$JOB_ID.out" \
+    2>"$LOG_DIR/train-$JOB_ID.err"

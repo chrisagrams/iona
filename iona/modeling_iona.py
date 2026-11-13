@@ -11,6 +11,7 @@ from sentence_transformers.sentence_transformer.modules import Pooling
 from torch import Tensor, nn
 from torch.distributed.nn.functional import all_gather as distributed_all_gather
 from transformers import PretrainedConfig, PreTrainedModel
+from transformers.cache_utils import DynamicCache, EncoderDecoderCache
 from transformers.modeling_outputs import BaseModelOutput
 from transformers.utils.generic import ModelOutput
 
@@ -586,25 +587,25 @@ class DecoderSelfAttention(nn.Module):
         self.proj_dropout = nn.Dropout(config.decoder_dropout)
 
     def forward(
-        self, hidden_states: Tensor, past: tuple[Tensor, Tensor] | None = None
-    ) -> tuple[Tensor, tuple[Tensor, Tensor]]:
+        self,
+        hidden_states: Tensor,
+        past_key_values: EncoderDecoderCache | None,
+        layer_idx: int,
+    ) -> Tensor:
         batch_size, n_tokens, _ = hidden_states.shape
-        if past is not None and n_tokens != 1:
-            raise ValueError("cached self-attention takes one new token at a time")
         qkv = self.qkv(hidden_states).reshape(batch_size, n_tokens, 3, self.n_heads, self.d_head)
         query, key, value = (x.transpose(1, 2) for x in qkv.unbind(dim=2))
-        if past is not None:
-            key = torch.cat([past[0], key], dim=2)
-            value = torch.cat([past[1], value], dim=2)
+        if past_key_values is not None:
+            key, value = past_key_values.self_attention_cache.update(key, value, layer_idx)
         context = F.scaled_dot_product_attention(
             query,
             key,
             value,
-            is_causal=past is None,
+            is_causal=n_tokens > 1,
             dropout_p=self.attn_dropout if self.training else 0.0,
         )
         context = context.transpose(1, 2).reshape(batch_size, n_tokens, -1)
-        return self.proj_dropout(self.out(context)), (key, value)
+        return self.proj_dropout(self.out(context))
 
 
 class DecoderCrossAttention(nn.Module):
@@ -621,24 +622,31 @@ class DecoderCrossAttention(nn.Module):
         self.attn_dropout = config.decoder_dropout
         self.proj_dropout = nn.Dropout(config.decoder_dropout)
 
-    def project_memory(self, memory: Tensor) -> tuple[Tensor, Tensor]:
-        """Project peak embeddings to keys and values once per spectrum."""
-        batch_size, n_peaks, _ = memory.shape
-        key_value = self.key_value(memory).reshape(
-            batch_size, n_peaks, 2, self.n_heads, self.d_head
-        )
-        key, value = (x.transpose(1, 2) for x in key_value.unbind(dim=2))
-        return key, value
-
     def forward(
         self,
         hidden_states: Tensor,
-        memory_key_value: tuple[Tensor, Tensor],
+        memory: Tensor,
         memory_mask: Tensor,
+        past_key_values: EncoderDecoderCache | None,
+        layer_idx: int,
     ) -> Tensor:
+        """Attend from `hidden_states` to `memory`.
+
+        With a cache, peak keys and values are projected on the first step and reused after.
+        """
         batch_size, n_tokens, _ = hidden_states.shape
+        if past_key_values is not None and past_key_values.is_updated.get(layer_idx):
+            layer = past_key_values.cross_attention_cache.layers[layer_idx]
+            key, value = layer.keys, layer.values
+        else:
+            key_value = self.key_value(memory).reshape(
+                batch_size, memory.shape[1], 2, self.n_heads, self.d_head
+            )
+            key, value = (x.transpose(1, 2) for x in key_value.unbind(dim=2))
+            if past_key_values is not None:
+                past_key_values.cross_attention_cache.update(key, value, layer_idx)
+                past_key_values.is_updated[layer_idx] = True
         query = self.query(hidden_states).reshape(batch_size, n_tokens, self.n_heads, self.d_head)
-        key, value = memory_key_value
         context = F.scaled_dot_product_attention(
             query.transpose(1, 2),
             key,
@@ -671,17 +679,18 @@ class DecoderBlock(nn.Module):
     def forward(
         self,
         hidden_states: Tensor,
-        memory_key_value: tuple[Tensor, Tensor],
+        memory: Tensor,
         memory_mask: Tensor,
-        past: tuple[Tensor, Tensor] | None = None,
-    ) -> tuple[Tensor, tuple[Tensor, Tensor]]:
-        attended, present = self.self_attn(self.norm1(hidden_states), past)
-        hidden_states = hidden_states + attended
-        hidden_states = hidden_states + self.cross_attn(
-            self.norm2(hidden_states), memory_key_value, memory_mask
+        past_key_values: EncoderDecoderCache | None,
+        layer_idx: int,
+    ) -> Tensor:
+        hidden_states = hidden_states + self.self_attn(
+            self.norm1(hidden_states), past_key_values, layer_idx
         )
-        hidden_states = hidden_states + self.ffn(self.norm3(hidden_states))
-        return hidden_states, present
+        hidden_states = hidden_states + self.cross_attn(
+            self.norm2(hidden_states), memory, memory_mask, past_key_values, layer_idx
+        )
+        return hidden_states + self.ffn(self.norm3(hidden_states))
 
 
 class PeptideDecoder(nn.Module):
@@ -708,11 +717,6 @@ class PeptideDecoder(nn.Module):
         )
         self.norm = nn.LayerNorm(hidden_size, eps=eps)
 
-    def project_memory(self, encoder_states: Tensor) -> list[tuple[Tensor, Tensor]]:
-        """Cross-attention keys and values for every layer."""
-        memory = self.memory_projection(encoder_states)
-        return [block.cross_attn.project_memory(memory) for block in self.blocks]
-
     def embed_precursor(self, neutral_mass: Tensor, charge: Tensor) -> Tensor:
         position = self.position_embedding.weight[0]
         return (self.precursor(neutral_mass, charge) + position).unsqueeze(1)
@@ -726,27 +730,20 @@ class PeptideDecoder(nn.Module):
     def forward(
         self,
         hidden_states: Tensor,
-        memory_key_value: list[tuple[Tensor, Tensor]],
+        memory: Tensor,
         memory_mask: Tensor,
-        past: list[tuple[Tensor, Tensor]] | None = None,
-    ) -> tuple[Tensor, list[tuple[Tensor, Tensor]]]:
-        presents = []
-        for index, block in enumerate(self.blocks):
-            hidden_states, present = block(
-                hidden_states,
-                memory_key_value[index],
-                memory_mask,
-                None if past is None else past[index],
-            )
-            presents.append(present)
-        return self.norm(hidden_states), presents
+        past_key_values: EncoderDecoderCache | None = None,
+    ) -> Tensor:
+        """Decode `hidden_states` against projected peaks, updating `past_key_values` if given."""
+        for layer_idx, block in enumerate(self.blocks):
+            hidden_states = block(hidden_states, memory, memory_mask, past_key_values, layer_idx)
+        return self.norm(hidden_states)
 
 
 class IonaForDenovo(IonaPreTrainedModel):
     """Iona encoder with an autoregressive peptide decoder for de novo sequencing."""
 
     config_class: type[PretrainedConfig] | None = IonaDenovoConfig
-    _no_split_modules = ["EncoderBlock", "DecoderBlock"]
 
     def __init__(
         self,
@@ -755,8 +752,6 @@ class IonaForDenovo(IonaPreTrainedModel):
         freeze_encoder: bool = False,
     ):
         super().__init__(config)
-        if config.vocab_size is None:
-            raise ValueError("config.vocab_size must be set from the peptide tokenizer")
         self.iona = encoder if encoder is not None else IonaModel(config.encoder)
         self.decoder = PeptideDecoder(config)
         self.lm_head = nn.Linear(config.decoder_hidden_size, config.vocab_size)
@@ -785,20 +780,17 @@ class IonaForDenovo(IonaPreTrainedModel):
 
     @staticmethod
     def neutral_mass(precursor_mz: Tensor, precursor_charge: Tensor) -> Tensor:
-        return (precursor_mz.float() - PROTON_MASS) * precursor_charge
+        return (precursor_mz - PROTON_MASS) * precursor_charge
 
     def _encode(
-        self, mz: Tensor, log_intensity: Tensor, attention_mask: Tensor | None
-    ) -> tuple[list[tuple[Tensor, Tensor]], Tensor]:
-        if attention_mask is None:
-            attention_mask = torch.ones_like(mz, dtype=torch.long)
-        with torch.set_grad_enabled(torch.is_grad_enabled() and not self._encoder_is_frozen):
-            states = self.iona(
-                mz=mz, log_intensity=log_intensity, attention_mask=attention_mask,
-                return_dict=True,
-            ).last_hidden_state
+        self, mz: Tensor, log_intensity: Tensor, attention_mask: Tensor
+    ) -> tuple[Tensor, Tensor]:
+        """Encode peaks and project them to the decoder width, with their attention mask."""
+        states = self.iona(
+            mz=mz, log_intensity=log_intensity, attention_mask=attention_mask, return_dict=True
+        ).last_hidden_state
         memory_mask = attention_mask.bool()[:, None, None, :]
-        return self.decoder.project_memory(states), memory_mask
+        return self.decoder.memory_projection(states), memory_mask
 
     def forward(
         self,
@@ -807,13 +799,13 @@ class IonaForDenovo(IonaPreTrainedModel):
         precursor_mz: Tensor,
         precursor_charge: Tensor,
         labels: Tensor,
-        attention_mask: Tensor | None = None,
+        attention_mask: Tensor,
     ) -> IonaForDenovoOutput:
         """Teacher-forced decoding: predict each label from the precursor and earlier labels."""
         shifted = labels[:, :-1]
         decoder_input_ids = shifted.masked_fill(shifted == -100, self.config.pad_token_id)
 
-        memory_key_value, memory_mask = self._encode(mz, log_intensity, attention_mask)
+        memory, memory_mask = self._encode(mz, log_intensity, attention_mask)
         neutral_mass = self.neutral_mass(precursor_mz, precursor_charge)
         hidden_states = torch.cat(
             [
@@ -822,7 +814,7 @@ class IonaForDenovo(IonaPreTrainedModel):
             ],
             dim=1,
         )
-        hidden_states, _ = self.decoder(hidden_states, memory_key_value, memory_mask)
+        hidden_states = self.decoder(hidden_states, memory, memory_mask)
         logits = self.lm_head(hidden_states).float()
         loss = F.cross_entropy(logits.flatten(0, 1), labels.flatten(), ignore_index=-100)
         return IonaForDenovoOutput(loss=loss, logits=logits)
@@ -835,7 +827,7 @@ class IonaForDenovo(IonaPreTrainedModel):
         precursor_mz: Tensor,
         precursor_charge: Tensor,
         tokenizer,
-        attention_mask: Tensor | None = None,
+        attention_mask: Tensor,
         precursor_tolerance_ppm: float = 50.0,
     ) -> IonaDenovoGenerationOutput:
         """Greedy decoding, as in Casanovo: take the most likely token until every peptide ends.
@@ -854,14 +846,15 @@ class IonaForDenovo(IonaPreTrainedModel):
         later = blocked | n_terminal
         later[eos] = False
 
-        memory_key_value, memory_mask = self._encode(mz, log_intensity, attention_mask)
+        memory, memory_mask = self._encode(mz, log_intensity, attention_mask)
         precursor_mass = self.neutral_mass(precursor_mz, precursor_charge)
         hidden_states = self.decoder.embed_precursor(precursor_mass, precursor_charge)
-        past, tokens = None, []
+        cache = EncoderDecoderCache(DynamicCache(), DynamicCache())
+        tokens = []
         done = torch.zeros(mz.shape[0], dtype=torch.bool, device=device)
         for step in range(max_length + 1):
-            hidden_states, past = self.decoder(hidden_states, memory_key_value, memory_mask, past)
-            logits = self.lm_head(hidden_states[:, -1]).float()
+            hidden_states = self.decoder(hidden_states, memory, memory_mask, cache)
+            logits = self.lm_head(hidden_states[:, -1])
             token = logits.masked_fill(later if step else blocked, float("-inf")).argmax(dim=-1)
             if step == max_length:
                 token.fill_(eos)

@@ -492,7 +492,7 @@ def preprocess_denovo_batch(
     encoded = tokenizer(peptides)["input_ids"]
     masses = tokenizer.token_masses
     out: dict[str, list] = {key: [] for key in (
-        "mz", "log_intensity", "labels", "peptide", "precursor_mz", "precursor_charge", "length"
+        "mz", "log_intensity", "labels", "precursor_mz", "precursor_charge", "length"
     )}
     for row, (peptide, ids) in enumerate(zip(peptides, encoded)):
         if tokenizer.unk_token_id in ids:
@@ -515,7 +515,6 @@ def preprocess_denovo_batch(
         out["mz"].append(values["mz"])
         out["log_intensity"].append(values["log_intensity"])
         out["labels"].append(ids)
-        out["peptide"].append(peptide)
         out["precursor_mz"].append(precursor)
         out["precursor_charge"].append(charge)
         out["length"].append(len(values["mz"]))
