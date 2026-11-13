@@ -11,6 +11,7 @@ from datasets import Dataset, DatasetDict, load_dataset, load_from_disk
 
 from iona.chemistry import PROTON_MASS, RESIDUE_MASSES, WATER_MASS
 from iona.processing_iona import IonaProcessor
+from iona.tokenization_iona import TOKEN_MASSES, TOKEN_PATTERN
 
 N_CHARGES = 8
 
@@ -460,6 +461,62 @@ def ninespecies_to_massive_kb(peptide: str) -> str:
         peptide = peptide.replace(theirs, ours)
     if "(" in peptide:
         raise ValueError(f"unmapped nine-species modification in {peptide!r}")
+    return peptide
+
+
+# Modification shifts by MassIVE-KB token value, for annotations written in other notations.
+_MASSIVE_KB_SHIFTS = (57.021, 15.995, 0.984, 42.011, 43.006, -17.027)
+_UNIMOD_SHIFTS = {4: 57.021, 35: 15.995, 7: 0.984, 1: 42.011, 5: 43.006, 385: -17.027}
+_BARE_SHIFT = re.compile(r"(?<!\[)([+-]\d*\.\d+)")
+_BRACKETED_SHIFT = re.compile(r"\[([+-]?\d*\.\d+)\]")
+_UNIMOD = re.compile(r"\[UNIMOD:(\d+)\]", re.IGNORECASE)
+
+
+def _canonical_shift(match: re.Match) -> str:
+    value = float(match.group(1))
+    for shift in _MASSIVE_KB_SHIFTS:
+        if abs(value - shift) < 0.01:
+            return f"[{shift:+.3f}]"
+    raise ValueError(f"unknown modification {match.group(0)!r}")
+
+
+def _unimod_shift(match: re.Match) -> str:
+    accession = int(match.group(1))
+    if accession not in _UNIMOD_SHIFTS:
+        raise ValueError(f"unknown modification {match.group(0)!r}")
+    return f"[{_UNIMOD_SHIFTS[accession]:+.3f}]"
+
+
+def normalize_annotation(peptide: str) -> str:
+    """Rewrite an annotated peptide in MassIVE-KB notation.
+
+    Accepts MassIVE-KB (`C[+57.021]`), nine-species (`C(+57.02)`), Casanovo (`C+57.021`,
+    `+43.006-17.027PEP`) and ProForma (`C[UNIMOD:4]`, `[+42.011]-PEP`) spellings of the
+    modifications the tokenizer knows. Raises ValueError if any part of the peptide is not a
+    token of the peptide tokenizer.
+    """
+    original = peptide
+    peptide = peptide.strip()
+    for theirs, ours in NINESPECIES_MODIFICATIONS.items():
+        peptide = peptide.replace(theirs, ours)
+    try:
+        peptide = _UNIMOD.sub(_unimod_shift, peptide)
+        peptide = _BARE_SHIFT.sub(r"[\1]", peptide)
+        peptide = _BRACKETED_SHIFT.sub(_canonical_shift, peptide)
+    except ValueError as error:
+        raise ValueError(f"{error} in {original!r}") from None
+    # ProForma separates N-terminal modifications from the first residue with a dash.
+    peptide = re.sub(r"^((?:\[[^\]]+\])+)-", r"\1", peptide)
+
+    tokens = re.findall(TOKEN_PATTERN, peptide)
+    unknown = [token for token in tokens if token not in TOKEN_MASSES]
+    if not peptide or unknown or "".join(tokens) != peptide:
+        raise ValueError(f"cannot read {original!r} as a peptide of known residues and "
+                         f"modifications (got {peptide!r})")
+    for index, token in enumerate(tokens):
+        if index and token.startswith("["):
+            raise ValueError(f"N-terminal modification {token!r} is not at the N-terminus "
+                             f"in {original!r}")
     return peptide
 
 
