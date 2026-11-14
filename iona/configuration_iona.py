@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from transformers import PretrainedConfig
 
+MASS_ENCODINGS = ("relative", "absolute", "both")
+
 
 class IonaConfig(PretrainedConfig):
     """Store the architecture settings required to construct an Iona model."""
@@ -24,6 +26,10 @@ class IonaConfig(PretrainedConfig):
         delta_bias_per_head_hidden: int = 32,
         delta_bias_f_min: float = 1e-3,
         delta_bias_f_max: float = 190.0,
+        mass_encoding: str = "relative",
+        abs_mz_n_freqs: int = 256,
+        abs_mz_f_min: float = 2.5e-4,
+        abs_mz_f_max: float = 190.0,
         **kwargs,
     ):
         super().__init__(**kwargs)
@@ -39,7 +45,19 @@ class IonaConfig(PretrainedConfig):
         self.delta_bias_per_head_hidden = delta_bias_per_head_hidden
         self.delta_bias_f_min = delta_bias_f_min
         self.delta_bias_f_max = delta_bias_f_max
+        self.mass_encoding = mass_encoding
+        self.abs_mz_n_freqs = abs_mz_n_freqs
+        self.abs_mz_f_min = abs_mz_f_min
+        self.abs_mz_f_max = abs_mz_f_max
         self._validate()
+
+    @property
+    def uses_relative_mass(self) -> bool:
+        return self.mass_encoding in ("relative", "both")
+
+    @property
+    def uses_absolute_mass(self) -> bool:
+        return self.mass_encoding in ("absolute", "both")
 
     def _validate(self) -> None:
         if self.hidden_size <= 0:
@@ -59,6 +77,12 @@ class IonaConfig(PretrainedConfig):
                 raise ValueError(f"{name} must be positive")
         if not 0 < self.delta_bias_f_min < self.delta_bias_f_max:
             raise ValueError("delta_bias_f_min and delta_bias_f_max must satisfy 0 < min < max")
+        if self.mass_encoding not in MASS_ENCODINGS:
+            raise ValueError(f"mass_encoding must be one of {MASS_ENCODINGS}")
+        if self.abs_mz_n_freqs <= 0:
+            raise ValueError("abs_mz_n_freqs must be positive")
+        if not 0 < self.abs_mz_f_min < self.abs_mz_f_max:
+            raise ValueError("abs_mz_f_min and abs_mz_f_max must satisfy 0 < min < max")
 
 
 class IonaDenoisingConfig(PretrainedConfig):

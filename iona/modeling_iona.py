@@ -51,7 +51,7 @@ class IonaForRetrievalOutput(ModelOutput):
 
 
 class PeakEmbed(nn.Module):
-    """Create m/z-free tokens from normalized log intensity."""
+    """Create tokens from normalized log intensity, plus absolute m/z when configured."""
 
     def __init__(self, config: IonaConfig):
         super().__init__()
@@ -61,12 +61,34 @@ class PeakEmbed(nn.Module):
             nn.Linear(config.hidden_size, config.hidden_size),
         )
         self.mask_token = nn.Parameter(torch.empty(config.hidden_size))
+        self.mz_ff: FourierFeatures | None = None
+        self.mz_proj: nn.Module | None = None
+        if config.uses_absolute_mass:
+            self.mz_ff = FourierFeatures(
+                config.abs_mz_n_freqs,
+                config.abs_mz_f_min,
+                config.abs_mz_f_max,
+            )
+            self.mz_proj = nn.Sequential(
+                nn.Linear(self.mz_ff.out_dim, config.hidden_size),
+                nn.GELU(),
+                nn.Linear(config.hidden_size, config.hidden_size),
+            )
 
-    def forward(self, log_intensity: Tensor, mask_positions: Tensor | None = None) -> Tensor:
+    def forward(
+        self,
+        log_intensity: Tensor,
+        mz: Tensor,
+        mask_positions: Tensor | None = None,
+    ) -> Tensor:
         intensity = log_intensity.unsqueeze(-1).to(dtype=self.mask_token.dtype)
         tokens = self.mlp(intensity)
         if mask_positions is not None:
             tokens = torch.where(mask_positions.unsqueeze(-1), self.mask_token, tokens)
+        if self.mz_ff is not None and self.mz_proj is not None:
+            # Added after masking so a masked peak still knows its mass, as with the relative bias.
+            mz_feats = self.mz_ff(mz).to(self.mask_token.dtype)
+            tokens = tokens + self.mz_proj(mz_feats)
         return tokens
 
 
@@ -196,12 +218,12 @@ class IonaPreTrainedModel(PreTrainedModel):
 
 
 class IonaModel(IonaPreTrainedModel):
-    """Encode mass-spectrum peaks with continuous relative-mass attention."""
+    """Encode mass-spectrum peaks with relative-mass attention and/or absolute-mass tokens."""
 
     def __init__(self, config: IonaConfig):
         super().__init__(config)
         self.embed = PeakEmbed(config)
-        self.bias_module = DeltaMZBias(config)
+        self.bias_module = DeltaMZBias(config) if config.uses_relative_mass else None
         self.blocks = nn.ModuleList([EncoderBlock(config) for _ in range(config.num_hidden_layers)])
         self.norm = nn.LayerNorm(config.hidden_size, eps=config.layer_norm_eps)
         self.gradient_checkpointing = False
@@ -228,11 +250,13 @@ class IonaModel(IonaPreTrainedModel):
             raise ValueError("mask_positions must have the same shape as mz")
         padding_mask = ~attention_mask.bool()
 
-        hidden_states = self.embed(log_intensity, mask_positions)
+        hidden_states = self.embed(log_intensity, mz, mask_positions)
+        if self.bias_module is not None:
+            attention_bias = self.bias_module(mz)
+        else:
+            attention_bias = hidden_states.new_zeros(mz.shape[0], 1, mz.shape[1], mz.shape[1])
         # Mask padded keys once so every layer shares one bias tensor instead of saving its own copy.
-        attention_bias = self.bias_module(mz).masked_fill(
-            padding_mask[:, None, None, :], float("-inf")
-        )
+        attention_bias = attention_bias.masked_fill(padding_mask[:, None, None, :], float("-inf"))
 
         for block in self.blocks:
             if self.gradient_checkpointing and self.training:

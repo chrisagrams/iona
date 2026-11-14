@@ -452,7 +452,9 @@ def build_callbacks(
     if training_args.logarithmic_eval_start_step is not None:
         cbs.append(LogarithmicEvalCallback(training_args.logarithmic_eval_start_step))
     cbs.append(EvaluationCacheCallback(module))
-    if training_args.bias_curve_steps:
+    # The absolute-mass ablation has no delta m/z bias to plot or align.
+    has_bias = module.iona.bias_module is not None
+    if training_args.bias_curve_steps and has_bias:
         cbs.append(BiasPanelCallback(module, training_args.bias_curve_steps, out_dir=out_dir))
     if training_args.probe_steps:
         cbs.append(
@@ -464,7 +466,8 @@ def build_callbacks(
                 training_args.probe_batch_size,
             )
         )
-        cbs.append(AlignmentCallback(module, training_args.probe_steps))
+        if has_bias:
+            cbs.append(AlignmentCallback(module, training_args.probe_steps))
     if include_probes and training_args.retrieval_steps:
         if retrieval_datasets is None:
             raise ValueError("retrieval datasets are required when retrieval_steps is enabled")

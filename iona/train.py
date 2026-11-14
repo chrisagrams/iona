@@ -259,10 +259,11 @@ def main(argv: list[str] | None = None) -> int:
 
         if trainer.is_world_process_zero():
             trainer.save_model(str(out_dir / "final"))
-            panels = render_bias_panels(model.iona.bias_module, trainer.state.global_step)
-            for name, fig in panels.items():
-                fig.savefig(out_dir / "figs" / f"{name.replace('/', '_')}_final.png", dpi=110)
-                plt.close(fig)
+            if model.iona.bias_module is not None:
+                panels = render_bias_panels(model.iona.bias_module, trainer.state.global_step)
+                for name, fig in panels.items():
+                    fig.savefig(out_dir / "figs" / f"{name.replace('/', '_')}_final.png", dpi=110)
+                    plt.close(fig)
         return 0
     finally:
         if sidecar_callback is not None:
