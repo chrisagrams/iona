@@ -34,22 +34,42 @@ from iona.modeling_iona import IonaForDenoising, IonaForPreTraining
 
 
 class PeakBudgetBatchSampler(BatchSampler):
-    """Build batches bounded by their padded pairwise-attention size."""
+    """Build batches bounded by their padded pairwise-attention size.
+
+    ``peak_budget`` optionally also bounds padded peaks (spectra x longest).
+    Pairs alone let batches of many short spectra carry far more peaks, whose
+    per-layer activations dominate memory once the encoder is trained.
+    """
 
     batch_size = None  # type: ignore[assignment]
     drop_last = False
 
-    def __init__(self, lengths, peak_pair_budget: int, seed: int, num_processes: int = 1):
+    def __init__(
+        self,
+        lengths,
+        peak_pair_budget: int,
+        seed: int,
+        num_processes: int = 1,
+        peak_budget: int | None = None,
+    ):
         self.lengths = lengths
         self.peak_pair_budget = peak_pair_budget
+        self.peak_budget = peak_budget
         self.seed = seed
         self.num_processes = num_processes
         self.epoch = 0
+        self._cached: tuple[int, list[list[int]]] | None = None
 
     def set_epoch(self, epoch: int) -> None:
         self.epoch = epoch
 
     def _batches(self) -> list[list[int]]:
+        # __len__ and __iter__ both need the plan; build it once per epoch.
+        if self._cached is None or self._cached[0] != self.epoch:
+            self._cached = (self.epoch, self._build_batches())
+        return self._cached[1]
+
+    def _build_batches(self) -> list[list[int]]:
         indices = sorted(range(len(self.lengths)), key=self.lengths.__getitem__)
         batches: list[list[int]] = []
         batch: list[int] = []
@@ -57,7 +77,11 @@ class PeakBudgetBatchSampler(BatchSampler):
         for index in indices:
             candidate_longest = max(longest, self.lengths[index])
             attention_size = (len(batch) + 1) * candidate_longest**2
-            if batch and attention_size > self.peak_pair_budget:
+            padded_peaks = (len(batch) + 1) * candidate_longest
+            over_budget = attention_size > self.peak_pair_budget or (
+                self.peak_budget is not None and padded_peaks > self.peak_budget
+            )
+            if batch and over_budget:
                 batches.append(batch)
                 batch = []
                 longest = 0
