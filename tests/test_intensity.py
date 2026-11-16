@@ -356,7 +356,8 @@ def single_process_group():
 
 
 class FinetuneSmokeTests(unittest.TestCase):
-    def test_launcher_style_run_writes_holdout_metrics(self):
+    def run_random_config(self, *extra: str) -> dict:
+        """Train the random-init config for 2 steps as the launcher would; return holdout metrics."""
         peptides = ["PEPTIDEK", "ACDEFGHIKLMNPQR", "MKWVTFISLLR", "LLGNVLVCVLAR"] * 4
         charges = [2, 3, 2, 3] * 4
         with tempfile.TemporaryDirectory() as directory:
@@ -378,10 +379,6 @@ class FinetuneSmokeTests(unittest.TestCase):
                 str(root / "encoder"),
                 "--data_dir",
                 str(root / "data"),
-                "--wandb_project",
-                "",
-                "--report_to",
-                "none",
                 "--ddp_backend",
                 "gloo",
                 "--use_cpu",
@@ -406,13 +403,28 @@ class FinetuneSmokeTests(unittest.TestCase):
                 "65536",
                 "--ion_budget",
                 "4096",
+                *extra,
             ]
             with single_process_group():
                 self.assertEqual(main(argv), 0)
             metrics = json.loads((root / "run" / "holdout_metrics.json").read_text())
-        self.assertEqual(metrics["encoder_init"], "random")
         self.assertEqual(metrics["holdout/n"], len(peptides))
+        return metrics
+
+    def test_launcher_style_run_writes_holdout_metrics(self):
+        metrics = self.run_random_config("--wandb_project", "", "--report_to", "none")
+        self.assertEqual(metrics["encoder_init"], "random")
         self.assertGreaterEqual(metrics["holdout/spectral_angle_median"], 0.0)
+
+    def test_rank_without_a_wandb_run_still_trains(self):
+        # init_wandb_run returns None on all but each node's local rank 0 (job 9095142).
+        with (
+            mock.patch.dict(os.environ, {"WANDB_MODE": "disabled"}),
+            mock.patch("iona.finetune_intensity.init_wandb_run", return_value=None) as init,
+        ):
+            metrics = self.run_random_config()
+        init.assert_called_once()
+        self.assertEqual(metrics["encoder_init"], "random")
 
 
 if __name__ == "__main__":

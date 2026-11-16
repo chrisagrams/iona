@@ -132,6 +132,8 @@ def main(argv: list[str] | None = None) -> int:
             entity=training_args.wandb_entity,
             config={},
         )
+    # init_wandb_run returns None on every rank but each node's local rank 0.
+    if wandb_run is not None:
         # A resumed job reattaches to the same run; its stored config comes back
         # JSON-round-tripped (e.g. int keys as strings), so allow value changes.
         wandb_run.config.update(
