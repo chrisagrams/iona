@@ -1,27 +1,5 @@
 #!/bin/bash -l
-# Submit from the repository root and provide scheduler policy through qsub.
-# Example (8 XPU tiles per node, global batch size 512):
-# qsub -A PROJECT -q QUEUE \
-#   -l select=4 -l place=scatter -l walltime=01:00:00 \
-#   -l filesystems=home:flare:daos_user_fs -j oe -o /path/to/pbs/logs \
-#   -v ARGS_FILE=configs/finetune/denovo-massivekb-50m/training.args,MODULE=iona.finetune_denovo,DAOS_POOL=POOL,DAOS_CONT=msdelta-training,LOG_ROOT=/flare/PROJECT/msdelta-runs,XPUS_PER_HOST=8,GLOBAL_BATCH_SIZE=512 \
-#   scripts/aurora-finetune.pbs
-# HF_HOME defaults to /tmp/$DAOS_POOL/$DAOS_CONT/hf-cache. Copy the encoder checkpoint and
-# the fine-tune datasets there; for iona.finetune_denovo, that includes the
-# datasets/denovo-preprocessed output of scripts/aurora-preprocess-denovo.pbs.
-# Set LOG_ROOT to the Flare base directory. Logs and W&B files are created at
-# $LOG_ROOT/$RUN_NAME/logs; RUN_NAME defaults to the configured run name + job ID.
-# LOG_DIR may override the complete path. Checkpoints remain in DAOS.
-# Set RESUME_FROM_CHECKPOINT=latest with a stable RUN_NAME to resume the highest
-# complete checkpoint-N directory.
-#
-# MODULE selects the fine-tune (default iona.finetune_denoise). PRETRAINED_PATH overrides
-# the args file's encoder checkpoint. EVAL_BATCH_SIZE defaults to MICRO_BATCH_SIZE, and
-# EVAL_STEPS sets both the evaluation and the checkpoint interval.
-# Telegraf is no longer provided on Aurora; set TELEGRAF_BIN to a portable
-# binary on a shared filesystem.
-# The launch follows the ALCF Aurora PyTorch DDP guidance:
-# https://docs.alcf.anl.gov/aurora/data-science/frameworks/pytorch/
+# Fine-tune a pretrained Iona encoder on Aurora with DDP across XPU tiles.
 
 module use /soft/modulefiles
 module load daos

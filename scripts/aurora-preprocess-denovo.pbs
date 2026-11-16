@@ -1,13 +1,5 @@
 #!/bin/bash -l
-# Build the de novo splits and download the encoder checkpoint with one non-distributed process.
-# Everything is stored under HF_HOME so it can be copied to DAOS for scripts/aurora-finetune.pbs.
-# Submit from the repository root, for example:
-# qsub -A PROJECT -q QUEUE \
-#   -l select=1 -l walltime=02:00:00 \
-#   -l filesystems=home:flare -j oe -o /path/to/pbs/logs \
-#   -v ARGS_FILE=configs/finetune/denovo-massivekb-50m/training.args,HF_HOME=/flare/UIC-HPC/homes/cgrams/hf \
-#   scripts/aurora-preprocess-denovo.pbs
-# The splits go to $HF_HOME/datasets/denovo-preprocessed unless PREPROCESSED_DATASET_DIR is set.
+# Build the de novo dataset splits and download the encoder checkpoint into HF_HOME.
 
 module load frameworks/2026.1.0
 
