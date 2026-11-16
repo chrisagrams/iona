@@ -22,7 +22,6 @@ Example:
 from __future__ import annotations
 
 import argparse
-import csv
 import logging
 import re
 import sys
@@ -199,6 +198,90 @@ def msp_mods(sequence: list[str]) -> tuple[str, str]:
     return count, "; ".join(f"{name}@{r}{p + 1}" for p, r, name in mods)
 
 
+def precursor_table(peptides: pd.DataFrame) -> pd.DataFrame:
+    """One row per peptide: its spellings, precursor m/z, and Prosit's MSP mod fields."""
+    records = []
+    for sequence_integer, charge, energy in zip(
+        peptides["sequence_integer"], peptides["precursor_charge"], peptides["collision_energy"]
+    ):
+        residues = [PROSIT_TOKENS[int(token)] for token in sequence_integer if token]
+        modified = "".join(residues)
+        mods, mod_string = msp_mods(residues)
+        records.append(
+            {
+                "ModifiedPeptide": "_"
+                + "".join(SPECTRONAUT_TOKENS.get(r, r) for r in residues)
+                + "_",
+                "LabeledPeptide": modified,
+                "StrippedPeptide": modified.replace("M(ox)", "M"),
+                "PrecursorCharge": int(charge),
+                "PrecursorMz": precursor_mz(sequence_integer, int(charge)),
+                "CollisionEnergy": float(energy),
+                "Mods": mods,
+                "ModString": mod_string,
+            }
+        )
+    return pd.DataFrame(records)
+
+
+def fragment_table(
+    precursors: pd.DataFrame,
+    intensities: np.ndarray,
+    fragment_mz: np.ndarray,
+    max_fragment_charge: int,
+    min_intensity: float,
+) -> pd.DataFrame:
+    """One row per kept fragment ion, grouped by spectrum and sorted by m/z within it."""
+    spectrum, slot = np.nonzero(intensities > min_intensity)
+    order = np.lexsort((fragment_mz[spectrum, slot], spectrum))
+    spectrum, slot = spectrum[order], slot[order]
+    ion_type, number, charge = fragment_annotations(intensities.shape[1], max_fragment_charge)
+    fragments = precursors.iloc[spectrum].reset_index(drop=True)
+    fragments["spectrum"] = spectrum
+    fragments["RelativeIntensity"] = intensities[spectrum, slot]
+    fragments["FragmentMz"] = fragment_mz[spectrum, slot].astype(np.float64).round(5)
+    fragments["FragmentNumber"] = number[slot]
+    fragments["FragmentType"] = ion_type[slot]
+    fragments["FragmentCharge"] = charge[slot]
+    fragments["FragmentLossType"] = "noloss"
+    return fragments
+
+
+def write_msp(path: Path | str, precursors: pd.DataFrame, fragments: pd.DataFrame) -> None:
+    """Write the library in the layout of Prosit's MSP converter."""
+    charge = fragments["FragmentCharge"].astype(str)
+    peaks = (
+        (
+            fragments["FragmentMz"].map("{:.5f}".format)
+            + "\t"
+            + fragments["RelativeIntensity"].map("{:.6g}".format)
+            + '\t"'
+            + fragments["FragmentType"]
+            + fragments["FragmentNumber"].astype(str)
+            + ("^" + charge).where(fragments["FragmentCharge"] > 1, "")
+            + '/0.0ppm"'
+        ).tolist()
+        if len(fragments)
+        else []
+    )
+    ends = np.cumsum(np.bincount(fragments["spectrum"], minlength=len(precursors)))
+    start = 0
+    with open(path, "w", encoding="utf-8") as msp:
+        for row, (precursor, end) in enumerate(zip(precursors.itertuples(index=False), ends)):
+            name, z = precursor.StrippedPeptide, precursor.PrecursorCharge
+            if row:
+                msp.write("\n")
+            msp.write(
+                f"Name: {name}/{z}\nMW: {precursor.PrecursorMz}\n"
+                f"Comment: Parent={precursor.PrecursorMz} "
+                f"Collision_energy={precursor.CollisionEnergy:g} Mods={precursor.Mods} "
+                f"ModString={name}//{precursor.ModString}/{z}\n"
+                f"Num peaks: {end - start}\n"
+            )
+            msp.writelines(f"{peak}\n" for peak in peaks[start:end])
+            start = end
+
+
 def write_library(
     prefix: Path,
     peptides: pd.DataFrame,
@@ -208,58 +291,14 @@ def write_library(
     min_intensity: float,
 ) -> int:
     """Write ``prefix.msp`` and ``prefix.csv``; returns the number of fragment ions written."""
-    ion_type, number, charge = fragment_annotations(intensities.shape[1], max_fragment_charge)
-    written = 0
-    with (
-        open(f"{prefix}.msp", "w", encoding="utf-8") as msp,
-        open(f"{prefix}.csv", "w", newline="", encoding="utf-8") as table,
-    ):
-        writer = csv.writer(table)
-        writer.writerow(CSV_COLUMNS)
-        for row in range(len(peptides)):
-            sequence_integer = peptides["sequence_integer"].iat[row]
-            residues = [PROSIT_TOKENS[int(t)] for t in sequence_integer if t]
-            modified = "".join(residues)
-            stripped = modified.replace("M(ox)", "M")
-            spectronaut = "_" + "".join(SPECTRONAUT_TOKENS.get(r, r) for r in residues) + "_"
-            precursor_charge = int(peptides["precursor_charge"].iat[row])
-            energy = float(peptides["collision_energy"].iat[row])
-            parent = precursor_mz(sequence_integer, precursor_charge)
-            keep = np.flatnonzero(intensities[row] > min_intensity)
-            keep = keep[np.argsort(fragment_mz[row, keep], kind="stable")]
-            mods, mod_string = msp_mods(residues)
-            if row:
-                msp.write("\n")
-            msp.write(
-                f"Name: {stripped}/{precursor_charge}\nMW: {parent}\n"
-                f"Comment: Parent={parent} Collision_energy={energy:g} Mods={mods} "
-                f"ModString={stripped}//{mod_string}/{precursor_charge}\n"
-                f"Num peaks: {len(keep)}\n"
-            )
-            for slot in keep:
-                ion = f"{ion_type[slot]}{number[slot]}"
-                if charge[slot] > 1:
-                    ion += f"^{charge[slot]}"
-                intensity, mz = float(intensities[row, slot]), float(fragment_mz[row, slot])
-                msp.write(f'{mz:.5f}\t{intensity:.6g}\t"{ion}/0.0ppm"\n')
-                writer.writerow(
-                    [
-                        f"{intensity:.6g}",
-                        f"{mz:.5f}",
-                        spectronaut,
-                        modified,
-                        stripped,
-                        precursor_charge,
-                        f"{parent:.5f}",
-                        f"{energy:g}",
-                        number[slot],
-                        ion_type[slot],
-                        charge[slot],
-                        "noloss",
-                    ]
-                )
-            written += len(keep)
-    return written
+    precursors = precursor_table(peptides)
+    fragments = fragment_table(
+        precursors, intensities, fragment_mz, max_fragment_charge, min_intensity
+    )
+    write_msp(f"{prefix}.msp", precursors, fragments)
+    table = fragments[CSV_COLUMNS].assign(PrecursorMz=fragments["PrecursorMz"].round(5))
+    table.to_csv(f"{prefix}.csv", index=False)
+    return len(fragments)
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
