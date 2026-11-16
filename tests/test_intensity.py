@@ -1,23 +1,36 @@
 """Check the Prosit ion ladder, the intensity head, and its data utilities."""
 
+import json
+import os
+import socket
 import tempfile
 import unittest
+from contextlib import contextmanager
+from dataclasses import asdict
 from pathlib import Path
+from unittest import mock
 
 import numpy as np
 import torch
+from accelerate.state import AcceleratorState
 from pyteomics import mass
 from safetensors.torch import load_file, save_file
-from transformers import TrainingArguments
+from transformers import HfArgumentParser, TrainingArguments
 
 from iona.configuration_iona import IonaConfig, IonaIntensityPredictionConfig
 from iona.denoising import PeakBudgetBatchSampler
+from iona.finetune_intensity import (
+    IntensityDataArguments,
+    IntensityModelArguments,
+    IntensityTrainingArguments,
+    load_encoder,
+    main,
+)
 from iona.intensity import (
     IntensityTrainer,
     IonaIntensityProcessor,
     PrositIntensityDataset,
     fit_intensity_prior,
-    load_encoder,
     prosit_fragment_ladder,
 )
 from iona.modeling_iona import IonaForIntensityPrediction, IonaForPreTraining, IonaModel
@@ -223,7 +236,7 @@ class LoadEncoderTests(unittest.TestCase):
             }
             self.assertTrue(any(key.startswith("msdelta.") for key in renamed))
             save_file(renamed, weights, metadata={"format": "pt"})
-            encoder = load_encoder(Path(directory), "pretrained")
+            encoder = load_encoder(IntensityModelArguments(pretrained_path=directory))
         for name, value in model.iona.state_dict().items():
             torch.testing.assert_close(encoder.state_dict()[name], value, msg=name)
 
@@ -261,6 +274,145 @@ class PrositDataTests(unittest.TestCase):
         only_11mer = slice(6 * 7, 6 * 10)
         self.assertTrue(torch.allclose(prior[1, 29, only_11mer], prior[1, 10, only_11mer]))
         self.assertGreater(prior[1, 7].sum().item(), 0)
+
+
+REPO = Path(__file__).resolve().parents[1]
+CONFIGS = REPO / "configs" / "finetune"
+# What scripts/aurora-finetune.pbs appends after --args_file (MICRO_BATCH_SIZE=16 on 24 tiles).
+LAUNCHER_ARGS = [
+    "--run_name",
+    "intensity-prosit-200m-random-123",
+    "--output_dir",
+    "/tmp/intensity-run",
+    "--per_device_train_batch_size",
+    "16",
+    "--per_device_eval_batch_size",
+    "16",
+    "--gradient_accumulation_steps",
+    "1",
+    "--ddp_backend",
+    "xccl",
+    "--wandb_project",
+    "msdelta-intensity",
+]
+
+
+class FinetuneConfigTests(unittest.TestCase):
+    def parse(self, name: str, *extra: str):
+        parser = HfArgumentParser(
+            (IntensityModelArguments, IntensityDataArguments, IntensityTrainingArguments)
+        )
+        args = ["--args_file", str(CONFIGS / name / "training.args"), *LAUNCHER_ARGS, *extra]
+        with single_process_group():
+            return parser.parse_args_into_dataclasses(
+                args=[*args, "--ddp_backend", "gloo"], args_file_flag="--args_file"
+            )
+
+    def test_random_config_differs_from_pretrained_only_in_init(self):
+        pretrained = self.parse("intensity-prosit-200m")
+        random = self.parse("intensity-prosit-200m-random")
+        self.assertFalse(pretrained[0].random_init)
+        self.assertTrue(random[0].random_init)
+        self.assertEqual(
+            asdict_without(pretrained[0], "random_init"), asdict_without(random[0], "random_init")
+        )
+        self.assertEqual(pretrained[1], random[1])
+        model_args, data_args, training_args = random
+        # The best 200m pretrained run (job 8870454): fine-tuned encoder at 3e-5, 3 epochs.
+        self.assertFalse(model_args.freeze_encoder)
+        self.assertEqual(training_args.encoder_learning_rate, 3e-5)
+        self.assertEqual(training_args.learning_rate, 1e-3)
+        self.assertEqual(training_args.num_train_epochs, 3)
+        self.assertEqual((data_args.ion_pair_budget, data_args.ion_budget), (174762, 5461))
+        self.assertEqual(training_args.wandb_project, "msdelta-intensity")
+        self.assertEqual(training_args.run_name, "intensity-prosit-200m-random-123")
+
+
+def asdict_without(value, field: str) -> dict:
+    return {k: v for k, v in asdict(value).items() if k != field}
+
+
+@contextmanager
+def single_process_group():
+    """A one-rank gloo group: with a ddp_backend set, TrainingArguments needs one, as under mpiexec."""
+    with socket.socket() as probe:
+        probe.bind(("127.0.0.1", 0))
+        port = probe.getsockname()[1]
+    env = {
+        "MASTER_ADDR": "127.0.0.1",
+        "MASTER_PORT": str(port),
+        "RANK": "0",
+        "WORLD_SIZE": "1",
+        "LOCAL_RANK": "0",
+        "LOCAL_WORLD_SIZE": "1",
+    }
+    with mock.patch.dict(os.environ, env):
+        torch.distributed.init_process_group("gloo", rank=0, world_size=1)
+        try:
+            yield
+        finally:
+            torch.distributed.destroy_process_group()
+            AcceleratorState._reset_state(reset_partial_state=True)
+
+
+class FinetuneSmokeTests(unittest.TestCase):
+    def test_launcher_style_run_writes_holdout_metrics(self):
+        peptides = ["PEPTIDEK", "ACDEFGHIKLMNPQR", "MKWVTFISLLR", "LLGNVLVCVLAR"] * 4
+        charges = [2, 3, 2, 3] * 4
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            for split in ("train", "val", "holdout"):
+                write_split(root / "data" / split, make_rows(peptides, charges))
+            np.save(
+                root / "data" / "holdout" / "prosit_spectral_angle.npy",
+                np.full(len(peptides), 0.9, dtype=np.float32),
+            )
+            IonaForPreTraining(ENCODER).save_pretrained(root / "encoder")
+            argv = [
+                "--args_file",
+                str(CONFIGS / "intensity-prosit-200m-random" / "training.args"),
+                *LAUNCHER_ARGS,
+                "--output_dir",
+                str(root / "run"),
+                "--pretrained_path",
+                str(root / "encoder"),
+                "--data_dir",
+                str(root / "data"),
+                "--wandb_project",
+                "",
+                "--report_to",
+                "none",
+                "--ddp_backend",
+                "gloo",
+                "--use_cpu",
+                "true",
+                "--bf16",
+                "false",
+                "--max_steps",
+                "2",
+                "--eval_steps",
+                "1",
+                "--save_steps",
+                "1",
+                "--logging_steps",
+                "1",
+                "--dataloader_num_workers",
+                "0",
+                "--prior_samples",
+                "16",
+                "--eval_samples",
+                "8",
+                "--ion_pair_budget",
+                "65536",
+                "--ion_budget",
+                "4096",
+            ]
+            with single_process_group():
+                self.assertEqual(main(argv), 0)
+            metrics = json.loads((root / "run" / "holdout_metrics.json").read_text())
+        self.assertEqual(metrics["encoder_init"], "random")
+        self.assertEqual(metrics["holdout/n"], len(peptides))
+        self.assertGreaterEqual(metrics["holdout/spectral_angle_median"], 0.0)
 
 
 if __name__ == "__main__":

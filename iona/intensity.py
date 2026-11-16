@@ -1,54 +1,32 @@
-"""Train a Prosit-style fragment-intensity head on a frozen Iona encoder.
+"""Prosit fragment-intensity data, processor, trainer and evaluation for Iona.
 
 Data are the Prosit 2020 HCD splits (figshare article 12937092), converted once
-by ``scripts/convert_prosit_hdf5.py`` into memory-mapped ``.npy`` arrays.
-
-    uv run iona-intensity \
-        --data-dir /mnt/vault-1/k8/prosit-dataset/arrays \
-        --checkpoint runs/<run>/final \
-        --output-dir runs/intensity/<name> \
-        --wandb-project msdelta-intensity
-
-``--encoder-init`` selects the controls that make the headline number
-interpretable: ``random`` freezes an untrained encoder of the same shape, and
-``none`` drops the encoder states so the head sees only Prosit's metadata.
-
-By default the encoder is frozen and only the head trains. ``--finetune-encoder``
-trains the encoder as well, at its own ``--encoder-learning-rate``; add
-``--gradient-checkpointing`` (or lower ``--ion-pair-budget``) if memory runs out.
+by ``scripts/convert_prosit_hdf5.py`` into memory-mapped ``.npy`` arrays. The
+fine-tune entry point is ``iona.finetune_intensity``.
 """
 
 from __future__ import annotations
 
-import argparse
-import json
 import os
 from pathlib import Path
 from typing import cast
 
 import numpy as np
 import torch
-import wandb
 from torch.utils.data import DataLoader, Dataset
 from transformers import (
     EvalPrediction,
     FeatureExtractionMixin,
     Trainer,
-    TrainingArguments,
-    set_seed,
 )
 
-from iona.callbacks import WalltimeCheckpointCallback
 from iona.chemistry import PROSIT_RESIDUE_MASSES, PROTON_MASS, WATER_MASS
-from iona.configuration_iona import IonaConfig, IonaIntensityPredictionConfig
+from iona.configuration_iona import IonaIntensityPredictionConfig
 from iona.denoising import PeakBudgetBatchSampler
 from iona.modeling_iona import (
     IonaForIntensityPrediction,
-    IonaForPreTraining,
-    IonaModel,
     masked_spectral_angle,
 )
-from iona.wandb_distributed import init_wandb_run
 
 SPLITS = ("train", "val", "holdout")
 
@@ -405,242 +383,3 @@ def gather_arrays(parts: dict[str, np.ndarray]) -> dict[str, np.ndarray]:
     gathered: list[dict[str, np.ndarray] | None] = [None] * torch.distributed.get_world_size()
     torch.distributed.all_gather_object(gathered, parts)
     return {name: np.concatenate([cast(dict, part)[name] for part in gathered]) for name in parts}
-
-
-def load_encoder(checkpoint: Path | None, encoder_init: str) -> IonaModel:
-    """Load the pretrained encoder, or build a same-shaped random one."""
-    if checkpoint is None:
-        if encoder_init == "pretrained":
-            raise ValueError("--checkpoint is required with --encoder-init pretrained")
-        return IonaModel(IonaConfig())
-    if encoder_init == "pretrained":
-        # MSDelta-era checkpoints store msdelta.* keys; a no-op for Iona checkpoints.
-        return IonaForPreTraining.from_pretrained(
-            checkpoint, key_mapping={r"^msdelta\.": "iona."}
-        ).iona
-    return IonaModel(IonaConfig.from_pretrained(checkpoint))
-
-
-def main(argv: list[str] | None = None) -> int:
-    local_rank = int(os.environ.get("LOCAL_RANK", "-1"))
-    if local_rank >= 0 and torch.xpu.is_available():
-        torch.xpu.set_device(local_rank)
-
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--data-dir", type=Path, required=True)
-    parser.add_argument("--checkpoint", type=Path)
-    parser.add_argument("--output-dir", type=Path, required=True)
-    parser.add_argument(
-        "--encoder-init", choices=("pretrained", "random", "none"), default="pretrained"
-    )
-    parser.add_argument("--head-hidden-size", type=int, default=256)
-    parser.add_argument("--head-dropout", type=float, default=0.1)
-    parser.add_argument("--max-train-samples", type=int)
-    parser.add_argument("--prior-samples", type=int, default=2_000_000)
-    parser.add_argument("--eval-samples", type=int, default=50_000)
-    parser.add_argument("--max-holdout-samples", type=int)
-    parser.add_argument("--epochs", type=float, default=1.0)
-    parser.add_argument("--max-steps", type=int, default=-1)
-    parser.add_argument(
-        "--ion-pair-budget",
-        type=int,
-        default=2**21,
-        help="max padded ions^2 summed over a training batch (bounds bias memory)",
-    )
-    parser.add_argument(
-        "--ion-budget",
-        type=int,
-        help="also cap padded ions (spectra x longest) per training batch; "
-        "needed with --finetune-encoder, where per-ion activations dominate memory",
-    )
-    parser.add_argument(
-        "--gradient-accumulation-steps",
-        type=int,
-        default=1,
-        help="micro-batches per optimizer step; lower the budgets and raise this to cut "
-        "memory without shrinking the data per step",
-    )
-    parser.add_argument("--eval-batch-size", type=int, default=64)
-    parser.add_argument("--learning-rate", type=float, default=1e-3, help="head learning rate")
-    parser.add_argument(
-        "--finetune-encoder",
-        action="store_true",
-        help="train the encoder too (default: frozen encoder, head only)",
-    )
-    parser.add_argument(
-        "--encoder-learning-rate",
-        type=float,
-        default=1e-5,
-        help="encoder learning rate with --finetune-encoder",
-    )
-    parser.add_argument(
-        "--gradient-checkpointing",
-        action="store_true",
-        help="recompute encoder activations in backward to save memory when fine-tuning",
-    )
-    parser.add_argument("--weight-decay", type=float, default=0.01)
-    parser.add_argument("--warmup-ratio", type=float, default=0.02)
-    parser.add_argument("--eval-steps", type=int, default=1000)
-    parser.add_argument("--num-workers", type=int, default=8)
-    parser.add_argument("--bf16", action=argparse.BooleanOptionalAction, default=True)
-    parser.add_argument("--seed", type=int, default=0)
-    parser.add_argument("--run-name")
-    parser.add_argument(
-        "--ddp-backend", help="torch.distributed backend, e.g. xccl on Aurora (default: auto)"
-    )
-    parser.add_argument("--resume-from-checkpoint", type=Path)
-    parser.add_argument("--wandb-project", help="log to this W&B project (off when unset)")
-    parser.add_argument("--wandb-entity")
-    args = parser.parse_args(argv)
-    if args.finetune_encoder and args.encoder_init == "none":
-        parser.error(
-            "--finetune-encoder needs an encoder; it cannot be used with --encoder-init none"
-        )
-
-    wandb_run = None
-    if args.wandb_project:
-        os.environ.setdefault("WANDB_PROJECT", args.wandb_project)
-        os.environ.setdefault("WANDB_DIR", str(args.output_dir))
-        args.output_dir.mkdir(parents=True, exist_ok=True)
-        wandb_run = init_wandb_run(
-            project=args.wandb_project,
-            run_name=args.run_name or args.output_dir.name,
-            config={},
-            entity=args.wandb_entity,
-        )
-    if wandb_run is not None:
-        # A resumed job reattaches to the same run; its stored config comes back
-        # JSON-round-tripped (e.g. int keys as strings), so allow value changes.
-        wandb_run.config.update(
-            {"cli": {k: str(v) if isinstance(v, Path) else v for k, v in vars(args).items()}},
-            allow_val_change=True,
-        )
-    try:
-        return train_and_evaluate(args, wandb_run)
-    finally:
-        if wandb_run is not None:
-            wandb_run.finish()
-
-
-def train_and_evaluate(args: argparse.Namespace, wandb_run: wandb.Run | None) -> int:
-    set_seed(args.seed)
-    data = {split: PrositIntensityDataset(args.data_dir / split) for split in SPLITS}
-    train = data["train"].subset(args.max_train_samples, args.seed)
-    validation = data["val"].subset(args.eval_samples, args.seed)
-    holdout = data["holdout"].subset(args.max_holdout_samples, args.seed)
-
-    encoder = load_encoder(args.checkpoint, args.encoder_init)
-    config = IonaIntensityPredictionConfig(
-        encoder=cast(IonaConfig, encoder.config),
-        head_hidden_size=args.head_hidden_size,
-        head_dropout=args.head_dropout,
-        use_encoder_states=args.encoder_init != "none",
-    )
-    model = IonaForIntensityPrediction(
-        config, encoder=encoder, freeze_encoder=not args.finetune_encoder
-    )
-    processor = IonaIntensityProcessor(
-        fit_intensity_prior(train.subset(args.prior_samples, args.seed + 1), config),
-        max_fragment_charge=config.max_fragment_charge,
-    )
-    trainable = sum(p.numel() for p in model.parameters() if p.requires_grad)
-    print(f"trainable parameters: {trainable:,}; train spectra: {len(train):,}")
-    if wandb_run is not None:
-        wandb_run.config.update(
-            {
-                "model": config.to_dict(),
-                "trainable_parameters": trainable,
-                "splits": {"train": len(train), "val": len(validation), "holdout": len(holdout)},
-            },
-            allow_val_change=True,
-        )
-
-    training_args = TrainingArguments(
-        output_dir=str(args.output_dir),
-        run_name=args.run_name or args.output_dir.name,
-        num_train_epochs=args.epochs,
-        max_steps=args.max_steps,
-        per_device_eval_batch_size=args.eval_batch_size,
-        gradient_accumulation_steps=args.gradient_accumulation_steps,
-        learning_rate=args.learning_rate,
-        weight_decay=args.weight_decay,
-        warmup_steps=args.warmup_ratio,  # a float < 1 is a fraction of total steps
-        lr_scheduler_type="cosine",
-        eval_strategy="steps",
-        eval_steps=args.eval_steps,
-        save_strategy="steps",
-        save_steps=args.eval_steps,
-        save_total_limit=2,
-        logging_steps=50,
-        remove_unused_columns=False,
-        label_names=["labels"],
-        dataloader_num_workers=args.num_workers,
-        bf16=args.bf16,
-        seed=args.seed,
-        data_seed=args.seed,
-        report_to=["wandb"] if args.wandb_project else [],
-        gradient_checkpointing=args.gradient_checkpointing and args.finetune_encoder,
-        ddp_find_unused_parameters=False,
-        ddp_backend=args.ddp_backend,
-    )
-    trainer = IntensityTrainer(
-        model=model,
-        args=training_args,
-        train_dataset=train,
-        eval_dataset=validation,
-        data_collator=processor,
-        processing_class=processor,
-        compute_metrics=intensity_metrics,
-        ion_pair_budget=args.ion_pair_budget,
-        ion_budget=args.ion_budget,
-        encoder_learning_rate=args.encoder_learning_rate if args.finetune_encoder else None,
-    )
-    if deadline := os.environ.get("IONA_JOB_DEADLINE_EPOCH"):
-        margin = float(os.environ.get("IONA_CHECKPOINT_MARGIN_SECONDS", "900"))
-        trainer.add_callback(WalltimeCheckpointCallback(float(deadline), margin))
-    trainer.train(
-        resume_from_checkpoint=str(args.resume_from_checkpoint)
-        if args.resume_from_checkpoint
-        else None
-    )
-    if trainer.state.global_step < trainer.state.max_steps:
-        # Stopped at the walltime margin after saving a checkpoint; the holdout
-        # pass would not fit, so resume and evaluate in the next job.
-        print(f"stopped early at step {trainer.state.global_step}; resume to finish")
-        return 0
-    trainer.save_model()
-
-    # Each process scores its own slice of the holdout; rank 0 reports.
-    accelerator = trainer.accelerator
-    angles = gather_arrays(
-        evaluate_split(
-            model,
-            holdout.shard(accelerator.process_index, accelerator.num_processes),
-            processor,
-            ion_pair_budget=args.ion_pair_budget,
-            num_workers=args.num_workers,
-            autocast_dtype=torch.bfloat16 if args.bf16 else None,
-        )
-    )
-    if not trainer.is_world_process_zero():
-        return 0
-    metrics = {
-        **summarize_spectral_angles(angles["model"], angles["charge"], "holdout/"),
-        **summarize_spectral_angles(angles["prior"], angles["charge"], "holdout/prior_"),
-    }
-    prosit = np.load(args.data_dir / "holdout" / "prosit_spectral_angle.npy", mmap_mode="r")
-    metrics["holdout/prosit_rnn_spectral_angle_median"] = float(np.median(prosit[holdout.indices]))
-    metrics["encoder_init"] = args.encoder_init
-    metrics["checkpoint"] = str(args.checkpoint)
-    metrics["world_size"] = accelerator.num_processes
-    print(json.dumps(metrics, indent=2))
-    (args.output_dir / "holdout_metrics.json").write_text(json.dumps(metrics, indent=2))
-    if wandb_run is not None:
-        numeric = {k: v for k, v in metrics.items() if isinstance(v, (int, float))}
-        wandb_run.log({**numeric, "train/global_step": trainer.state.global_step})
-        wandb_run.summary.update(numeric)
-    return 0
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())

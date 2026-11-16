@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 
-import math
 import torch
 import torch.nn.functional as F
 from pytorch_metric_learning.losses import SupConLoss
