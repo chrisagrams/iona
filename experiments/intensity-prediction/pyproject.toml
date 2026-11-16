@@ -1,7 +1,7 @@
 [project]
 name = "prosit-transformer-eval"
 version = "0.1.0"
-description = "Evaluate the released Prosit Transformer on the Prosit 2020 HCD holdout with the MSDelta spectral-angle protocol."
+description = "Evaluate the released Prosit Transformer on the Prosit 2020 HCD holdout with the Iona spectral-angle protocol."
 readme = "README.md"
 # The released model targets torch 1.8.1 and the authors' TAPE fork.
 requires-python = ">=3.8,<3.9"

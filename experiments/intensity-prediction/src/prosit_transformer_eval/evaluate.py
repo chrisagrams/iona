@@ -9,7 +9,7 @@ between LMDB and HDF5.
 Scoring follows their ``cleanTapeOutput``: clip negative predictions to 0,
 normalize to the base peak, set impossible ions to -1, then Prosit's masked
 spectral distance. The same predictions are also scored with the spectral angle
-used by ``msdelta.intensity`` so the two protocols can be compared directly.
+used by ``iona.intensity`` so the two protocols can be compared directly.
 Predictions are aligned to the holdout HDF5 row by row, and the Prosit RNN
 predictions shipped in that file give the reference number.
 """
@@ -78,8 +78,8 @@ def authors_spectral_angle(true: np.ndarray, pred: np.ndarray, epsilon: float = 
     return np.nan_to_num(angle)
 
 
-def msdelta_spectral_angle(true: np.ndarray, pred: np.ndarray):
-    """msdelta.modeling_msdelta.masked_spectral_angle over slots with true >= 0."""
+def iona_spectral_angle(true: np.ndarray, pred: np.ndarray):
+    """iona.modeling_iona.masked_spectral_angle over slots with true >= 0."""
     mask = true >= 0
     pred = np.where(mask, np.nan_to_num(pred), 0.0)
     true = np.where(mask, np.clip(true, 0.0, None), 0.0)
@@ -143,7 +143,7 @@ def main(argv: list[str] | None = None) -> int:
         rows = slice(start, start + CHUNK)
         cleaned[rows] = clean_predictions(raw_predictions[rows], charge[rows], length[rows])
         authors[rows] = authors_spectral_angle(true[rows], cleaned[rows])
-        ours[rows] = msdelta_spectral_angle(true[rows], cleaned[rows])
+        ours[rows] = iona_spectral_angle(true[rows], cleaned[rows])
 
     metrics = {
         "n": int(len(true)),

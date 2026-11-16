@@ -1,8 +1,8 @@
 # Prosit Transformer evaluation
 
 Evaluates the released Prosit Transformer (Ekvall et al., J. Proteome Res. 2022)
-on the Prosit 2020 HCD holdout, the benchmark `msdelta.intensity` reports on, so
-MSDelta can be compared against it under one protocol.
+on the Prosit 2020 HCD holdout, the benchmark `iona.intensity` reports on, so
+Iona can be compared against it under one protocol.
 
 The model sees exactly the authors' inputs: their released TAPE LMDB `test`
 split (their conversion of `prediction_hcd_ho.hdf5`) read through their TAPE
@@ -12,7 +12,7 @@ HDF5. Predictions are scored twice:
 
 - **authors' protocol**: their `cleanTapeOutput` (clip negatives, base-peak
   normalize, mask impossible ions, masked spectral distance, NaN to 0);
-- **MSDelta protocol**: the spectral angle in `msdelta.intensity`.
+- **Iona protocol**: the spectral angle in `iona.intensity`.
 
 Applied to the Prosit RNN predictions shipped in the holdout file, the
 authors' protocol reproduces the file's `spectral_angle` column to 3e-14 and the
