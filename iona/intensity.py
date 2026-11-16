@@ -1,9 +1,9 @@
-"""Train a Prosit-style fragment-intensity head on a frozen MSDelta encoder.
+"""Train a Prosit-style fragment-intensity head on a frozen Iona encoder.
 
 Data are the Prosit 2020 HCD splits (figshare article 12937092), converted once
 by ``scripts/convert_prosit_hdf5.py`` into memory-mapped ``.npy`` arrays.
 
-    uv run msdelta-intensity \
+    uv run iona-intensity \
         --data-dir /mnt/vault-1/k8/prosit-dataset/arrays \
         --checkpoint runs/<run>/final \
         --output-dir runs/intensity/<name> \
@@ -28,6 +28,7 @@ from typing import cast
 
 import numpy as np
 import torch
+import wandb
 from torch.utils.data import DataLoader, Dataset
 from transformers import (
     EvalPrediction,
@@ -37,18 +38,17 @@ from transformers import (
     set_seed,
 )
 
-import wandb
-from msdelta.callbacks import WalltimeCheckpointCallback
-from msdelta.chemistry import PROSIT_RESIDUE_MASSES, PROTON_MASS, WATER_MASS
-from msdelta.configuration_msdelta import MSDeltaConfig, MSDeltaIntensityPredictionConfig
-from msdelta.denoising import PeakBudgetBatchSampler
-from msdelta.modeling_msdelta import (
-    MSDeltaForIntensityPrediction,
-    MSDeltaForPreTraining,
-    MSDeltaModel,
+from iona.callbacks import WalltimeCheckpointCallback
+from iona.chemistry import PROSIT_RESIDUE_MASSES, PROTON_MASS, WATER_MASS
+from iona.configuration_iona import IonaConfig, IonaIntensityPredictionConfig
+from iona.denoising import PeakBudgetBatchSampler
+from iona.modeling_iona import (
+    IonaForIntensityPrediction,
+    IonaForPreTraining,
+    IonaModel,
     masked_spectral_angle,
 )
-from msdelta.wandb_distributed import init_wandb_run
+from iona.wandb_distributed import init_wandb_run
 
 SPLITS = ("train", "val", "holdout")
 
@@ -88,10 +88,10 @@ def prosit_fragment_ladder(
     return mz.float(), valid, length
 
 
-class MSDeltaIntensityProcessor(FeatureExtractionMixin):
+class IonaIntensityProcessor(FeatureExtractionMixin):
     """Turn Prosit rows into prior-weighted theoretical ion lists for the encoder.
 
-    MSDelta tokens carry no m/z, so a ladder of identical intensities would make
+    Iona tokens carry no m/z, so a ladder of identical intensities would make
     every hidden state identical. Each possible ion therefore enters with the
     training-set mean intensity for its (precursor charge, peptide length, slot)
     cell, and only possible ions are kept, packed to the front of each row.
@@ -235,7 +235,7 @@ class IntensityTrainer(Trainer):
         self.encoder_learning_rate = encoder_learning_rate
 
     def _save_rng_state(self, output_dir: str) -> None:
-        # As in MSDeltaTrainer: many ranks racing os.makedirs on a distributed
+        # As in IonaTrainer: many ranks racing os.makedirs on a distributed
         # filesystem can raise a spurious FileExistsError, so rank 0 creates it.
         if self.args.world_size > 1:
             if self.args.process_index == 0:
@@ -249,8 +249,8 @@ class IntensityTrainer(Trainer):
         optimizer = super().create_optimizer(model)
         if self.encoder_learning_rate is None:
             return optimizer
-        opt_model = cast(MSDeltaForIntensityPrediction, self.model if model is None else model)
-        encoder_ids = {id(p) for p in opt_model.msdelta.parameters()}
+        opt_model = cast(IonaForIntensityPrediction, self.model if model is None else model)
+        encoder_ids = {id(p) for p in opt_model.iona.parameters()}
         groups = []
         for group in optimizer.param_groups:
             settings = {k: v for k, v in group.items() if k != "params"}
@@ -295,7 +295,7 @@ class IntensityTrainer(Trainer):
 
 def fit_intensity_prior(
     dataset: PrositIntensityDataset,
-    config: MSDeltaIntensityPredictionConfig,
+    config: IonaIntensityPredictionConfig,
     *,
     batch_size: int = 65_536,
 ) -> torch.Tensor:
@@ -360,9 +360,9 @@ def intensity_metrics(prediction: EvalPrediction) -> dict[str, float]:
 
 @torch.no_grad()
 def evaluate_split(
-    model: MSDeltaForIntensityPrediction,
+    model: IonaForIntensityPrediction,
     dataset: PrositIntensityDataset,
-    processor: MSDeltaIntensityProcessor,
+    processor: IonaIntensityProcessor,
     *,
     ion_pair_budget: int,
     num_workers: int,
@@ -407,15 +407,18 @@ def gather_arrays(parts: dict[str, np.ndarray]) -> dict[str, np.ndarray]:
     return {name: np.concatenate([cast(dict, part)[name] for part in gathered]) for name in parts}
 
 
-def load_encoder(checkpoint: Path | None, encoder_init: str) -> MSDeltaModel:
+def load_encoder(checkpoint: Path | None, encoder_init: str) -> IonaModel:
     """Load the pretrained encoder, or build a same-shaped random one."""
     if checkpoint is None:
         if encoder_init == "pretrained":
             raise ValueError("--checkpoint is required with --encoder-init pretrained")
-        return MSDeltaModel(MSDeltaConfig())
+        return IonaModel(IonaConfig())
     if encoder_init == "pretrained":
-        return MSDeltaForPreTraining.from_pretrained(checkpoint).msdelta
-    return MSDeltaModel(MSDeltaConfig.from_pretrained(checkpoint))
+        # MSDelta-era checkpoints store msdelta.* keys; a no-op for Iona checkpoints.
+        return IonaForPreTraining.from_pretrained(
+            checkpoint, key_mapping={r"^msdelta\.": "iona."}
+        ).iona
+    return IonaModel(IonaConfig.from_pretrained(checkpoint))
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -527,16 +530,16 @@ def train_and_evaluate(args: argparse.Namespace, wandb_run: wandb.Run | None) ->
     holdout = data["holdout"].subset(args.max_holdout_samples, args.seed)
 
     encoder = load_encoder(args.checkpoint, args.encoder_init)
-    config = MSDeltaIntensityPredictionConfig(
-        encoder=cast(MSDeltaConfig, encoder.config),
+    config = IonaIntensityPredictionConfig(
+        encoder=cast(IonaConfig, encoder.config),
         head_hidden_size=args.head_hidden_size,
         head_dropout=args.head_dropout,
         use_encoder_states=args.encoder_init != "none",
     )
-    model = MSDeltaForIntensityPrediction(
+    model = IonaForIntensityPrediction(
         config, encoder=encoder, freeze_encoder=not args.finetune_encoder
     )
-    processor = MSDeltaIntensityProcessor(
+    processor = IonaIntensityProcessor(
         fit_intensity_prior(train.subset(args.prior_samples, args.seed + 1), config),
         max_fragment_charge=config.max_fragment_charge,
     )
@@ -592,8 +595,8 @@ def train_and_evaluate(args: argparse.Namespace, wandb_run: wandb.Run | None) ->
         ion_budget=args.ion_budget,
         encoder_learning_rate=args.encoder_learning_rate if args.finetune_encoder else None,
     )
-    if deadline := os.environ.get("MSDELTA_JOB_DEADLINE_EPOCH"):
-        margin = float(os.environ.get("MSDELTA_CHECKPOINT_MARGIN_SECONDS", "900"))
+    if deadline := os.environ.get("IONA_JOB_DEADLINE_EPOCH"):
+        margin = float(os.environ.get("IONA_CHECKPOINT_MARGIN_SECONDS", "900"))
         trainer.add_callback(WalltimeCheckpointCallback(float(deadline), margin))
     trainer.train(
         resume_from_checkpoint=str(args.resume_from_checkpoint)

@@ -1,5 +1,5 @@
 #!/bin/bash -l
-# Train the Prosit fragment-intensity head (msdelta.intensity) with data
+# Train the Prosit fragment-intensity head (iona.intensity) with data
 # parallelism over every XPU tile of the allocated Aurora nodes. Submit from the
 # repository root, for example (one node = 6 GPUs = 12 tiles = 12 DDP ranks):
 # qsub -A PROJECT -q QUEUE \
@@ -8,7 +8,7 @@
 #   -v DATA_DIR=/flare/PROJECT/prosit-dataset/arrays,ENCODER_CHECKPOINT=/flare/PROJECT/msdelta-200m-production-01-final,OUTPUT_ROOT=/flare/PROJECT/msdelta-intensity,RUN_PREFIX=200m-finetune,INTENSITY_ARGS \
 #   pbs/aurora-intensity.pbs
 # DATA_DIR holds the train/val/holdout .npy arrays from scripts/convert_prosit_hdf5.py.
-# Extra msdelta.intensity flags go in INTENSITY_ARGS. Its spaces cannot be written
+# Extra iona.intensity flags go in INTENSITY_ARGS. Its spaces cannot be written
 # inside -v, so export it first and list it in -v by name only (no "="), which
 # makes qsub copy the exported value, e.g.
 #   export INTENSITY_ARGS="--finetune-encoder --gradient-checkpointing --ion-budget 32768"
@@ -46,8 +46,8 @@ if ((CHECKPOINT_MARGIN_SECONDS >= JOB_WALLTIME_SECONDS)); then
     echo "CHECKPOINT_MARGIN_SECONDS must be less than the requested walltime" >&2
     exit 2
 fi
-export MSDELTA_JOB_DEADLINE_EPOCH=$((JOB_START_EPOCH + JOB_WALLTIME_SECONDS))
-export MSDELTA_CHECKPOINT_MARGIN_SECONDS=$CHECKPOINT_MARGIN_SECONDS
+export IONA_JOB_DEADLINE_EPOCH=$((JOB_START_EPOCH + JOB_WALLTIME_SECONDS))
+export IONA_CHECKPOINT_MARGIN_SECONDS=$CHECKPOINT_MARGIN_SECONDS
 
 REPO_DIR=${REPO_DIR:-${PBS_O_WORKDIR:-$PWD}}
 VENV_DIR=${VENV_DIR:-$REPO_DIR/.venv}
@@ -144,8 +144,8 @@ export PYTHONPATH=$REPO_DIR${PYTHONPATH:+:$PYTHONPATH}
 export HF_HUB_OFFLINE=${HF_HUB_OFFLINE:-1}
 export MASTER_ADDR=${MASTER_ADDR:-$(head -n 1 "$NODE_LIST")}
 export MASTER_PORT=${MASTER_PORT:-29500}
-export MSDELTA_XPUS_PER_HOST=$XPUS_PER_HOST
-export MSDELTA_WORLD_SIZE=$TOTAL_XPUS
+export IONA_XPUS_PER_HOST=$XPUS_PER_HOST
+export IONA_WORLD_SIZE=$TOTAL_XPUS
 
 # Compute nodes reach W&B through the ALCF proxy.
 ALCF_PROXY=${ALCF_PROXY:-http://proxy.alcf.anl.gov:3128}
@@ -193,13 +193,13 @@ exec mpiexec \
             echo "Aurora launcher did not provide PMIX_RANK, PALS_RANKID, or PMI_RANK" >&2
             exit 2
         fi
-        export WORLD_SIZE="$MSDELTA_WORLD_SIZE"
-        export LOCAL_RANK="${PALS_LOCAL_RANKID:-${MPI_LOCALRANKID:-$((RANK % MSDELTA_XPUS_PER_HOST))}}"
-        export LOCAL_WORLD_SIZE="$MSDELTA_XPUS_PER_HOST"
+        export WORLD_SIZE="$IONA_WORLD_SIZE"
+        export LOCAL_RANK="${PALS_LOCAL_RANKID:-${MPI_LOCALRANKID:-$((RANK % IONA_XPUS_PER_HOST))}}"
+        export LOCAL_WORLD_SIZE="$IONA_XPUS_PER_HOST"
         exec "$@"
     ' bash \
     "$VENV_DIR/bin/python" \
-    -m msdelta.intensity \
+    -m iona.intensity \
     "${TRAIN_ARGS[@]}" \
     ${EXTRA_ARGS[@]+"${EXTRA_ARGS[@]}"} \
     >"$LOG_DIR/train-$JOB_ID.out" \

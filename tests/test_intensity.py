@@ -7,21 +7,23 @@ from pathlib import Path
 import numpy as np
 import torch
 from pyteomics import mass
+from safetensors.torch import load_file, save_file
 from transformers import TrainingArguments
 
-from msdelta.configuration_msdelta import MSDeltaConfig, MSDeltaIntensityPredictionConfig
-from msdelta.denoising import PeakBudgetBatchSampler
-from msdelta.intensity import (
+from iona.configuration_iona import IonaConfig, IonaIntensityPredictionConfig
+from iona.denoising import PeakBudgetBatchSampler
+from iona.intensity import (
     IntensityTrainer,
-    MSDeltaIntensityProcessor,
+    IonaIntensityProcessor,
     PrositIntensityDataset,
     fit_intensity_prior,
+    load_encoder,
     prosit_fragment_ladder,
 )
-from msdelta.modeling_msdelta import MSDeltaForIntensityPrediction, MSDeltaModel
+from iona.modeling_iona import IonaForIntensityPrediction, IonaForPreTraining, IonaModel
 
 ALPHABET = "ACDEFGHIKLMNPQRSTVWY"
-ENCODER = MSDeltaConfig(
+ENCODER = IonaConfig(
     hidden_size=32,
     num_attention_heads=4,
     num_hidden_layers=2,
@@ -54,9 +56,9 @@ def as_features(rows: dict[str, torch.Tensor]) -> list[dict[str, torch.Tensor]]:
     return [{name: values[i] for name, values in rows.items()} for i in range(len(rows["labels"]))]
 
 
-def random_processor(seed: int = 0) -> MSDeltaIntensityProcessor:
+def random_processor(seed: int = 0) -> IonaIntensityProcessor:
     generator = torch.Generator().manual_seed(seed)
-    return MSDeltaIntensityProcessor(torch.rand((6, 30, 174), generator=generator))
+    return IonaIntensityProcessor(torch.rand((6, 30, 174), generator=generator))
 
 
 def write_split(directory: Path, batch: dict[str, torch.Tensor]) -> None:
@@ -109,7 +111,7 @@ class IntensityCollatorTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             processor.save_pretrained(directory)
             self.assertTrue((Path(directory) / "preprocessor_config.json").is_file())
-            loaded = MSDeltaIntensityProcessor.from_pretrained(directory)
+            loaded = IonaIntensityProcessor.from_pretrained(directory)
         self.assertTrue(np.array_equal(processor.intensity_prior, loaded.intensity_prior))
         batch = loaded(as_features(self.rows))
         for name, values in self.batch.items():
@@ -119,12 +121,12 @@ class IntensityCollatorTests(unittest.TestCase):
 class IntensityPredictionModelTests(unittest.TestCase):
     def setUp(self):
         torch.manual_seed(0)
-        self.config = MSDeltaIntensityPredictionConfig(encoder=ENCODER, head_hidden_size=16)
+        self.config = IonaIntensityPredictionConfig(encoder=ENCODER, head_hidden_size=16)
         self.rows = make_rows(["PEPTIDEK", "ACDEFGHIKLMNPQR", "MKWVTFISLLR"], [2, 3, 4])
         self.batch = random_processor()(as_features(self.rows))
 
     def test_uniform_encoder_input_is_degenerate_but_prior_input_is_not(self):
-        encoder = MSDeltaModel(ENCODER).eval()
+        encoder = IonaModel(ENCODER).eval()
         inputs = {name: values[:1] for name, values in self.batch.items()}
         count = int(inputs["attention_mask"].sum())
         with torch.no_grad():
@@ -138,15 +140,15 @@ class IntensityPredictionModelTests(unittest.TestCase):
         self.assertGreater((primed - primed[0]).abs().max().item(), 1e-3)
 
     def test_frozen_encoder_trains_only_the_head(self):
-        model = MSDeltaForIntensityPrediction(
-            self.config, encoder=MSDeltaModel(ENCODER), freeze_encoder=True
+        model = IonaForIntensityPrediction(
+            self.config, encoder=IonaModel(ENCODER), freeze_encoder=True
         )
         model.train()
-        self.assertFalse(model.msdelta.training)
+        self.assertFalse(model.iona.training)
         output = model(**self.batch)
         self.assertTrue(torch.isfinite(output.loss))
         output.loss.backward()
-        self.assertTrue(all(p.grad is None for p in model.msdelta.parameters()))
+        self.assertTrue(all(p.grad is None for p in model.iona.parameters()))
         self.assertTrue(any(p.grad is not None for p in model.intensity_head.parameters()))
 
         valid = self.rows["labels"] >= 0
@@ -156,13 +158,13 @@ class IntensityPredictionModelTests(unittest.TestCase):
     def test_finetuning_trains_every_used_encoder_parameter(self):
         for checkpointing in (False, True):
             with self.subTest(gradient_checkpointing=checkpointing):
-                model = MSDeltaForIntensityPrediction(self.config, encoder=MSDeltaModel(ENCODER))
+                model = IonaForIntensityPrediction(self.config, encoder=IonaModel(ENCODER))
                 if checkpointing:
                     model.gradient_checkpointing_enable()
                 model.train()
-                self.assertTrue(model.msdelta.training)
+                self.assertTrue(model.iona.training)
                 model(**self.batch).loss.backward()
-                mask_token = model.msdelta.embed.mask_token
+                mask_token = model.iona.embed.mask_token
                 self.assertFalse(mask_token.requires_grad)
                 # Every other trainable parameter is reached, so DDP can run
                 # with find_unused_parameters=False.
@@ -174,7 +176,7 @@ class IntensityPredictionModelTests(unittest.TestCase):
                 self.assertEqual(missing, [])
 
     def test_encoder_gets_its_own_learning_rate(self):
-        model = MSDeltaForIntensityPrediction(self.config, encoder=MSDeltaModel(ENCODER))
+        model = IonaForIntensityPrediction(self.config, encoder=IonaModel(ENCODER))
         with tempfile.TemporaryDirectory() as directory:
             trainer = IntensityTrainer(
                 model=model,
@@ -185,7 +187,7 @@ class IntensityPredictionModelTests(unittest.TestCase):
                 encoder_learning_rate=1e-5,
             )
             optimizer = trainer.create_optimizer()
-        encoder_ids = {id(p) for p in model.msdelta.parameters()}
+        encoder_ids = {id(p) for p in model.iona.parameters()}
         seen = set()
         for group in optimizer.param_groups:
             in_encoder = {id(p) in encoder_ids for p in group["params"]}
@@ -196,15 +198,34 @@ class IntensityPredictionModelTests(unittest.TestCase):
         self.assertEqual(seen, trainable)
 
     def test_encoder_free_control_ignores_the_encoder(self):
-        config = MSDeltaIntensityPredictionConfig(
+        config = IonaIntensityPredictionConfig(
             encoder=ENCODER, head_hidden_size=16, use_encoder_states=False
         )
-        model = MSDeltaForIntensityPrediction(config, encoder=MSDeltaModel(ENCODER)).eval()
+        model = IonaForIntensityPrediction(config, encoder=IonaModel(ENCODER)).eval()
         before = model(**self.batch).intensities
         with torch.no_grad():
-            for parameter in model.msdelta.parameters():
+            for parameter in model.iona.parameters():
                 parameter.add_(1.0)
         self.assertTrue(torch.equal(before, model(**self.batch).intensities))
+
+
+class LoadEncoderTests(unittest.TestCase):
+    def test_msdelta_era_checkpoint_keys_load_as_pretrained(self):
+        torch.manual_seed(0)
+        model = IonaForPreTraining(ENCODER)
+        with tempfile.TemporaryDirectory() as directory:
+            model.save_pretrained(directory)
+            weights = Path(directory) / "model.safetensors"
+            state = load_file(weights)
+            renamed = {
+                ("msdelta." + key[len("iona.") :] if key.startswith("iona.") else key): value
+                for key, value in state.items()
+            }
+            self.assertTrue(any(key.startswith("msdelta.") for key in renamed))
+            save_file(renamed, weights, metadata={"format": "pt"})
+            encoder = load_encoder(Path(directory), "pretrained")
+        for name, value in model.iona.state_dict().items():
+            torch.testing.assert_close(encoder.state_dict()[name], value, msg=name)
 
 
 class PeakBudgetBatchSamplerTests(unittest.TestCase):
@@ -232,7 +253,7 @@ class PrositDataTests(unittest.TestCase):
             for item, row in zip(items, (2, 0, 1)):
                 self.assertTrue(torch.equal(item["labels"], batch["labels"][row]))
                 self.assertEqual(int(item["precursor_charge"]), int(batch["precursor_charge"][row]))
-            prior = fit_intensity_prior(dataset, MSDeltaIntensityPredictionConfig())
+            prior = fit_intensity_prior(dataset, IonaIntensityPredictionConfig())
         self.assertTrue(torch.isfinite(prior).all())
         # Unseen (charge, length) cells fall back to the charge-level mean. At
         # charge 2, ion numbers 8-10 exist only in the 11-mer, so there the

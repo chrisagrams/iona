@@ -182,9 +182,7 @@ class IonaIntensityPredictionConfig(PretrainedConfig):
         **kwargs,
     ):
         super().__init__(**kwargs)
-        self.encoder = (
-            encoder if isinstance(encoder, IonaConfig) else IonaConfig(**(encoder or {}))
-        )
+        self.encoder = encoder if isinstance(encoder, IonaConfig) else IonaConfig(**(encoder or {}))
         self.head_hidden_size = head_hidden_size
         self.head_dropout = head_dropout
         self.max_sequence_length = max_sequence_length

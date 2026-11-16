@@ -3,7 +3,7 @@
 The figshare files (article 12937092) store every column gzip-compressed in
 column-shaped chunks, so random row access costs seconds per batch. This
 decompresses each split once, sequentially, into ``.npy`` files that
-``msdelta.intensity.PrositIntensityDataset`` memory-maps:
+``iona.intensity.PrositIntensityDataset`` memory-maps:
 
     sequence_integer.npy    int8    (N, 30)   Prosit alphabet, 0-padded
     precursor_charge.npy    int8    (N,)      1-6
