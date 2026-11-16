@@ -42,6 +42,7 @@ xpu = [
 iona-train = "iona.train:main"
 iona-preprocess = "iona.preprocess:main"
 iona-denoise = "iona.denoise_mzml:main"
+iona-denovo = "iona.predict_denovo:main"
 
 [dependency-groups]
 dev = [

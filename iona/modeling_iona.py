@@ -540,11 +540,13 @@ class IonaForDenovoOutput(ModelOutput):
 class IonaDenovoGenerationOutput(ModelOutput):
     """Greedy-decoded peptide per spectrum.
 
-    `sequences` holds token ids ending with EOS, padded; `precursor_match` says whether the
-    peptide mass fits the precursor.
+    `sequences` holds token ids ending with EOS, padded; `token_scores` holds the probability
+    of each chosen token, 0 at padding; `precursor_match` says whether the peptide mass fits
+    the precursor.
     """
 
     sequences: Tensor | None = None
+    token_scores: Tensor | None = None
     precursor_match: Tensor | None = None
 
 
@@ -850,16 +852,19 @@ class IonaForDenovo(IonaPreTrainedModel):
         precursor_mass = self.neutral_mass(precursor_mz, precursor_charge)
         hidden_states = self.decoder.embed_precursor(precursor_mass, precursor_charge)
         cache = EncoderDecoderCache(DynamicCache(), DynamicCache())
-        tokens = []
+        tokens, scores = [], []
         done = torch.zeros(mz.shape[0], dtype=torch.bool, device=device)
         for step in range(max_length + 1):
             hidden_states = self.decoder(hidden_states, memory, memory_mask, cache)
             logits = self.lm_head(hidden_states[:, -1])
-            token = logits.masked_fill(later if step else blocked, float("-inf")).argmax(dim=-1)
+            logits = logits.float().masked_fill(later if step else blocked, float("-inf"))
+            token = logits.argmax(dim=-1)
             if step == max_length:
                 token.fill_(eos)
             token = token.masked_fill(done, pad)
+            score = logits.softmax(dim=-1).gather(1, token[:, None]).squeeze(1)
             tokens.append(token)
+            scores.append(score.masked_fill(done, 0.0))
             done |= token == eos
             if done.all():
                 break
@@ -872,7 +877,9 @@ class IonaForDenovo(IonaPreTrainedModel):
         error = (peptide_mass[:, None] + shifts - precursor_mass[:, None]).abs()
         tolerance = precursor_mass * precursor_tolerance_ppm * 1e-6
         return IonaDenovoGenerationOutput(
-            sequences=sequences, precursor_match=(error <= tolerance[:, None]).any(dim=-1)
+            sequences=sequences,
+            token_scores=torch.stack(scores, dim=1),
+            precursor_match=(error <= tolerance[:, None]).any(dim=-1),
         )
 
 

@@ -64,6 +64,56 @@ def residue_masses(ids, token_masses: list[float], eos_token_id: int):
     return masses
 
 
+class DenovoMetrics:
+    """Count matched peptides and residues over decoded spectra."""
+
+    # spectra, matched peptides, matched residues, predicted residues, true residues,
+    # predictions that fit the precursor
+    N_COUNTS = 6
+
+    def __init__(self):
+        self.counts = [0] * self.N_COUNTS
+
+    def update(self, predicted: list[float], true: list[float], fits: bool) -> list[bool]:
+        """Score one prediction, given residue masses, and return its per-residue matches."""
+        matched = match_residues(predicted, true)
+        for index, value in enumerate(
+            (1, int(all(matched)), sum(matched), len(predicted), len(true), int(fits))
+        ):
+            self.counts[index] += value
+        return matched
+
+    @staticmethod
+    def compute_from(counts) -> dict[str, float]:
+        spectra, peptides, residues, predicted, true, fits = (int(c) for c in counts)
+        return {
+            "aa_precision": residues / max(predicted, 1),
+            "aa_recall": residues / max(true, 1),
+            "peptide_recall": peptides / max(spectra, 1),
+            "precursor_match_rate": fits / max(spectra, 1),
+            "decoded_spectra": float(spectra),
+        }
+
+    def compute(self) -> dict[str, float]:
+        return self.compute_from(self.counts)
+
+
+def area_under_precision_coverage(scores: list[float], correct: list[bool]) -> float:
+    """Area under the precision-coverage curve, ranking predictions by score as Casanovo does.
+
+    Each prediction adds 1/n coverage at the precision reached once it is included.
+    """
+    if not scores:
+        raise ValueError("no predictions to rank")
+    order = sorted(range(len(scores)), key=lambda i: scores[i], reverse=True)
+    matched = 0
+    area = 0.0
+    for rank, i in enumerate(order, start=1):
+        matched += int(correct[i])
+        area += matched / rank
+    return area / len(scores)
+
+
 class DenovoTrainer(IonaTrainer):
     """Score decoded peptides on evaluation."""
 
@@ -99,9 +149,7 @@ class DenovoTrainer(IonaTrainer):
         token_masses = tokenizer.token_masses
         rows = range(min(len(dataset), self.decode_rows))
         shard = rows[self.args.process_index :: self.args.world_size]
-        # spectra, matched peptides, matched residues, predicted residues, true residues,
-        # predictions that fit the precursor
-        counts = torch.zeros(6, dtype=torch.long, device=self.args.device)
+        metrics = DenovoMetrics()
         step = self.args.per_device_eval_batch_size
         for start in range(0, len(shard), step):
             batch = self.data_collator([dataset[index] for index in shard[start : start + step]])
@@ -116,20 +164,12 @@ class DenovoTrainer(IonaTrainer):
             for sequence, label, fits in zip(
                 output.sequences.tolist(), labels.tolist(), output.precursor_match.tolist()
             ):
-                predicted = residue_masses(sequence, token_masses, tokenizer.eos_token_id)
-                true = residue_masses(label, token_masses, tokenizer.eos_token_id)
-                matched = match_residues(predicted, true)
-                counts += torch.tensor(
-                    [1, int(all(matched)), sum(matched), len(predicted), len(true), int(fits)],
-                    device=counts.device,
+                metrics.update(
+                    residue_masses(sequence, token_masses, tokenizer.eos_token_id),
+                    residue_masses(label, token_masses, tokenizer.eos_token_id),
+                    fits,
                 )
-        spectra, peptides, residues, predicted, true, fits = (
+        counts = torch.tensor(metrics.counts, dtype=torch.long, device=self.args.device)
+        return DenovoMetrics.compute_from(
             self.accelerator.reduce(counts, reduction="sum").tolist()
         )
-        return {
-            "aa_precision": residues / max(predicted, 1),
-            "aa_recall": residues / max(true, 1),
-            "peptide_recall": peptides / max(spectra, 1),
-            "precursor_match_rate": fits / max(spectra, 1),
-            "decoded_spectra": float(spectra),
-        }
